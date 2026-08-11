@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useAuth } from "@/lib/AuthContext";
+import { useCanEdit } from "@/lib/AuthContext";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -841,8 +841,7 @@ function LesseeStats({ invoices }: { invoices: Invoice[] }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────
 export default function APTracker() {
-  const { role } = useAuth();
-  const canEdit = role === "admin";
+  const canEdit = useCanEdit();
   const qc = useQueryClient();
   const { toast } = useToast();
   const importRef = useRef<HTMLInputElement>(null);

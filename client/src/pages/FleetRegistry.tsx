@@ -1282,8 +1282,9 @@ function CarDetail({
         <DetailRow label="Managed By" value={(r as any).managed ?? "—"} />
         <DetailRow label="Managed Category" value={(r as any).managed_category ?? "—"} />
         <DetailRow label="NBV" value={(r as any).nbv != null ? `$${Number((r as any).nbv).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
-        <DetailRow label="OAC" value={(r as any).oac != null ? `$${Number((r as any).oac).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
-        <DetailRow label="OEC" value={(r as any).oec != null ? `$${Number((r as any).oec).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
+        {/* OAC = Original Acquired Cost — distinct from OEC (Original Est. Build Cost). Often blank when Master Car List import only supplies OEC. */}
+        <DetailRow label="OAC (Acquired Cost)" value={(r as any).oac != null ? `$${Number((r as any).oac).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
+        <DetailRow label="OEC (Est. Build Cost)" value={(r as any).oec != null ? `$${Number((r as any).oec).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         <DetailRow label="Monthly Rent P/C" value={(r as any).monthly_rent_per_car != null ? `$${Number((r as any).monthly_rent_per_car).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         <DetailRow label="Monthly Depr P/C" value={(r as any).monthly_depr_per_car != null ? `$${Number((r as any).monthly_depr_per_car).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         <DetailRow label="Total BV (Rider)" value={(r as any).total_bv_rider != null ? `$${Number((r as any).total_bv_rider).toLocaleString()}` : "—"} />

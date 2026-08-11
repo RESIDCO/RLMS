@@ -17,6 +17,7 @@ import {
   LogOut,
   ShieldCheck,
   Eye,
+  Pencil,
   KeyRound,
   BookUser,
   Calculator,
@@ -27,7 +28,7 @@ import {
 } from "lucide-react";
 import FreshnessBanner from "@/components/FreshnessBanner";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth, useIsAdmin } from "@/lib/AuthContext";
 import { supabase } from "@/lib/supabase";
 import {
   Tooltip,
@@ -295,6 +296,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [changePwOpen, setChangePwOpen] = useState(false);
   const [location] = useLocation();
   const { user, role, signOut, needsPasswordChange, clearNeedsPasswordChange } = useAuth();
+  const isAdmin = useIsAdmin();
 
   // Auto-open when arriving via a password-reset email link
   useEffect(() => {
@@ -359,7 +361,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <NavItem key={n.href} href={n.href} label={n.label} icon={n.icon} active={active} collapsed={false} />
             );
           })}
-          {role === "admin" && (
+          {isAdmin && (
             <>
               <div className="pt-3 pb-1 px-3">
                 <span className="text-[9px] uppercase tracking-widest text-muted-foreground/60">Admin</span>
@@ -377,6 +379,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <div className="flex items-center gap-1.5">
                 {role === "admin" ? (
                   <ShieldCheck className="h-3 w-3 text-primary shrink-0" />
+                ) : role === "editor" ? (
+                  <Pencil className="h-3 w-3 text-primary shrink-0" />
                 ) : (
                   <Eye className="h-3 w-3 text-muted-foreground shrink-0" />
                 )}
@@ -430,7 +434,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           })}
 
           {/* Admin-only section */}
-          {role === "admin" && (
+          {isAdmin && (
             <>
               {!collapsed && (
                 <div className="pt-3 pb-1 px-3">
@@ -463,6 +467,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <div className="flex items-center gap-1.5">
                 {role === "admin" ? (
                   <ShieldCheck className="h-3 w-3 text-primary shrink-0" />
+                ) : role === "editor" ? (
+                  <Pencil className="h-3 w-3 text-primary shrink-0" />
                 ) : (
                   <Eye className="h-3 w-3 text-muted-foreground shrink-0" />
                 )}

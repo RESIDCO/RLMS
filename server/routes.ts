@@ -156,6 +156,8 @@ export async function registerRoutes(
   // Each rider may carry an optional `cars` array of car objects to create & assign.
   app.post("/api/setup-lease", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const { mla, riders: riderPayloads } = req.body as {
         mla: Record<string, any>;
         riders: Array<{
@@ -587,6 +589,8 @@ export async function registerRoutes(
 
   app.post("/api/railcars", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const parsed = insertRailcarSchema.parse(req.body);
       const { data, error } = await supabase
         .from("railcars")
@@ -602,6 +606,8 @@ export async function registerRoutes(
 
   app.patch("/api/railcars/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRailcarSchema.partial().parse(req.body);
       const { data, error } = await supabase
@@ -620,6 +626,8 @@ export async function registerRoutes(
   // Change car number (remark change) — retains all attributes, logs history
   app.post("/api/railcars/:id/change-number", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const { new_car_number, reason, changed_by } = changeCarNumberSchema.parse(req.body);
 
@@ -658,6 +666,8 @@ export async function registerRoutes(
 
   app.delete("/api/railcars/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const { data: assignments, error: aErr } = await supabase
         .from("railcar_assignments")
@@ -716,6 +726,8 @@ export async function registerRoutes(
 
   app.post("/api/leases", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const parsed = insertMasterLeaseSchema.parse(req.body);
       const { data, error } = await supabase
         .from("master_leases")
@@ -731,6 +743,8 @@ export async function registerRoutes(
 
   app.patch("/api/leases/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertMasterLeaseSchema.partial().parse(req.body);
       const { data, error } = await supabase
@@ -748,6 +762,8 @@ export async function registerRoutes(
 
   app.delete("/api/leases/:id", async (req, res) => {
     try {
+      const adminId = await requireAdmin(req, res);
+      if (!adminId) return;
       const id = Number(req.params.id);
       const { data: riders } = await supabase
         .from("riders")
@@ -797,6 +813,8 @@ export async function registerRoutes(
 
   app.post("/api/riders", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const parsed = insertRiderSchema.parse(req.body);
       const { data, error } = await supabase
         .from("riders")
@@ -812,6 +830,8 @@ export async function registerRoutes(
 
   app.patch("/api/riders/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRiderSchema.partial().parse(req.body);
       const { data, error } = await supabase
@@ -829,6 +849,8 @@ export async function registerRoutes(
 
   app.delete("/api/riders/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const { data: assigns } = await supabase
         .from("railcar_assignments")
@@ -867,6 +889,8 @@ export async function registerRoutes(
   // ---------- Move cars ----------
   app.post("/api/move", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const input = moveCarsSchema.parse(req.body);
       const { car_ids, to_rider_id, new_fleet_name, reason, moved_by } = input;
 
@@ -979,6 +1003,8 @@ export async function registerRoutes(
 
   app.post("/api/riders/:id/contacts", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const riderId = Number(req.params.id);
       const parsed = insertRiderContactSchema.parse({ ...req.body, rider_id: riderId });
       const { data, error } = await supabase
@@ -991,6 +1017,8 @@ export async function registerRoutes(
   // POST /api/contacts — create a contact directly (rider_id in body)
   app.post("/api/contacts", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const parsed = insertRiderContactSchema.parse(req.body);
       const { data, error } = await supabase
         .from("rider_contacts").insert(parsed).select().single();
@@ -1001,6 +1029,8 @@ export async function registerRoutes(
 
   app.patch("/api/contacts/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRiderContactSchema.partial().parse(req.body);
       const { data, error } = await supabase
@@ -1012,6 +1042,8 @@ export async function registerRoutes(
 
   app.delete("/api/contacts/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const id = Number(req.params.id);
       const { error } = await supabase.from("rider_contacts").delete().eq("id", id);
       if (error) throw error;
@@ -1133,6 +1165,8 @@ export async function registerRoutes(
 
   app.post("/api/import/preview", async (req: Request, res: Response) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const { rows } = req.body as { rows: any[] };
       if (!Array.isArray(rows) || rows.length === 0)
         return res.status(400).json({ message: "No rows provided" });
@@ -1204,6 +1238,8 @@ export async function registerRoutes(
 
   app.post("/api/import/commit", async (req: Request, res: Response) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const { rows } = req.body as { rows: any[] };
       if (!Array.isArray(rows) || rows.length === 0)
         return res.status(400).json({ message: "No rows" });
@@ -1678,6 +1714,31 @@ export async function registerRoutes(
     return user.id;
   }
 
+  /** Require admin or editor — full read/write on fleet/lease/AP/programs/etc. */
+  async function requireWrite(req: Request, res: Response): Promise<string | null> {
+    const user = await getAuthUser(req);
+    if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
+    const { data } = await supabase.from("user_roles").select("role").eq("user_id", user.id).single();
+    if (data?.role !== "admin" && data?.role !== "editor") {
+      res.status(403).json({ error: "Forbidden" });
+      return null;
+    }
+    return user.id;
+  }
+
+  const VALID_ROLES = ["admin", "editor", "viewer"] as const;
+  type AppRole = (typeof VALID_ROLES)[number];
+  function isValidRole(role: unknown): role is AppRole {
+    return typeof role === "string" && (VALID_ROLES as readonly string[]).includes(role);
+  }
+
+  /** Require any authenticated user (no role check) — used by read routes. */
+  async function requireUser(req: Request, res: Response): Promise<string | null> {
+    const user = await getAuthUser(req);
+    if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
+    return user.id;
+  }
+
   // GET /api/auth/me — returns current user's role
   app.get("/api/auth/me", async (req, res) => {
     try {
@@ -1755,8 +1816,8 @@ export async function registerRoutes(
     try {
       const adminId = await requireAdmin(req, res);
       if (!adminId) return;
-      const { email, role } = req.body as { email: string; role: "admin" | "viewer" };
-      if (!email || !role) return res.status(400).json({ error: "email and role required" });
+      const { email, role } = req.body as { email: string; role: AppRole };
+      if (!email || !isValidRole(role)) return res.status(400).json({ error: "email and valid role required" });
       const appUrl = process.env.VITE_API_BASE ?? "https://rlms-residco.onrender.com";
 
       // Try the standard invite first
@@ -1814,8 +1875,8 @@ export async function registerRoutes(
       const adminId = await requireAdmin(req, res);
       if (!adminId) return;
       const { userId } = req.params;
-      const { role } = req.body as { role: "admin" | "viewer" };
-      if (!role) return res.status(400).json({ error: "role required" });
+      const { role } = req.body as { role: AppRole };
+      if (!isValidRole(role)) return res.status(400).json({ error: "valid role required" });
       const { error } = await supabase.from("user_roles").update({ role }).eq("user_id", userId);
       if (error) throw error;
       res.json({ ok: true });
@@ -1891,7 +1952,9 @@ export async function registerRoutes(
     upload.single("file"),
     async (req: Request & { file?: Express.Multer.File }, res: Response) => {
       try {
-        const user = await getAuthUser(req, res);
+        const writerId = await requireWrite(req, res);
+        if (!writerId) return;
+        const user = await getAuthUser(req);
         if (!user) return;
         if (!req.file) return res.status(400).json({ error: "No file provided" });
         const { entityType, entityId } = req.params;
@@ -1940,8 +2003,8 @@ export async function registerRoutes(
   // DELETE /api/attachments/:id — delete an attachment (admin only)
   app.delete("/api/attachments/:id", async (req, res) => {
     try {
-      const adminId = await requireAdmin(req, res);
-      if (!adminId) return;
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const { id } = req.params;
       const { data: att, error: fetchErr } = await supabase
         .from("attachments")
@@ -1991,7 +2054,7 @@ export async function registerRoutes(
   // POST /api/rent-events — log a new rent event
   app.post("/api/rent-events", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const { car_id, event_type, event_date, reason } = req.body;
       if (!car_id || !event_type || !event_date || !reason) {
@@ -2059,6 +2122,8 @@ export async function registerRoutes(
   // Reference writes
   app.post("/api/reference/cost-factors", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const { year, factor, publication_q = 0, source = null } = req.body;
       const { data, error } = await supabase.from("dv_cost_factors")
         .upsert({ year, factor, publication_q, source }, { onConflict: "year,publication_q" }).select().single();
@@ -2067,6 +2132,8 @@ export async function registerRoutes(
   });
   app.post("/api/reference/salvage", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const { data, error } = await supabase.from("dv_salvage_quarters")
         .upsert(req.body, { onConflict: "quarter_code" }).select().single();
       if (error) throw error; res.json(data);
@@ -2074,6 +2141,8 @@ export async function registerRoutes(
   });
   app.post("/api/reference/ab-codes", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const row = { effective_from: "1970-01-01", ...req.body };
       const { data, error } = await supabase.from("dv_ab_codes")
         .upsert(row, { onConflict: "code,effective_from" }).select().single();
@@ -2082,6 +2151,8 @@ export async function registerRoutes(
   });
   app.post("/api/reference/car-rates", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const { data, error } = await supabase.from("dv_car_dep_rates")
         .upsert(req.body, { onConflict: "equipment_type" }).select().single();
       if (error) throw error; res.json(data);
@@ -2104,6 +2175,8 @@ export async function registerRoutes(
   // Pure-engine calc (no persist)
   app.post("/api/calculate", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const ref = await dvLoadReferenceData();
       const { data: abData } = await supabase.from("dv_ab_codes").select("code, rate_basis, rate, max_depreciation");
       const abMap = new Map<string, { rate_basis: AbRateBasis; rate: number; max_depreciation: number }>();
@@ -2134,6 +2207,8 @@ export async function registerRoutes(
   });
   app.post("/api/calculations", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const visitor = dvVisitorId(req);
       const ref = await dvLoadReferenceData();
       const { data: abData } = await supabase.from("dv_ab_codes").select("code, rate_basis, rate, max_depreciation");
@@ -2189,6 +2264,8 @@ export async function registerRoutes(
   });
   app.delete("/api/calculations/:id", async (req, res) => {
     try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const visitor = dvVisitorId(req);
       const { error } = await supabase.from("dv_calculations").delete().eq("id", req.params.id).eq("visitor_id", visitor);
       if (error) throw error; res.json({ ok: true });
@@ -2236,7 +2313,7 @@ export async function registerRoutes(
   // POST /api/invoices — create
   app.post("/api/invoices", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const payload = { ...req.body, created_by: userId, updated_at: new Date().toISOString() };
       delete payload.id;
@@ -2249,7 +2326,7 @@ export async function registerRoutes(
   // PATCH /api/invoices/:id — update
   app.patch("/api/invoices/:id", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const payload = { ...req.body, updated_at: new Date().toISOString() };
       delete payload.id;
@@ -2262,7 +2339,7 @@ export async function registerRoutes(
   // DELETE /api/invoices/:id
   app.delete("/api/invoices/:id", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const { error } = await supabase.from("invoices").delete().eq("id", req.params.id);
       if (error) throw error;
@@ -2273,7 +2350,7 @@ export async function registerRoutes(
   // POST /api/invoices/:id/dispute-logs — add dispute entry
   app.post("/api/invoices/:id/dispute-logs", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const email = await getCallerEmail(userId);
       const { log_date, description, outcome } = req.body;
@@ -2295,7 +2372,7 @@ export async function registerRoutes(
   // DELETE /api/dispute-logs/:id
   app.delete("/api/dispute-logs/:id", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const { error } = await supabase.from("dispute_logs").delete().eq("id", req.params.id);
       if (error) throw error;
@@ -2306,7 +2383,7 @@ export async function registerRoutes(
   // POST /api/invoices/:id/communications — add comm log entry
   app.post("/api/invoices/:id/communications", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const email = await getCallerEmail(userId);
       const { comm_date, comm_type, contact_name, notes } = req.body;
@@ -2334,7 +2411,7 @@ export async function registerRoutes(
   // DELETE /api/communications/:id
   app.delete("/api/communications/:id", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const { error } = await supabase.from("invoice_communications").delete().eq("id", req.params.id);
       if (error) throw error;
@@ -2345,7 +2422,7 @@ export async function registerRoutes(
   // POST /api/invoices/:id/upload-pdf — upload cover sheet PDF
   app.post("/api/invoices/:id/upload-pdf", upload.single("file"), async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
       const ext = req.file.originalname.split(".").pop() ?? "pdf";
@@ -2388,7 +2465,7 @@ export async function registerRoutes(
   // POST /api/invoices/import-csv — bulk import from CSV
   app.post("/api/invoices/import-csv", upload.single("file"), async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
       const text = req.file.buffer.toString("utf-8");
@@ -2448,7 +2525,7 @@ export async function registerRoutes(
   // POST /api/programs — create program
   app.post("/api/programs", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const { name, description, status } = req.body;
       if (!name?.trim()) return res.status(400).json({ error: "Name is required" });
@@ -2465,7 +2542,7 @@ export async function registerRoutes(
   // PATCH /api/programs/:id — update program
   app.patch("/api/programs/:id", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const id = Number(req.params.id);
       const { name, description, status } = req.body;
@@ -2482,7 +2559,7 @@ export async function registerRoutes(
   // DELETE /api/programs/:id — delete program (cascades docs + car links)
   app.delete("/api/programs/:id", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const id = Number(req.params.id);
       // Remove all files from storage first
@@ -2515,7 +2592,7 @@ export async function registerRoutes(
   // POST /api/programs/:id/documents — upload a document
   app.post("/api/programs/:id/documents", upload.single("file"), async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
       const programId = Number(req.params.id);
@@ -2545,7 +2622,7 @@ export async function registerRoutes(
   // DELETE /api/programs/:id/documents/:docId — delete a document
   app.delete("/api/programs/:id/documents/:docId", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const docId = Number(req.params.docId);
       const { data: doc } = await supabase.from("program_documents").select("storage_path").eq("id", docId).single();
@@ -2574,7 +2651,7 @@ export async function registerRoutes(
   // POST /api/programs/:id/cars — link railcars to program
   app.post("/api/programs/:id/cars", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const programId = Number(req.params.id);
       const { railcar_ids, notes } = req.body;
@@ -2589,7 +2666,7 @@ export async function registerRoutes(
   // DELETE /api/programs/:id/cars/:linkId — unlink a railcar
   app.delete("/api/programs/:id/cars/:linkId", async (req, res) => {
     try {
-      const userId = await requireUser(req, res);
+      const userId = await requireWrite(req, res);
       if (!userId) return;
       const { error } = await supabase.from("program_cars").delete().eq("id", Number(req.params.linkId));
       if (error) throw error;

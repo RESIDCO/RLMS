@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
-export type Role = "admin" | "viewer" | null;
+export type Role = "admin" | "editor" | "viewer" | null;
 
 interface AuthContextValue {
   session: Session | null;
@@ -104,8 +104,14 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-/** Returns true if the current user can make changes (admin only) */
+/** Returns true if the current user can make data changes (admin or editor) */
 export function useCanEdit() {
+  const { role } = useAuth();
+  return role === "admin" || role === "editor";
+}
+
+/** Returns true if the current user can manage users / delete master leases */
+export function useIsAdmin() {
   const { role } = useAuth();
   return role === "admin";
 }

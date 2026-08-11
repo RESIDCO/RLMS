@@ -1,0 +1,2 @@
+# Destination for live schema dumps (corporate cutover prep).
+# See script/export-schema.md — do not dump live production from automation.

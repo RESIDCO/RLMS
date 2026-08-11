@@ -8,12 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, Trash2, ShieldCheck, Eye, MailIcon } from "lucide-react";
+import { UserPlus, Trash2, ShieldCheck, Eye, Pencil, MailIcon } from "lucide-react";
+
+type AppRole = "admin" | "editor" | "viewer";
 
 interface AppUser {
   id: string;
   email: string;
-  role: "admin" | "viewer";
+  role: AppRole;
   created_at: string;
 }
 
@@ -31,7 +33,7 @@ export default function UserManagement() {
   const { session } = useAuth();
   const { toast } = useToast();
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"admin" | "viewer">("viewer");
+  const [inviteRole, setInviteRole] = useState<AppRole>("viewer");
   const [inviting, setInviting] = useState(false);
   const [resending, setResending] = useState<string | null>(null); // email being resent
 
@@ -92,7 +94,7 @@ export default function UserManagement() {
     }
   }
 
-  async function handleResend(email: string, role: "admin" | "viewer") {
+  async function handleResend(email: string, role: AppRole) {
     setResending(email);
     try {
       const res = await fetch("/api/admin/users/invite", {
@@ -152,6 +154,7 @@ export default function UserManagement() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="editor">Editor</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
@@ -202,6 +205,11 @@ export default function UserManagement() {
                           <SelectItem value="viewer">
                             <span className="flex items-center gap-1.5">
                               <Eye className="h-3 w-3" /> Viewer
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="editor">
+                            <span className="flex items-center gap-1.5">
+                              <Pencil className="h-3 w-3" /> Editor
                             </span>
                           </SelectItem>
                           <SelectItem value="admin">

@@ -248,8 +248,9 @@ function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }
           <DetailRow label="Managed By"        value={r.managed} />
           <DetailRow label="Managed Category"  value={r.managed_category} />
           <DetailRow label="NBV"               value={fmtMoney(r.nbv)} />
-          <DetailRow label="OAC"               value={fmtMoney(r.oac)} />
-          <DetailRow label="OEC"               value={fmtMoney(r.oec)} />
+          {/* OAC = Original Acquired Cost — distinct from OEC; often blank when import only supplies OEC. */}
+          <DetailRow label="OAC (Acquired Cost)" value={fmtMoney(r.oac)} />
+          <DetailRow label="OEC (Est. Build Cost)" value={fmtMoney(r.oec)} />
 
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 mt-4">Assignment</p>
           <DetailRow label="Lessee"   value={car.assignment?.fleet_name} />

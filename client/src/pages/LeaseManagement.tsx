@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useCanEdit } from "@/lib/AuthContext";
+import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -118,6 +118,7 @@ function fmtMoney(n: number | null) {
 
 export default function LeaseManagement() {
   const canEdit = useCanEdit();
+  const isAdmin = useIsAdmin();
   const [, navigate] = useLocation();
   const [expandedLeases, setExpandedLeases] = useState<Set<number>>(new Set());
   const [expandedRiders, setExpandedRiders] = useState<Set<number>>(new Set());
@@ -360,7 +361,7 @@ export default function LeaseManagement() {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>}
-                    {canEdit && <AlertDialog>
+                    {isAdmin && <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button size="icon" variant="ghost">
                           <Trash2 className="h-3.5 w-3.5" />

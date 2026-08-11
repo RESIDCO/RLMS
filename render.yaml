@@ -8,7 +8,7 @@ services:
     region: ohio
     branch: master
     repo: https://github.com/RESIDCO/RLMS.git
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /
     envVars:

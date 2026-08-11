@@ -1,16 +1,32 @@
+# Corporate RLMS on Render — Blueprint
+# Secrets (anon/service keys) must be set in the Render dashboard; do not commit them.
 services:
   - type: web
     name: rlms-residco
     runtime: node
-    plan: free
+    plan: starter
+    region: ohio
+    branch: master
+    repo: https://github.com/RESIDCO/RLMS.git
     buildCommand: npm install && npm run build
     startCommand: npm start
+    healthCheckPath: /
     envVars:
+      - key: NODE_VERSION
+        value: "20"
       - key: NODE_ENV
         value: production
+      # Corporate Supabase project (eweydhfduepaefshriar) — not the personal test project
       - key: SUPABASE_URL
-        value: https://qgdrgiqrkoyhvbakuqwo.supabase.co
+        value: https://eweydhfduepaefshriar.supabase.co
+      - key: VITE_SUPABASE_URL
+        value: https://eweydhfduepaefshriar.supabase.co
+      # Same-origin API calls from the built SPA (Express serves the client)
+      - key: VITE_API_BASE
+        value: ""
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
         sync: false

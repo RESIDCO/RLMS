@@ -2,90 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
-/* RLMS — industrial dark-navy + steel-blue. Dark-first. */
+/* RLMS — UMLER portal visual tokens (one-way copy). Dark-first. */
 
 :root {
-  /* Matches .dark by default (dark-mode-only app) */
-  --button-outline: rgba(255, 255, 255, 0.08);
+  --button-outline: rgba(200, 107, 58, 0.4);
   --badge-outline: rgba(255, 255, 255, 0.05);
   --opaque-button-border-intensity: 10;
   --elevate-1: rgba(255, 255, 255, 0.04);
   --elevate-2: rgba(255, 255, 255, 0.08);
 
-  --background: 222 47% 8%;
-  --foreground: 210 20% 88%;
-  --border: 220 25% 22%;
-  --card: 222 40% 11%;
-  --card-foreground: 210 20% 88%;
-  --card-border: 220 25% 22%;
-  --sidebar: 222 45% 9%;
-  --sidebar-foreground: 210 20% 88%;
-  --sidebar-border: 220 25% 20%;
-  --sidebar-primary: 210 100% 56%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 220 35% 14%;
-  --sidebar-accent-foreground: 210 20% 88%;
-  --sidebar-ring: 210 100% 56%;
-  --popover: 220 35% 14%;
-  --popover-foreground: 210 20% 88%;
-  --popover-border: 220 25% 22%;
-  --primary: 210 100% 56%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 220 35% 14%;
-  --secondary-foreground: 210 20% 88%;
-  --muted: 220 30% 13%;
-  --muted-foreground: 215 15% 55%;
-  --accent: 220 35% 14%;
-  --accent-foreground: 210 20% 88%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 100%;
-  --input: 220 25% 22%;
-  --ring: 210 100% 56%;
+  /* Hex → HSL for existing hsl(var(--token) / <alpha>) utilities */
+  --background: 213 24% 6%;          /* #0B0E12 */
+  --foreground: 210 29% 93%;         /* #E9EEF3 */
+  --border: 217 18% 20%;             /* #2A313C */
+  --card: 216 22% 9%;                /* #12161C */
+  --card-foreground: 210 29% 93%;
+  --card-border: 217 18% 20%;
+  --sidebar: 213 24% 6%;
+  --sidebar-foreground: 210 29% 93%;
+  --sidebar-border: 217 18% 20%;
+  --sidebar-primary: 21 57% 51%;     /* #C86B3A */
+  --sidebar-primary-foreground: 210 29% 93%;
+  --sidebar-accent: 217 21% 12%;     /* #181D25 */
+  --sidebar-accent-foreground: 210 29% 93%;
+  --sidebar-ring: 21 57% 51%;
+  --popover: 216 22% 9%;
+  --popover-foreground: 210 29% 93%;
+  --popover-border: 217 18% 20%;
+  --primary: 21 57% 51%;             /* #C86B3A signal orange */
+  --primary-foreground: 210 29% 93%;
+  --secondary: 217 21% 12%;          /* #181D25 */
+  --secondary-foreground: 210 29% 93%;
+  --muted: 217 21% 12%;
+  --muted-foreground: 214 10% 47%;   /* #6B7684 */
+  --accent: 217 21% 12%;
+  --accent-foreground: 210 29% 93%;
+  --destructive: 21 57% 51%;
+  --destructive-foreground: 210 29% 93%;
+  --input: 217 18% 20%;
+  --ring: 21 57% 51%;
 
-  --chart-1: 210 100% 56%;
-  --chart-2: 190 70% 55%;
-  --chart-3: 170 60% 50%;
-  --chart-4: 38 92% 50%;
-  --chart-5: 0 84% 60%;
+  --chart-1: 206 22% 57%;            /* #7A96AB steel */
+  --chart-2: 164 30% 51%;            /* #5BA894 teal */
+  --chart-3: 38 56% 52%;             /* #C9963E amber */
+  --chart-4: 21 57% 51%;             /* #C86B3A signal */
+  --chart-5: 214 10% 47%;
 
-  --success: 142 71% 45%;
-  --warning: 38 92% 50%;
-  --error: 0 84% 60%;
+  --success: 164 30% 51%;
+  --warning: 38 56% 52%;
+  --error: 21 57% 51%;
 
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --radius: 0.5rem;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --radius: 0.75rem;
 
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
-  --shadow-sm: 0px 2px 0px 0px hsl(0 0% 0% / 0), 0px 1px 2px -1px hsl(0 0% 0% / 0);
-  --shadow: 0px 2px 0px 0px hsl(0 0% 0% / 0), 0px 1px 2px -1px hsl(0 0% 0% / 0);
-  --shadow-md: 0px 2px 0px 0px hsl(0 0% 0% / 0), 0px 2px 4px -1px hsl(0 0% 0% / 0);
-  --shadow-lg: 0px 2px 0px 0px hsl(0 0% 0% / 0), 0px 4px 6px -1px hsl(0 0% 0% / 0);
-  --shadow-xl: 0px 2px 0px 0px hsl(0 0% 0% / 0), 0px 8px 10px -1px hsl(0 0% 0% / 0);
-  --shadow-2xl: 0px 2px 0px 0px hsl(0 0% 0% / 0);
+  --shadow-sm: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 40px rgba(0, 0, 0, 0.28);
+  --shadow-md: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 40px rgba(0, 0, 0, 0.28);
+  --shadow-lg: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 40px rgba(0, 0, 0, 0.28);
+  --shadow-xl: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 40px rgba(0, 0, 0, 0.28);
+  --shadow-2xl: 0 12px 40px rgba(0, 0, 0, 0.28);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
-  --sidebar-primary-border: hsl(var(--sidebar-primary));
-  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --sidebar-accent-border: hsl(var(--sidebar-accent));
-  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --primary-border: hsl(var(--primary));
-  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --secondary-border: hsl(var(--secondary));
-  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --muted-border: hsl(var(--muted));
-  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --accent-border: hsl(var(--accent));
-  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --destructive-border: hsl(var(--destructive));
-  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --sidebar-primary-border: rgba(200, 107, 58, 0.4);
+  --sidebar-accent-border: #2A313C;
+  --primary-border: rgba(200, 107, 58, 0.4);
+  --secondary-border: #2A313C;
+  --muted-border: #2A313C;
+  --accent-border: #2A313C;
+  --destructive-border: rgba(200, 107, 58, 0.4);
 }
 
 .dark {
-  /* Same as :root — app is dark-mode only */
-  --button-outline: rgba(255, 255, 255, 0.08);
+  --button-outline: rgba(200, 107, 58, 0.4);
   --badge-outline: rgba(255, 255, 255, 0.05);
   --opaque-button-border-intensity: 10;
   --elevate-1: rgba(255, 255, 255, 0.04);
@@ -106,9 +99,11 @@
     font-feature-settings: "cv11", "ss01", "ss03";
     -webkit-font-smoothing: antialiased;
   }
-  /* Force dark theme always */
   html {
     color-scheme: dark;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-serif);
   }
 }
 
@@ -117,6 +112,28 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
+  }
+  .font-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+  .font-kpi {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  /* UMLER panel surface — any bordered card picks up radius + shadow */
+  .bg-card.border {
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 40px rgba(0, 0, 0, 0.28);
   }
   .tabular-nums {
     font-variant-numeric: tabular-nums;

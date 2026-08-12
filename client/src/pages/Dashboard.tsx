@@ -400,11 +400,19 @@ function DrillDownDrawer({
 }
 
 // ── KPI Card ──────────────────────────────────────────────────────────────────
+const kpiAccent = {
+  primary: { icon: "text-umler-steel", bar: "bg-umler-steel" },
+  warning: { icon: "text-umler-amber", bar: "bg-umler-amber" },
+  error: { icon: "text-umler-signal", bar: "bg-umler-signal" },
+  success: { icon: "text-umler-teal", bar: "bg-umler-teal" },
+  muted: { icon: "text-umler-faint", bar: "bg-umler-steel" },
+} as const;
+
 function KpiCard({
   label,
   value,
   icon: Icon,
-  accent,
+  accent = "muted",
   testId,
   onClick,
   subtext,
@@ -412,47 +420,40 @@ function KpiCard({
   label: string;
   value: number | string;
   icon: any;
-  accent?: "primary" | "warning" | "error" | "success" | "muted";
+  accent?: keyof typeof kpiAccent;
   testId: string;
   onClick?: () => void;
   subtext?: string;
 }) {
+  const tone = kpiAccent[accent];
   return (
     <button
       type="button"
       className={cn(
-        "rounded-lg border border-card-border bg-card p-5 flex flex-col gap-3 text-left w-full transition-all",
-        onClick && "cursor-pointer hover:border-primary/40 hover:bg-card/80 hover:shadow-sm group"
+        "rounded-xl border border-card-border bg-card shadow-card p-5 flex flex-col gap-3 text-left w-full transition-all",
+        onClick && "cursor-pointer hover:border-umler-steel/40 hover:bg-card/80 group"
       )}
       onClick={onClick}
       data-testid={testId}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+        <span className="font-eyebrow">
           {label}
         </span>
         <div className="flex items-center gap-1.5">
-          <Icon
-            className={cn(
-              "h-4 w-4",
-              accent === "primary" && "text-primary",
-              accent === "warning" && "text-[hsl(var(--warning))]",
-              accent === "error" && "text-[hsl(var(--error))]",
-              accent === "success" && "text-[hsl(var(--success))]",
-              (!accent || accent === "muted") && "text-muted-foreground"
-            )}
-          />
+          <Icon className={cn("h-4 w-4", tone.icon)} />
           {onClick && (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
           )}
         </div>
       </div>
-      <div className="text-3xl font-semibold tabular-nums font-mono-num">
+      <div className="font-kpi text-foreground">
         {value}
       </div>
       {subtext && (
         <div className="text-[11px] text-muted-foreground -mt-1">{subtext}</div>
       )}
+      <div className={cn("h-[2px] w-full rounded-full mt-auto", tone.bar)} />
     </button>
   );
 }
@@ -535,24 +536,25 @@ export default function Dashboard() {
               {/* Utilization — special card with ring */}
               <button
                 type="button"
-                className="rounded-lg border border-card-border bg-card p-5 flex flex-col gap-2 text-left w-full cursor-pointer hover:border-primary/40 hover:bg-card/80 hover:shadow-sm group transition-all"
+                className="rounded-xl border border-card-border bg-card shadow-card p-5 flex flex-col gap-2 text-left w-full cursor-pointer hover:border-umler-steel/40 hover:bg-card/80 group transition-all"
                 onClick={() => setDrillKey("utilization_pct")}
                 data-testid="kpi-utilization"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Fleet Utilization</span>
+                  <span className="font-eyebrow">Fleet Utilization</span>
                   <div className="flex items-center gap-1.5">
-                    <Gauge className={cn("h-4 w-4", utilPct >= 90 ? "text-[hsl(var(--success))]" : utilPct >= 70 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--error))]")} />
+                    <Gauge className={cn("h-4 w-4", utilPct >= 90 ? "text-umler-teal" : utilPct >= 70 ? "text-umler-amber" : "text-umler-signal")} />
                     <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <UtilRing pct={utilPct} />
                   <div>
-                    <div className="text-3xl font-semibold tabular-nums font-mono-num">{utilPct}%</div>
+                    <div className="font-kpi text-foreground">{utilPct}%</div>
                     <div className="text-[11px] text-muted-foreground">{data.kpis.active_assignments} of {data.kpis.total_fleet} cars</div>
                   </div>
                 </div>
+                <div className={cn("h-[2px] w-full rounded-full mt-auto", utilPct >= 90 ? "bg-umler-teal" : utilPct >= 70 ? "bg-umler-amber" : "bg-umler-signal")} />
               </button>
               <KpiCard
                 testId="kpi-off-rent"
@@ -591,7 +593,7 @@ export default function Dashboard() {
 
         {/* Entity Utilization: RPS vs Owned */}
         {data && (
-          <section className="rounded-lg border border-card-border bg-card">
+          <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-3.5 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Fleet Utilization by Entity</h2>
               <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">RPS vs Owned</span>
@@ -640,7 +642,7 @@ export default function Dashboard() {
         {/* Two panels */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Cars by Fleet */}
-          <section className="rounded-lg border border-card-border bg-card">
+          <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Cars by Lessee</h2>
               <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -679,7 +681,7 @@ export default function Dashboard() {
           </section>
 
           {/* Lease Expiration Timeline */}
-          <section className="rounded-lg border border-card-border bg-card">
+          <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Lease Expiration Timeline</h2>
               <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

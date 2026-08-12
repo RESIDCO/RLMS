@@ -31,14 +31,14 @@ export default function Login() {
             className="w-14 h-14 object-contain"
           />
           <div className="text-center">
-            <div className="text-lg font-semibold tracking-wide text-foreground">RLMS</div>
-            <div className="text-xs text-muted-foreground tracking-widest uppercase">RESIDCO</div>
+            <div className="font-serif text-lg font-semibold tracking-tight text-foreground">RLMS</div>
+            <div className="font-eyebrow mt-1">RESIDCO</div>
           </div>
         </div>
 
         {/* Card */}
-        <div className="rounded-xl border border-border bg-card p-6 shadow-lg">
-          <h1 className="text-base font-semibold text-foreground mb-1">Sign in</h1>
+        <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+          <h1 className="font-serif text-base font-semibold text-foreground mb-1">Sign in</h1>
           <p className="text-xs text-muted-foreground mb-5">
             Railcar Lease Management System
           </p>

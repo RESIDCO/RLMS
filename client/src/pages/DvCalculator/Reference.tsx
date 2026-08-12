@@ -20,7 +20,8 @@ export default function ReferencePage() {
     <DvSubNav />
     <div className="px-4 md:px-8 py-5 md:py-8 max-w-[1600px]">
       <header className="mb-5 md:mb-6">
-        <h1 className="text-lg md:text-xl font-semibold tracking-tight">Reference Data</h1>
+        <div className="font-eyebrow mb-1.5">RLMS</div>
+        <h1 className="font-serif text-lg md:text-xl font-semibold tracking-tight">Reference Data</h1>
         <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
           AAR-published rates and factors. Add new quarterly rows here — historical values are preserved.
         </p>

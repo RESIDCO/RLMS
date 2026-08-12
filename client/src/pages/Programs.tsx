@@ -199,7 +199,8 @@ export default function ProgramsPage() {
       {/* Header */}
       <header className="mb-5 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-lg md:text-xl font-semibold tracking-tight">Programs</h1>
+          <div className="font-eyebrow mb-1.5">RLMS</div>
+          <h1 className="font-serif text-lg md:text-xl font-semibold tracking-tight">Programs</h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
             Scopes of work, car lists, inspection reports and supporting documents
           </p>

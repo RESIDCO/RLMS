@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, Trash2, ShieldCheck, Eye, Pencil, MailIcon } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 
 type AppRole = "admin" | "editor" | "viewer";
 
@@ -17,16 +18,6 @@ interface AppUser {
   email: string;
   role: AppRole;
   created_at: string;
-}
-
-function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className="border-b border-border px-6 py-4">
-      <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">RLMS</div>
-      <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-      <p className="text-sm text-muted-foreground">{subtitle}</p>
-    </div>
-  );
 }
 
 export default function UserManagement() {
@@ -124,7 +115,7 @@ export default function UserManagement() {
 
       <div className="flex-1 overflow-auto p-6 space-y-6">
         {/* Invite form */}
-        <div className="rounded-xl border border-border bg-card p-5 max-w-lg">
+        <div className="rounded-xl border border-border bg-card shadow-card p-5 max-w-lg">
           <h2 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
             <UserPlus className="h-4 w-4 text-primary" />
             Invite a team member
@@ -167,9 +158,9 @@ export default function UserManagement() {
         </div>
 
         {/* User table */}
-        <div className="rounded-xl border border-border overflow-hidden">
+        <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
           <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="font-eyebrow">
               Team members
             </span>
             <span className="text-xs text-muted-foreground">{users.length} user{users.length !== 1 ? "s" : ""}</span>

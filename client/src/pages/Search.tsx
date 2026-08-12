@@ -287,8 +287,8 @@ export default function SearchPage() {
     <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">RLMS</div>
-        <h1 className="text-2xl font-bold tracking-tight">Search</h1>
+        <div className="font-eyebrow mb-1.5">RLMS</div>
+        <h1 className="font-serif text-2xl font-semibold tracking-tight">Search</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Search by car number(s), lessee name, rider, or lease number. Separate multiple car numbers with commas or spaces.
         </p>

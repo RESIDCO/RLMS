@@ -1187,7 +1187,7 @@ function CarDetail({
     <div>
       <SheetHeader>
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Railcar Detail</span>
+          <span className="font-eyebrow">Railcar Detail</span>
           <EntityBadge entity={(r as any).entity} size="lg" />
         </div>
         <SheetTitle className="font-mono-num">{r.car_number}</SheetTitle>

@@ -96,7 +96,8 @@ export default function HistoryPage() {
     <div className="px-4 md:px-8 py-5 md:py-8 max-w-[1600px]">
       <header className="mb-5 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-lg md:text-xl font-semibold tracking-tight">History</h1>
+          <div className="font-eyebrow mb-1.5">RLMS</div>
+          <h1 className="font-serif text-lg md:text-xl font-semibold tracking-tight">History</h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
             {items.length} saved calculation{items.length === 1 ? "" : "s"}
           </p>

@@ -84,10 +84,10 @@ function Logo({ collapsed }: { collapsed: boolean }) {
       />
       {!collapsed && (
         <div className="min-w-0">
-          <div className="text-sm font-semibold tracking-tight leading-tight text-foreground">
+          <div className="font-serif text-sm font-semibold tracking-tight leading-tight text-foreground">
             RLMS
           </div>
-          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground leading-tight">
+          <div className="font-eyebrow leading-tight">
             RESIDCO
           </div>
         </div>
@@ -116,10 +116,10 @@ function NavItem({
       href={href}
       data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
       className={cn(
-        "group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors hover-elevate",
+        "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-sans transition-colors",
         active
-          ? "bg-sidebar-accent text-foreground border border-sidebar-accent-border"
-          : "text-muted-foreground border border-transparent"
+          ? "bg-umler-panel2 text-umler-ink"
+          : "text-umler-faint hover:bg-umler-panel2 hover:text-umler-ink"
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
@@ -341,8 +341,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               draggable={false}
             />
             <div className="min-w-0">
-              <div className="text-sm font-semibold tracking-tight leading-tight text-foreground">RLMS</div>
-              <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground leading-tight">RESIDCO</div>
+              <div className="font-serif text-sm font-semibold tracking-tight leading-tight text-foreground">RLMS</div>
+              <div className="font-eyebrow leading-tight">RESIDCO</div>
             </div>
           </div>
           <button
@@ -364,7 +364,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           {isAdmin && (
             <>
               <div className="pt-3 pb-1 px-3">
-                <span className="text-[9px] uppercase tracking-widest text-muted-foreground/60">Admin</span>
+                <span className="font-eyebrow">Admin</span>
               </div>
               {adminNav.map((n) => (
                 <NavItem key={n.href} href={n.href} label={n.label} icon={n.icon} active={location.startsWith(n.href)} collapsed={false} />
@@ -375,7 +375,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
         <div className="px-2 pb-2 pt-2 border-t border-sidebar-border space-y-1">
           {user && (
-            <div className="px-3 py-2 rounded-md bg-muted/20 space-y-1">
+            <div className="px-3 py-2 rounded-lg bg-umler-panel2 space-y-1">
               <div className="flex items-center gap-1.5">
                 {role === "admin" ? (
                   <ShieldCheck className="h-3 w-3 text-primary shrink-0" />
@@ -391,14 +391,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           )}
           <button
             onClick={() => setChangePwOpen(true)}
-            className="w-full flex items-center gap-2 rounded-md px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors border border-transparent"
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-umler-faint hover:text-umler-ink hover:bg-umler-panel2 transition-colors"
           >
             <KeyRound className="h-4 w-4 shrink-0" />
             <span>Change password</span>
           </button>
           <button
             onClick={signOut}
-            className="w-full flex items-center gap-2 rounded-md px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors border border-transparent"
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-umler-faint hover:text-umler-ink hover:bg-umler-panel2 transition-colors"
           >
             <LogOut className="h-4 w-4 shrink-0" />
             <span>Sign out</span>
@@ -438,7 +438,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <>
               {!collapsed && (
                 <div className="pt-3 pb-1 px-3">
-                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground/60">
+                  <span className="font-eyebrow">
                     Admin
                   </span>
                 </div>
@@ -463,7 +463,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         {/* User info + sign out */}
         <div className="px-2 pb-2 pt-2 border-t border-sidebar-border space-y-1">
           {!collapsed && user && (
-            <div className="px-3 py-2 rounded-md bg-muted/20 space-y-1">
+            <div className="px-3 py-2 rounded-lg bg-umler-panel2 space-y-1">
               <div className="flex items-center gap-1.5">
                 {role === "admin" ? (
                   <ShieldCheck className="h-3 w-3 text-primary shrink-0" />
@@ -484,7 +484,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             onClick={() => setChangePwOpen(true)}
             data-testid="button-change-password"
             className={cn(
-              "w-full flex items-center gap-2 rounded-md px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors border border-transparent",
+              "w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-umler-faint hover:text-umler-ink hover:bg-umler-panel2 transition-colors",
               collapsed && "justify-center"
             )}
           >
@@ -496,7 +496,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             onClick={signOut}
             data-testid="button-sign-out"
             className={cn(
-              "w-full flex items-center gap-2 rounded-md px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors border border-transparent",
+              "w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-umler-faint hover:text-umler-ink hover:bg-umler-panel2 transition-colors",
               collapsed && "justify-center"
             )}
           >
@@ -507,7 +507,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <button
             onClick={() => setCollapsed((c) => !c)}
             data-testid="button-collapse-sidebar"
-            className="w-full flex items-center justify-center gap-2 rounded-md px-2 py-2 text-xs text-muted-foreground hover-elevate border border-transparent"
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs text-umler-faint hover:text-umler-ink hover:bg-umler-panel2 transition-colors"
           >
             {collapsed ? (
               <ChevronRight className="h-4 w-4" />

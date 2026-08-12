@@ -6,11 +6,30 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        lg: ".5625rem", /* 9px */
-        md: ".375rem", /* 6px */
-        sm: ".1875rem", /* 3px */
+        lg: "8px",
+        md: "8px",
+        sm: ".1875rem",
+        xl: "12px",
+      },
+      boxShadow: {
+        card: "inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 40px rgba(0,0,0,0.28)",
       },
       colors: {
+        umler: {
+          void: "#0B0E12",
+          panel: "#12161C",
+          panel2: "#181D25",
+          line: "#2A313C",
+          ink: "#E9EEF3",
+          faint: "#6B7684",
+          steel: "#7A96AB",
+          teal: "#5BA894",
+          amber: "#C9963E",
+          signal: "#C86B3A",
+        },
+        success: "#5BA894",
+        warning: "#C9963E",
+        error: "#C86B3A",
         // Flat / base colors (regular buttons)
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
@@ -83,9 +102,9 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["var(--font-sans)"],
-        serif: ["var(--font-serif)"],
-        mono: ["var(--font-mono)"],
+        sans: ['"DM Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        serif: ['"Source Serif 4"', "Georgia", "serif"],
+        mono: ['"IBM Plex Mono"', "ui-monospace", "Menlo", "Consolas", "monospace"],
       },
       keyframes: {
         "accordion-down": {

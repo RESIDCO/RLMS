@@ -199,36 +199,39 @@ function SortTh({
 }
 
 // ─── KPI tiles ────────────────────────────────────────────────────────────
+const kpiAccent = {
+  neutral: { icon: "text-umler-faint", bar: "bg-umler-steel" },
+  error: { icon: "text-umler-signal", bar: "bg-umler-signal" },
+  warning: { icon: "text-umler-amber", bar: "bg-umler-amber" },
+  success: { icon: "text-umler-teal", bar: "bg-umler-teal" },
+  primary: { icon: "text-umler-steel", bar: "bg-umler-steel" },
+} as const;
+
 function KpiTile({
   label, value, sub, icon: Icon, accent = "neutral", onClick,
 }: {
   label: string; value: string; sub?: string;
   icon: React.FC<{ className?: string }>;
-  accent?: "neutral" | "error" | "warning" | "success" | "primary";
+  accent?: keyof typeof kpiAccent;
   onClick?: () => void;
 }) {
-  const accentMap = {
-    neutral: "text-muted-foreground",
-    error: "text-error",
-    warning: "text-warning",
-    success: "text-success",
-    primary: "text-primary",
-  };
+  const tone = kpiAccent[accent];
   return (
     <button
       onClick={onClick}
       className={cn(
-        "rounded-xl border border-card-border bg-card p-4 text-left transition-colors",
+        "rounded-xl border border-card-border bg-card shadow-card p-4 text-left transition-colors",
         onClick ? "cursor-pointer hover:bg-muted/20" : "cursor-default"
       )}
       data-testid={`kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}
     >
       <div className="flex items-center gap-2 mb-2">
-        <Icon className={cn("h-4 w-4 shrink-0", accentMap[accent])} />
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
+        <Icon className={cn("h-4 w-4 shrink-0", tone.icon)} />
+        <span className="font-eyebrow">{label}</span>
       </div>
-      <div className="text-xl font-bold">{value}</div>
+      <div className="font-kpi text-foreground">{value}</div>
       {sub && <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>}
+      <div className={cn("h-[2px] w-full rounded-full mt-2", tone.bar)} />
     </button>
   );
 }

@@ -1818,7 +1818,12 @@ export async function registerRoutes(
       if (!adminId) return;
       const { email, role } = req.body as { email: string; role: AppRole };
       if (!email || !isValidRole(role)) return res.status(400).json({ error: "email and valid role required" });
-      const appUrl = process.env.VITE_API_BASE ?? "https://rlms-residco.onrender.com";
+      // Public app origin for invite/magic-link redirects — never use VITE_API_BASE
+      // (that is often "" for same-origin API and previously fell back to a stale host).
+      const appUrl =
+        process.env.APP_URL ||
+        process.env.SITE_URL ||
+        "https://rlms-d6kb.onrender.com";
 
       // Try the standard invite first
       const { data: inviteData, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {

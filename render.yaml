@@ -24,6 +24,9 @@ services:
       # Same-origin API calls from the built SPA (Express serves the client)
       - key: VITE_API_BASE
         value: ""
+      # Used for invite / magic-link redirectTo (must match Supabase Site URL)
+      - key: APP_URL
+        value: https://rlms-d6kb.onrender.com
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

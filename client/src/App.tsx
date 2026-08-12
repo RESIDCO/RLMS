@@ -20,6 +20,7 @@ import Contacts from "@/pages/Contacts";
 import APTracker from "@/pages/APTracker";
 import Programs from "@/pages/Programs";
 import Login from "@/pages/Login";
+import SetPassword from "@/pages/SetPassword";
 import DvNewCalculation from "@/pages/DvCalculator/NewCalculation";
 import DvHistory from "@/pages/DvCalculator/History";
 import DvReference from "@/pages/DvCalculator/Reference";
@@ -51,7 +52,7 @@ function AppRouter() {
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuth();
+  const { session, loading, needsPasswordChange } = useAuth();
 
   if (loading) {
     return (
@@ -63,6 +64,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!session) {
     return <Login />;
+  }
+
+  // Invite / recovery links must set a password before using the app
+  if (needsPasswordChange) {
+    return <SetPassword />;
   }
 
   return <>{children}</>;

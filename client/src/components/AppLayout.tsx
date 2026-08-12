@@ -295,16 +295,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
   const [location] = useLocation();
-  const { user, role, signOut, needsPasswordChange, clearNeedsPasswordChange } = useAuth();
+  const { user, role, signOut } = useAuth();
   const isAdmin = useIsAdmin();
-
-  // Auto-open when arriving via a password-reset email link
-  useEffect(() => {
-    if (needsPasswordChange) {
-      setChangePwOpen(true);
-      clearNeedsPasswordChange();
-    }
-  }, [needsPasswordChange, clearNeedsPasswordChange]);
 
   // Close mobile nav on route change
   useEffect(() => {

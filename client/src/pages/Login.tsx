@@ -40,7 +40,9 @@ export default function Login() {
         <div className="rounded-xl border border-border bg-card p-6 shadow-card">
           <h1 className="font-serif text-base font-semibold text-foreground mb-1">Sign in</h1>
           <p className="text-xs text-muted-foreground mb-5">
-            Railcar Lease Management System
+            Railcar Lease Management System. New users: open the invite email and use{" "}
+            <span className="text-foreground">Accept invitation</span> to set your password —
+            this sign-in form is only for accounts that already have a password.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">

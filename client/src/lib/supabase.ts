@@ -9,19 +9,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// In-memory storage adapter — avoids localStorage/sessionStorage which are
-// blocked in sandboxed iframes. Sessions persist for the tab lifetime.
-const memoryStore: Record<string, string> = {};
-const memoryStorage = {
-  getItem: (key: string) => memoryStore[key] ?? null,
-  setItem: (key: string, value: string) => { memoryStore[key] = value; },
-  removeItem: (key: string) => { delete memoryStore[key]; },
-};
-
+/**
+ * Persist sessions in localStorage so invite → set-password → dashboard
+ * survives reloads. (Memory-only storage caused invitees to fall back to
+ * the normal sign-in form with no password set.)
+ */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: memoryStorage,
     persistSession: true,
+    autoRefreshToken: true,
     detectSessionInUrl: true,
+    flowType: "implicit",
   },
 });

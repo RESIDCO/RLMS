@@ -21,6 +21,7 @@ import APTracker from "@/pages/APTracker";
 import Programs from "@/pages/Programs";
 import Login from "@/pages/Login";
 import SetPassword from "@/pages/SetPassword";
+import AcceptInvite from "@/pages/AcceptInvite";
 import DvNewCalculation from "@/pages/DvCalculator/NewCalculation";
 import DvHistory from "@/pages/DvCalculator/History";
 import DvReference from "@/pages/DvCalculator/Reference";
@@ -53,6 +54,12 @@ function AppRouter() {
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { session, loading, needsPasswordChange } = useAuth();
+  const [loc] = useHashLocation();
+
+  // Invite acceptance is public (token_hash in query) — no session yet
+  if (loc.startsWith("/accept-invite")) {
+    return <AcceptInvite />;
+  }
 
   if (loading) {
     return (
@@ -66,7 +73,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return <Login />;
   }
 
-  // Invite / recovery links must set a password before using the app
+  // Legacy invite hash (#access_token&type=invite) or recovery
   if (needsPasswordChange) {
     return <SetPassword />;
   }
@@ -80,13 +87,13 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <AuthProvider>
-          <AuthGate>
-            <Router hook={useHashLocation}>
+          <Router hook={useHashLocation}>
+            <AuthGate>
               <AppLayout>
                 <AppRouter />
               </AppLayout>
-            </Router>
-          </AuthGate>
+            </AuthGate>
+          </Router>
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>

@@ -25,6 +25,7 @@ import {
   X as XIcon,
   Receipt,
   FolderOpen,
+  ExternalLink,
 } from "lucide-react";
 import FreshnessBanner from "@/components/FreshnessBanner";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+
+/** UMLER Intelligence portal (Vercel). Independent login from RLMS. */
+const UMLER_EXTERNAL_URL = "https://railcarumlerportal.vercel.app/";
 
 const mainNav = [
   { href: "/",         label: "Dashboard",       icon: LayoutDashboard },
@@ -526,6 +530,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
           <GlobalSearch />
+          <button
+            type="button"
+            onClick={() => window.open(UMLER_EXTERNAL_URL, "_blank", "noopener,noreferrer")}
+            title="Open UMLER Intelligence in a new tab (separate login)"
+            data-testid="button-open-umler"
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-sidebar-border bg-umler-panel2 px-2.5 sm:px-3 py-1.5 text-xs font-medium text-umler-faint hover:text-umler-ink hover:border-umler-steel/40 transition-colors"
+          >
+            <ExternalLink className="h-3.5 w-3.5 opacity-85" />
+            <span className="hidden sm:inline">UMLER</span>
+          </button>
         </div>
         <main className="flex-1 min-w-0 overflow-auto">
           <FreshnessBanner />

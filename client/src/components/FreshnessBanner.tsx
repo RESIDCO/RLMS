@@ -59,7 +59,7 @@ export default function FreshnessBanner({ hideLink }: { hideLink?: boolean } = {
       </div>
       {!hideLink && (
         <Link
-          href="/reference"
+          href="/dv/reference"
           className="shrink-0 inline-flex items-center gap-1 text-amber-900 dark:text-amber-100 font-medium hover:underline whitespace-nowrap"
           data-testid="link-banner-reference"
         >

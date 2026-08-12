@@ -42,11 +42,6 @@ const STORAGE_BUCKET = "rlms-attachments";
  *  DV CALCULATOR (AAR Rule 107) — module helpers
  * ================================================================== */
 
-function dvVisitorId(req: Request): string {
-  const hdr = req.header("X-Visitor-Id");
-  return hdr && hdr.length > 0 ? hdr : "anon";
-}
-
 async function dvLoadReferenceData(): Promise<DvReferenceData> {
   const [cf, sq, cr] = await Promise.all([
     supabase.from("dv_cost_factors").select("year, factor").order("year", { ascending: true }),
@@ -86,7 +81,7 @@ function dvParseInputs(body: any, abCodes: Map<string, { rate_basis: AbRateBasis
       installDate: new Date(it.installDate),
       rateBasis,
       rate,
-      maxDepreciation,
+      max: maxDepreciation,
     };
   });
   return {
@@ -2192,21 +2187,23 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  // Calculations persistence
+  // Calculations persistence — scoped to authenticated RLMS user (not anon visitor cookie)
   app.get("/api/calculations", async (req, res) => {
     try {
-      const visitor = dvVisitorId(req);
+      const user = await getAuthUser(req);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { data, error } = await supabase.from("dv_calculations")
-        .select("*, dv_calculation_ab_items(*)").eq("visitor_id", visitor)
+        .select("*, dv_calculation_ab_items(*)").eq("visitor_id", user.id)
         .order("created_at", { ascending: false }).limit(200);
       if (error) throw error; res.json(data || []);
     } catch (err) { errHandler(res, err); }
   });
   app.get("/api/calculations/:id", async (req, res) => {
     try {
-      const visitor = dvVisitorId(req);
+      const user = await getAuthUser(req);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { data, error } = await supabase.from("dv_calculations")
-        .select("*, dv_calculation_ab_items(*)").eq("id", req.params.id).eq("visitor_id", visitor).single();
+        .select("*, dv_calculation_ab_items(*)").eq("id", req.params.id).eq("visitor_id", user.id).single();
       if (error) throw error; res.json(data);
     } catch (err) { errHandler(res, err); }
   });
@@ -2214,7 +2211,6 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const visitor = dvVisitorId(req);
       const ref = await dvLoadReferenceData();
       const { data: abData } = await supabase.from("dv_ab_codes").select("code, rate_basis, rate, max_depreciation");
       const abMap = new Map<string, { rate_basis: AbRateBasis; rate: number; max_depreciation: number }>();
@@ -2222,7 +2218,7 @@ export async function registerRoutes(
       const inputs = dvParseInputs(req.body, abMap);
       const result = calculateDv(inputs, ref);
       const row = {
-        visitor_id: visitor,
+        visitor_id: writerId,
         railcar_id: req.body.railcarId ?? null,
         railroad: req.body.railroad ?? null,
         ddct_incident_no: req.body.ddctNumber ?? null,
@@ -2245,7 +2241,7 @@ export async function registerRoutes(
         salvage_plus_20: result.salvage.salvagePlus20,
         dismantling_allow: result.salvage.dismantlingAllowance,
         over_age_cutoff: result.overAgeCutoff,
-        created_by: visitor,
+        created_by: writerId,
         result_json: result,
       };
       const { data: calc, error } = await supabase.from("dv_calculations").insert(row).select().single();
@@ -2271,8 +2267,7 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const visitor = dvVisitorId(req);
-      const { error } = await supabase.from("dv_calculations").delete().eq("id", req.params.id).eq("visitor_id", visitor);
+      const { error } = await supabase.from("dv_calculations").delete().eq("id", req.params.id).eq("visitor_id", writerId);
       if (error) throw error; res.json({ ok: true });
     } catch (err) { errHandler(res, err); }
   });

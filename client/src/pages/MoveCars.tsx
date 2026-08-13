@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { ArrowRight, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -58,7 +59,7 @@ export default function MoveCars() {
     ? new URLSearchParams(window.location.search).get("rider") ?? ""
     : "";
   const [fromRiderId, setFromRiderId] = useState<string>(initRider);
-  const [toRiderId, setToRiderId] = useState<string>("");
+  const [toRiderLabel, setToRiderLabel] = useState<string>("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [newFleetName, setNewFleetName] = useState("");
   const [reason, setReason] = useState("");
@@ -72,7 +73,11 @@ export default function MoveCars() {
   const { data: history } = useQuery<any[]>({ queryKey: ["/api/history"] });
 
   const fromRider = riders?.find((r) => String(r.id) === fromRiderId);
-  const toRider = riders?.find((r) => String(r.id) === toRiderId);
+  const toRiderMatch = riders?.find(
+    (r) =>
+      String(r.rider_name ?? "").trim().toUpperCase() === toRiderLabel.trim().toUpperCase() ||
+      String(r.schedule_number ?? "").trim().toUpperCase() === toRiderLabel.trim().toUpperCase()
+  );
 
   const sourceCars = useMemo(() => {
     if (!fromRiderId || !railcars) return [];
@@ -101,9 +106,13 @@ export default function MoveCars() {
 
   const move = useMutation({
     mutationFn: async () => {
+      const resolved = await resolveRiderLabel(toRiderLabel);
+      if (String(resolved.id) === fromRiderId) {
+        throw new Error("Destination rider must differ from the source rider");
+      }
       await apiRequest("POST", "/api/move", {
         car_ids: Array.from(selected),
-        to_rider_id: Number(toRiderId),
+        to_rider_id: resolved.id,
         new_fleet_name: newFleetName.trim() || null,
         reason: reason.trim() || null,
         moved_by: "rlms-ui",
@@ -117,7 +126,7 @@ export default function MoveCars() {
       });
       setSelected(new Set());
       setFromRiderId("");
-      setToRiderId("");
+      setToRiderLabel("");
       setNewFleetName("");
       setReason("");
     },
@@ -126,7 +135,10 @@ export default function MoveCars() {
   });
 
   const canConfirm =
-    fromRiderId && toRiderId && selected.size > 0 && fromRiderId !== toRiderId;
+    !!fromRiderId &&
+    toRiderLabel.trim().length > 0 &&
+    selected.size > 0 &&
+    !(toRiderMatch && String(toRiderMatch.id) === fromRiderId);
 
   return (
     <div>
@@ -263,22 +275,16 @@ export default function MoveCars() {
             )}
           </Step>
 
-          <Step n={3} title="Destination rider" done={!!toRiderId}>
-            <Select value={toRiderId} onValueChange={setToRiderId}>
-              <SelectTrigger data-testid="select-to-rider">
-                <SelectValue placeholder="Choose destination…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(riders ?? [])
-                  .filter((r: any) => String(r.id) !== fromRiderId)
-                  .map((r: any) => (
-                    <SelectItem key={r.id} value={String(r.id)}>
-                      {r.rider_name} —{" "}
-                      {r.master_lease?.lease_number ?? "—"} · {r.car_count ?? 0} cars
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+          <Step n={3} title="Destination rider / OL" done={!!toRiderLabel.trim()}>
+            <RiderFreeTextInput
+              value={toRiderLabel}
+              onChange={setToRiderLabel}
+              riders={riders ?? []}
+              excludeId={fromRiderId}
+              listId="move-to-rider-suggestions"
+              data-testid="select-to-rider"
+              placeholder="Type destination rider / OL…"
+            />
           </Step>
 
           <Step n={4} title="New lessee name & reason (optional)">
@@ -336,9 +342,9 @@ export default function MoveCars() {
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     To
                   </div>
-                  <div className="font-medium truncate">{toRider?.rider_name}</div>
+                  <div className="font-medium truncate">{toRiderMatch?.rider_name ?? toRiderLabel}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {toRider?.master_lease?.lease_number}
+                    {toRiderMatch?.master_lease?.lease_number ?? (toRiderMatch ? "—" : "New OL (will create)")}
                   </div>
                 </div>
               </div>

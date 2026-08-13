@@ -2,6 +2,8 @@ import { useMemo, useState, useCallback, useEffect } from "react";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
+import { InactiveFleetBadge, SoldFleetBadge, IdleFleetBadge, fleetActiveLabel } from "@/components/InactiveFleetBadge";
+import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -184,7 +186,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     get(r, "rider_external_id"),
     r.lessee_name ?? r.assignment?.fleet_name ?? "",
     r.entity ?? "",
-    r.active_status ?? (r.active === false ? "Inactive" : r.active === true ? "Active" : ""),
+    fleetActiveLabel(r.active) || (r.active_status ?? ""),
     get(r, "data_source"),
     r.car_type ?? "",
     r.description ?? r.general_description ?? "",
@@ -231,15 +233,21 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
 
 export default function FleetRegistry() {
   const canEdit = useCanEdit();
-  // Deep-link: ?filter=unassigned | assigned | offrent | all
+  // Deep-link: ?filter=unassigned | assigned | offrent | sold | all
   const initAssigned = typeof window !== "undefined"
-    ? (() => { const f = new URLSearchParams(window.location.search).get("filter"); return f === "unassigned" ? "unassigned" : f === "assigned" ? "assigned" : f === "offrent" ? "offrent" : "all"; })()
+    ? (() => {
+        const f = new URLSearchParams(window.location.search).get("filter");
+        if (f === "unassigned" || f === "assigned" || f === "offrent" || f === "sold") return f;
+        return "all";
+      })()
     : "all";
 
   const [search, setSearch] = useState("");
   const [assignedFilter, setAssignedFilter] = useState<string>(initAssigned);
   const [riderFilter, setRiderFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  // §5 fleet membership — distinct from service-status filter below
+  const [fleetActiveFilter, setFleetActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "car_number",
     dir: "asc",
@@ -314,6 +322,9 @@ export default function FleetRegistry() {
 
   const filtered = useMemo(() => {
     let rows = railcars ?? [];
+    // §5 fleet membership (active boolean) — default Active; distinct from service status
+    if (fleetActiveFilter === "active") rows = rows.filter((r) => (r as any).active !== false);
+    if (fleetActiveFilter === "inactive") rows = rows.filter((r) => (r as any).active === false);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter((r) => {
@@ -333,6 +344,9 @@ export default function FleetRegistry() {
     if (assignedFilter === "unassigned") rows = rows.filter((r) => !r.assignment);
     if (assignedFilter === "assigned") rows = rows.filter((r) => !!r.assignment);
     if (assignedFilter === "offrent") rows = rows.filter((r) => offRentCarIds.has(r.id));
+    if (assignedFilter === "sold") {
+      rows = rows.filter((r) => (r as any).fleet_status === "Sold");
+    }
     if (riderFilter !== "all")
       rows = rows.filter((r) => String(r.assignment?.rider_id ?? "") === riderFilter);
 
@@ -361,7 +375,7 @@ export default function FleetRegistry() {
     });
 
     return rows;
-  }, [railcars, search, statusFilter, riderFilter, transitFilter, entityFilter, sort]);
+  }, [railcars, search, statusFilter, riderFilter, transitFilter, entityFilter, assignedFilter, fleetActiveFilter, offRentCarIds, sort]);
 
   // ── Multi-select helpers ──────────────────────────────────────────────────
   const allFilteredIds = filtered.map((r) => r.id);
@@ -549,12 +563,22 @@ export default function FleetRegistry() {
               className="pl-9"
             />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[180px]" data-testid="filter-status">
-              <SelectValue placeholder="Status" />
+          <Select value={fleetActiveFilter} onValueChange={(v) => setFleetActiveFilter(v as "active" | "inactive" | "all")}>
+            <SelectTrigger className="w-[150px]" data-testid="filter-fleet-active">
+              <SelectValue placeholder="Fleet status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active cars</SelectItem>
+              <SelectItem value="inactive">Inactive cars</SelectItem>
+              <SelectItem value="all">All cars</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[180px]" data-testid="filter-status">
+              <SelectValue placeholder="Service status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All service statuses</SelectItem>
               {STATUS_OPTIONS.map((s) => (
                 <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
               ))}
@@ -602,6 +626,7 @@ export default function FleetRegistry() {
               <SelectItem value="assigned">Assigned only</SelectItem>
               <SelectItem value="unassigned">Unassigned only</SelectItem>
               <SelectItem value="offrent">Off Rent</SelectItem>
+              <SelectItem value="sold">Sold</SelectItem>
             </SelectContent>
           </Select>
           {/* Column visibility picker */}
@@ -813,7 +838,28 @@ export default function FleetRegistry() {
                         <EntityBadge entity={(r as any).entity} />
                       </td>
                       <td className="px-4 py-3 font-mono-num font-medium">
-                        {r.car_number}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{r.car_number}</span>
+                          <InactiveFleetBadge active={(r as any).active} />
+                          <SoldFleetBadge
+                            car={{
+                              active: (r as any).active,
+                              rider_external_id: (r as any).rider_external_id,
+                              assignment_label: (r as any).assignment_label,
+                              fleet_name: r.assignment?.fleet_name ?? null,
+                              managed_category: (r as any).managed_category,
+                            }}
+                          />
+                          <IdleFleetBadge
+                            car={{
+                              active: (r as any).active,
+                              rider_external_id: (r as any).rider_external_id,
+                              assignment_label: (r as any).assignment_label,
+                              fleet_name: r.assignment?.fleet_name ?? null,
+                              managed_category: (r as any).managed_category,
+                            }}
+                          />
+                        </div>
                       </td>
                       <td className="px-4 py-3 font-mono-num text-muted-foreground hidden sm:table-cell">
                         {r.reporting_marks ?? "—"}
@@ -846,7 +892,7 @@ export default function FleetRegistry() {
                         {r.assignment?.rider?.master_lease?.lease_number ?? "—"}
                       </td>
                       <td className="px-4 py-3 font-mono-num text-muted-foreground">
-                        {fmtDate(r.assignment?.rider?.expiration_date)}
+                        {fmtDate((r as any).lease_end_date ?? (r as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}
                       </td>
                       {/* Optional columns */}
                       {visibleCols.has("nbv") && (
@@ -924,8 +970,12 @@ export default function FleetRegistry() {
                         <td className="px-4 py-3 text-muted-foreground">{(r as any).data_source ?? "—"}</td>
                       )}
                       {visibleCols.has("active") && (
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {(r as any).active_status ?? ((r as any).active === false ? "Inactive" : (r as any).active === true ? "Active" : "—")}
+                        <td className="px-4 py-3">
+                          {(r as any).active === false ? (
+                            <InactiveFleetBadge active={false} />
+                          ) : (
+                            <span className="text-muted-foreground text-xs">Active</span>
+                          )}
                         </td>
                       )}
                       {visibleCols.has("rider_external_id") && (
@@ -1148,9 +1198,10 @@ function CarDetail({
 
   const assignMutation = useMutation({
     mutationFn: async () => {
+      const resolved = await resolveRiderLabel(assignRiderId);
       const res = await apiRequest("POST", "/api/move", {
         car_ids: [carId],
-        to_rider_id: Number(assignRiderId),
+        to_rider_id: resolved.id,
         new_fleet_name: assignFleet.trim() || null,
         reason: assignReason.trim() || null,
         moved_by: "user",
@@ -1160,6 +1211,7 @@ function CarDetail({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars", carId] });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       toast({ title: "Car assigned", description: "Assignment saved successfully." });
       setAssignOpen(false);
@@ -1204,6 +1256,14 @@ function CarDetail({
             SOLD / TRANSFERRED
           </div>
           <p className="mt-1 text-xs text-amber-300/90">Sold to: {(r as any).sold_to}</p>
+        </div>
+      )}
+
+      {/* §5 Inactive fleet membership — distinct from Off Rent / service status */}
+      {(r as any).active === false && (
+        <div className="mt-4 rounded-md border border-zinc-500/30 bg-zinc-500/10 px-4 py-3 flex items-center gap-2">
+          <InactiveFleetBadge active={false} />
+          <span className="text-xs text-zinc-400">Inactive in fleet (not currently counted in Dashboard KPIs)</span>
         </div>
       )}
 
@@ -1302,13 +1362,18 @@ function CarDetail({
         <DetailRow label="Comment / Event Note" value={(r as any).comment_event_note ?? "—"} />
       </dl>
 
-      {/* Prior reporting marks */}
-      {((r as any).old_car_initial || (r as any).old_car_number) && (
-        <div className="mt-4 rounded-md bg-muted/30 border border-border px-4 py-3">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Prior Reporting Marks</div>
-          <div className="font-mono text-sm">{(r as any).old_car_initial ?? ""} {(r as any).old_car_number ?? ""}</div>
-        </div>
-      )}
+      {/* Previously known as — sourced from car_number_history (VCF remarks), not flat old_car_* */}
+      {(data.number_history ?? []).length > 0 && (() => {
+        const latest = data.number_history[0];
+        const prior = [latest.old_car_initial, latest.old_car_number].filter(Boolean).join(" ");
+        if (!prior) return null;
+        return (
+          <div className="mt-4 rounded-md bg-muted/30 border border-border px-4 py-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Previously known as</div>
+            <div className="font-mono text-sm">{prior}</div>
+          </div>
+        );
+      })()}
 
       <div className="mt-6 border-t border-border pt-5">
         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
@@ -1333,9 +1398,15 @@ function CarDetail({
             <div className="flex justify-between">
               <span className="text-muted-foreground">Expires</span>
               <span className="font-mono-num">
-                {fmtDate(r.assignment.rider?.expiration_date)}
+                {fmtDate((r as any).lease_end_date ?? (r as any).lease_expiry) || "—"}
               </span>
             </div>
+            {!(r as any).lease_end_date && !(r as any).lease_expiry && r.assignment?.rider?.expiration_date && (
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span>Rider table (cache)</span>
+                <span className="font-mono-num">{fmtDate(r.assignment.rider.expiration_date)}</span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-sm text-muted-foreground italic">Unassigned</div>
@@ -1352,7 +1423,7 @@ function CarDetail({
               className="w-full"
               onClick={() => {
                 setAssignFleet(r.assignment?.fleet_name ?? "");
-                setAssignRiderId(r.assignment?.rider_id ? String(r.assignment.rider_id) : "");
+                setAssignRiderId(r.assignment?.rider?.rider_name ?? "");
                 setAssignOpen(true);
               }}
               data-testid="btn-open-assign"
@@ -1365,25 +1436,17 @@ function CarDetail({
                 {r.assignment ? "Reassign Car" : "Assign Car to Rider"}
               </div>
 
-              {/* Rider picker grouped by lease */}
+              {/* Rider / OL — free text (new codes allowed) */}
               <div>
-                <Label className="text-xs">Rider</Label>
-                <Select value={assignRiderId} onValueChange={setAssignRiderId}>
-                  <SelectTrigger data-testid="select-assign-rider">
-                    <SelectValue placeholder="Select a rider…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allRiders.length === 0 && (
-                      <SelectItem value="__none" disabled>No riders found</SelectItem>
-                    )}
-                    {allRiders.map((rd: any) => (
-                      <SelectItem key={rd.id} value={String(rd.id)}>
-                        {rd.rider_name}
-                        {rd.master_lease?.lease_number ? ` · ${rd.master_lease.lease_number}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs">Rider / OL</Label>
+                <RiderFreeTextInput
+                  value={assignRiderId}
+                  onChange={setAssignRiderId}
+                  riders={allRiders}
+                  listId={`assign-rider-${carId}`}
+                  data-testid="select-assign-rider"
+                  placeholder="Type rider / OL code…"
+                />
               </div>
 
               {/* Lessee */}
@@ -1411,7 +1474,7 @@ function CarDetail({
               <div className="flex gap-2 pt-1">
                 <Button
                   size="sm"
-                  disabled={!assignRiderId || assignMutation.isPending}
+                  disabled={!assignRiderId.trim() || assignMutation.isPending}
                   onClick={() => assignMutation.mutate()}
                   data-testid="btn-save-assign"
                 >
@@ -1475,9 +1538,13 @@ function CarDetail({
               <div key={h.id} className="text-xs border-l-2 border-amber-500/50 pl-3 py-1">
                 <div className="font-mono-num text-muted-foreground">{new Date(h.changed_at).toLocaleString()}</div>
                 <div className="mt-0.5 font-mono font-medium">
-                  <span className="text-muted-foreground">{h.old_car_number}</span>
+                  <span className="text-muted-foreground">
+                    {[h.old_car_initial, h.old_car_number].filter(Boolean).join(" ") || h.old_car_number}
+                  </span>
                   <span className="mx-1.5 text-amber-400">→</span>
-                  <span>{h.new_car_number}</span>
+                  <span>
+                    {[h.new_car_initial, h.new_car_number].filter(Boolean).join(" ") || h.new_car_number}
+                  </span>
                 </div>
                 {h.reason && <div className="text-muted-foreground italic mt-0.5">{h.reason}</div>}
               </div>
@@ -1749,8 +1816,6 @@ function RailcarFormDialog({
     managed_category: (car as any)?.managed_category ?? "",
     // Merge coating into lining_material — prefer lining_material, fall back to coating
     lining_material: (car as any)?.lining_material || (car as any)?.coating || "",
-    old_car_initial: (car as any)?.old_car_initial ?? "",
-    old_car_number: (car as any)?.old_car_number ?? "",
     notes: car?.notes ?? "",
     nbv: (car as any)?.nbv != null ? String((car as any).nbv) : "",
     oac: (car as any)?.oac != null ? String((car as any).oac) : "",
@@ -1783,12 +1848,13 @@ function RailcarFormDialog({
         await apiRequest("PATCH", `/api/railcars/${car.id}`, form);
       } else {
         const res = await apiRequest("POST", `/api/railcars`, form);
-        // If a rider was selected, assign the new car to it immediately
-        if (assignRiderId) {
+        // If a rider/OL was entered, resolve (match or create) then assign
+        if (assignRiderId.trim()) {
           const newCar = await res.json();
+          const resolved = await resolveRiderLabel(assignRiderId);
           await apiRequest("POST", "/api/move", {
             car_ids: [newCar.id],
-            to_rider_id: Number(assignRiderId),
+            to_rider_id: resolved.id,
             new_fleet_name: assignFleetName.trim() || null,
             reason: assignReason.trim() || "New Assignment",
             moved_by: "user",
@@ -1799,10 +1865,10 @@ function RailcarFormDialog({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      if (!car && assignRiderId) {
+      queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
+      if (!car && assignRiderId.trim()) {
         queryClient.invalidateQueries({ queryKey: ["/api/history"] });
-        const riderName = allRiders.find((r: any) => String(r.id) === assignRiderId)?.rider_name ?? "rider";
-        toast({ title: "Railcar created & assigned", description: `Assigned to ${riderName}` });
+        toast({ title: "Railcar created & assigned", description: `Assigned to ${assignRiderId.trim()}` });
       } else {
         toast({ title: car ? "Railcar updated" : "Railcar created" });
       }
@@ -1958,15 +2024,9 @@ function RailcarFormDialog({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Prior Car Initial</Label>
-              <Input value={form.old_car_initial} onChange={(e) => setForm({ ...form, old_car_initial: e.target.value })} placeholder="e.g. ADMX" className="font-mono" />
-            </div>
-            <div>
-              <Label>Prior Car Number</Label>
-              <Input value={form.old_car_number} onChange={(e) => setForm({ ...form, old_car_number: e.target.value })} placeholder="e.g. 000006" className="font-mono" />
-            </div>
+          <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Prior reporting marks (remarks) live in Reporting Mark History from the Valid Car File —
+            use “Change Reporting Mark / Car Number” to record a new rename. Flat <span className="font-mono">old_car_*</span> fields are no longer edited here.
           </div>
           <div>
             <Label>Transit / Repair Status</Label>
@@ -2025,22 +2085,17 @@ function RailcarFormDialog({
                 Assign to Rider <span className="normal-case tracking-normal font-normal text-muted-foreground/70">(optional)</span>
               </div>
               <div>
-                <Label className="text-xs">Rider</Label>
-                <Select value={assignRiderId || "__none"} onValueChange={(v) => setAssignRiderId(v === "__none" ? "" : v)}>
-                  <SelectTrigger data-testid="select-new-car-rider">
-                    <SelectValue placeholder="— Skip assignment —" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">— Skip assignment —</SelectItem>
-                    {allRiders.map((r: any) => (
-                      <SelectItem key={r.id} value={String(r.id)}>
-                        {r.rider_name}{r.master_lease?.lease_number ? ` · ${r.master_lease.lease_number}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs">Rider / OL</Label>
+                <RiderFreeTextInput
+                  value={assignRiderId}
+                  onChange={setAssignRiderId}
+                  riders={allRiders}
+                  listId="new-car-rider-suggestions"
+                  data-testid="select-new-car-rider"
+                  placeholder="Optional — type rider / OL code…"
+                />
               </div>
-              {assignRiderId && (
+              {assignRiderId.trim() && (
                 <>
                   <div>
                     <Label className="text-xs">Lessee Name</Label>
@@ -2070,7 +2125,7 @@ function RailcarFormDialog({
             Cancel
           </Button>
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending ? "Saving…" : car ? "Save" : (assignRiderId ? "Create & Assign" : "Create")}
+            {save.isPending ? "Saving…" : car ? "Save" : (assignRiderId.trim() ? "Create & Assign" : "Create")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2102,8 +2157,6 @@ function useMemoReset(
         managed_category: (car as any)?.managed_category ?? "",
         // Merge coating into lining_material
         lining_material: (car as any)?.lining_material || (car as any)?.coating || "",
-        old_car_initial: (car as any)?.old_car_initial ?? "",
-        old_car_number: (car as any)?.old_car_number ?? "",
         sold_to: (car as any)?.sold_to ?? "",
         active: (car as any)?.active ?? true,
         nbv: (car as any)?.nbv != null ? String((car as any).nbv) : "",

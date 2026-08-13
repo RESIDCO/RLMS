@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
+import { InactiveFleetBadge, SoldFleetBadge, IdleFleetBadge } from "@/components/InactiveFleetBadge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -166,7 +167,31 @@ function CellValue({ col, r }: { col: ColDef; r: Row }) {
   const ra = r as any;
   switch (col.key) {
     case "entity":          return <EntityBadge entity={ra.entity} />;
-    case "car_number":      return <>{r.car_number}</>;
+    case "car_number":
+      return (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span>{r.car_number}</span>
+          <InactiveFleetBadge active={ra.active} />
+          <SoldFleetBadge
+            car={{
+              active: ra.active,
+              rider_external_id: ra.rider_external_id,
+              assignment_label: ra.assignment_label,
+              fleet_name: r.assignment?.fleet_name ?? null,
+              managed_category: ra.managed_category,
+            }}
+          />
+          <IdleFleetBadge
+            car={{
+              active: ra.active,
+              rider_external_id: ra.rider_external_id,
+              assignment_label: ra.assignment_label,
+              fleet_name: r.assignment?.fleet_name ?? null,
+              managed_category: ra.managed_category,
+            }}
+          />
+        </div>
+      );
     case "car_initial":     return <>{ra.car_initial ?? "—"}</>;
     case "reporting_marks": return <>{r.reporting_marks ?? "—"}</>;
     case "car_type":        return <>{r.car_type ?? "—"}</>;
@@ -186,7 +211,7 @@ function CellValue({ col, r }: { col: ColDef; r: Row }) {
     case "fleet":       return <>{r.assignment?.fleet_name ?? <span className="text-muted-foreground italic text-xs">Unassigned</span>}</>;
     case "rider":       return <>{r.assignment?.rider?.rider_name ?? "—"}</>;
     case "lease":       return <>{r.assignment?.rider?.master_lease?.lease_number ?? "—"}</>;
-    case "expiration":  return <>{fmtDate(r.assignment?.rider?.expiration_date)}</>;
+    case "expiration":  return <>{fmtDate((ra as any).lease_end_date ?? (ra as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}</>;
     case "build_year":  return <>{ra.build_year ?? "—"}</>;
     case "capacity_cf": return <>{ra.capacity_cf != null ? Number(ra.capacity_cf).toLocaleString() : "—"}</>;
     case "lining":      return <>{ra.lining_material || ra.lining || ra.coating || "—"}</>;
@@ -199,8 +224,21 @@ function CellValue({ col, r }: { col: ColDef; r: Row }) {
 
 // ── Detail slide-over (read-only) ─────────────────────────────────────────────
 function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }) {
+  const { data: detail } = useQuery<{ number_history?: any[] }>({
+    queryKey: ["/api/railcars", car?.id],
+    enabled: !!car?.id,
+    queryFn: async () => {
+      const res = await fetch(`/api/railcars/${car!.id}`);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+  });
   if (!car) return null;
   const r = car as any;
+  const latestRemark = (detail?.number_history ?? [])[0];
+  const previouslyKnownAs = latestRemark
+    ? [latestRemark.old_car_initial, latestRemark.old_car_number].filter(Boolean).join(" ")
+    : "";
 
   function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
     return (
@@ -219,9 +257,21 @@ function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }
             <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Railcar</span>
             <EntityBadge entity={r.entity} />
           </div>
-          <SheetTitle className="font-mono">
-            <span className="text-muted-foreground">{car.reporting_marks ?? ""}</span>
-            <span>{car.car_number}</span>
+          <SheetTitle className="font-mono flex items-center gap-2 flex-wrap">
+            <span>
+              <span className="text-muted-foreground">{car.reporting_marks ?? ""}</span>
+              <span>{car.car_number}</span>
+            </span>
+            <InactiveFleetBadge active={r.active} />
+            <SoldFleetBadge
+              car={{
+                active: r.active,
+                rider_external_id: r.rider_external_id,
+                assignment_label: r.assignment_label,
+                fleet_name: car.assignment?.fleet_name ?? null,
+                managed_category: r.managed_category,
+              }}
+            />
           </SheetTitle>
           <SheetDescription>
             {car.car_type ?? "—"}
@@ -258,11 +308,10 @@ function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }
           <DetailRow label="Lease"    value={car.assignment?.rider?.master_lease?.lease_number} />
           <DetailRow label="Expires"  value={fmtDate(car.assignment?.rider?.expiration_date)} />
 
-          {(r.old_car_initial || r.old_car_number) && (
+          {previouslyKnownAs && (
             <>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 mt-4">Prior Reporting Marks</p>
-              <DetailRow label="Prior Initial" value={<span className="font-mono">{r.old_car_initial}</span>} />
-              <DetailRow label="Prior Number"  value={<span className="font-mono">{r.old_car_number}</span>} />
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 mt-4">Previously known as</p>
+              <DetailRow label="Prior mark" value={<span className="font-mono">{previouslyKnownAs}</span>} />
             </>
           )}
 
@@ -332,6 +381,7 @@ export default function AllCars() {
   const [search, setSearch]           = useState("");
   const [entityFilter, setEntityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [fleetActiveFilter, setFleetActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const [assignFilter, setAssignFilter] = useState("all");
   const [sort, setSort]               = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "car_number", dir: "asc" });
   const [openCar, setOpenCar]         = useState<Row | null>(null);
@@ -348,6 +398,9 @@ export default function AllCars() {
 
   const filtered = useMemo(() => {
     let rows = railcars ?? [];
+
+    if (fleetActiveFilter === "active") rows = rows.filter((r) => (r as any).active !== false);
+    if (fleetActiveFilter === "inactive") rows = rows.filter((r) => (r as any).active === false);
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -391,7 +444,7 @@ export default function AllCars() {
       if (av > bv) return sort.dir === "asc" ? 1 : -1;
       return 0;
     });
-  }, [railcars, search, entityFilter, statusFilter, assignFilter, sort]);
+  }, [railcars, search, entityFilter, statusFilter, assignFilter, fleetActiveFilter, sort]);
 
   const toggleSort = (key: SortKey) =>
     setSort((prev) => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -418,6 +471,17 @@ export default function AllCars() {
               data-testid="input-search-all-cars"
             />
           </div>
+
+          <Select value={fleetActiveFilter} onValueChange={(v) => setFleetActiveFilter(v as "active" | "inactive" | "all")}>
+            <SelectTrigger className="w-[150px]" data-testid="filter-fleet-active-allcars">
+              <SelectValue placeholder="Fleet status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active cars</SelectItem>
+              <SelectItem value="inactive">Inactive cars</SelectItem>
+              <SelectItem value="all">All cars</SelectItem>
+            </SelectContent>
+          </Select>
 
           <Select value={entityFilter} onValueChange={setEntityFilter}>
             <SelectTrigger className="w-[190px]">

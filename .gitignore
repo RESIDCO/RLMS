@@ -15,3 +15,10 @@ dist/
 
 # Logs
 *.log
+
+# Local run artifacts
+script/*-last.json
+script/__pycache__/
+supabase/.temp/
+schema/*.apply-errors.json
+

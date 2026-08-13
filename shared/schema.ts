@@ -53,7 +53,7 @@ export type Railcar = {
   general_description: string | null;
   lease_type: string | null;
   managed: string | null;
-  managed_category: string | null;     // derived from entity by trigger
+  managed_category: string | null;     // VCF §4.2 (Idle / Net Lease / …); not entity ownership
   lining_material: string | null;
   active: boolean;
   status: string | null;
@@ -73,6 +73,7 @@ export type Railcar = {
   lease_expiry: string | null;
   monthly_rent_per_car: number | null;
   monthly_depr_per_car: number | null;
+  lease_end_residual_per_car?: number | null;
   total_bv_rider: number | null;
   cars_on_rider_ar: number | null;
   commodity_family: string | null;
@@ -85,6 +86,14 @@ export type Railcar = {
   nbv: number | null;
   oec: number | null;
   oac: number | null;
+  // ── V_Valid / 3rd-party reference (bulk import §1.1) ──
+  legacy_valid_car_id: string | null;
+  client_id: string | null;
+  cover_sheet: string | null;
+  legal_owner: string | null;
+  update_made: string | null;
+  update_needed_next_vcf: string | null;
+  current_assignment_id: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -94,6 +103,8 @@ export type CarNumberHistory = {
   railcar_id: number;
   old_car_number: string;
   new_car_number: string;
+  old_car_initial: string | null;
+  new_car_initial: string | null;
   changed_at: string;
   changed_by: string | null;
   reason: string | null;
@@ -131,6 +142,43 @@ export type AssignmentHistory = {
   moved_at: string;
   moved_by: string | null;
   reason: string | null;
+  // VCF assignment-period fields (bulk import §1.3)
+  rider_external_id: string | null;
+  assignment_label: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  active: boolean | null;
+  comment: string | null;
+  assignment_id_ext: string | null;
+};
+
+export type RiderFinancialSummary = {
+  id: number;
+  snapshot_month: string;
+  rider_id: string;
+  car_type: string;
+  entity: string;
+  count_cars: number;
+  lessee: string | null;
+  former_deal: string | null;
+  legal_owner: string | null;
+  net_equipment_cost_total: number | null;
+  net_equipment_cost_per_car: number | null;
+  total_book_value: number | null;
+  book_value_per_asset: number | null;
+  total_monthly_depreciation: number | null;
+  monthly_depreciation_per_asset: number | null;
+  monthly_rent_per_car: number | null;
+  monthly_rent_total: number | null;
+  lease_end_residual_total: number | null;
+  lease_end_residual_per_asset: number | null;
+  months_until_lease_exp: number | null;
+  deal_resp: string | null;
+  lender: string | null;
+  liability_insurance_exp: string | null;
+  property_insurance_exp: string | null;
+  raw_air_rail_power: string | null;
+  created_at?: string;
 };
 
 // ---- Zod validation schemas ----

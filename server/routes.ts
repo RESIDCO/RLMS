@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
+import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import {
   insertMasterLeaseSchema,
   insertRiderSchema,
@@ -21,6 +22,37 @@ import {
   deriveLeaseKey,
   synthesizeLeaseNumber,
 } from "@shared/residco-import";
+import {
+  buildVcfReview,
+  railcarPayloadFromCurrent,
+  assignmentHistoryNaturalKey,
+  assignmentHistoryPayloadFromPeriod,
+  assignmentHistoryContentEqual,
+  carNumberHistoryNaturalKey,
+  carNumberHistoryPayloadFromPeriod,
+} from "@shared/vcf-import";
+import {
+  deriveFleetStatus,
+  isOperatingFleetCar,
+  type FleetStatus,
+} from "@shared/fleet-status";
+import {
+  aggregateOlEndDate,
+  carLeaseEndDate,
+  carLesseeName,
+  carOlCode,
+  parseIsoDateOnly,
+} from "@shared/lease-authority";
+import { syncRiderExpirationsFromCars } from "./sync-rider-expirations";
+import {
+  buildFinancialReview,
+  financialRowToDbPayload,
+  averageBatches,
+  carToAssetFamily,
+  candidateAssetFamilies,
+  financialSheetForCarEntity,
+  type FinancialParsedRow,
+} from "@shared/financial-import";
 import {
   calculateDv,
   type DvInputs,
@@ -237,67 +269,89 @@ export async function registerRoutes(
   // ---------- Dashboard ----------
   app.get("/api/dashboard", async (_req, res) => {
     try {
-      const [railcarsRes, assignmentsRes, ridersRes, leasesRes] =
-        await Promise.all([
-          supabase.from("railcars").select(
-            `id, car_number, reporting_marks, car_type, status, entity,
-             assignment:railcar_assignments(
-               id, fleet_name, rider_id,
-               rider:riders(id, rider_name, schedule_number, expiration_date,
-                 master_lease:master_leases(id, lease_number, lessee)
-               )
-             )`
-          ),
-          supabase
+      // Lease status / lessee / OL authority = railcars fields (VCF), NOT riders.expiration_date.
+      // PostgREST caps at 1000 rows — paginate and verify exact count or refuse to serve.
+      const db = supabaseAdmin;
+      const [allRailcarsRaw, assignmentsRaw] = await Promise.all([
+        fetchAllRowsOrThrow(db, "railcars", (from, to) =>
+          db
+            .from("railcars")
+            .select(
+              `id, car_number, reporting_marks, car_type, status, entity, active,
+               rider_external_id, assignment_label, managed_category,
+               lessee_name, lease_start_date, lease_end_date, lease_expiry`
+            )
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+        fetchAllRowsOrThrow(db, "railcar_assignments", (from, to) =>
+          db
             .from("railcar_assignments")
-            .select("id, railcar_id, rider_id, fleet_name", { count: "exact" }),
-          supabase.from("riders").select(
-            "id, rider_name, schedule_number, expiration_date, master_lease_id"
-          ),
-          supabase.from("master_leases").select("id, lease_number, lessor, lessee"),
-        ]);
+            .select("id, railcar_id, rider_id")
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+      ]);
 
-      if (railcarsRes.error) throw railcarsRes.error;
-      if (assignmentsRes.error) throw assignmentsRes.error;
-      if (ridersRes.error) throw ridersRes.error;
-      if (leasesRes.error) throw leasesRes.error;
+      const allRailcars = allRailcarsRaw.map((r: any) => {
+        const fleetStatus: FleetStatus | null = deriveFleetStatus({
+          active: r.active,
+          rider_external_id: r.rider_external_id,
+          assignment_label: r.assignment_label,
+          managed_category: r.managed_category,
+        });
+        return { ...r, fleet_status: fleetStatus };
+      });
 
-      // Normalise the nested assignment (Supabase returns array for 1-to-many)
-      const railcars = (railcarsRes.data ?? []).map((r: any) => ({
-        ...r,
-        assignment: Array.isArray(r.assignment) ? r.assignment[0] ?? null : r.assignment,
-      }));
-      const assignments = assignmentsRes.data ?? [];
-      const riders = ridersRes.data ?? [];
-      const leases = leasesRes.data ?? [];
+      const activeCars = allRailcars.filter((r: any) => r.active === true);
+      const railcars = activeCars.filter((r: any) =>
+        isOperatingFleetCar({
+          active: r.active,
+          rider_external_id: r.rider_external_id,
+          assignment_label: r.assignment_label,
+          managed_category: r.managed_category,
+        })
+      );
+      const operatingCarIds = new Set(railcars.map((r: any) => r.id));
+      const soldCars = activeCars.filter((r: any) => r.fleet_status === "Sold");
+      const idleCars = activeCars.filter((r: any) => r.fleet_status === "Idle");
+      const leasedCars = activeCars.filter((r: any) => r.fleet_status === "Leased");
 
-      const assignedCarIds = new Set(assignments.map((a) => a.railcar_id));
-      const activeAssignments = assignments.length;
+      const assignments = assignmentsRaw.filter((a: any) =>
+        operatingCarIds.has(a.railcar_id)
+      );
+      const assignedCarIds = new Set(assignments.map((a: any) => a.railcar_id));
 
-      // Unassigned = in registry but no active assignment
+      // Active Assignments = fleet_status Leased on operating fleet (car-level; not riders table)
+      const activeAssignments = leasedCars.filter((r: any) => operatingCarIds.has(r.id)).length;
+
+      // Unassigned = operating cars with no railcar_assignments row (not "rider expired")
       const unassignedCarList = railcars.filter((r: any) => !assignedCarIds.has(r.id));
       const unassignedCars = unassignedCarList.length;
 
-      // Utilization = assigned / total * 100 (round to 1 decimal)
       const utilization = railcars.length > 0
         ? Math.round((activeAssignments / railcars.length) * 1000) / 10
         : 0;
 
-      // RPS vs Owned entity bucketing
-      const rpsCars     = railcars.filter((r: any) => r.entity === "Rail Partners Select");
-      const ownedCars   = railcars.filter((r: any) => r.entity === "Main");
-      const rpsAssigned = rpsCars.filter((r: any) => assignedCarIds.has(r.id)).length;
-      const ownedAssigned = ownedCars.filter((r: any) => assignedCarIds.has(r.id)).length;
-      const rpsUtil   = rpsCars.length   > 0 ? Math.round((rpsAssigned   / rpsCars.length)   * 1000) / 10 : 0;
+      const rpsCars = railcars.filter((r: any) => r.entity === "Rail Partners Select");
+      const ownedCars = railcars.filter((r: any) => r.entity === "Main");
+      const coalCars = railcars.filter((r: any) => r.entity === "Coal");
+      const rpsAssigned = rpsCars.filter((r: any) => r.fleet_status === "Leased").length;
+      const ownedAssigned = ownedCars.filter((r: any) => r.fleet_status === "Leased").length;
+      const rpsUtil = rpsCars.length > 0 ? Math.round((rpsAssigned / rpsCars.length) * 1000) / 10 : 0;
       const ownedUtil = ownedCars.length > 0 ? Math.round((ownedAssigned / ownedCars.length) * 1000) / 10 : 0;
 
-      // Off-rent count — cars whose most recent rent_event is 'off_rent'
-      const { data: rentEvents } = await supabase
-        .from("rent_events")
-        .select("car_id, event_type, event_date")
-        .order("event_date", { ascending: false });
+      // Off Rent — rent_events only (never riders.expiration_date)
+      const rentEvents = await fetchAllRows((from, to) =>
+        supabaseAdmin
+          .from("rent_events")
+          .select("car_id, event_type, event_date")
+          .order("event_date", { ascending: false })
+          .range(from, to)
+      );
       const latestRentByCarId = new Map<number, string>();
-      for (const ev of (rentEvents ?? []) as any[]) {
+      for (const ev of rentEvents as any[]) {
+        if (!operatingCarIds.has(ev.car_id)) continue;
         if (!latestRentByCarId.has(ev.car_id)) {
           latestRentByCarId.set(ev.car_id, ev.event_type);
         }
@@ -307,46 +361,65 @@ export async function registerRoutes(
       const now = new Date();
       const twelveMo = new Date(now);
       twelveMo.setMonth(twelveMo.getMonth() + 12);
-
       const sixMo = new Date(now);
       sixMo.setMonth(sixMo.getMonth() + 6);
 
-      const expiringRiders = riders.filter((r) => {
-        if (!r.expiration_date) return false;
-        const d = new Date(r.expiration_date);
-        return d <= twelveMo && d >= now;
+      // Active Riders / OLs — distinct rider_external_id on operating cars
+      type OlAgg = {
+        ol: string;
+        car_count: number;
+        car_ids: number[];
+        ends: string[];
+        lessee_name: string | null;
+        assignment_label: string | null;
+      };
+      const olMap = new Map<string, OlAgg>();
+      for (const c of railcars as any[]) {
+        const ol = carOlCode(c);
+        if (!ol) continue;
+        const key = ol.toUpperCase();
+        let agg = olMap.get(key);
+        if (!agg) {
+          agg = {
+            ol,
+            car_count: 0,
+            car_ids: [],
+            ends: [],
+            lessee_name: carLesseeName(c),
+            assignment_label: c.assignment_label ?? null,
+          };
+          olMap.set(key, agg);
+        }
+        agg.car_count += 1;
+        agg.car_ids.push(c.id);
+        const end = carLeaseEndDate(c);
+        if (end) agg.ends.push(end);
+        if (!agg.lessee_name) agg.lessee_name = carLesseeName(c);
+      }
+      const activeOls = Array.from(olMap.values()).map((agg) => ({
+        id: agg.ol, // string key for UI (was numeric riders.id)
+        rider_name: agg.ol,
+        schedule_number: agg.ol,
+        expiration_date: aggregateOlEndDate(agg.ends),
+        lease_number: null as string | null,
+        lessee_name: agg.lessee_name,
+        car_count: agg.car_count,
+      }));
+
+      const expiringRiders = activeOls.filter((r) => {
+        const d = parseIsoDateOnly(r.expiration_date);
+        if (!d) return false;
+        return d >= now && d <= twelveMo;
       });
       const expiring12mo = expiringRiders.length;
-      const expiring6mo = riders.filter((r) => {
-        if (!r.expiration_date) return false;
-        const d = new Date(r.expiration_date);
-        return d <= sixMo && d >= now;
+      const expiring6mo = activeOls.filter((r) => {
+        const d = parseIsoDateOnly(r.expiration_date);
+        if (!d) return false;
+        return d >= now && d <= sixMo;
       }).length;
 
-      // Assigned car detail list for KPI drill-down
-      const assignedCarList = railcars.filter((r: any) => assignedCarIds.has(r.id));
-
-      // cars by fleet — enriched with MLA + rider context + car list
-      // Build a map of rider_id → rider + lease info
-      const riderDetailMap = new Map<number, { rider_name: string; schedule_number: string | null; expiration_date: string | null; lease_number: string | null; lessor: string | null; lessee: string | null; master_lease_id: number }>();
-      for (const r of riders as any[]) {
-        const lease = leases.find((l: any) => l.id === r.master_lease_id) as any;
-        riderDetailMap.set(r.id, {
-          rider_name: r.rider_name,
-          schedule_number: r.schedule_number ?? null,
-          expiration_date: r.expiration_date ?? null,
-          lease_number: lease?.lease_number ?? null,
-          lessor: lease?.lessor ?? null,
-          lessee: lease?.lessee ?? null,
-          master_lease_id: r.master_lease_id,
-        });
-      }
-      // Build a map of railcar id → full detail
-      const railcarDetailMap = new Map<number, any>();
-      for (const r of railcars) {
-        railcarDetailMap.set(r.id, r);
-      }
-      // Group assignments by fleet
+      // Cars by Lessee — counts only. Group by railcars.lessee_name.
+      // Do not use assignment.fleet_name or riders. Full car lists load on click.
       type FleetEntry = {
         fleet_name: string;
         count: number;
@@ -356,58 +429,66 @@ export async function registerRoutes(
         rider_name: string | null;
         schedule_number: string | null;
         expiration_date: string | null;
-        cars: { id: number; car_number: string; reporting_marks: string | null; car_type: string | null; status: string | null; entity: string | null }[];
+        cars: {
+          id: number;
+          car_number: string;
+          reporting_marks: string | null;
+          car_type: string | null;
+          status: string | null;
+          entity: string | null;
+        }[];
       };
-      const fleetMap = new Map<string, { count: number; rider_id: number | null; car_ids: number[] }>();
-      for (const a of assignments as any[]) {
-        const key = a.fleet_name ?? "Unassigned";
-        if (!fleetMap.has(key)) fleetMap.set(key, { count: 0, rider_id: a.rider_id ?? null, car_ids: [] });
-        const entry = fleetMap.get(key)!;
-        entry.count++;
-        entry.car_ids.push(a.railcar_id);
+      const lesseeMap = new Map<
+        string,
+        { count: number; ends: string[]; ols: Set<string> }
+      >();
+      for (const c of railcars as any[]) {
+        const lessee = carLesseeName(c) || "Unassigned";
+        let entry = lesseeMap.get(lessee);
+        if (!entry) {
+          entry = { count: 0, ends: [], ols: new Set() };
+          lesseeMap.set(lessee, entry);
+        }
+        entry.count += 1;
+        const end = carLeaseEndDate(c);
+        if (end) entry.ends.push(end);
+        const ol = carOlCode(c);
+        if (ol) entry.ols.add(ol);
       }
-      const carsByFleet: FleetEntry[] = Array.from(fleetMap.entries())
+      const carsByFleet: FleetEntry[] = Array.from(lesseeMap.entries())
         .map(([fleet_name, entry]) => {
-          const rd = entry.rider_id ? riderDetailMap.get(entry.rider_id) : null;
+          const ols = Array.from(entry.ols).sort();
           return {
             fleet_name,
             count: entry.count,
-            lease_number: rd?.lease_number ?? null,
-            lessor: rd?.lessor ?? null,
-            lessee: rd?.lessee ?? null,
-            rider_name: rd?.rider_name ?? null,
-            schedule_number: rd?.schedule_number ?? null,
-            expiration_date: rd?.expiration_date ?? null,
-            cars: entry.car_ids.map((cid) => {
-              const c = railcarDetailMap.get(cid);
-              return { id: cid, car_number: c?.car_number ?? "?", reporting_marks: c?.reporting_marks ?? null, car_type: c?.car_type ?? null, status: c?.status ?? null, entity: c?.entity ?? null };
-            }).sort((a, b) => a.car_number.localeCompare(b.car_number)),
+            lease_number: null,
+            lessor: null,
+            lessee: fleet_name,
+            rider_name: ols[0] ?? null,
+            schedule_number: ols.length > 1 ? `${ols.length} OLs` : ols[0] ?? null,
+            expiration_date: aggregateOlEndDate(entry.ends),
+            cars: [],
           };
         })
         .sort((a, b) => b.count - a.count);
 
-      // lease expiration timeline: riders with expiry + car count + lease number
-      const leaseMap = new Map<number, string>(
-        leases.map((l: any) => [l.id, l.lease_number])
-      );
-      const ridersCarCount = new Map<number, number>();
-      for (const a of assignments) {
-        ridersCarCount.set(a.rider_id, (ridersCarCount.get(a.rider_id) ?? 0) + 1);
-      }
-      const expirationTimeline = riders
+      // Timeline: active OLs with a known car-level end, soonest first; null ends last
+      const expirationTimeline = activeOls
+        .slice()
+        .sort((a, b) => {
+          if (!a.expiration_date && !b.expiration_date) return a.rider_name.localeCompare(b.rider_name);
+          if (!a.expiration_date) return 1;
+          if (!b.expiration_date) return -1;
+          return a.expiration_date.localeCompare(b.expiration_date);
+        })
         .map((r) => ({
           rider_id: r.id,
           rider_name: r.rider_name,
           schedule_number: r.schedule_number,
           expiration_date: r.expiration_date,
-          lease_number: leaseMap.get(r.master_lease_id) ?? null,
-          car_count: ridersCarCount.get(r.id) ?? 0,
-        }))
-        .sort((a, b) => {
-          if (!a.expiration_date) return 1;
-          if (!b.expiration_date) return -1;
-          return a.expiration_date.localeCompare(b.expiration_date);
-        });
+          lease_number: r.lessee_name,
+          car_count: r.car_count,
+        }));
 
       res.json({
         kpis: {
@@ -417,54 +498,116 @@ export async function registerRoutes(
           expiring_12mo: expiring12mo,
           expiring_6mo: expiring6mo,
           off_rent_count: offRentCount,
-          riders_count: riders.length,
+          riders_count: activeOls.length,
           utilization_pct: utilization,
+          sold_count: soldCars.length,
+          idle_count: idleCars.length,
+          leased_count: leasedCars.length,
+          active_cars_including_sold: activeCars.length,
           rps_total: rpsCars.length,
           rps_assigned: rpsAssigned,
           rps_util_pct: rpsUtil,
           owned_total: ownedCars.length,
           owned_assigned: ownedAssigned,
           owned_util_pct: ownedUtil,
+          coal_total: coalCars.length,
+          lessee_count: carsByFleet.length,
+          lease_authority: "railcars",
+          railcars_scanned: allRailcarsRaw.length,
         },
-        // KPI drill-down detail lists
         detail: {
-          all_cars: railcars.map((r: any) => ({
-            id: r.id, car_number: r.car_number, reporting_marks: r.reporting_marks,
-            car_type: r.car_type, status: r.status, entity: r.entity,
-            fleet_name: r.assignment?.fleet_name ?? null,
-            rider_name: r.assignment?.rider?.rider_name ?? null,
-            lease_number: r.assignment?.rider?.master_lease?.lease_number ?? null,
-            lessee: r.assignment?.rider?.master_lease?.lessee ?? null,
-          })),
-          assigned_cars: assignedCarList.map((r: any) => ({
-            id: r.id, car_number: r.car_number, reporting_marks: r.reporting_marks,
-            car_type: r.car_type, status: r.status, entity: r.entity,
-            fleet_name: r.assignment?.fleet_name ?? null,
-            rider_name: r.assignment?.rider?.rider_name ?? null,
-            lease_number: r.assignment?.rider?.master_lease?.lease_number ?? null,
-            lessee: r.assignment?.rider?.master_lease?.lessee ?? null,
-          })),
+          all_cars: [],
+          assigned_cars: [],
           unassigned_cars: unassignedCarList.map((r: any) => ({
-            id: r.id, car_number: r.car_number, reporting_marks: r.reporting_marks,
-            car_type: r.car_type, status: r.status, entity: r.entity,
-            fleet_name: null, rider_name: null, lease_number: null, lessee: null,
+            id: r.id,
+            car_number: r.car_number,
+            reporting_marks: r.reporting_marks,
+            car_type: r.car_type,
+            status: r.status,
+            entity: r.entity,
+            active: r.active,
+            fleet_status: r.fleet_status,
+            fleet_name: carLesseeName(r),
+            rider_name: carOlCode(r),
+            lease_number: null,
+            lessee: carLesseeName(r),
           })),
+          sold_cars: [],
           expiring_riders: expiringRiders.map((r) => ({
-            id: r.id, rider_name: r.rider_name, schedule_number: r.schedule_number,
+            id: r.id,
+            rider_name: r.rider_name,
+            schedule_number: r.schedule_number,
             expiration_date: r.expiration_date,
-            lease_number: leaseMap.get(r.master_lease_id) ?? null,
-            car_count: ridersCarCount.get(r.id) ?? 0,
+            lease_number: r.lessee_name,
+            car_count: r.car_count,
           })),
-          riders: riders.map((r) => ({
-            id: r.id, rider_name: r.rider_name, schedule_number: r.schedule_number,
+          riders: activeOls.map((r) => ({
+            id: r.id,
+            rider_name: r.rider_name,
+            schedule_number: r.schedule_number,
             expiration_date: r.expiration_date,
-            lease_number: leaseMap.get(r.master_lease_id) ?? null,
-            car_count: ridersCarCount.get(r.id) ?? 0,
+            lease_number: r.lessee_name,
+            car_count: r.car_count,
           })),
         },
         cars_by_fleet: carsByFleet,
-        expiration_timeline: expirationTimeline,
+        expiration_timeline: expirationTimeline.filter((r) => !!r.expiration_date),
       });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/dashboard/lessee", async (req: Request, res: Response) => {
+    try {
+      const name = String(req.query.name ?? "").trim();
+      if (!name) return res.status(400).json({ message: "name is required" });
+
+      const cars = await fetchAllRows((from, to) =>
+        supabaseAdmin
+          .from("railcars")
+          .select(
+            "id, car_number, reporting_marks, car_type, status, entity, active, lessee_name, rider_external_id, assignment_label, managed_category"
+          )
+          .eq("active", true)
+          .eq("lessee_name", name)
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
+      const operating = cars.filter((r: any) =>
+        isOperatingFleetCar({
+          active: r.active,
+          rider_external_id: r.rider_external_id,
+          assignment_label: r.assignment_label,
+          managed_category: r.managed_category,
+        })
+      );
+      res.json({
+        fleet_name: name,
+        count: operating.length,
+        cars: operating
+          .map((c: any) => ({
+            id: c.id,
+            car_number: c.car_number,
+            reporting_marks: c.reporting_marks,
+            car_type: c.car_type,
+            status: c.status,
+            entity: c.entity,
+          }))
+          .sort((a: any, b: any) => String(a.car_number).localeCompare(String(b.car_number))),
+      });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  /** One-shot / ops: refresh riders.expiration_date from railcars (derived cache). */
+  app.post("/api/riders/sync-expirations", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const result = await syncRiderExpirationsFromCars(supabase);
+      res.json(result);
     } catch (err) {
       errHandler(res, err);
     }
@@ -482,30 +625,44 @@ export async function registerRoutes(
         ? Number(req.query.lease_id)
         : undefined;
 
-      // Get everything joined; 151 cars is tiny, return all.
-      let query = supabase
-        .from("railcars")
-        .select(
-          `*,
-          assignment:railcar_assignments(
-            id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
-            rider:riders(
-              id, rider_name, schedule_number, expiration_date, master_lease_id,
-              master_lease:master_leases(id, lease_number)
-            )
-          )`
-        )
-        .order("car_number", { ascending: true });
+      // Paginate — PostgREST caps at 1000; fleet is ~30k after VCF.
+      const data = await fetchAllRows((from, to) => {
+        let query = supabase
+          .from("railcars")
+          .select(
+            `*,
+            assignment:railcar_assignments(
+              id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
+              rider:riders(
+                id, rider_name, schedule_number, expiration_date, master_lease_id,
+                master_lease:master_leases(id, lease_number)
+              )
+            )`
+          )
+          .order("id", { ascending: true })
+          .range(from, to);
+        if (status) query = query.eq("status", status);
+        return query;
+      });
 
-      if (status) query = query.eq("status", status);
+      let rows = data.map((r: any) => {
+        const assignment = Array.isArray(r.assignment) ? r.assignment[0] ?? null : r.assignment;
+        const fleet_status = deriveFleetStatus({
+          active: r.active,
+          rider_external_id: r.rider_external_id,
+          assignment_label: r.assignment_label,
+          fleet_name: assignment?.fleet_name ?? null,
+          managed_category: r.managed_category,
+        });
+        return { ...r, assignment, fleet_status };
+      });
 
-      const { data, error } = await query;
-      if (error) throw error;
-
-      let rows = (data ?? []).map((r: any) => ({
-        ...r,
-        assignment: Array.isArray(r.assignment) ? r.assignment[0] ?? null : r.assignment,
-      }));
+      // Stable display order after id-paginated fetch
+      rows.sort((a: any, b: any) =>
+        String(a.car_number ?? "").localeCompare(String(b.car_number ?? ""), undefined, {
+          numeric: true,
+        })
+      );
 
       if (search) {
         const q = search.toLowerCase();
@@ -783,24 +940,102 @@ export async function registerRoutes(
   // ---------- Riders ----------
   app.get("/api/riders", async (_req, res) => {
     try {
-      const [ridersRes, assignmentsRes] = await Promise.all([
-        supabase
-          .from("riders")
-          .select("*, master_lease:master_leases(id, lease_number)")
-          .order("rider_name"),
-        supabase.from("railcar_assignments").select("rider_id"),
+      const [riders, assignments] = await Promise.all([
+        fetchAllRows((from, to) =>
+          supabase
+            .from("riders")
+            .select("*, master_lease:master_leases(id, lease_number)")
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("railcar_assignments")
+            .select("rider_id")
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
       ]);
-      if (ridersRes.error) throw ridersRes.error;
-      if (assignmentsRes.error) throw assignmentsRes.error;
       const countByRider = new Map<number, number>();
-      for (const a of assignmentsRes.data ?? []) {
+      for (const a of assignments) {
         countByRider.set(a.rider_id, (countByRider.get(a.rider_id) ?? 0) + 1);
       }
-      const out = (ridersRes.data ?? []).map((r: any) => ({
-        ...r,
-        car_count: countByRider.get(r.id) ?? 0,
-      }));
+      const out = riders
+        .map((r: any) => ({
+          ...r,
+          car_count: countByRider.get(r.id) ?? 0,
+        }))
+        .sort((a: any, b: any) =>
+          String(a.rider_name ?? "").localeCompare(String(b.rider_name ?? ""))
+        );
       res.json(out);
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  /** Resolve a free-text OL/rider label to an existing rider, or create one under an Ad Hoc MLA. */
+  app.post("/api/riders/resolve", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const raw = String(req.body?.label ?? req.body?.rider_name ?? "").trim();
+      if (!raw) return res.status(400).json({ message: "label is required" });
+
+      const riders = await fetchAllRows((from, to) =>
+        supabase
+          .from("riders")
+          .select("id, rider_name, schedule_number, master_lease_id")
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
+      const upper = raw.toUpperCase();
+      const asId = Number(raw);
+      const match =
+        (Number.isFinite(asId) && asId > 0
+          ? riders.find((r: any) => r.id === asId)
+          : undefined) ??
+        riders.find(
+          (r: any) =>
+            String(r.rider_name ?? "").trim().toUpperCase() === upper ||
+            String(r.schedule_number ?? "").trim().toUpperCase() === upper
+        );
+      if (match) {
+        return res.json({ id: match.id, rider_name: match.rider_name, created: false });
+      }
+
+      const AD_HOC_LEASE = "AD-HOC-OL";
+      let { data: mla } = await supabase
+        .from("master_leases")
+        .select("id")
+        .eq("lease_number", AD_HOC_LEASE)
+        .maybeSingle();
+      if (!mla) {
+        const { data: created, error: mErr } = await supabase
+          .from("master_leases")
+          .insert({
+            lease_number: AD_HOC_LEASE,
+            lessor: "RESIDCO",
+            lessee: "Ad Hoc / Free-text OL",
+            lease_type: "Railcar Lease",
+          })
+          .select("id")
+          .single();
+        if (mErr) throw mErr;
+        mla = created;
+      }
+
+      const { data: inserted, error: rErr } = await supabase
+        .from("riders")
+        .insert({
+          master_lease_id: mla!.id,
+          rider_name: raw,
+          schedule_number: raw,
+        })
+        .select("id, rider_name")
+        .single();
+      if (rErr) throw rErr;
+      res.json({ id: inserted.id, rider_name: inserted.rider_name, created: true });
     } catch (err) {
       errHandler(res, err);
     }
@@ -1169,18 +1404,29 @@ export async function registerRoutes(
       // Fetch existing (reporting_marks + car_number) pairs for dupe detection.
       // The DB enforces uniqueness on the combination, not car_number alone, so
       // we must key on the same shape the import will write.
-      const { data: existing } = await supabase
-        .from("railcars").select("car_number, reporting_marks");
+      const existing = await fetchAllRows((from, to) =>
+        supabase
+          .from("railcars")
+          .select("car_number, reporting_marks")
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       const dupeKey = (marks: string | null | undefined, num: string | null | undefined) =>
         `${(marks ?? "").trim().toUpperCase()}|${(num ?? "").trim().toUpperCase()}`;
       const existingNums = new Set(
-        (existing ?? []).map((r: any) => dupeKey(r.reporting_marks, r.car_number))
+        existing.map((r: any) => dupeKey(r.reporting_marks, r.car_number))
       );
 
-      // Fetch riders for name matching
-      const { data: riders } = await supabase.from("riders").select("id, rider_name");
+      // Fetch riders for name matching (suggestions / existing link only — new OL codes are allowed)
+      const riders = await fetchAllRows((from, to) =>
+        supabase
+          .from("riders")
+          .select("id, rider_name")
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       const riderMap = new Map<string, number>();
-      for (const r of riders ?? []) riderMap.set(r.rider_name.trim().toUpperCase(), r.id);
+      for (const r of riders) riderMap.set(r.rider_name.trim().toUpperCase(), r.id);
 
       // Track in-batch duplicates (marks+number repeated within the same upload)
       const seenInBatch = new Set<string>();
@@ -1203,7 +1449,9 @@ export async function registerRoutes(
         if (isDbDupe) errors.push("Car number already exists in the system — duplicate will be skipped");
         if (isBatchDupe) errors.push("Car number is duplicated within this file — only the first occurrence will be imported");
 
-        if (riderUnknown) warnings.push(`Rider "${built.rider_name}" not found in system — car will be imported unassigned`);
+        // New OL/rider codes are expected — commit creates the rider when Lessee/MLA context exists.
+        if (riderUnknown)
+          warnings.push(`Rider/OL "${built.rider_name}" is new — will be created on import when Lessee is present`);
         if (built.entity && !["Main", "Rail Partners Select", "Coal"].includes(built.entity))
           warnings.push(`entity "${built.entity}" is unrecognised — expected "Main", "Rail Partners Select" or "Coal"; managed_category will fall back to entity value`);
 
@@ -1462,6 +1710,484 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  // ---------- Valid Car File (V_VALID_CARS) — assignment-grouped preview (§2 / §2.3) ----------
+  // Dry-run review only unless a separate commit endpoint is used after Bruce sign-off.
+  app.post("/api/import/vcf/preview", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const { rows } = req.body as { rows: any[] };
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No rows provided" });
+      }
+
+      const existingKeys = new Set<string>();
+      const { data: existing, error: eErr } = await supabase
+        .from("railcars")
+        .select("car_initial, car_number, reporting_marks");
+      if (eErr) throw eErr;
+      for (const r of existing ?? []) {
+        const initial = String((r as any).car_initial || (r as any).reporting_marks || "")
+          .trim()
+          .toUpperCase();
+        const num = String((r as any).car_number ?? "").trim();
+        if (initial || num) existingKeys.add(`${initial}|${num}`);
+      }
+
+      const review = buildVcfReview(rows, existingKeys);
+      // Omit full cars[] from response (can be 30k+) — keep summary + flags for UI.
+      res.json({
+        ok: true,
+        mode: "vcf",
+        existingCarsInDb: existingKeys.size,
+        totalRows: review.totalRows,
+        distinctCars: review.distinctCars,
+        newCars: review.newCars,
+        updatedCars: review.updatedCars,
+        multipleActiveCount: review.multipleActiveCount,
+        multipleActiveCars: review.multipleActiveCars,
+        badActiveCount: review.badActiveCount,
+        badActiveValues: review.badActiveValues,
+        unmappedManagedCategoryCount: review.unmappedManagedCategoryCount,
+        unmappedManagedCategories: review.unmappedManagedCategories,
+        // Sample of needs-review cars for UI (full list is multipleActiveCars)
+        needsReviewSample: review.cars.filter((c) => c.needsReview).slice(0, 50).map((c) => ({
+          car_initial: c.car_initial,
+          car_number: c.car_number,
+          periodCount: c.periodCount,
+          activePeriodCount: c.activePeriodCount,
+        })),
+      });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  // VCF commit — gated. Requires confirmProductionImport === true after Bruce review.
+  // Not used for the non-prod gate run; kept ready for the signed-off production load.
+  app.post("/api/import/vcf/commit", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const { rows, confirmProductionImport } = req.body as {
+        rows: any[];
+        confirmProductionImport?: boolean;
+      };
+      if (!confirmProductionImport) {
+        return res.status(400).json({
+          message: "VCF commit blocked — set confirmProductionImport: true only after Bruce signs off on the §2.3 review.",
+        });
+      }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No rows provided" });
+      }
+
+      const existingKeys = new Set<string>();
+      const { data: existing } = await supabase
+        .from("railcars")
+        .select("id, car_initial, car_number, reporting_marks");
+      const keyToId = new Map<string, number>();
+      for (const r of existing ?? []) {
+        const initial = String((r as any).car_initial || (r as any).reporting_marks || "")
+          .trim()
+          .toUpperCase();
+        const num = String((r as any).car_number ?? "").trim();
+        const k = `${initial}|${num}`;
+        existingKeys.add(k);
+        keyToId.set(k, (r as any).id);
+      }
+
+      const review = buildVcfReview(rows, existingKeys);
+      const BATCH = 500;
+      let inserted = 0;
+      let updated = 0;
+      let historyRows = 0;
+      let assignmentPeriods = 0;
+      let assignmentInserted = 0;
+      let assignmentUpdated = 0;
+      let assignmentUnchanged = 0;
+      let remarkHistory = 0;
+      let remarkInserted = 0;
+      let remarkUpdated = 0;
+      let remarkUnchanged = 0;
+      const movedAt = new Date().toISOString();
+
+      // Prefetch existing VCF history for idempotent upsert (car + ASSIGNMENT_ID + start_date)
+      const ahByKey = new Map<string, any>();
+      {
+        let from = 0;
+        for (;;) {
+          const { data, error } = await supabase
+            .from("assignment_history")
+            .select(
+              "id, railcar_id, assignment_id_ext, start_date, end_date, rider_external_id, assignment_label, active, comment, reason"
+            )
+            .eq("moved_by", "vcf-import")
+            .range(from, from + 999);
+          if (error) throw error;
+          const chunk = data ?? [];
+          for (const r of chunk) {
+            ahByKey.set(
+              assignmentHistoryNaturalKey(
+                r.railcar_id,
+                r.assignment_id_ext,
+                r.start_date,
+                r.end_date
+              ),
+              r
+            );
+          }
+          if (chunk.length < 1000) break;
+          from += 1000;
+        }
+      }
+      const cnhByKey = new Map<string, any>();
+      {
+        let from = 0;
+        for (;;) {
+          const { data, error } = await supabase
+            .from("car_number_history")
+            .select(
+              "id, railcar_id, old_car_initial, old_car_number, new_car_initial, new_car_number, changed_at, changed_by, reason"
+            )
+            .eq("changed_by", "vcf-import")
+            .range(from, from + 999);
+          if (error) throw error;
+          const chunk = data ?? [];
+          for (const r of chunk) {
+            cnhByKey.set(
+              carNumberHistoryNaturalKey({
+                railcarId: r.railcar_id,
+                old_car_initial: r.old_car_initial,
+                old_car_number: r.old_car_number,
+                new_car_initial: r.new_car_initial,
+                new_car_number: r.new_car_number,
+                changed_at: r.changed_at,
+              }),
+              r
+            );
+          }
+          if (chunk.length < 1000) break;
+          from += 1000;
+        }
+      }
+
+      for (let i = 0; i < review.cars.length; i += BATCH) {
+        const slice = review.cars.slice(i, i + BATCH);
+        for (const car of slice) {
+          const payload = railcarPayloadFromCurrent(car.current, {
+            needsReview: car.needsReview,
+          });
+          const existingId = keyToId.get(car.carKey);
+          let railcarId = existingId;
+          if (existingId) {
+            // Skip entity in update when unchanged so the old managed_category trigger doesn't fire
+            const { data: existingCar } = await supabase
+              .from("railcars")
+              .select("entity")
+              .eq("id", existingId)
+              .maybeSingle();
+            const updatePayload = { ...payload };
+            if (existingCar && (existingCar as any).entity === payload.entity) {
+              delete (updatePayload as any).entity;
+            }
+            const { error } = await supabase.from("railcars").update(updatePayload).eq("id", existingId);
+            if (error) throw error;
+            updated += 1;
+          } else {
+            const { data: ins, error } = await supabase.from("railcars").insert(payload).select("id").single();
+            if (error) throw error;
+            railcarId = ins!.id;
+            keyToId.set(car.carKey, railcarId);
+            inserted += 1;
+          }
+
+          // Idempotent assignment_history upsert — natural key car + ASSIGNMENT_ID + start_date
+          // (Do NOT delete-all / blind-insert; monthly re-runs must not double rows.)
+          for (const p of car.periods) {
+            const hist = assignmentHistoryPayloadFromPeriod(railcarId!, p, movedAt);
+            const key = assignmentHistoryNaturalKey(
+              hist.railcar_id,
+              hist.assignment_id_ext,
+              hist.start_date,
+              hist.end_date
+            );
+            const existing = ahByKey.get(key);
+            if (existing) {
+              if (assignmentHistoryContentEqual(existing, hist)) {
+                assignmentUnchanged += 1;
+              } else {
+                const { error } = await supabase
+                  .from("assignment_history")
+                  .update(hist)
+                  .eq("id", existing.id);
+                if (error) throw error;
+                ahByKey.set(key, { ...existing, ...hist });
+                assignmentUpdated += 1;
+              }
+            } else {
+              const { data: ins, error } = await supabase
+                .from("assignment_history")
+                .insert(hist)
+                .select("id")
+                .single();
+              if (error) throw error;
+              ahByKey.set(key, { id: ins!.id, ...hist });
+              assignmentInserted += 1;
+            }
+            assignmentPeriods += 1;
+          }
+
+          // Idempotent car_number_history upsert — remark natural key
+          for (const p of car.periods) {
+            const remark = carNumberHistoryPayloadFromPeriod(railcarId!, p, movedAt);
+            if (!remark) continue;
+            const key = carNumberHistoryNaturalKey({
+              railcarId: remark.railcar_id,
+              old_car_initial: remark.old_car_initial,
+              old_car_number: remark.old_car_number,
+              new_car_initial: remark.new_car_initial,
+              new_car_number: remark.new_car_number,
+              changed_at: remark.changed_at,
+            });
+            const existing = cnhByKey.get(key);
+            if (existing) {
+              remarkUnchanged += 1;
+              remarkHistory += 1;
+              continue;
+            }
+            const { data: ins, error } = await supabase
+              .from("car_number_history")
+              .insert(remark)
+              .select("id")
+              .single();
+            if (error) throw error;
+            cnhByKey.set(key, { id: ins!.id, ...remark });
+            remarkInserted += 1;
+            remarkHistory += 1;
+          }
+          historyRows += 1;
+        }
+      }
+
+      // Keep riders.expiration_date as a derived cache of car-level ends (not Dashboard SoT)
+      let riderExpirationSync: Awaited<ReturnType<typeof syncRiderExpirationsFromCars>> | null = null;
+      try {
+        riderExpirationSync = await syncRiderExpirationsFromCars(supabase);
+      } catch (syncErr) {
+        console.warn("[vcf/commit] rider expiration sync failed", syncErr);
+      }
+
+      res.json({
+        ok: true,
+        inserted,
+        updated,
+        carsProcessed: review.cars.length,
+        assignmentPeriods,
+        assignmentInserted,
+        assignmentUpdated,
+        assignmentUnchanged,
+        remarkHistory,
+        remarkInserted,
+        remarkUpdated,
+        remarkUnchanged,
+        multipleActiveFlagged: review.multipleActiveCount,
+        riderExpirationSync,
+      });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  // ---------- Financial Data Refresh (Asset Report) — §3 preview / gated commit ----------
+  app.post("/api/import/financial/preview", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const { mainRows, rpsRows, snapshotMonth } = req.body as {
+        mainRows?: unknown[][];
+        rpsRows?: unknown[][];
+        snapshotMonth?: string | null;
+      };
+      if (!Array.isArray(mainRows) && !Array.isArray(rpsRows)) {
+        return res.status(400).json({ message: "Provide mainRows and/or rpsRows sheet matrices" });
+      }
+
+      // Active cars for reconciliation / refresh preview
+      const activeCars: any[] = [];
+      let from = 0;
+      for (;;) {
+        const { data, error } = await supabase
+          .from("railcars")
+          .select("id, rider_external_id, car_type, mechanical_designation, general_description, entity")
+          .eq("active", true)
+          .range(from, from + 999);
+        if (error) throw error;
+        const chunk = data ?? [];
+        activeCars.push(...chunk);
+        if (chunk.length < 1000) break;
+        from += 1000;
+      }
+
+      const review = buildFinancialReview(
+        mainRows ?? [],
+        rpsRows ?? [],
+        activeCars,
+        snapshotMonth ?? null
+      );
+
+      res.json({
+        ok: true,
+        mode: "financial",
+        productionWrite: false,
+        snapshotMonth: review.snapshotMonth,
+        snapshotMonthDetected: review.snapshotMonthDetected,
+        qualifyingRows: review.qualifyingRows,
+        qualifyingCarCount: review.qualifyingCarCount,
+        mainRows: review.main.rows.length,
+        rpsRows: review.rps.rows.length,
+        skippedNonRail: review.skippedNonRail,
+        flaggedCount: review.flaggedCount,
+        flagged: review.flagged,
+        activeCarsInRlms: review.activeCarsInRlms,
+        fileVsActiveDelta: review.fileVsActiveDelta,
+        fileNoCarMatchCount: review.fileNoCarMatches.length,
+        fileNoCarMatches: review.fileNoCarMatches.slice(0, 50),
+        carsNoFileMatch: review.carsNoFileMatch,
+        refreshPreview: review.refreshPreview,
+        matchPathStats: review.matchPathStats,
+        assetFamilyMappingNotes: review.assetFamilyMappingNotes,
+        joinRules: review.joinRules,
+      });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/import/financial/commit", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const { mainRows, rpsRows, snapshotMonth, confirmProductionImport } = req.body as {
+        mainRows?: unknown[][];
+        rpsRows?: unknown[][];
+        snapshotMonth?: string | null;
+        confirmProductionImport?: boolean;
+      };
+      if (!confirmProductionImport) {
+        return res.status(400).json({
+          message: "Financial commit blocked — set confirmProductionImport: true only after Bruce signs off on the §3.5 reconciliation.",
+        });
+      }
+
+      const activeCars: any[] = [];
+      let from = 0;
+      for (;;) {
+        const { data, error } = await supabase
+          .from("railcars")
+          .select("id, rider_external_id, car_type, mechanical_designation, general_description, entity")
+          .eq("active", true)
+          .range(from, from + 999);
+        if (error) throw error;
+        const chunk = data ?? [];
+        activeCars.push(...chunk);
+        if (chunk.length < 1000) break;
+        from += 1000;
+      }
+
+      const review = buildFinancialReview(
+        mainRows ?? [],
+        rpsRows ?? [],
+        activeCars,
+        snapshotMonth ?? null
+      );
+      if (!review.snapshotMonth) {
+        return res.status(400).json({ message: "snapshot_month required — detect failed; pass snapshotMonth explicitly" });
+      }
+
+      const allRows = [...review.main.rows, ...review.rps.rows];
+      const BATCH = 100;
+      let inserted = 0;
+      for (let i = 0; i < allRows.length; i += BATCH) {
+        const slice = allRows.slice(i, i + BATCH).map(financialRowToDbPayload);
+        const { error } = await supabase.from("rider_financial_summary").upsert(slice, {
+          onConflict: "snapshot_month,rider_id,car_type,entity,net_equipment_cost_per_car",
+          ignoreDuplicates: false,
+        });
+        if (error) throw error;
+        inserted += slice.length;
+      }
+
+      // Refresh per-car financials from this snapshot (§3.4)
+      // Entity-scoped: Main↔Main, RPS↔RPS; Coal never refreshes (Bruce: no Coal source).
+      const byRiderTypeEntity = new Map<string, FinancialParsedRow[]>();
+      const assetsByRiderEntity = new Map<string, Set<string>>();
+      for (const r of allRows) {
+        const k = `${r.rider_id}|${r.car_type}|${r.entity}`;
+        const list = byRiderTypeEntity.get(k) ?? [];
+        list.push(r);
+        byRiderTypeEntity.set(k, list);
+        const rk = `${r.rider_id}|${r.entity}`;
+        const set = assetsByRiderEntity.get(rk) ?? new Set();
+        set.add(r.car_type);
+        assetsByRiderEntity.set(rk, set);
+      }
+
+      let refreshed = 0;
+      let leftBlank = 0;
+      let coalSkipped = 0;
+      for (const car of activeCars) {
+        const rider = String(car.rider_external_id ?? "").trim();
+        const sheetEnt = financialSheetForCarEntity(car.entity);
+        if (!rider || !sheetEnt) {
+          if (car.entity === "Coal" || car.entity === "Main-Coal" || !sheetEnt) coalSkipped += 1;
+          leftBlank += 1;
+          continue;
+        }
+        let batches: FinancialParsedRow[] | undefined;
+        for (const asset of candidateAssetFamilies(car)) {
+          const found = byRiderTypeEntity.get(`${rider}|${asset}|${sheetEnt}`);
+          if (found?.length) { batches = found; break; }
+        }
+        if (!batches?.length) {
+          const only = assetsByRiderEntity.get(`${rider}|${sheetEnt}`);
+          if (only && only.size === 1) {
+            batches = byRiderTypeEntity.get(`${rider}|${[...only][0]}|${sheetEnt}`);
+          }
+        }
+        if (!batches?.length) {
+          leftBlank += 1;
+          continue;
+        }
+        const avg = averageBatches(batches);
+        const payload: Record<string, unknown> = {};
+        if (avg.nbv != null) payload.nbv = avg.nbv;
+        if (avg.monthly_rent_per_car != null) payload.monthly_rent_per_car = avg.monthly_rent_per_car;
+        if (avg.monthly_depr_per_car != null) payload.monthly_depr_per_car = avg.monthly_depr_per_car;
+        if (avg.lease_end_residual_per_car != null) payload.lease_end_residual_per_car = avg.lease_end_residual_per_car;
+        if (avg.legal_owner) payload.legal_owner = avg.legal_owner;
+        if (avg.oec != null) payload.oec = avg.oec;
+        if (Object.keys(payload).length === 0) { leftBlank += 1; continue; }
+        let { error } = await supabase.from("railcars").update(payload).eq("id", car.id);
+        // Residual column may not be migrated yet — retry without it rather than aborting the refresh.
+        if (error && payload.lease_end_residual_per_car != null && /lease_end_residual_per_car/i.test(String(error.message ?? ""))) {
+          delete payload.lease_end_residual_per_car;
+          if (Object.keys(payload).length === 0) { leftBlank += 1; continue; }
+          ({ error } = await supabase.from("railcars").update(payload).eq("id", car.id));
+        }
+        if (error) throw error;
+        refreshed += 1;
+      }
+
+      res.json({
+        ok: true,
+        snapshotMonth: review.snapshotMonth,
+        summaryRowsInserted: inserted,
+        carsRefreshed: refreshed,
+        carsLeftBlank: leftBlank,
+        coalSkipped,
+        flaggedCount: review.flaggedCount,
+        qualifyingCarCount: review.qualifyingCarCount,
+        activeCarsInRlms: review.activeCarsInRlms,
+        matchPathStats: review.matchPathStats,
+      });
+    } catch (err) { errHandler(res, err); }
+  });
+
   // ---------- Cleanup test/sample railcars (admin-only, dry-run by default) ----------
   // GET /api/admin/cleanup-test-railcars                 → preview candidates only (no DB writes)
   // POST /api/admin/cleanup-test-railcars { confirm: true } → snapshot to railcars_test_quarantine
@@ -1559,7 +2285,7 @@ export async function registerRoutes(
       const carQuery = supabase
         .from("railcars")
         .select(
-          `id, car_number, reporting_marks, car_type, status, entity, mechanical_designation,
+          `id, car_number, reporting_marks, car_type, status, entity, active, mechanical_designation,
            assignment:railcar_assignments(
              id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
              rider:riders(
@@ -1580,7 +2306,16 @@ export async function registerRoutes(
           : r.assignment,
       }));
 
-      const matchedCars = cars.filter((c: any) => {
+      // Optional fleet-membership filter: active | inactive | all (default active — §5)
+      const fleetActive = String(req.query.fleet_active ?? "active").toLowerCase();
+      const carsForSearch =
+        fleetActive === "all"
+          ? cars
+          : fleetActive === "inactive"
+            ? cars.filter((c: any) => c.active === false)
+            : cars.filter((c: any) => c.active === true);
+
+      const matchedCars = carsForSearch.filter((c: any) => {
         // Concatenated form ("TFOX88031") so users can search by the full
         // workbook identifier even though the DB stores marks and number
         // separately.
@@ -1607,8 +2342,9 @@ export async function registerRoutes(
         .order("rider_name");
       if (rErr) throw rErr;
 
+      // Rider car counts from active fleet members only (same scope as dashboard §5)
       const countByRider = new Map<number, number>();
-      for (const c of cars) {
+      for (const c of cars.filter((x: any) => x.active === true)) {
         const rid = (c as any).assignment?.rider?.id;
         if (rid) countByRider.set(rid, (countByRider.get(rid) ?? 0) + 1);
       }

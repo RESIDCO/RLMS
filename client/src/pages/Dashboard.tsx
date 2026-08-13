@@ -22,6 +22,7 @@ import {
   X,
   Building2,
   CalendarClock,
+  PackageMinus,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -39,7 +40,7 @@ type CarRow = {
 };
 
 type RiderRow = {
-  id: number;
+  id: number | string;
   rider_name: string;
   schedule_number: string | null;
   expiration_date: string | null;
@@ -69,12 +70,17 @@ type DashboardData = {
     off_rent_count: number;
     riders_count: number;
     utilization_pct: number;
+    sold_count: number;
+    idle_count?: number;
+    leased_count?: number;
     rps_total: number;
     rps_assigned: number;
     rps_util_pct: number;
     owned_total: number;
     owned_assigned: number;
     owned_util_pct: number;
+    lessee_count?: number;
+    lease_authority?: string;
   };
   detail: {
     all_cars: CarRow[];
@@ -85,7 +91,7 @@ type DashboardData = {
   };
   cars_by_fleet: FleetDetail[];
   expiration_timeline: {
-    rider_id: number;
+    rider_id: number | string;
     rider_name: string;
     schedule_number: string | null;
     expiration_date: string | null;
@@ -150,7 +156,16 @@ function StatusPill({ status }: { status: string | null }) {
 
 // ── Fleet drill-down drawer ───────────────────────────────────────────────────
 function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: () => void }) {
+  const { data: loaded, isLoading: carsLoading } = useQuery<FleetDetail>({
+    queryKey: fleet?.fleet_name
+      ? [`/api/dashboard/lessee?name=${encodeURIComponent(fleet.fleet_name)}`]
+      : ["/api/dashboard/lessee"],
+    enabled: !!fleet?.fleet_name,
+    staleTime: 0,
+  });
   if (!fleet) return null;
+  const cars = loaded?.cars?.length ? loaded.cars : fleet.cars ?? [];
+  const count = loaded?.count ?? fleet.count;
   const months = monthsUntil(fleet.expiration_date);
   const tone = expiryTone(months);
 
@@ -158,7 +173,7 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
   const downloadCsv = () => {
     const rows = [
       ["car_number", "reporting_marks", "car_type", "status", "entity", "lessee_name", "rider", "lease", "lessee"],
-      ...fleet.cars.map(c => [
+      ...cars.map(c => [
         c.car_number, c.reporting_marks ?? "", c.car_type ?? "", c.status ?? "", c.entity ?? "",
         fleet.fleet_name, fleet.rider_name ?? "", fleet.lease_number ?? "", fleet.lessee ?? "",
       ]),
@@ -177,7 +192,7 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
         {/* Header */}
         <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <SheetTitle className="text-base">{fleet.fleet_name}</SheetTitle>
-          <SheetDescription className="text-xs">{fleet.count} car{fleet.count !== 1 ? "s" : ""} in this lessee</SheetDescription>
+          <SheetDescription className="text-xs">{count.toLocaleString()} car{count !== 1 ? "s" : ""} in this lessee</SheetDescription>
 
           {/* MLA + Rider summary cards */}
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -210,7 +225,7 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
         {/* Car list */}
         <div className="flex-1 overflow-y-auto">
           <div className="px-6 py-3 text-[10px] uppercase tracking-wider text-muted-foreground font-medium border-b border-border/50 flex items-center justify-between">
-            <span><span className="font-mono-num">{fleet.cars.length}</span> cars</span>
+            <span><span className="font-mono-num">{count.toLocaleString()}</span> cars</span>
             <button
               onClick={downloadCsv}
               className="text-primary hover:underline text-[10px] uppercase tracking-wider font-medium"
@@ -218,7 +233,9 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
               ↓ Download CSV
             </button>
           </div>
-          {fleet.cars.length === 0 ? (
+          {carsLoading ? (
+            <div className="px-6 py-16"><Skeleton className="h-40" /></div>
+          ) : cars.length === 0 ? (
             <div className="px-6 py-16 text-center text-muted-foreground text-sm">No cars.</div>
           ) : (
             <table className="w-full text-xs">
@@ -232,7 +249,7 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
                 </tr>
               </thead>
               <tbody>
-                {fleet.cars.map((c) => (
+                {cars.map((c) => (
                   <tr key={c.id} className="border-t border-border/40 hover:bg-muted/20">
                     <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
                     <td className="px-4 py-2.5 text-muted-foreground font-mono">{c.reporting_marks ?? "—"}</td>
@@ -265,12 +282,12 @@ function DrillDownDrawer({
   const open = !!drillKey && !!data;
 
   const config: Record<NonNullable<DrillKey>, { title: string; description: string }> = {
-    total_fleet:        { title: "Total Fleet",          description: "All railcars currently in the RESIDCO registry" },
+    total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold cars kept for repair billing)" },
     active_assignments: { title: "Active Assignments",   description: "Cars currently assigned to a rider / lessee" },
     unassigned_cars:    { title: "Unassigned Cars",      description: "Cars in the registry with no active assignment — available for new leases" },
-    expiring_12mo:      { title: "Expiring Riders (<12 months)", description: "Riders whose lease term ends within the next 12 months" },
-    riders_count:       { title: "All Riders",           description: "Every rider currently in the system" },
-    utilization_pct:    { title: "Fleet Utilization",    description: "Cars on active assignment vs. total fleet" },
+    expiring_12mo:      { title: "Expiring OLs (<12 months)", description: "Active OL codes whose car-level lease_end_date falls within the next 12 months (not riders.expiration_date)" },
+    riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
+    utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
   };
 
   const info = drillKey ? config[drillKey] : null;
@@ -486,6 +503,8 @@ function UtilRing({ pct }: { pct: number }) {
 export default function Dashboard() {
   const { data, isLoading } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const [drillKey, setDrillKey] = useState<DrillKey>(null);
@@ -504,9 +523,9 @@ export default function Dashboard() {
 
       <div className="px-4 sm:px-8 py-5 sm:py-7 space-y-7">
         {/* KPIs */}
-<div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
+<div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-9 gap-3">
           {isLoading ? (
-            Array.from({ length: 6 }).map((_, i) => (
+            Array.from({ length: 7 }).map((_, i) => (
               <Skeleton key={i} className="h-[110px] rounded-lg" />
             ))
           ) : data ? (
@@ -552,10 +571,23 @@ export default function Dashboard() {
                   <div>
                     <div className="font-kpi text-foreground">{utilPct}%</div>
                     <div className="text-[11px] text-muted-foreground">{data.kpis.active_assignments} of {data.kpis.total_fleet} cars</div>
+                    {(data.kpis.idle_count ?? 0) > 0 && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        Includes {data.kpis.idle_count.toLocaleString()} Idle in denominator
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className={cn("h-[2px] w-full rounded-full mt-auto", utilPct >= 90 ? "bg-umler-teal" : utilPct >= 70 ? "bg-umler-amber" : "bg-umler-signal")} />
               </button>
+              <KpiCard
+                testId="kpi-sold"
+                label="Sold"
+                value={data.kpis.sold_count}
+                icon={PackageMinus}
+                accent="warning"
+                onClick={() => navigate("/fleet?filter=sold")}
+              />
               <KpiCard
                 testId="kpi-off-rent"
                 label="Off Rent"
@@ -582,7 +614,7 @@ export default function Dashboard() {
               />
               <KpiCard
                 testId="kpi-riders"
-                label="Active Riders"
+                label="Active OLs"
                 value={data.kpis.riders_count}
                 icon={FileText}
                 onClick={() => navigate("/leases?filter=riders")}
@@ -646,7 +678,7 @@ export default function Dashboard() {
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Cars by Lessee</h2>
               <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-                {data?.cars_by_fleet.length ?? 0} lessees
+                {(data?.kpis.lessee_count ?? data?.cars_by_fleet.length ?? 0).toLocaleString()} lessees
               </span>
             </header>
             <div className="p-5 space-y-2.5 max-h-[480px] overflow-auto">
@@ -667,7 +699,7 @@ export default function Dashboard() {
                         {f.fleet_name}
                         <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                       </span>
-                      <span className="font-mono-num text-muted-foreground">{f.count}</span>
+                      <span className="font-mono-num text-muted-foreground">{f.count.toLocaleString()}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                       <div className="h-full bg-primary group-hover:bg-primary/80 transition-colors" style={{ width: `${(f.count / maxFleet) * 100}%` }} />
@@ -680,7 +712,7 @@ export default function Dashboard() {
             </div>
           </section>
 
-          {/* Lease Expiration Timeline */}
+          {/* Lease Expiration Timeline — car-level lease_end_date aggregated by OL */}
           <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Lease Expiration Timeline</h2>
@@ -695,34 +727,57 @@ export default function Dashboard() {
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="px-5 py-4"><Skeleton className="h-10 rounded" /></div>
                 ))
-              ) : (
-                data?.expiration_timeline.map((r) => {
-                  const months = monthsUntil(r.expiration_date);
-                  const tone = expiryTone(months);
+              ) : (() => {
+                const withEnd = (data?.expiration_timeline ?? []).filter((r) => !!r.expiration_date);
+                const openEnded = (data?.expiration_timeline ?? []).length - withEnd.length;
+                if (withEnd.length === 0) {
                   return (
-                    <a
-                      key={r.rider_id}
-                      href={`/leases?rider=${r.rider_id}`}
-                      className="px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group"
-                      data-testid={`rider-timeline-${r.rider_id}`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium truncate group-hover:text-primary transition-colors">{r.rider_name}</div>
-                          <div className="text-[11px] text-muted-foreground font-mono-num">
-                            {r.lease_number ?? "—"} · {r.car_count} cars
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
-                        <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
-                      </div>
-                    </a>
+                    <div className="px-5 py-8 text-sm text-muted-foreground">
+                      No known car-level lease end dates in the operating fleet.
+                      {openEnded > 0 && (
+                        <span className="block mt-1 text-xs">
+                          {openEnded.toLocaleString()} active OLs have open / indefinite terms (VCF END_DATE blank).
+                        </span>
+                      )}
+                    </div>
                   );
-                })
-              )}
+                }
+                return (
+                  <>
+                    {openEnded > 0 && (
+                      <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
+                        Showing {withEnd.length} OL{withEnd.length !== 1 ? "s" : ""} with a known lease_end_date · {openEnded.toLocaleString()} open-ended omitted
+                      </div>
+                    )}
+                    {withEnd.map((r) => {
+                      const months = monthsUntil(r.expiration_date);
+                      const tone = expiryTone(months);
+                      return (
+                        <a
+                          key={String(r.rider_id)}
+                          href={`/fleet?search=${encodeURIComponent(r.rider_name)}`}
+                          className="px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group"
+                          data-testid={`rider-timeline-${r.rider_id}`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium truncate group-hover:text-primary transition-colors">{r.rider_name}</div>
+                              <div className="text-[11px] text-muted-foreground font-mono-num">
+                                {r.lease_number ?? "—"} · {r.car_count} cars
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
+                            <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
+                          </div>
+                        </a>
+                      );
+                    })}
+                  </>
+                );
+              })()}
             </div>
           </section>
         </div>

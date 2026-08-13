@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { useCanEdit } from "@/lib/AuthContext";
-import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -84,6 +83,35 @@ interface CommitResult {
   skipped: number;
 }
 
+interface VcfReviewResult {
+  ok: boolean;
+  mode: "vcf";
+  existingCarsInDb: number;
+  totalRows: number;
+  distinctCars: number;
+  newCars: number;
+  updatedCars: number;
+  multipleActiveCount: number;
+  multipleActiveCars: Array<{
+    car_initial: string;
+    car_number: string;
+    activePeriodCount: number;
+    assignment_ids: string[];
+    start_dates: string[];
+  }>;
+  badActiveCount: number;
+  badActiveValues: Array<{ raw: string; count: number; sampleRows: number[] }>;
+  unmappedManagedCategoryCount: number;
+  unmappedManagedCategories: Array<{ raw: string; count: number }>;
+}
+
+function looksLikeVcf(rows: Record<string, string>[]): boolean {
+  if (!rows.length) return false;
+  const keys = Object.keys(rows[0]).map((k) => k.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+  const has = (s: string) => keys.includes(s);
+  return has("carinitial") && has("carnumber") && has("active") && (has("assignmentid") || has("assignment"));
+}
+
 // ── CSV parser (client-side, no library needed for simple cases) ───────────────
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split(/\r?\n/);
@@ -124,9 +152,68 @@ async function loadXLSX(): Promise<void> {
 async function parseXLSX(file: File): Promise<Record<string, string>[]> {
   await loadXLSX();
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  const preferred =
+    wb.SheetNames.find((n: string) => /^V_VALID_CARS$/i.test(n)) ||
+    wb.SheetNames.find((n: string) => /valid.?car/i.test(n)) ||
+    wb.SheetNames[0];
+  const ws = wb.Sheets[preferred];
   return XLSX.utils.sheet_to_json(ws, { defval: "" }) as Record<string, string>[];
+}
+
+type WorkbookParse =
+  | { kind: "vcf" | "master"; rows: Record<string, string>[] }
+  | { kind: "financial"; mainRows: unknown[][]; rpsRows: unknown[][]; sheetNames: string[] };
+
+function looksLikeAssetReport(sheetNames: string[]): boolean {
+  const joined = sheetNames.join(" | ").toLowerCase();
+  return /residco.*deal/.test(joined) && /rps.*deal/.test(joined);
+}
+
+async function parseWorkbook(file: File): Promise<WorkbookParse> {
+  await loadXLSX();
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  if (looksLikeAssetReport(wb.SheetNames)) {
+    const mainName =
+      wb.SheetNames.find((n: string) => /residco/i.test(n) && /deal/i.test(n)) || wb.SheetNames[0];
+    const rpsName =
+      wb.SheetNames.find((n: string) => /rps/i.test(n) && /deal/i.test(n)) || wb.SheetNames[1];
+    const mainRows = XLSX.utils.sheet_to_json(wb.Sheets[mainName], { header: 1, defval: null }) as unknown[][];
+    const rpsRows = XLSX.utils.sheet_to_json(wb.Sheets[rpsName], { header: 1, defval: null }) as unknown[][];
+    return { kind: "financial", mainRows, rpsRows, sheetNames: [mainName, rpsName] };
+  }
+  const preferred =
+    wb.SheetNames.find((n: string) => /^V_VALID_CARS$/i.test(n)) ||
+    wb.SheetNames.find((n: string) => /valid.?car/i.test(n)) ||
+    wb.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[preferred], { defval: "" }) as Record<string, string>[];
+  return { kind: looksLikeVcf(rows) ? "vcf" : "master", rows };
+}
+
+interface FinancialReviewResult {
+  ok: boolean;
+  mode: "financial";
+  snapshotMonth: string | null;
+  snapshotMonthDetected: boolean;
+  qualifyingRows: number;
+  qualifyingCarCount: number;
+  mainRows: number;
+  rpsRows: number;
+  skippedNonRail: number;
+  flaggedCount: number;
+  flagged: Array<{ entity: string; rider_id: string; asset: string; count_cars: number; reason: string; lessee: string | null }>;
+  activeCarsInRlms: number;
+  fileVsActiveDelta: number;
+  fileNoCarMatchCount: number;
+  fileNoCarMatches: Array<{ rider_id: string; car_type: string; entity: string; count_cars: number }>;
+  carsNoFileMatch: {
+    total: number;
+    coal: number;
+    mainRps: number;
+    sampleMainRps: Array<{ id: number; rider_external_id: string | null; car_type: string | null; mapped_asset: string | null; entity: string | null }>;
+  };
+  refreshPreview: { carsMatched: number; carsUnmatched: number; multiBatchRiderTypes: number };
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -243,37 +330,87 @@ export default function BulkImportPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [vcfReview, setVcfReview] = useState<VcfReviewResult | null>(null);
+  const [finReview, setFinReview] = useState<FinancialReviewResult | null>(null);
+  const [finPayload, setFinPayload] = useState<{ mainRows: unknown[][]; rpsRows: unknown[][] } | null>(null);
   const [committed, setCommitted] = useState<CommitResult | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [rawRows, setRawRows] = useState<PreviewRow[]>([]);
-
-  const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
+  const [vcfRawRows, setVcfRawRows] = useState<Record<string, string>[]>([]);
 
   async function handleFile(file: File) {
     setPreview(null);
+    setVcfReview(null);
+    setFinReview(null);
+    setFinPayload(null);
     setCommitted(null);
     setFileName(file.name);
     setLoading(true);
     try {
-      let rows: Record<string, string>[];
       if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
         const text = await file.text();
-        rows = parseCSV(text);
+        const rows = parseCSV(text);
+        if (rows.length === 0) throw new Error("No data rows found in file.");
+        if (looksLikeVcf(rows)) {
+          setVcfRawRows(rows);
+          const res = await fetch("/api/import/vcf/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          setVcfReview(await res.json());
+        } else {
+          const res = await fetch("/api/import/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const result: PreviewResult = await res.json();
+          setPreview(result);
+          setRawRows(result.preview);
+        }
       } else {
-        rows = await parseXLSX(file);
+        const parsed = await parseWorkbook(file);
+        if (parsed.kind === "financial") {
+          setFinPayload({ mainRows: parsed.mainRows, rpsRows: parsed.rpsRows });
+          const res = await fetch("/api/import/financial/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mainRows: parsed.mainRows, rpsRows: parsed.rpsRows }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const result: FinancialReviewResult = await res.json();
+          setFinReview(result);
+          toast({
+            title: "Asset Report review ready",
+            description: `${result.qualifyingCarCount.toLocaleString()} rail cars in file · ${result.refreshPreview.carsMatched.toLocaleString()} active cars would match`,
+          });
+        } else if (parsed.kind === "vcf") {
+          setVcfRawRows(parsed.rows);
+          const res = await fetch("/api/import/vcf/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: parsed.rows }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          setVcfReview(await res.json());
+          toast({ title: "Valid Car File review ready" });
+        } else {
+          if (parsed.rows.length === 0) throw new Error("No data rows found in file.");
+          const res = await fetch("/api/import/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: parsed.rows }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const result: PreviewResult = await res.json();
+          setPreview(result);
+          setRawRows(result.preview);
+        }
       }
-      if (rows.length === 0) throw new Error("No data rows found in file.");
-
-      const res = await fetch("/api/import/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const result: PreviewResult = await res.json();
-      setPreview(result);
-      setRawRows(result.preview);
     } catch (e: any) {
       toast({ title: "Parse error", description: e.message, variant: "destructive" });
     } finally {
@@ -310,7 +447,7 @@ export default function BulkImportPage() {
     <div className="p-6 max-w-5xl mx-auto">
       <PageHeader
         title="Bulk Import"
-        subtitle="Upload a CSV or Excel file to add railcars to the fleet registry"
+        subtitle="Upload a Valid Car File, Asset Report (Financial Refresh), or Master Car List workbook"
       />
 
       {/* Success state */}
@@ -322,7 +459,7 @@ export default function BulkImportPage() {
           {committed.skipped > 0 && (
             <div className="text-sm text-amber-400 mt-1">{committed.skipped} rows were skipped due to errors or duplicates</div>
           )}
-          <Button className="mt-4" variant="secondary" onClick={() => { setCommitted(null); setFileName(null); setRawRows([]); }}>
+          <Button className="mt-4" variant="secondary" onClick={() => { setCommitted(null); setFileName(null); setRawRows([]); setVcfReview(null); setVcfRawRows([]); setFinReview(null); setFinPayload(null); }}>
             Import another file
           </Button>
         </div>
@@ -349,7 +486,7 @@ export default function BulkImportPage() {
               {fileName ? fileName : "Drop a CSV or Excel file here"}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              or click to browse · .csv, .xlsx, .xls supported
+              or click to browse · .csv, .xlsx, .xls · V_VALID_CARS sheet preferred when present
             </div>
             <input
               ref={fileRef}
@@ -360,6 +497,172 @@ export default function BulkImportPage() {
             />
           </div>
 
+          {loading && (
+            <div className="mt-6 space-y-2">
+              <Skeleton className="h-8 w-1/3" />
+              <Skeleton className="h-48 w-full" />
+            </div>
+          )}
+
+          {/* §2.3 Valid Car File review */}
+          {vcfReview && !loading && (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                <div className="text-sm font-semibold text-foreground">Valid Car File — §2.3 review (dry-run)</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  No production write yet. Bruce must sign off on these counts before commit.
+                  {vcfRawRows.length > 0 ? ` · ${vcfRawRows.length.toLocaleString()} sheet rows uploaded` : null}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <StatChip icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Rows processed" value={vcfReview.totalRows} />
+                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />} label="Distinct cars" value={vcfReview.distinctCars} color="emerald" />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="New cars" value={vcfReview.newCars} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Updated cars" value={vcfReview.updatedCars} />
+                <StatChip
+                  icon={<AlertTriangle className={`h-3.5 w-3.5 ${vcfReview.multipleActiveCount > 0 ? "text-amber-400" : "text-muted-foreground"}`} />}
+                  label="Double-active flags"
+                  value={vcfReview.multipleActiveCount}
+                  color={vcfReview.multipleActiveCount > 0 ? "amber" : undefined}
+                />
+              </div>
+
+              {vcfReview.multipleActiveCount > 0 && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+                  <div className="text-sm font-medium text-foreground mb-2">
+                    Multiple simultaneously-active assignment rows ({vcfReview.multipleActiveCount})
+                  </div>
+                  <div className="overflow-auto max-h-64">
+                    <table className="w-full text-xs">
+                      <thead className="text-muted-foreground">
+                        <tr>
+                          <th className="text-left py-1 pr-3">Mark</th>
+                          <th className="text-left py-1 pr-3">Number</th>
+                          <th className="text-left py-1 pr-3">Active periods</th>
+                          <th className="text-left py-1 pr-3">Assignment IDs</th>
+                          <th className="text-left py-1">Start dates</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {vcfReview.multipleActiveCars.map((c) => (
+                          <tr key={`${c.car_initial}-${c.car_number}`} className="border-t border-border/60">
+                            <td className="py-1.5 pr-3 font-mono">{c.car_initial}</td>
+                            <td className="py-1.5 pr-3 font-mono">{c.car_number}</td>
+                            <td className="py-1.5 pr-3">{c.activePeriodCount}</td>
+                            <td className="py-1.5 pr-3 font-mono">{c.assignment_ids.join(", ")}</td>
+                            <td className="py-1.5 font-mono">{c.start_dates.join(", ")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-lg border border-border bg-card p-4 text-xs">
+                  <div className="font-medium text-foreground mb-1">ACTIVE parse issues</div>
+                  {vcfReview.badActiveCount === 0 ? (
+                    <div className="text-emerald-400">None — all ACTIVE values were -1 or 0</div>
+                  ) : (
+                    <ul className="space-y-1 text-amber-300">
+                      {vcfReview.badActiveValues.map((v) => (
+                        <li key={v.raw}>“{v.raw}” × {v.count} (rows {v.sampleRows.join(", ")})</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="rounded-lg border border-border bg-card p-4 text-xs">
+                  <div className="font-medium text-foreground mb-1">MANAGED_CATEGORY unmapped</div>
+                  {vcfReview.unmappedManagedCategoryCount === 0 ? (
+                    <div className="text-emerald-400">None — all values matched the canonical table</div>
+                  ) : (
+                    <ul className="space-y-1 text-amber-300">
+                      {vcfReview.unmappedManagedCategories.map((v) => (
+                        <li key={v.raw}>“{v.raw}” × {v.count}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground">
+                Production commit stays locked until Bruce signs off. Existing cars in DB: {vcfReview.existingCarsInDb.toLocaleString()}.
+              </div>
+            </div>
+          )}
+
+          {/* §3.5 Financial / Asset Report review */}
+          {finReview && !loading && (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                <div className="text-sm font-semibold text-foreground">Asset Report — §3.5 reconciliation (dry-run)</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  No production write yet. Snapshot month: {finReview.snapshotMonth ?? "not detected"}.
+                  {finPayload ? ` · Main ${finReview.mainRows} + RPS ${finReview.rpsRows} qualifying rows` : null}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <StatChip icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Qualifying rows" value={finReview.qualifyingRows} />
+                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />} label="Cars in file (rail)" value={finReview.qualifyingCarCount} color="emerald" />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Active cars in RLMS" value={finReview.activeCarsInRlms} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="File − RLMS delta" value={finReview.fileVsActiveDelta} />
+                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Would match" value={finReview.refreshPreview.carsMatched} color="emerald" />
+                <StatChip
+                  icon={<AlertTriangle className={`h-3.5 w-3.5 ${finReview.flaggedCount ? "text-amber-400" : "text-muted-foreground"}`} />}
+                  label="Flagged non-car"
+                  value={finReview.flaggedCount}
+                  color={finReview.flaggedCount ? "amber" : undefined}
+                />
+              </div>
+
+              {finReview.flaggedCount > 0 && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+                  <div className="text-sm font-medium mb-2">Flagged (not imported as rail) — {finReview.flaggedCount}</div>
+                  <ul className="text-xs space-y-1 max-h-40 overflow-auto">
+                    {finReview.flagged.map((f, i) => (
+                      <li key={`${f.rider_id}-${f.asset}-${i}`}>
+                        <span className="font-mono">{f.rider_id}</span> · {f.asset} × {f.count_cars} — {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <div className="font-medium text-foreground mb-1">File rider+type with no matching active car</div>
+                  <div className="text-muted-foreground mb-2">{finReview.fileNoCarMatchCount} combinations</div>
+                  <ul className="space-y-1 max-h-48 overflow-auto">
+                    {finReview.fileNoCarMatches.slice(0, 20).map((f) => (
+                      <li key={`${f.rider_id}-${f.car_type}-${f.entity}`}>
+                        <span className="font-mono">{f.rider_id}</span> · {f.car_type} ({f.entity}) × {f.count_cars}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <div className="font-medium text-foreground mb-1">Active cars with no file match</div>
+                  <div className="text-muted-foreground mb-2">
+                    {finReview.carsNoFileMatch.total.toLocaleString()} total · Coal {finReview.carsNoFileMatch.coal.toLocaleString()} (expected) · Main/RPS {finReview.carsNoFileMatch.mainRps.toLocaleString()}
+                  </div>
+                  <ul className="space-y-1 max-h-48 overflow-auto">
+                    {finReview.carsNoFileMatch.sampleMainRps.slice(0, 15).map((c) => (
+                      <li key={c.id}>
+                        <span className="font-mono">{c.rider_external_id}</span> · {c.car_type} → {c.mapped_asset ?? "?"} ({c.entity})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground">
+                Skipped non-Rail (Air/Power): {finReview.skippedNonRail}. Multi-batch rider+types: {finReview.refreshPreview.multiBatchRiderTypes}.
+                Production commit stays locked until Bruce signs off.
+              </div>
+            </div>
+          )}
+
           {/* Template download + column guide */}
           <div className="mt-4 flex items-start gap-3 p-4 rounded-lg border border-border bg-card/60">
             <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -367,11 +670,12 @@ export default function BulkImportPage() {
               <div className="font-medium text-foreground">Expected columns (RESIDCO Master Car List workbook)</div>
               <div className="text-[11px] text-muted-foreground mb-1">
                 Header names are case- and punctuation-insensitive ("Mech Desig.", "Mechanical Designation", and "mech_designation" all map to the same field).
+                Valid Car File uploads skip this guide and use the §2.3 review above.
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-0.5">
                 {[
                   ["Car Number", "Required · unique, e.g. TFOX88031"],
-                  ["Rider ID", "Optional · external rider/lease ref e.g. EA1503"],
+                  ["Rider ID", "Optional · free-text OL / rider code e.g. EA1503 (new codes are created on import)"],
                   ["Lessee", "Optional · current lessee/operator"],
                   ["Entity", "Optional · Main → RESIDCO Owned, Rail Partners Select → RPS, Coal → Coal"],
                   ["Active", "Optional · Active / Inactive (drives `active` boolean)"],
@@ -404,7 +708,7 @@ export default function BulkImportPage() {
                 ))}
               </div>
               <div className="mt-2 text-[11px] text-muted-foreground">
-                Riders available for assignment-name linking: {(riders ?? []).map((r: any) => r.rider_name).join(", ") || "loading\u2026"}
+                Rider / OL is free text in the file — existing codes link when present; new codes are created on import (not limited to the current rider list).
               </div>
               <button onClick={downloadTemplate} className="mt-2 text-primary underline-offset-2 hover:underline">
                 Download template CSV
@@ -412,16 +716,8 @@ export default function BulkImportPage() {
             </div>
           </div>
 
-          {/* Loading */}
-          {loading && (
-            <div className="mt-6 space-y-2">
-              <Skeleton className="h-8 w-1/3" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-          )}
-
-          {/* Preview */}
-          {preview && !loading && (
+          {/* Master Car List preview */}
+          {preview && !loading && !vcfReview && (
             <div className="mt-6 space-y-4">
               {/* Summary badges */}
               <div className="flex items-center gap-3 flex-wrap">

@@ -3,6 +3,14 @@ import { useLocation } from "wouter";
 import { Search as SearchIcon, Train, FileText, BookOpen, ChevronRight, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { InactiveFleetBadge, SoldFleetBadge } from "@/components/InactiveFleetBadge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface MasterLease {
@@ -31,6 +39,7 @@ interface RailcarResult {
   car_type: string | null;
   status: string | null;
   entity: string | null;
+  active?: boolean | null;
   mechanical_designation: string | null;
   assignment: {
     id: number;
@@ -123,6 +132,16 @@ function RailcarRow({ car }: { car: RailcarResult }) {
       <div className="min-w-[140px]">
         <div className="flex items-center gap-1.5 mb-0.5">
           <EntityBadge entity={car.entity} />
+          <InactiveFleetBadge active={car.active} />
+          <SoldFleetBadge
+            car={{
+              active: car.active,
+              rider_external_id: (car as any).rider_external_id,
+              assignment_label: (car as any).assignment_label,
+              fleet_name: car.assignment?.fleet_name ?? null,
+              managed_category: (car as any).managed_category,
+            }}
+          />
         </div>
         <div className="font-mono text-sm font-semibold text-foreground">{car.car_number}</div>
         <div className="text-[11px] text-muted-foreground mt-0.5">{car.car_type ?? "—"}{car.mechanical_designation ? ` · ${car.mechanical_designation}` : ""}</div>
@@ -227,6 +246,7 @@ export default function SearchPage() {
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fleetActiveFilter, setFleetActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -242,19 +262,21 @@ export default function SearchPage() {
       const q = params.get("q");
       if (q && q !== query) {
         setQuery(q);
-        runSearch(q);
+        runSearch(q, fleetActiveFilter);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location]);
 
-  async function runSearch(q: string) {
+  async function runSearch(q: string, fleetActive: typeof fleetActiveFilter = fleetActiveFilter) {
     const trimmed = q.trim();
     if (!trimmed) { setResults(null); setCommitted(""); return; }
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
+      const res = await fetch(
+        `/api/search?q=${encodeURIComponent(trimmed)}&fleet_active=${encodeURIComponent(fleetActive)}`
+      );
       if (!res.ok) throw new Error(await res.text());
       const data: SearchResults = await res.json();
       setResults(data);
@@ -269,7 +291,12 @@ export default function SearchPage() {
   function handleInput(val: string) {
     setQuery(val);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => runSearch(val), 350);
+    debounceRef.current = setTimeout(() => runSearch(val, fleetActiveFilter), 350);
+  }
+
+  function onFleetActiveChange(v: "active" | "inactive" | "all") {
+    setFleetActiveFilter(v);
+    if (query.trim()) runSearch(query, v);
   }
 
   function clear() {
@@ -302,7 +329,7 @@ export default function SearchPage() {
           type="text"
           value={query}
           onChange={(e) => handleInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { if (debounceRef.current) clearTimeout(debounceRef.current); runSearch(query); } }}
+          onKeyDown={(e) => { if (e.key === "Enter") { if (debounceRef.current) clearTimeout(debounceRef.current); runSearch(query, fleetActiveFilter); } }}
           placeholder="e.g. HWCX10823, 10841  ·  COVIA  ·  SCH 5  ·  H07-099  ·  Exxon Mobile"
           className="w-full bg-card border border-border rounded-lg pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
         />
@@ -314,6 +341,20 @@ export default function SearchPage() {
             <X className="h-4 w-4" />
           </button>
         )}
+      </div>
+
+      <div className="mb-4 flex items-center gap-2">
+        <Select value={fleetActiveFilter} onValueChange={(v) => onFleetActiveChange(v as "active" | "inactive" | "all")}>
+          <SelectTrigger className="w-[150px]" data-testid="filter-fleet-active-search">
+            <SelectValue placeholder="Fleet status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active cars</SelectItem>
+            <SelectItem value="inactive">Inactive cars</SelectItem>
+            <SelectItem value="all">All cars</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-[11px] text-muted-foreground">Fleet membership (defaults to Active)</span>
       </div>
 
       {/* Search tips */}

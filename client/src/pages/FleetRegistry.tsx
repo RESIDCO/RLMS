@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
+import { useSearch } from "wouter";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -231,20 +232,50 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
   URL.revokeObjectURL(url);
 }
 
+function parseFleetQuery(searchStr: string): {
+  assigned: string;
+  entity: string;
+  riderOl: string;
+} {
+  const fromWouter = new URLSearchParams(String(searchStr || "").replace(/^\?/, ""));
+  const hash = typeof window !== "undefined" ? window.location.hash : "";
+  const fromHash = new URLSearchParams(hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "");
+  const fromSearch =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const qs = [...fromWouter.keys()].length
+    ? fromWouter
+    : [...fromHash.keys()].length
+      ? fromHash
+      : fromSearch;
+  const f = qs.get("filter");
+  const assigned =
+    f === "unassigned" ||
+    f === "assigned" ||
+    f === "offrent" ||
+    f === "sold" ||
+    f === "leased" ||
+    f === "offlease"
+      ? f
+      : "all";
+  const raw = (qs.get("entity") || "").trim().toLowerCase();
+  const entity =
+    raw === "main" || raw === "owned"
+      ? "Main"
+      : raw === "rps" || raw === "rail partners select"
+        ? "Rail Partners Select"
+        : "all";
+  return { assigned, entity, riderOl: (qs.get("rider") || "").trim() };
+}
+
 export default function FleetRegistry() {
   const canEdit = useCanEdit();
-  // Deep-link: ?filter=unassigned | assigned | offrent | sold | all
-  const initAssigned = typeof window !== "undefined"
-    ? (() => {
-        const f = new URLSearchParams(window.location.search).get("filter");
-        if (f === "unassigned" || f === "assigned" || f === "offrent" || f === "sold") return f;
-        return "all";
-      })()
-    : "all";
+  const wouterSearch = useSearch();
+  const initQ = parseFleetQuery(wouterSearch);
 
   const [search, setSearch] = useState("");
-  const [assignedFilter, setAssignedFilter] = useState<string>(initAssigned);
+  const [assignedFilter, setAssignedFilter] = useState<string>(initQ.assigned);
   const [riderFilter, setRiderFilter] = useState<string>("all");
+  const [olCodeFilter, setOlCodeFilter] = useState<string>(initQ.riderOl);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   // §5 fleet membership — distinct from service-status filter below
   const [fleetActiveFilter, setFleetActiveFilter] = useState<"active" | "inactive" | "all">("active");
@@ -256,7 +287,7 @@ export default function FleetRegistry() {
   const [editCar, setEditCar] = useState<Row | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [transitFilter, setTransitFilter] = useState<string>("all");
-  const [entityFilter, setEntityFilter] = useState<string>("all");
+  const [entityFilter, setEntityFilter] = useState<string>(initQ.entity);
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkStatusPending, setBulkStatusPending] = useState(false);
@@ -311,6 +342,13 @@ export default function FleetRegistry() {
   });
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
   const { data: rentEvents } = useQuery<any[]>({ queryKey: ["/api/rent-events"] });
+
+  useEffect(() => {
+    const q = parseFleetQuery(wouterSearch);
+    setAssignedFilter(q.assigned);
+    setEntityFilter(q.entity);
+    setOlCodeFilter(q.riderOl);
+  }, [wouterSearch]);
   // Derive set of car IDs currently off-rent (most recent event per car is off_rent)
   const offRentCarIds = useMemo(() => {
     const seen = new Map<number, string>();
@@ -333,7 +371,9 @@ export default function FleetRegistry() {
           r.car_number.toLowerCase().includes(q) ||
           r.reporting_marks?.toLowerCase().includes(q) ||
           combined.includes(q) ||
-          r.assignment?.fleet_name?.toLowerCase().includes(q)
+          r.assignment?.fleet_name?.toLowerCase().includes(q) ||
+          String((r as any).rider_external_id ?? "").toLowerCase().includes(q) ||
+          String((r as any).lessee_name ?? "").toLowerCase().includes(q)
         );
       });
     }
@@ -343,9 +383,24 @@ export default function FleetRegistry() {
     if (entityFilter !== "all") rows = rows.filter((r) => (r as any).entity === entityFilter);
     if (assignedFilter === "unassigned") rows = rows.filter((r) => !r.assignment);
     if (assignedFilter === "assigned") rows = rows.filter((r) => !!r.assignment);
+    if (assignedFilter === "leased") rows = rows.filter((r) => (r as any).fleet_status === "Leased");
+    if (assignedFilter === "offlease") rows = rows.filter((r) => (r as any).fleet_status === "Idle");
     if (assignedFilter === "offrent") rows = rows.filter((r) => offRentCarIds.has(r.id));
     if (assignedFilter === "sold") {
       rows = rows.filter((r) => (r as any).fleet_status === "Sold");
+    }
+    if (olCodeFilter) {
+      const q = olCodeFilter.toUpperCase();
+      if (/^\d+$/.test(olCodeFilter)) {
+        rows = rows.filter((r) => String(r.assignment?.rider_id ?? "") === olCodeFilter);
+      } else {
+        rows = rows.filter((r) => {
+          const ext = String((r as any).rider_external_id ?? "").trim().toUpperCase();
+          const name = String(r.assignment?.rider?.rider_name ?? "").trim().toUpperCase();
+          const sch = String(r.assignment?.rider?.schedule_number ?? "").trim().toUpperCase();
+          return ext === q || name === q || sch === q;
+        });
+      }
     }
     if (riderFilter !== "all")
       rows = rows.filter((r) => String(r.assignment?.rider_id ?? "") === riderFilter);
@@ -375,7 +430,7 @@ export default function FleetRegistry() {
     });
 
     return rows;
-  }, [railcars, search, statusFilter, riderFilter, transitFilter, entityFilter, assignedFilter, fleetActiveFilter, offRentCarIds, sort]);
+  }, [railcars, search, statusFilter, riderFilter, olCodeFilter, transitFilter, entityFilter, assignedFilter, fleetActiveFilter, offRentCarIds, sort]);
 
   // ── Multi-select helpers ──────────────────────────────────────────────────
   const allFilteredIds = filtered.map((r) => r.id);
@@ -623,6 +678,8 @@ export default function FleetRegistry() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All cars</SelectItem>
+              <SelectItem value="leased">Leased</SelectItem>
+              <SelectItem value="offlease">Off-lease (Idle)</SelectItem>
               <SelectItem value="assigned">Assigned only</SelectItem>
               <SelectItem value="unassigned">Unassigned only</SelectItem>
               <SelectItem value="offrent">Off Rent</SelectItem>

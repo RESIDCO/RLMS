@@ -50,6 +50,16 @@ export function parseIsoDateOnly(d: string | null | undefined): Date | null {
   return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
+export function addCalendarMonths(iso: string, months: number): string | null {
+  const d = parseIsoDateOnly(iso);
+  if (!d) return null;
+  d.setMonth(d.getMonth() + months);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 /**
  * Latest known end among cars that have one. For the derived riders.expiration_date
  * cache only — never use this as a stand-in date for cars whose lease_end_date is null.

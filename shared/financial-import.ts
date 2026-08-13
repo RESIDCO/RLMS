@@ -34,6 +34,7 @@ export type FinancialParsedRow = {
   lease_end_residual_total: number | null;
   lease_end_residual_per_asset: number | null;
   months_until_lease_exp: number | null;
+  lease_exp_date: string | null;
   deal_resp: string | null;
   lender: string | null;
   liability_insurance_exp: string | null;
@@ -133,6 +134,26 @@ function parseDateCell(v: unknown): string | null {
   return null;
 }
 
+function monthsBetween(fromIso: string, toIso: string): number {
+  const [fy, fm] = fromIso.slice(0, 7).split("-").map(Number);
+  const [ty, tm] = toIso.slice(0, 7).split("-").map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
+
+/** Prefer the months column; if blank, derive from Lease Exp vs snapshot month. */
+function resolveLeaseTerm(
+  snapshotMonth: string | null,
+  monthsRaw: unknown,
+  leaseExpRaw: unknown
+): { months: number | null; leaseExp: string | null } {
+  const leaseExp = parseDateCell(leaseExpRaw);
+  let months = num(monthsRaw);
+  if (months == null && leaseExp && snapshotMonth) {
+    months = monthsBetween(snapshotMonth, leaseExp);
+  }
+  return { months, leaseExp };
+}
+
 /** Detect snapshot_month from a header cell that is a Date / ISO date. */
 export function detectSnapshotMonth(headers: unknown[]): string | null {
   for (const h of headers) {
@@ -183,7 +204,13 @@ function buildColMap(headers: unknown[]): ColMap {
       "totalresidualvalue",
     ],
     lease_end_residual_per_asset: ["leaseendrvperasset", "rvperasset"],
-    months_until_lease_exp: ["ofmonthsuntilleasexp", "monthsuntilleasexp"],
+    months_until_lease_exp: [
+      "ofmonthsuntilleaseexp",
+      "ofmonthsuntilleasexp",
+      "monthsuntilleaseexp",
+      "monthsuntilleasexp",
+    ],
+    lease_exp_date: ["leaseexp"],
     owner_entity: ["ownerentity"],
     deal_resp: ["dealresp"],
     lender: ["lender"],
@@ -365,6 +392,12 @@ export function parseAssetSheet(
           ? (num(cell(row, map, "book_value_per_asset")) as number) * count_cars
           : num(cell(row, map, "total_book_value"));
 
+    const leaseTerm = resolveLeaseTerm(
+      snapshot_month,
+      cell(row, map, "months_until_lease_exp"),
+      cell(row, map, "lease_exp_date")
+    );
+
     rows.push({
       entity,
       snapshot_month,
@@ -384,7 +417,8 @@ export function parseAssetSheet(
       monthly_rent_total: num(cell(row, map, "monthly_rent_total")),
       lease_end_residual_total: num(cell(row, map, "lease_end_residual_total")),
       lease_end_residual_per_asset: num(cell(row, map, "lease_end_residual_per_asset")),
-      months_until_lease_exp: num(cell(row, map, "months_until_lease_exp")),
+      months_until_lease_exp: leaseTerm.months,
+      lease_exp_date: leaseTerm.leaseExp,
       deal_resp: str(cell(row, map, "deal_resp")),
       lender: str(cell(row, map, "lender")),
       liability_insurance_exp: parseDateCell(cell(row, map, "liability_insurance_exp")),

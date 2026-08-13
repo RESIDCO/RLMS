@@ -173,6 +173,7 @@ export type RiderFinancialSummary = {
   lease_end_residual_total: number | null;
   lease_end_residual_per_asset: number | null;
   months_until_lease_exp: number | null;
+  lease_exp_date?: string | null;
   deal_resp: string | null;
   lender: string | null;
   liability_insurance_exp: string | null;

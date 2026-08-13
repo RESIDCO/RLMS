@@ -42,6 +42,7 @@ import {
   carLesseeName,
   carOlCode,
   parseIsoDateOnly,
+  addCalendarMonths,
 } from "@shared/lease-authority";
 import { syncRiderExpirationsFromCars } from "./sync-rider-expirations";
 import {
@@ -342,13 +343,32 @@ export async function registerRoutes(
       const ownedUtil = ownedCars.length > 0 ? Math.round((ownedAssigned / ownedCars.length) * 1000) / 10 : 0;
 
       // Off Rent — rent_events only (never riders.expiration_date)
-      const rentEvents = await fetchAllRows((from, to) =>
-        supabaseAdmin
-          .from("rent_events")
-          .select("car_id, event_type, event_date")
-          .order("event_date", { ascending: false })
-          .range(from, to)
-      );
+      const [rentEvents, finRows] = await Promise.all([
+        fetchAllRows((from, to) =>
+          supabaseAdmin
+            .from("rent_events")
+            .select("car_id, event_type, event_date")
+            .order("event_date", { ascending: false })
+            .range(from, to)
+        ),
+        fetchAllRows((from, to) =>
+          supabaseAdmin
+            .from("rider_financial_summary")
+            .select(
+              "snapshot_month, rider_id, entity, lessee, months_until_lease_exp, lease_exp_date, count_cars"
+            )
+            .order("id", { ascending: true })
+            .range(from, to)
+        ).catch(async () =>
+          fetchAllRows((from, to) =>
+            supabaseAdmin
+              .from("rider_financial_summary")
+              .select("snapshot_month, rider_id, entity, lessee, months_until_lease_exp, count_cars")
+              .order("id", { ascending: true })
+              .range(from, to)
+          )
+        ),
+      ]);
       const latestRentByCarId = new Map<number, string>();
       for (const ev of rentEvents as any[]) {
         if (!operatingCarIds.has(ev.car_id)) continue;
@@ -438,20 +458,94 @@ export async function registerRoutes(
         if (!d) return false;
         return d >= now && d <= cutoff;
       };
-      const expirationTimeline = Array.from(endBuckets.values())
+
+      type TimelineRow = {
+        rider_id: string;
+        rider_name: string;
+        schedule_number: string;
+        expiration_date: string;
+        lease_number: string | null;
+        car_count: number;
+        source: "financial" | "vcf";
+        months_until_lease_exp: number | null;
+      };
+
+      const snapDates = (finRows as any[])
+        .map((r) => String(r.snapshot_month ?? "").slice(0, 10))
+        .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
+      const latestSnap = snapDates.length ? snapDates.reduce((a, b) => (a > b ? a : b)) : null;
+      const latestFin = latestSnap
+        ? (finRows as any[]).filter((r) => String(r.snapshot_month ?? "").slice(0, 10) === latestSnap)
+        : [];
+
+      type FinOl = {
+        ol: string;
+        expiration_date: string;
+        months: number | null;
+        lessee: string | null;
+      };
+      const finByOl = new Map<string, FinOl>();
+      for (const r of latestFin) {
+        const ol = String(r.rider_id ?? "").trim();
+        if (!ol) continue;
+        const key = ol.toUpperCase();
+        const leaseExp = String(r.lease_exp_date ?? "").trim().slice(0, 10);
+        const monthsRaw = r.months_until_lease_exp;
+        const months = monthsRaw == null || monthsRaw === "" ? null : Math.round(Number(monthsRaw));
+        const date =
+          /^\d{4}-\d{2}-\d{2}$/.test(leaseExp)
+            ? leaseExp
+            : months != null && Number.isFinite(months) && latestSnap
+              ? addCalendarMonths(latestSnap, months)
+              : null;
+        if (!date) continue;
+        const existing = finByOl.get(key);
+        if (!existing || date < existing.expiration_date) {
+          finByOl.set(key, {
+            ol,
+            expiration_date: date,
+            months: Number.isFinite(months as number) ? (months as number) : null,
+            lessee: r.lessee ? String(r.lessee) : null,
+          });
+        } else if (existing && !existing.lessee && r.lessee) {
+          existing.lessee = String(r.lessee);
+        }
+      }
+
+      const financialTimeline: TimelineRow[] = Array.from(finByOl.values())
+        .map((f) => {
+          const live = olMap.get(f.ol.toUpperCase());
+          return {
+            rider_id: f.ol,
+            rider_name: f.ol,
+            schedule_number: f.ol,
+            expiration_date: f.expiration_date,
+            lease_number: f.lessee ?? live?.lessee_name ?? null,
+            car_count: live?.car_count ?? 0,
+            source: "financial" as const,
+            months_until_lease_exp: f.months,
+          };
+        })
+        .sort((a, b) => a.expiration_date.localeCompare(b.expiration_date) || a.rider_name.localeCompare(b.rider_name));
+
+      const vcfTimeline: TimelineRow[] = Array.from(endBuckets.values())
         .sort((a, b) => a.expiration_date.localeCompare(b.expiration_date) || a.ol.localeCompare(b.ol))
         .map((b) => ({
-          rider_id: `${b.ol}|${b.expiration_date}`,
+          rider_id: `${b.ol}|${b.expiration_date}|vcf`,
           rider_name: b.ol,
           schedule_number: b.ol,
           expiration_date: b.expiration_date,
           lease_number: b.lessee_name,
           car_count: b.car_count,
+          source: "vcf" as const,
+          months_until_lease_exp: null,
         }));
-      const expiringRiders = expirationTimeline.filter((r) => inExpiryWindow(r.expiration_date, twelveMo));
-      const expiring6Groups = expirationTimeline.filter((r) => inExpiryWindow(r.expiration_date, sixMo));
-      const expiring12mo = expiringRiders.reduce((sum, r) => sum + r.car_count, 0);
-      const expiring6mo = expiring6Groups.reduce((sum, r) => sum + r.car_count, 0);
+
+      const expirationTimeline = financialTimeline;
+      const expiringRiders = financialTimeline.filter((r) => inExpiryWindow(r.expiration_date, twelveMo));
+      const expiring6Groups = financialTimeline.filter((r) => inExpiryWindow(r.expiration_date, sixMo));
+      const expiring12mo = expiringRiders.length;
+      const expiring6mo = expiring6Groups.length;
 
       // Cars by Lessee — counts only. Group by railcars.lessee_name.
       // Do not use assignment.fleet_name or riders. Full car lists load on click.
@@ -516,6 +610,7 @@ export async function registerRoutes(
           expiring_6mo: expiring6mo,
           off_rent_count: offRentCount,
           undefined_end_car_count: undefinedEndCarCount,
+          financial_snapshot_month: latestSnap,
           riders_count: activeOls.length,
           utilization_pct: utilization,
           sold_count: soldCars.length,
@@ -570,6 +665,7 @@ export async function registerRoutes(
         },
         cars_by_fleet: carsByFleet,
         expiration_timeline: expirationTimeline,
+        expiration_timeline_vcf: vcfTimeline,
       });
     } catch (err) {
       errHandler(res, err);

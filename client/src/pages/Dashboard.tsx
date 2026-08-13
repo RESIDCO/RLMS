@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,6 +69,7 @@ type DashboardData = {
     expiring_6mo: number;
     off_rent_count: number;
     undefined_end_car_count?: number;
+    financial_snapshot_month?: string | null;
     riders_count: number;
     utilization_pct: number;
     sold_count: number;
@@ -92,6 +93,16 @@ type DashboardData = {
   };
   cars_by_fleet: FleetDetail[];
   expiration_timeline: {
+    rider_id: number | string;
+    rider_name: string;
+    schedule_number: string | null;
+    expiration_date: string | null;
+    lease_number: string | null;
+    car_count: number;
+    source?: "financial" | "vcf";
+    months_until_lease_exp?: number | null;
+  }[];
+  expiration_timeline_vcf?: {
     rider_id: number | string;
     rider_name: string;
     schedule_number: string | null;
@@ -286,7 +297,7 @@ function DrillDownDrawer({
     total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold cars kept for repair billing)" },
     active_assignments: { title: "Active Assignments",   description: "Cars currently assigned to a rider / lessee" },
     unassigned_cars:    { title: "Unassigned Cars",      description: "Cars in the registry with no active assignment — available for new leases" },
-    expiring_12mo:      { title: "Expiring <12 months", description: "Cars whose own lease_end_date falls within the next 12 months. Counted per date — cars with a null end are excluded, not folded into another car on the same OL." },
+    expiring_12mo:      { title: "Expiring <12 months", description: "Rider deals whose Asset Report Lease Exp falls within the next 12 months (not VCF car-level lease_end_date)." },
     riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
     utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
   };
@@ -641,8 +652,12 @@ export default function Dashboard() {
                   <div className="h-full bg-violet-500 transition-all" style={{ width: `${data.kpis.rps_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
-                  <span>{data.kpis.rps_assigned} assigned</span>
-                  <span>{data.kpis.rps_total - data.kpis.rps_assigned} off-lease</span>
+                  <Link href="/fleet?entity=RPS&filter=leased" className="hover:text-foreground hover:underline">
+                    {data.kpis.rps_assigned} assigned
+                  </Link>
+                  <Link href="/fleet?entity=RPS&filter=offlease" className="hover:text-foreground hover:underline">
+                    {data.kpis.rps_total - data.kpis.rps_assigned} off-lease
+                  </Link>
                   <span className="font-mono-num">{data.kpis.rps_total} total</span>
                 </div>
               </div>
@@ -659,8 +674,12 @@ export default function Dashboard() {
                   <div className="h-full bg-sky-500 transition-all" style={{ width: `${data.kpis.owned_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
-                  <span>{data.kpis.owned_assigned} assigned</span>
-                  <span>{data.kpis.owned_total - data.kpis.owned_assigned} off-lease</span>
+                  <Link href="/fleet?entity=Main&filter=leased" className="hover:text-foreground hover:underline">
+                    {data.kpis.owned_assigned} assigned
+                  </Link>
+                  <Link href="/fleet?entity=Main&filter=offlease" className="hover:text-foreground hover:underline">
+                    {data.kpis.owned_total - data.kpis.owned_assigned} off-lease
+                  </Link>
                   <span className="font-mono-num">{data.kpis.owned_total} total</span>
                 </div>
               </div>
@@ -709,7 +728,7 @@ export default function Dashboard() {
             </div>
           </section>
 
-          {/* Lease Expiration Timeline — one row per (OL, exact lease_end_date); null ends omitted */}
+          {/* Lease Expiration Timeline — Asset Report rider-level Lease Exp */}
           <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Lease Expiration Timeline</h2>
@@ -719,40 +738,36 @@ export default function Dashboard() {
                 <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]" />&gt;12mo</span>
               </div>
             </header>
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border max-h-[480px] overflow-auto">
               {isLoading ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="px-5 py-4"><Skeleton className="h-10 rounded" /></div>
                 ))
               ) : (() => {
                 const withEnd = data?.expiration_timeline ?? [];
-                const openEndedCars = data?.kpis.undefined_end_car_count ?? 0;
+                const vcfExtra = data?.expiration_timeline_vcf ?? [];
                 if (withEnd.length === 0) {
                   return (
                     <div className="px-5 py-8 text-sm text-muted-foreground">
-                      No known car-level lease end dates in the operating fleet.
-                      {openEndedCars > 0 && (
-                        <span className="block mt-1 text-xs">
-                          {openEndedCars.toLocaleString()} cars have no defined end date (VCF END_DATE blank or indefinite).
-                        </span>
-                      )}
+                      No rider-level Lease Exp dates in the Asset Report snapshot.
                     </div>
                   );
                 }
                 return (
                   <>
-                    {openEndedCars > 0 && (
-                      <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
-                        Showing {withEnd.length} date group{withEnd.length !== 1 ? "s" : ""} · {openEndedCars.toLocaleString()} cars with no defined end date omitted
-                      </div>
-                    )}
+                    <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
+                      {withEnd.length} rider deal{withEnd.length !== 1 ? "s" : ""} with a Lease Exp
+                      {data?.kpis.financial_snapshot_month && (
+                        <> · snapshot {data.kpis.financial_snapshot_month.slice(0, 7)}</>
+                      )}
+                    </div>
                     {withEnd.map((r) => {
                       const months = monthsUntil(r.expiration_date);
                       const tone = expiryTone(months);
                       return (
-                        <a
+                        <Link
                           key={String(r.rider_id)}
-                          href={`/fleet?search=${encodeURIComponent(r.rider_name)}`}
+                          href={`/fleet?rider=${encodeURIComponent(r.rider_name)}`}
                           className="px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group"
                           data-testid={`rider-timeline-${r.rider_id}`}
                         >
@@ -769,7 +784,38 @@ export default function Dashboard() {
                             <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
                             <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
                           </div>
-                        </a>
+                        </Link>
+                      );
+                    })}
+                    {vcfExtra.length > 0 && (
+                      <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
+                        {vcfExtra.length} VCF car-level date group{vcfExtra.length !== 1 ? "s" : ""} (supplemental — not used for Expiring tiles)
+                      </div>
+                    )}
+                    {vcfExtra.map((r) => {
+                      const months = monthsUntil(r.expiration_date);
+                      const tone = expiryTone(months);
+                      return (
+                        <Link
+                          key={String(r.rider_id)}
+                          href={`/fleet?rider=${encodeURIComponent(r.rider_name)}`}
+                          className="px-5 py-3 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group opacity-70"
+                          data-testid={`rider-timeline-vcf-${r.rider_id}`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium truncate group-hover:text-primary transition-colors">{r.rider_name}</div>
+                              <div className="text-[11px] text-muted-foreground font-mono-num">
+                                VCF · {r.lease_number ?? "—"} · {r.car_count} car{r.car_count !== 1 ? "s" : ""}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
+                            <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
+                          </div>
+                        </Link>
                       );
                     })}
                   </>

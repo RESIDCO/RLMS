@@ -2,6 +2,8 @@
 
 **Status:** Not started — do not enable RLS until policies are designed and tested.
 
+**App-layer note (2026-08-13):** Express now requires a valid Supabase Bearer session on every `/api/*` route (`server/auth.ts`). That stops anonymous HTTP downloads of fleet data. It does **not** replace RLS — the service/anon keys can still hit Postgres directly until RLS is designed.
+
 ## Why this is separate
 RLS is disabled on all ~23 corporate tables (`railcars`, `rider_financial_summary`, `assignment_history`, …). The service/anon API key alone can read/write any row. Flipping RLS on with no policies will break the app.
 

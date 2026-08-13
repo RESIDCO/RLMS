@@ -447,7 +447,7 @@ function KpiCard({
     <button
       type="button"
       className={cn(
-        "rounded-xl border border-card-border bg-card shadow-card p-5 flex flex-col gap-3 text-left w-full transition-all",
+        "rounded-xl border border-card-border bg-card shadow-card p-5 flex flex-col gap-3 text-left w-full min-w-0 overflow-hidden transition-all",
         onClick && "cursor-pointer hover:border-umler-steel/40 hover:bg-card/80 group"
       )}
       onClick={onClick}
@@ -464,8 +464,8 @@ function KpiCard({
           )}
         </div>
       </div>
-      <div className="font-kpi text-foreground">
-        {value}
+      <div className="font-kpi text-foreground truncate tabular-nums">
+        {typeof value === "number" ? value.toLocaleString() : value}
       </div>
       {subtext && (
         <div className="text-[11px] text-muted-foreground -mt-1">{subtext}</div>
@@ -477,24 +477,21 @@ function KpiCard({
 
 // ── Utilization Ring ──────────────────────────────────────────────────────────
 function UtilRing({ pct }: { pct: number }) {
-  const r = 18;
+  const r = 15;
   const circ = 2 * Math.PI * r;
   const stroke = circ * (1 - pct / 100);
   const color = pct >= 90 ? "hsl(var(--success))" : pct >= 70 ? "hsl(var(--warning))" : "hsl(var(--error))";
   return (
-    <svg width="48" height="48" viewBox="0 0 44 44" className="shrink-0">
-      <circle cx="22" cy="22" r={r} fill="none" stroke="hsl(var(--muted))" strokeWidth="4" />
+    <svg width="40" height="40" viewBox="0 0 38 38" className="shrink-0">
+      <circle cx="19" cy="19" r={r} fill="none" stroke="hsl(var(--muted))" strokeWidth="3.5" />
       <circle
-        cx="22" cy="22" r={r} fill="none"
-        stroke={color} strokeWidth="4"
+        cx="19" cy="19" r={r} fill="none"
+        stroke={color} strokeWidth="3.5"
         strokeDasharray={circ} strokeDashoffset={stroke}
         strokeLinecap="round"
-        transform="rotate(-90 22 22)"
+        transform="rotate(-90 19 19)"
         style={{ transition: "stroke-dashoffset 0.6s ease" }}
       />
-      <text x="22" y="22" textAnchor="middle" dominantBaseline="central" fontSize="9" fill="currentColor" className="font-semibold">
-        {pct}%
-      </text>
     </svg>
   );
 }
@@ -523,7 +520,7 @@ export default function Dashboard() {
 
       <div className="px-4 sm:px-8 py-5 sm:py-7 space-y-7">
         {/* KPIs */}
-<div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-9 gap-3">
+<div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-9 gap-3 [&>*]:min-w-0">
           {isLoading ? (
             Array.from({ length: 7 }).map((_, i) => (
               <Skeleton key={i} className="h-[110px] rounded-lg" />
@@ -555,27 +552,26 @@ export default function Dashboard() {
               {/* Utilization — special card with ring */}
               <button
                 type="button"
-                className="rounded-xl border border-card-border bg-card shadow-card p-5 flex flex-col gap-2 text-left w-full cursor-pointer hover:border-umler-steel/40 hover:bg-card/80 group transition-all"
+                className="rounded-xl border border-card-border bg-card shadow-card p-4 flex flex-col gap-2 text-left w-full min-w-0 overflow-hidden cursor-pointer hover:border-umler-steel/40 hover:bg-card/80 group transition-all"
                 onClick={() => setDrillKey("utilization_pct")}
                 data-testid="kpi-utilization"
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-eyebrow">Fleet Utilization</span>
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-1 min-w-0">
+                  <span className="font-eyebrow truncate">Utilization</span>
+                  <div className="flex items-center gap-1 shrink-0">
                     <Gauge className={cn("h-4 w-4", utilPct >= 90 ? "text-umler-teal" : utilPct >= 70 ? "text-umler-amber" : "text-umler-signal")} />
                     <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 min-w-0">
                   <UtilRing pct={utilPct} />
-                  <div>
-                    <div className="font-kpi text-foreground">{utilPct}%</div>
-                    <div className="text-[11px] text-muted-foreground">{data.kpis.active_assignments} of {data.kpis.total_fleet} cars</div>
-                    {(data.kpis.idle_count ?? 0) > 0 && (
-                      <div className="text-[10px] text-muted-foreground mt-0.5">
-                        Includes {data.kpis.idle_count.toLocaleString()} Idle in denominator
-                      </div>
-                    )}
+                  <div className="min-w-0 overflow-hidden">
+                    <div className="text-[22px] leading-none font-semibold tabular-nums tracking-tight text-foreground">
+                      {utilPct}%
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-1 truncate">
+                      {data.kpis.active_assignments.toLocaleString()} / {data.kpis.total_fleet.toLocaleString()}
+                    </div>
                   </div>
                 </div>
                 <div className={cn("h-[2px] w-full rounded-full mt-auto", utilPct >= 90 ? "bg-umler-teal" : utilPct >= 70 ? "bg-umler-amber" : "bg-umler-signal")} />

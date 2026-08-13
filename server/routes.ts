@@ -3,6 +3,7 @@ import type { Server } from "http";
 import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
+import { getAuthUser, requireApiAuth } from "./auth";
 import {
   insertMasterLeaseSchema,
   insertRiderSchema,
@@ -179,6 +180,10 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Gate every /api route: valid Supabase session (Bearer JWT) required.
+  // Writes still use requireWrite / requireAdmin for role checks on top of this.
+  app.use("/api", requireApiAuth);
+
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
   // Each rider may carry an optional `cars` array of car objects to create & assign.
@@ -2540,19 +2545,9 @@ export async function registerRoutes(
   // AUTH ROUTES
   // ─────────────────────────────────────────────────────────────
 
-  // Helper: validate Bearer JWT and return user
-  async function getAuthUser(req: Request): Promise<{ id: string; email: string } | null> {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return null;
-    const token = authHeader.slice(7);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) return null;
-    return { id: user.id, email: user.email ?? "" };
-  }
-
   // Helper: require admin role
   async function requireAdmin(req: Request, res: Response): Promise<string | null> {
-    const user = await getAuthUser(req);
+    const user = req.authUser ?? (await getAuthUser(req));
     if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
     const { data } = await supabase.from("user_roles").select("role").eq("user_id", user.id).single();
     if (data?.role !== "admin") { res.status(403).json({ error: "Forbidden" }); return null; }
@@ -2561,7 +2556,7 @@ export async function registerRoutes(
 
   /** Require admin or editor — full read/write on fleet/lease/AP/programs/etc. */
   async function requireWrite(req: Request, res: Response): Promise<string | null> {
-    const user = await getAuthUser(req);
+    const user = req.authUser ?? (await getAuthUser(req));
     if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
     const { data } = await supabase.from("user_roles").select("role").eq("user_id", user.id).single();
     if (data?.role !== "admin" && data?.role !== "editor") {
@@ -2579,7 +2574,7 @@ export async function registerRoutes(
 
   /** Require any authenticated user (no role check) — used by read routes. */
   async function requireUser(req: Request, res: Response): Promise<string | null> {
-    const user = await getAuthUser(req);
+    const user = req.authUser ?? (await getAuthUser(req));
     if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
     return user.id;
   }
@@ -2587,7 +2582,7 @@ export async function registerRoutes(
   // GET /api/auth/me — returns current user's role
   app.get("/api/auth/me", async (req, res) => {
     try {
-      const user = await getAuthUser(req);
+      const user = req.authUser ?? (await getAuthUser(req));
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { data } = await supabase.from("user_roles").select("role").eq("user_id", user.id).single();
       res.json({ id: user.id, email: user.email, role: data?.role ?? null });
@@ -2598,7 +2593,7 @@ export async function registerRoutes(
   // GET /api/prefs/columns?page=<page> — returns visible_cols array for the current user + page
   app.get("/api/prefs/columns", async (req: Request, res: Response) => {
     try {
-      const user = await getAuthUser(req);
+      const user = req.authUser ?? (await getAuthUser(req));
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const page = String(req.query.page ?? "").trim();
       if (!page) return res.status(400).json({ error: "page param required" });
@@ -2617,7 +2612,7 @@ export async function registerRoutes(
   // PUT /api/prefs/columns — upsert visible_cols for the current user + page
   app.put("/api/prefs/columns", async (req: Request, res: Response) => {
     try {
-      const user = await getAuthUser(req);
+      const user = req.authUser ?? (await getAuthUser(req));
       if (!user) return res.status(401).json({ error: "Unauthorized" });
       const { page, visible_cols } = req.body as { page: string; visible_cols: string[] };
       if (!page) return res.status(400).json({ error: "page required" });

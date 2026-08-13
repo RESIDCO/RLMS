@@ -99,7 +99,17 @@ const MANAGED_CATEGORY_MAP: Record<string, (typeof MANAGED_CATEGORY_CANONICAL)[n
 
 const UNKNOWN_START = new Set(["1901-01-01"]);
 const UNKNOWN_END = new Set(["1900-01-06", "1901-01-01"]);
-const INDEFINITE_END = new Set(["4000-12-31"]);
+
+/**
+ * VCF uses 4000-12-31 as "indefinite / open-ended". Source files also produce
+ * near-miss variants (e.g. 4000-12-21 from a typo or Excel quirk). Treat any
+ * end year ≥ 3000 as the same sentinel — never as a real lease expiration.
+ */
+export function isIndefiniteEndDate(iso: string | null | undefined): boolean {
+  if (!iso) return false;
+  const y = Number(String(iso).trim().slice(0, 4));
+  return Number.isFinite(y) && y >= 3000;
+}
 
 function normKey(h: string): string {
   return String(h ?? "")
@@ -248,7 +258,7 @@ export function parseVcfRow(raw: VcfRawRow, sourceRow: number): VcfParsedRow | n
     end_date,
     start_date_unknown: !!(start_date && UNKNOWN_START.has(start_date)),
     end_date_unknown: !!(end_date && UNKNOWN_END.has(end_date)),
-    end_date_indefinite: !!(end_date && INDEFINITE_END.has(end_date)),
+    end_date_indefinite: isIndefiniteEndDate(end_date),
     comment: str(n.comment),
     activeParse,
     client_id: str(n.client_id),

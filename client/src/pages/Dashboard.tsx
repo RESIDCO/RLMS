@@ -68,6 +68,7 @@ type DashboardData = {
     expiring_12mo: number;
     expiring_6mo: number;
     off_rent_count: number;
+    undefined_end_car_count?: number;
     riders_count: number;
     utilization_pct: number;
     sold_count: number;
@@ -285,7 +286,7 @@ function DrillDownDrawer({
     total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold cars kept for repair billing)" },
     active_assignments: { title: "Active Assignments",   description: "Cars currently assigned to a rider / lessee" },
     unassigned_cars:    { title: "Unassigned Cars",      description: "Cars in the registry with no active assignment — available for new leases" },
-    expiring_12mo:      { title: "Expiring OLs (<12 months)", description: "Active OL codes whose car-level lease_end_date falls within the next 12 months (not riders.expiration_date)" },
+    expiring_12mo:      { title: "Expiring <12 months", description: "Cars whose own lease_end_date falls within the next 12 months. Counted per date — cars with a null end are excluded, not folded into another car on the same OL." },
     riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
     utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
   };
@@ -587,10 +588,10 @@ export default function Dashboard() {
               <KpiCard
                 testId="kpi-off-rent"
                 label="Off Rent"
-                value={data.kpis.off_rent_count}
+                value="—"
+                subtext="No rent-event source yet"
                 icon={AlertTriangle}
-                accent="error"
-                onClick={() => navigate("/fleet?filter=offrent")}
+                accent="muted"
               />
               <KpiCard
                 testId="kpi-expiring6"
@@ -708,7 +709,7 @@ export default function Dashboard() {
             </div>
           </section>
 
-          {/* Lease Expiration Timeline — car-level lease_end_date aggregated by OL */}
+          {/* Lease Expiration Timeline — one row per (OL, exact lease_end_date); null ends omitted */}
           <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Lease Expiration Timeline</h2>
@@ -724,15 +725,15 @@ export default function Dashboard() {
                   <div key={i} className="px-5 py-4"><Skeleton className="h-10 rounded" /></div>
                 ))
               ) : (() => {
-                const withEnd = (data?.expiration_timeline ?? []).filter((r) => !!r.expiration_date);
-                const openEnded = (data?.expiration_timeline ?? []).length - withEnd.length;
+                const withEnd = data?.expiration_timeline ?? [];
+                const openEndedCars = data?.kpis.undefined_end_car_count ?? 0;
                 if (withEnd.length === 0) {
                   return (
                     <div className="px-5 py-8 text-sm text-muted-foreground">
                       No known car-level lease end dates in the operating fleet.
-                      {openEnded > 0 && (
+                      {openEndedCars > 0 && (
                         <span className="block mt-1 text-xs">
-                          {openEnded.toLocaleString()} active OLs have open / indefinite terms (VCF END_DATE blank).
+                          {openEndedCars.toLocaleString()} cars have no defined end date (VCF END_DATE blank or indefinite).
                         </span>
                       )}
                     </div>
@@ -740,9 +741,9 @@ export default function Dashboard() {
                 }
                 return (
                   <>
-                    {openEnded > 0 && (
+                    {openEndedCars > 0 && (
                       <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
-                        Showing {withEnd.length} OL{withEnd.length !== 1 ? "s" : ""} with a known lease_end_date · {openEnded.toLocaleString()} open-ended omitted
+                        Showing {withEnd.length} date group{withEnd.length !== 1 ? "s" : ""} · {openEndedCars.toLocaleString()} cars with no defined end date omitted
                       </div>
                     )}
                     {withEnd.map((r) => {
@@ -760,7 +761,7 @@ export default function Dashboard() {
                             <div className="min-w-0">
                               <div className="text-sm font-medium truncate group-hover:text-primary transition-colors">{r.rider_name}</div>
                               <div className="text-[11px] text-muted-foreground font-mono-num">
-                                {r.lease_number ?? "—"} · {r.car_count} cars
+                                {r.lease_number ?? "—"} · {r.car_count} car{r.car_count !== 1 ? "s" : ""}
                               </div>
                             </div>
                           </div>

@@ -8,6 +8,14 @@
  * Lease Management UI, but Dashboard and lease-status KPIs must read cars.
  */
 
+import { isIndefiniteEndDate } from "./vcf-import";
+
+function genuineEndDate(iso: string): string | null {
+  const s = String(iso ?? "").trim().slice(0, 10);
+  if (!s || isIndefiniteEndDate(s)) return null;
+  return s;
+}
+
 export type CarLeaseFields = {
   lease_end_date?: string | null;
   lease_expiry?: string | null;
@@ -19,11 +27,7 @@ export type CarLeaseFields = {
 
 /** Canonical known end date from the car record (null = indefinite / unknown). */
 export function carLeaseEndDate(car: CarLeaseFields): string | null {
-  const end = String(car.lease_end_date ?? "").trim().slice(0, 10);
-  if (end) return end;
-  const exp = String(car.lease_expiry ?? "").trim().slice(0, 10);
-  if (exp) return exp;
-  return null;
+  return genuineEndDate(car.lease_end_date ?? "") || genuineEndDate(car.lease_expiry ?? "");
 }
 
 export function carLesseeName(car: CarLeaseFields): string | null {
@@ -46,11 +50,15 @@ export function parseIsoDateOnly(d: string | null | undefined): Date | null {
   return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
-/** Aggregate known end dates for an OL: latest (max) among cars with a known end. */
+/**
+ * Latest known end among cars that have one. For the derived riders.expiration_date
+ * cache only — never use this as a stand-in date for cars whose lease_end_date is null.
+ * Dashboard timeline / expiring tiles must group by (OL, exact end date) instead.
+ */
 export function aggregateOlEndDate(ends: Array<string | null | undefined>): string | null {
   let best: string | null = null;
   for (const e of ends) {
-    const s = e ? String(e).trim().slice(0, 10) : "";
+    const s = genuineEndDate(e ?? "");
     if (!s) continue;
     if (!best || s > best) best = s;
   }

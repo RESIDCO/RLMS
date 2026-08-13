@@ -373,8 +373,18 @@ export async function registerRoutes(
         lessee_name: string | null;
         assignment_label: string | null;
       };
+      type EndBucket = {
+        ol: string;
+        expiration_date: string;
+        car_count: number;
+        lessee_name: string | null;
+      };
       const olMap = new Map<string, OlAgg>();
+      const endBuckets = new Map<string, EndBucket>();
+      let undefinedEndCarCount = 0;
       for (const c of railcars as any[]) {
+        const end = carLeaseEndDate(c);
+        if (!end) undefinedEndCarCount += 1;
         const ol = carOlCode(c);
         if (!ol) continue;
         const key = ol.toUpperCase();
@@ -392,9 +402,26 @@ export async function registerRoutes(
         }
         agg.car_count += 1;
         agg.car_ids.push(c.id);
-        const end = carLeaseEndDate(c);
         if (end) agg.ends.push(end);
         if (!agg.lessee_name) agg.lessee_name = carLesseeName(c);
+
+        // Timeline / expiring tiles: count only cars that share this exact end date.
+        // Null ends are omitted (see undefined_end_car_count), never folded into another car's date.
+        if (end) {
+          const bkey = `${key}|${end}`;
+          let bucket = endBuckets.get(bkey);
+          if (!bucket) {
+            bucket = {
+              ol,
+              expiration_date: end,
+              car_count: 0,
+              lessee_name: carLesseeName(c),
+            };
+            endBuckets.set(bkey, bucket);
+          }
+          bucket.car_count += 1;
+          if (!bucket.lessee_name) bucket.lessee_name = carLesseeName(c);
+        }
       }
       const activeOls = Array.from(olMap.values()).map((agg) => ({
         id: agg.ol, // string key for UI (was numeric riders.id)
@@ -406,17 +433,25 @@ export async function registerRoutes(
         car_count: agg.car_count,
       }));
 
-      const expiringRiders = activeOls.filter((r) => {
-        const d = parseIsoDateOnly(r.expiration_date);
+      const inExpiryWindow = (iso: string, cutoff: Date) => {
+        const d = parseIsoDateOnly(iso);
         if (!d) return false;
-        return d >= now && d <= twelveMo;
-      });
-      const expiring12mo = expiringRiders.length;
-      const expiring6mo = activeOls.filter((r) => {
-        const d = parseIsoDateOnly(r.expiration_date);
-        if (!d) return false;
-        return d >= now && d <= sixMo;
-      }).length;
+        return d >= now && d <= cutoff;
+      };
+      const expirationTimeline = Array.from(endBuckets.values())
+        .sort((a, b) => a.expiration_date.localeCompare(b.expiration_date) || a.ol.localeCompare(b.ol))
+        .map((b) => ({
+          rider_id: `${b.ol}|${b.expiration_date}`,
+          rider_name: b.ol,
+          schedule_number: b.ol,
+          expiration_date: b.expiration_date,
+          lease_number: b.lessee_name,
+          car_count: b.car_count,
+        }));
+      const expiringRiders = expirationTimeline.filter((r) => inExpiryWindow(r.expiration_date, twelveMo));
+      const expiring6Groups = expirationTimeline.filter((r) => inExpiryWindow(r.expiration_date, sixMo));
+      const expiring12mo = expiringRiders.reduce((sum, r) => sum + r.car_count, 0);
+      const expiring6mo = expiring6Groups.reduce((sum, r) => sum + r.car_count, 0);
 
       // Cars by Lessee — counts only. Group by railcars.lessee_name.
       // Do not use assignment.fleet_name or riders. Full car lists load on click.
@@ -472,24 +507,6 @@ export async function registerRoutes(
         })
         .sort((a, b) => b.count - a.count);
 
-      // Timeline: active OLs with a known car-level end, soonest first; null ends last
-      const expirationTimeline = activeOls
-        .slice()
-        .sort((a, b) => {
-          if (!a.expiration_date && !b.expiration_date) return a.rider_name.localeCompare(b.rider_name);
-          if (!a.expiration_date) return 1;
-          if (!b.expiration_date) return -1;
-          return a.expiration_date.localeCompare(b.expiration_date);
-        })
-        .map((r) => ({
-          rider_id: r.id,
-          rider_name: r.rider_name,
-          schedule_number: r.schedule_number,
-          expiration_date: r.expiration_date,
-          lease_number: r.lessee_name,
-          car_count: r.car_count,
-        }));
-
       res.json({
         kpis: {
           total_fleet: railcars.length,
@@ -498,6 +515,7 @@ export async function registerRoutes(
           expiring_12mo: expiring12mo,
           expiring_6mo: expiring6mo,
           off_rent_count: offRentCount,
+          undefined_end_car_count: undefinedEndCarCount,
           riders_count: activeOls.length,
           utilization_pct: utilization,
           sold_count: soldCars.length,
@@ -534,11 +552,11 @@ export async function registerRoutes(
           })),
           sold_cars: [],
           expiring_riders: expiringRiders.map((r) => ({
-            id: r.id,
+            id: r.rider_id,
             rider_name: r.rider_name,
             schedule_number: r.schedule_number,
             expiration_date: r.expiration_date,
-            lease_number: r.lessee_name,
+            lease_number: r.lease_number,
             car_count: r.car_count,
           })),
           riders: activeOls.map((r) => ({
@@ -551,7 +569,7 @@ export async function registerRoutes(
           })),
         },
         cars_by_fleet: carsByFleet,
-        expiration_timeline: expirationTimeline.filter((r) => !!r.expiration_date),
+        expiration_timeline: expirationTimeline,
       });
     } catch (err) {
       errHandler(res, err);

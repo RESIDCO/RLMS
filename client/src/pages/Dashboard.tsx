@@ -110,6 +110,12 @@ type DashboardData = {
     lease_number: string | null;
     car_count: number;
   }[];
+  fleet_age?: {
+    tiles: { year: number; count: number }[];
+    unknown_count: number;
+    known_count: number;
+    operating_count: number;
+  };
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -692,6 +698,36 @@ export default function Dashboard() {
                   <span className="font-mono-num">{data.kpis.owned_total} total</span>
                 </div>
               </div>
+            </div>
+          </section>
+        )}
+
+        {/* Fleet Age — Turning 50 (independent of lease-expiration tiles) */}
+        {data && (
+          <section className="rounded-xl border border-card-border bg-card shadow-card" data-testid="panel-fleet-age">
+            <header className="px-5 py-3.5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+              <h2 className="text-sm font-semibold">Fleet Age — Turning 50</h2>
+              <span className="text-[11px] text-muted-foreground">
+                {(data.fleet_age?.operating_count ?? 0).toLocaleString()} operating cars
+                {" — "}
+                build year unknown for {(data.fleet_age?.unknown_count ?? 0).toLocaleString()}
+                {(data.fleet_age?.known_count ?? 0) === 0
+                  ? " (tiles stay at 0 until build years are populated)"
+                  : ""}
+              </span>
+            </header>
+            <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {(data.fleet_age?.tiles ?? []).map((t, i) => (
+                <KpiCard
+                  key={t.year}
+                  testId={`kpi-turning50-${t.year}`}
+                  label={`${t.year}`}
+                  value={t.count}
+                  subtext="cars turning 50"
+                  accent={i === 0 ? "warning" : i === 1 ? "warning" : "muted"}
+                  marker="dot"
+                />
+              ))}
             </div>
           </section>
         )}

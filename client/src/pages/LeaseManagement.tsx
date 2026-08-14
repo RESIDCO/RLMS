@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { carBuildYear } from "@shared/build-year";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import type {
   MasterLeaseWithRiders,
@@ -728,7 +729,7 @@ function RiderCars({ riderId }: { riderId: number }) {
                       </td>
                     )}
                     {visibleCols.has("build_year") && (
-                      <td className="px-3 py-1.5 font-mono-num text-muted-foreground">{(c as any).build_year ?? "—"}</td>
+                      <td className="px-3 py-1.5 font-mono-num text-muted-foreground">{carBuildYear(c) ?? "—"}</td>
                     )}
                   </tr>
                 ))}

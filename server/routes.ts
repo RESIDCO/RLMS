@@ -47,7 +47,7 @@ import {
   parseIsoDateOnly,
   addCalendarMonths,
 } from "@shared/lease-authority";
-import { syncRiderExpirationsFromCars } from "./sync-rider-expirations";
+import { carBuildYear, turning50ByYear } from "@shared/build-year";
 import {
   buildFinancialReview,
   financialRowToDbPayload,
@@ -294,7 +294,7 @@ export async function registerRoutes(
             .from("railcars")
             .select(
               `id, entity, active, rider_external_id, assignment_label, managed_category,
-               lessee_name, lease_end_date, lease_expiry`
+               lessee_name, lease_end_date, lease_expiry, build_year, built_year`
             )
             .eq("active", true)
             .order("id", { ascending: true })
@@ -625,6 +625,27 @@ export async function registerRoutes(
       const sqlUtil = (op: number, leased: number) =>
         op > 0 ? Math.round((leased / op) * 1000) / 10 : 0;
 
+      let ageCars = railcars as any[];
+      if (sqlKpis) {
+        const ageRaw = await fetchAllRows<any>((from, to) =>
+          db
+            .from("railcars")
+            .select("id, active, rider_external_id, assignment_label, managed_category, build_year, built_year")
+            .eq("active", true)
+            .order("id", { ascending: true })
+            .range(from, to)
+        );
+        ageCars = ageRaw.filter((r: any) =>
+          isOperatingFleetCar({
+            active: r.active,
+            rider_external_id: r.rider_external_id,
+            assignment_label: r.assignment_label,
+            managed_category: r.managed_category,
+          })
+        );
+      }
+      const fleet_age = turning50ByYear(ageCars);
+
       res.json({
         kpis: sqlKpis
           ? {
@@ -738,6 +759,7 @@ export async function registerRoutes(
           : carsByFleet,
         expiration_timeline: expirationTimeline,
         expiration_timeline_vcf: sqlKpis ? (fleetSql.expiration_timeline_vcf || []) : vcfTimeline,
+        fleet_age,
       });
     } catch (err) {
       errHandler(res, err);
@@ -1473,6 +1495,7 @@ export async function registerRoutes(
       general_description: description,
       mechanical_designation: mechDesig,
       build_year: buildYear,
+      built_year: buildYear,
       capacity_cf: capacityCf,
       lining,
       oec, nbv, oac,
@@ -3035,11 +3058,12 @@ export async function registerRoutes(
     try {
       const q = String(req.query.q || "").trim();
       let sel = supabase.from("railcars")
-        .select("id, car_initial, car_number, tare_weight_lbs, built_year, oec, oac, nbv")
+        .select("id, car_initial, car_number, tare_weight_lbs, built_year, build_year, oec, oac, nbv")
         .order("car_initial", { ascending: true }).order("car_number", { ascending: true }).limit(50);
       if (q.length) sel = sel.or(`car_initial.ilike.%${q}%,car_number.ilike.%${q}%`);
       const { data, error } = await sel;
-      if (error) throw error; res.json(data || []);
+      if (error) throw error;
+      res.json((data || []).map((r: any) => ({ ...r, built_year: carBuildYear(r) })));
     } catch (err) { errHandler(res, err); }
   });
 

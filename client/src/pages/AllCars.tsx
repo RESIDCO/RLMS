@@ -38,6 +38,7 @@ import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { cn } from "@/lib/utils";
 import type { RailcarWithAssignment } from "@shared/schema";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { carBuildYear } from "@shared/build-year";
 
 type Row = RailcarWithAssignment;
 
@@ -214,7 +215,7 @@ function CellValue({ col, r }: { col: ColDef; r: Row }) {
     case "rider":       return <>{r.assignment?.rider?.rider_name ?? "—"}</>;
     case "lease":       return <>{displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}</>;
     case "expiration":  return <>{fmtDate((ra as any).lease_end_date ?? (ra as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}</>;
-    case "build_year":  return <>{ra.build_year ?? "—"}</>;
+    case "build_year":  return <>{carBuildYear(ra) ?? "—"}</>;
     case "capacity_cf": return <>{ra.capacity_cf != null ? Number(ra.capacity_cf).toLocaleString() : "—"}</>;
     case "lining":      return <>{ra.lining_material || ra.lining || ra.coating || "—"}</>;
     case "nbv":         return <>{fmtMoney(ra.nbv)}</>;
@@ -289,7 +290,7 @@ function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }
           <DetailRow label="Car Type"          value={car.car_type} />
           <DetailRow label="Mech. Designation" value={r.mechanical_designation} />
           <DetailRow label="Description"       value={r.general_description} />
-          <DetailRow label="Build Year"        value={r.build_year} />
+          <DetailRow label="Build Year"        value={carBuildYear(r)} />
           <DetailRow label="Capacity (cf)"     value={r.capacity_cf != null ? Number(r.capacity_cf).toLocaleString() : null} />
           <DetailRow label="Lining"            value={r.lining_material || r.lining || r.coating} />
 

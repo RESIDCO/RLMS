@@ -19,6 +19,7 @@ import {
   deriveLeaseKey,
   synthesizeLeaseNumber,
 } from "../shared/residco-import";
+import { carBuildYear, turning50ByYear } from "../shared/build-year";
 
 let passed = 0;
 let failed = 0;
@@ -337,6 +338,26 @@ eq(
   4,
   "distinctRiderCount: groups by (lessee, rider name); falls back to assignment_label"
 );
+
+eq(carBuildYear({ build_year: 1976, built_year: null }), 1976, "carBuildYear prefers build_year");
+eq(carBuildYear({ build_year: null, built_year: 1976 }), 1976, "carBuildYear falls back to built_year");
+eq(carBuildYear({ build_year: null, built_year: null }), null, "carBuildYear null when both empty");
+{
+  const summary = turning50ByYear(
+    [
+      { build_year: 1976 }, // turns 50 in 2026
+      { build_year: 1977 },
+      { build_year: null, built_year: null },
+      { build_year: null, built_year: null },
+    ],
+    2026,
+    3
+  );
+  eq(summary.tiles.map((t) => t.year), [2026, 2027, 2028, 2029], "turning50 years this year through +3");
+  eq(summary.tiles.map((t) => t.count), [1, 1, 0, 0], "turning50 counts by year");
+  eq(summary.unknown_count, 2, "turning50 unknown count");
+  eq(summary.operating_count, 4, "turning50 operating count");
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) {

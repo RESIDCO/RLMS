@@ -44,7 +44,7 @@ export type Railcar = {
   load_limit_lbs: number | null;
   aar_designation: string | null;
   dot_specification: string | null;
-  built_year: number | null;
+  built_year: number | null; // DV/UMLER legacy; fleet SoT is build_year (see shared/build-year.ts)
   entity: string | null;
   car_initial: string | null;
   old_car_initial: string | null;
@@ -78,7 +78,7 @@ export type Railcar = {
   cars_on_rider_ar: number | null;
   commodity_family: string | null;
   commodity: string | null;
-  build_year: number | null;
+  build_year: number | null; // fleet SoT for car age; import also mirrors to built_year
   lining: string | null;
   dot_code: string | null;
   comment_event_note: string | null;

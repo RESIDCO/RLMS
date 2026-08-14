@@ -60,6 +60,7 @@ import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { carBuildYear } from "@shared/build-year";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 
@@ -131,6 +132,80 @@ function fmtDate(d: string | null | undefined) {
     month: "short",
     day: "2-digit",
   });
+}
+
+function fmtUsd(v: unknown, digits = 0) {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
+/** Must stay in lockstep with OPT_COLS order — headers iterate that list too. */
+function renderOptTd(key: string, r: any) {
+  const money = "px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap";
+  const num = "px-4 py-3 font-mono-num text-muted-foreground";
+  const text = "px-4 py-3 text-muted-foreground";
+  switch (key) {
+    case "nbv":
+      return <td key={key} className={money}>{fmtUsd(r.nbv, 0)}</td>;
+    case "oac":
+      return <td key={key} className={money}>{fmtUsd(r.oac, 0)}</td>;
+    case "oec":
+      return <td key={key} className={money}>{fmtUsd(r.oec, 0)}</td>;
+    case "monthly_rent_per_car":
+      return <td key={key} className={money}>{fmtUsd(r.monthly_rent_per_car, 2)}</td>;
+    case "monthly_depr_per_car":
+      return <td key={key} className={money}>{fmtUsd(r.monthly_depr_per_car, 2)}</td>;
+    case "capacity_cf":
+      return <td key={key} className={num}>{r.capacity_cf != null ? Number(r.capacity_cf).toLocaleString() : "—"}</td>;
+    case "lining":
+      return <td key={key} className={text}>{r.lining_material || r.lining || r.coating || "—"}</td>;
+    case "build_year": {
+      const year = carBuildYear(r);
+      return <td key={key} className={num}>{year ?? "—"}</td>;
+    }
+    case "description":
+      return <td key={key} className={`${text} max-w-[180px] truncate`}>{r.general_description || r.description || "—"}</td>;
+    case "mech_designation":
+      return <td key={key} className={text}>{r.mechanical_designation || r.mech_designation || "—"}</td>;
+    case "commodity":
+      return <td key={key} className={text}>{r.commodity ?? "—"}</td>;
+    case "commodity_family":
+      return <td key={key} className={text}>{r.commodity_family ?? "—"}</td>;
+    case "dot_code":
+      return <td key={key} className={num}>{r.dot_code || r.dot_specification || "—"}</td>;
+    case "lease_type":
+      return <td key={key} className={text}>{r.lease_type ?? "—"}</td>;
+    case "lease_start_date":
+      return <td key={key} className={num}>{fmtDate(r.lease_start_date)}</td>;
+    case "lease_end_date":
+      return <td key={key} className={num}>{fmtDate(r.lease_end_date)}</td>;
+    case "lease_expiry":
+      return <td key={key} className={num}>{fmtDate(r.lease_expiry)}</td>;
+    case "data_source":
+      return <td key={key} className={text}>{r.data_source ?? "—"}</td>;
+    case "active":
+      return (
+        <td key={key} className="px-4 py-3">
+          {r.active === false ? (
+            <InactiveFleetBadge active={false} />
+          ) : (
+            <span className="text-muted-foreground text-xs">Active</span>
+          )}
+        </td>
+      );
+    case "rider_external_id":
+      return <td key={key} className={num}>{r.rider_external_id ?? "—"}</td>;
+    case "comment_event_note":
+      return (
+        <td key={key} className={`${text} max-w-[220px] truncate`} title={r.comment_event_note ?? ""}>
+          {r.comment_event_note ?? "—"}
+        </td>
+      );
+    default:
+      return <td key={key} className={text}>—</td>;
+  }
 }
 
 const STATUS_BADGE_MAP: Record<string, string> = {
@@ -328,9 +403,9 @@ export default function FleetRegistry() {
     { key: "oec",                 label: "OEC" },
     { key: "monthly_rent_per_car", label: "Monthly Rent P/C" },
     { key: "monthly_depr_per_car", label: "Monthly Depr P/C" },
+    { key: "build_year",          label: "Build Year" },
     { key: "capacity_cf",         label: "Capacity (cf)" },
     { key: "lining",              label: "Lining" },
-    { key: "build_year",          label: "Build Year" },
     { key: "description",         label: "Description" },
     { key: "mech_designation",    label: "Mech Desig." },
     { key: "commodity",           label: "Commodity" },
@@ -933,98 +1008,7 @@ export default function FleetRegistry() {
                       <td className="px-4 py-3 font-mono-num text-muted-foreground">
                         {fmtDate((r as any).lease_end_date ?? (r as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}
                       </td>
-                      {/* Optional columns */}
-                      {visibleCols.has("nbv") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap">
-                          {(r as any).nbv != null ? `$${Number((r as any).nbv).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("oac") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap">
-                          {(r as any).oac != null ? `$${Number((r as any).oac).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("oec") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap">
-                          {(r as any).oec != null ? `$${Number((r as any).oec).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("capacity_cf") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground">
-                          {(r as any).capacity_cf != null ? Number((r as any).capacity_cf).toLocaleString() : "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("lining") && (
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {(r as any).lining_material || (r as any).lining || (r as any).coating || "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("build_year") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground">
-                          {(r as any).build_year ?? "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("description") && (
-                        <td className="px-4 py-3 text-muted-foreground max-w-[180px] truncate">
-                          {(r as any).general_description || (r as any).description || "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("mech_designation") && (
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {(r as any).mechanical_designation || (r as any).mech_designation || "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("monthly_rent_per_car") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap">
-                          {(r as any).monthly_rent_per_car != null ? `$${Number((r as any).monthly_rent_per_car).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("monthly_depr_per_car") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap">
-                          {(r as any).monthly_depr_per_car != null ? `$${Number((r as any).monthly_depr_per_car).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : "—"}
-                        </td>
-                      )}
-                      {visibleCols.has("commodity") && (
-                        <td className="px-4 py-3 text-muted-foreground">{(r as any).commodity ?? "—"}</td>
-                      )}
-                      {visibleCols.has("commodity_family") && (
-                        <td className="px-4 py-3 text-muted-foreground">{(r as any).commodity_family ?? "—"}</td>
-                      )}
-                      {visibleCols.has("dot_code") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground">{(r as any).dot_code || (r as any).dot_specification || "—"}</td>
-                      )}
-                      {visibleCols.has("lease_type") && (
-                        <td className="px-4 py-3 text-muted-foreground">{(r as any).lease_type ?? "—"}</td>
-                      )}
-                      {visibleCols.has("lease_start_date") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground">{fmtDate((r as any).lease_start_date)}</td>
-                      )}
-                      {visibleCols.has("lease_end_date") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground">{fmtDate((r as any).lease_end_date)}</td>
-                      )}
-                      {visibleCols.has("lease_expiry") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground">{fmtDate((r as any).lease_expiry)}</td>
-                      )}
-                      {visibleCols.has("data_source") && (
-                        <td className="px-4 py-3 text-muted-foreground">{(r as any).data_source ?? "—"}</td>
-                      )}
-                      {visibleCols.has("active") && (
-                        <td className="px-4 py-3">
-                          {(r as any).active === false ? (
-                            <InactiveFleetBadge active={false} />
-                          ) : (
-                            <span className="text-muted-foreground text-xs">Active</span>
-                          )}
-                        </td>
-                      )}
-                      {visibleCols.has("rider_external_id") && (
-                        <td className="px-4 py-3 font-mono-num text-muted-foreground">{(r as any).rider_external_id ?? "—"}</td>
-                      )}
-                      {visibleCols.has("comment_event_note") && (
-                        <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={(r as any).comment_event_note ?? ""}>
-                          {(r as any).comment_event_note ?? "—"}
-                        </td>
-                      )}
+                      {OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => renderOptTd(c.key, r))}
                       <td className="px-4 py-3 text-muted-foreground">
                         <ChevronRight className="h-4 w-4" />
                       </td>
@@ -1391,7 +1375,7 @@ function CarDetail({
         <DetailRow label="Capacity (cf)" value={r.capacity_cf ?? "—"} />
         <DetailRow label="Tare (lbs)" value={r.tare_weight_lbs ?? "—"} />
         <DetailRow label="Load Limit" value={r.load_limit_lbs ?? "—"} />
-        <DetailRow label="Built" value={r.built_year ?? "—"} />
+        <DetailRow label="Build Year" value={carBuildYear(r) ?? "—"} />
         <DetailRow label="Lining" value={(r as any).lining_material || (r as any).coating || "—"} />
         <DetailRow label="Lease Type" value={(r as any).lease_type ?? "—"} />
         <DetailRow label="Managed By" value={(r as any).managed ?? "—"} />
@@ -1406,7 +1390,6 @@ function CarDetail({
         <DetailRow label="Cars on Rider (AR)" value={(r as any).cars_on_rider_ar ?? "—"} />
         <DetailRow label="Commodity Family" value={(r as any).commodity_family ?? "—"} />
         <DetailRow label="Commodity" value={(r as any).commodity ?? "—"} />
-        <DetailRow label="Build Year" value={(r as any).build_year ?? r.built_year ?? "—"} />
         <DetailRow label="DOT Code" value={(r as any).dot_code ?? r.dot_specification ?? "—"} />
         <DetailRow label="Data Source" value={(r as any).data_source ?? "—"} />
         <DetailRow label="Active" value={(r as any).active_status ?? ((r as any).active === false ? "Inactive" : (r as any).active === true ? "Active" : "—")} />

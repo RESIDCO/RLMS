@@ -34,7 +34,7 @@ import {
   CheckCircle2, AlertCircle, Car, Users, Search, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit } from "@/lib/AuthContext";
 import type { RailcarWithAssignment } from "@shared/schema";
@@ -78,7 +78,7 @@ type RiderForm = {
   existing_car_ids: number[];
 };
 
-const ENTITY_OPTIONS = ["Main", "Rail Partners Select"];
+const ENTITY_OPTIONS = ["Main", "Rail Partners Select", "Coal"];
 const STATUS_OPTIONS = ["Active/In-Service", "Storage", "Bad Order", "Off-Lease", "Retired", "Scrapped"];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -115,12 +115,14 @@ function blankCar(): NewCar {
 }
 
 const ENTITY_BADGE: Record<string, string> = {
-  "Rail Partners Select": "bg-violet-500/15 text-violet-300 border-violet-500/30",
-  "Main":                 "bg-sky-500/15 text-sky-300 border-sky-500/30",
+  "Rail Partners Select": "bg-umler-steel/15 text-umler-steel border-umler-steel/30",
+  "Main":                 "bg-umler-teal/15 text-umler-teal border-umler-teal/30",
+  "Coal":                 "bg-umler-faint/15 text-umler-faint border-umler-faint/30",
 };
 const ENTITY_LABEL: Record<string, string> = {
   "Rail Partners Select": "RPS",
-  "Main": "Owned",
+  "Main": "MAIN",
+  "Coal": "COAL",
 };
 
 function EntityBadge({ entity }: { entity: string }) {
@@ -185,8 +187,10 @@ function ExistingCarPicker({
   }, [open]);
 
   const { data: allCars, isLoading } = useQuery<RailcarWithAssignment[]>({
-    queryKey: ["/api/railcars"],
+    queryKey: ["/api/railcars", { all: "1", assigned: "unassigned" }],
+    queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1", assigned: "unassigned" })),
     enabled: open,
+    staleTime: 45_000,
   });
 
   // Only show unassigned cars
@@ -240,8 +244,8 @@ function ExistingCarPicker({
               <thead className="bg-muted/40 text-muted-foreground sticky top-0">
                 <tr>
                   <th className="w-10 pl-4 py-2" />
-                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Car #</th>
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Marks</th>
+                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Car #</th>
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Type</th>
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Entity</th>
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Status</th>
@@ -257,8 +261,8 @@ function ExistingCarPicker({
                     <td className="pl-4 py-2.5">
                       <Checkbox checked={selected.has(c.id)} onCheckedChange={() => toggle(c.id)} />
                     </td>
-                    <td className="px-3 py-2.5 font-mono font-semibold">{c.car_number}</td>
                     <td className="px-3 py-2.5 font-mono text-muted-foreground text-xs">{c.reporting_marks ?? "—"}</td>
+                    <td className="px-3 py-2.5 font-mono font-semibold">{c.car_number}</td>
                     <td className="px-3 py-2.5 text-muted-foreground">{c.car_type ?? "—"}</td>
                     <td className="px-3 py-2.5"><EntityBadge entity={(c as any).entity ?? "Main"} /></td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{c.status ?? "—"}</td>
@@ -291,21 +295,21 @@ function NewCarRow({ car, onChange, onRemove }: {
   return (
     <div className="grid grid-cols-12 gap-2 items-start border border-border/60 rounded-lg p-3 bg-muted/10">
       <div className="col-span-2">
-        <Label className="text-[10px] text-muted-foreground mb-1 block">Car Number <span className="text-destructive">*</span></Label>
-        <Input
-          className="h-8 text-xs font-mono"
-          placeholder="123456"
-          value={car.car_number}
-          onChange={(e) => onChange({ ...car, car_number: e.target.value.toUpperCase() })}
-        />
-      </div>
-      <div className="col-span-2">
         <Label className="text-[10px] text-muted-foreground mb-1 block">Reporting Marks</Label>
         <Input
           className="h-8 text-xs font-mono"
           placeholder="OFOX"
           value={car.reporting_marks}
           onChange={(e) => onChange({ ...car, reporting_marks: e.target.value.toUpperCase() })}
+        />
+      </div>
+      <div className="col-span-2">
+        <Label className="text-[10px] text-muted-foreground mb-1 block">Car Number <span className="text-destructive">*</span></Label>
+        <Input
+          className="h-8 text-xs font-mono"
+          placeholder="123456"
+          value={car.car_number}
+          onChange={(e) => onChange({ ...car, car_number: e.target.value.toUpperCase() })}
         />
       </div>
       <div className="col-span-2">
@@ -444,7 +448,11 @@ export default function LeaseWizard() {
   const [bulkPasteOpen, setBulkPasteOpen] = useState(false);
 
   // Derived
-  const { data: allCars } = useQuery<RailcarWithAssignment[]>({ queryKey: ["/api/railcars"] });
+  const { data: allCars } = useQuery<RailcarWithAssignment[]>({
+    queryKey: ["/api/railcars", { all: "1" }],
+    queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1" })),
+    staleTime: 45_000,
+  });
   const carById = new Map((allCars ?? []).map((c) => [c.id, c]));
 
   const activeRider = riders[activeRiderIdx];
@@ -779,7 +787,7 @@ export default function LeaseWizard() {
                       const c = carById.get(id);
                       return (
                         <div key={id} className="flex items-center gap-1.5 bg-muted rounded-full px-3 py-1 text-xs">
-                          <span className="font-mono font-semibold">{c?.car_number ?? id}</span>
+                          <span className="font-mono font-semibold">{c ? [c.reporting_marks, c.car_number].filter(Boolean).join(" ") : id}</span>
                           {c && <EntityBadge entity={(c as any).entity ?? "Main"} />}
                           <button
                             className="text-muted-foreground hover:text-destructive ml-1"
@@ -869,7 +877,7 @@ export default function LeaseWizard() {
                     <h2 className="text-sm font-semibold">{r.rider_name}</h2>
                     {r.schedule_number && <span className="text-xs text-muted-foreground">Sch {r.schedule_number}</span>}
                     {r.sold_to?.trim() && (
-                      <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-400 border-amber-500/30">
+                      <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30">
                         SOLD → {r.sold_to}
                       </span>
                     )}
@@ -921,14 +929,14 @@ export default function LeaseWizard() {
                         const c = carById.get(id);
                         return (
                           <span key={id} className="flex items-center gap-1 bg-muted rounded-full px-2.5 py-0.5 text-xs font-mono">
-                            {c?.car_number ?? id}
+                            {c ? [c.reporting_marks, c.car_number].filter(Boolean).join(" ") : id}
                             {c && <EntityBadge entity={(c as any).entity ?? "Main"} />}
                           </span>
                         );
                       })}
                       {r.new_cars.map((c) => (
                         <span key={c._key} className="flex items-center gap-1 bg-primary/10 border border-primary/20 rounded-full px-2.5 py-0.5 text-xs font-mono">
-                          {c.car_number || "—"}
+                          {[c.reporting_marks, c.car_number].filter(Boolean).join(" ") || "—"}
                           <EntityBadge entity={c.entity} />
                           <span className="text-[9px] text-primary ml-0.5">NEW</span>
                         </span>

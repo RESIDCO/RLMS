@@ -42,7 +42,7 @@ export function SoldFleetBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border border-amber-500/35 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-400",
+        "inline-flex items-center rounded-full border border-umler-amber/35 bg-umler-amber/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-umler-amber",
         className
       )}
       data-testid="badge-sold-fleet"
@@ -65,7 +65,7 @@ export function IdleFleetBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border border-sky-500/35 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-sky-400",
+        "inline-flex items-center rounded-full border border-umler-steel/35 bg-umler-steel/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-umler-steel",
         className
       )}
       data-testid="badge-idle-fleet"

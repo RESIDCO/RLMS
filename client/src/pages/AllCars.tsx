@@ -2,8 +2,9 @@
  * All Railcars — comprehensive view of every car in the registry.
  * Supports filtering, sorting, and a column visibility picker for optional fields.
  */
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { apiGet, railcarsQs } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
 import { InactiveFleetBadge, SoldFleetBadge, IdleFleetBadge } from "@/components/InactiveFleetBadge";
 import { Input } from "@/components/ui/input";
@@ -36,23 +37,24 @@ import { Search, ArrowUpDown, ChevronRight, Layers, Columns3 } from "lucide-reac
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { cn } from "@/lib/utils";
 import type { RailcarWithAssignment } from "@shared/schema";
+import { displayLeaseNumber } from "@shared/residco-import";
 
 type Row = RailcarWithAssignment;
 
 // ── Shared constants ──────────────────────────────────────────────────────────
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
-  "Rail Partners Select": { label: "RPS",   cls: "bg-violet-500/15 text-violet-300 border-violet-500/30 font-semibold" },
-  "Main":                 { label: "OWNED", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30 font-semibold" },
-  "Coal":                 { label: "COAL",  cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30 font-semibold" },
+  "Rail Partners Select": { label: "RPS",   cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30 font-semibold" },
+  "Main":                 { label: "MAIN", cls: "bg-umler-teal/15 text-umler-teal border-umler-teal/30 font-semibold" },
+  "Coal":                 { label: "COAL",  cls: "bg-umler-faint/15 text-umler-faint border-umler-faint/30 font-semibold" },
 };
 
 const STATUS_BADGE: Record<string, string> = {
-  "Active/In-Service": "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
-  "Storage":           "bg-amber-500/15 text-amber-400 border-amber-500/25",
-  "Bad Order":         "bg-red-500/15 text-red-400 border-red-500/25",
-  "Off-Lease":         "bg-sky-500/15 text-sky-400 border-sky-500/25",
-  "Retired":           "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  "Scrapped":          "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
+  "Active/In-Service": "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
+  "Storage":           "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
+  "Bad Order":         "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
+  "Off-Lease":         "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  "Retired":           "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+  "Scrapped":          "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
 };
 
 const STATUS_OPTIONS = [
@@ -73,7 +75,7 @@ function StatusBadge({ status }: { status: string | null | undefined }) {
   if (!status) return <span className="text-muted-foreground">—</span>;
   const cls = STATUS_BADGE[status] ?? "bg-muted text-muted-foreground border-border";
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider", cls)}>
+    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider whitespace-nowrap", cls)}>
       {status}
     </span>
   );
@@ -110,8 +112,8 @@ interface ColDef {
 const ALL_COLS: ColDef[] = [
   // ── Always visible ──
   { key: "entity",          label: "Entity",       optional: false, defaultOn: true,  sortKey: "entity" },
-  { key: "car_number",      label: "Car #",        optional: false, defaultOn: true,  sortKey: "car_number", className: "font-mono font-semibold text-foreground whitespace-nowrap" },
   { key: "reporting_marks", label: "Marks",        optional: false, defaultOn: true,  className: "font-mono text-muted-foreground text-xs" },
+  { key: "car_number",      label: "Car #",        optional: false, defaultOn: true,  sortKey: "car_number", className: "font-mono font-semibold text-foreground whitespace-nowrap" },
   { key: "car_type",        label: "Type",         optional: false, defaultOn: true,  sortKey: "car_type", className: "text-muted-foreground" },
   { key: "status",          label: "Status",       optional: false, defaultOn: true,  sortKey: "status" },
   { key: "fleet",           label: "Lessee",       optional: false, defaultOn: true,  sortKey: "fleet" },
@@ -202,7 +204,7 @@ function CellValue({ col, r }: { col: ColDef; r: Row }) {
         <div className="flex flex-col gap-1">
           <StatusBadge status={r.status} />
           {ra.sold_to && (
-            <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-400 border-amber-500/30 w-fit">SOLD</span>
+            <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30 w-fit">SOLD</span>
           )}
         </div>
       );
@@ -210,7 +212,7 @@ function CellValue({ col, r }: { col: ColDef; r: Row }) {
     case "managed":     return <>{ra.managed ?? "—"}</>;
     case "fleet":       return <>{r.assignment?.fleet_name ?? <span className="text-muted-foreground italic text-xs">Unassigned</span>}</>;
     case "rider":       return <>{r.assignment?.rider?.rider_name ?? "—"}</>;
-    case "lease":       return <>{r.assignment?.rider?.master_lease?.lease_number ?? "—"}</>;
+    case "lease":       return <>{displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}</>;
     case "expiration":  return <>{fmtDate((ra as any).lease_end_date ?? (ra as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}</>;
     case "build_year":  return <>{ra.build_year ?? "—"}</>;
     case "capacity_cf": return <>{ra.capacity_cf != null ? Number(ra.capacity_cf).toLocaleString() : "—"}</>;
@@ -281,8 +283,8 @@ function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }
 
         <div className="mt-6 space-y-0">
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 mt-4">Identity</p>
-          <DetailRow label="Car Number"        value={<span className="font-mono">{car.car_number}</span>} />
           <DetailRow label="Reporting Marks"   value={<span className="font-mono">{car.reporting_marks}</span>} />
+          <DetailRow label="Car Number"        value={<span className="font-mono">{car.car_number}</span>} />
           <DetailRow label="Car Initial"       value={<span className="font-mono">{r.car_initial}</span>} />
           <DetailRow label="Car Type"          value={car.car_type} />
           <DetailRow label="Mech. Designation" value={r.mechanical_designation} />
@@ -305,7 +307,7 @@ function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 mt-4">Assignment</p>
           <DetailRow label="Lessee"   value={car.assignment?.fleet_name} />
           <DetailRow label="Rider"    value={car.assignment?.rider?.rider_name} />
-          <DetailRow label="Lease"    value={car.assignment?.rider?.master_lease?.lease_number} />
+          <DetailRow label="Lease"    value={displayLeaseNumber(car.assignment?.rider?.master_lease?.lease_number) || "—"} />
           <DetailRow label="Expires"  value={fmtDate(car.assignment?.rider?.expiration_date)} />
 
           {previouslyKnownAs && (
@@ -394,38 +396,36 @@ export default function AllCars() {
   // Columns to actually render, in order
   const activeCols = ALL_COLS.filter((c) => !c.optional || visibleOptional.has(c.key));
 
-  const { data: railcars, isLoading } = useQuery<Row[]>({ queryKey: ["/api/railcars"] });
+  const [page, setPage] = useState(1);
+  const pageSize = 75;
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, entityFilter, statusFilter, fleetActiveFilter, assignFilter]);
+
+  const listParams = {
+    page,
+    pageSize,
+    search: debouncedSearch || undefined,
+    status: statusFilter,
+    entity: entityFilter,
+    active: fleetActiveFilter,
+    assigned: assignFilter,
+  };
+  type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
+  const { data: pageData, isLoading } = useQuery<RailcarPage>({
+    queryKey: ["/api/railcars", listParams],
+    queryFn: () => apiGet<RailcarPage>(railcarsQs(listParams)),
+    staleTime: 45_000,
+    placeholderData: keepPreviousData,
+  });
+  const railcars = pageData?.rows ?? [];
+  const totalCount = pageData?.total_count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const filtered = useMemo(() => {
-    let rows = railcars ?? [];
-
-    if (fleetActiveFilter === "active") rows = rows.filter((r) => (r as any).active !== false);
-    if (fleetActiveFilter === "inactive") rows = rows.filter((r) => (r as any).active === false);
-
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      rows = rows.filter((r) => {
-        const combined = `${(r.reporting_marks ?? "").toLowerCase()}${r.car_number.toLowerCase()}`;
-        return combined.includes(q) ||
-        r.car_number.toLowerCase().includes(q) ||
-        r.reporting_marks?.toLowerCase().includes(q) ||
-        (r as any).car_initial?.toLowerCase().includes(q) ||
-        r.car_type?.toLowerCase().includes(q) ||
-        (r as any).mechanical_designation?.toLowerCase().includes(q) ||
-        (r as any).general_description?.toLowerCase().includes(q) ||
-        (r as any).entity?.toLowerCase().includes(q) ||
-        (r as any).managed?.toLowerCase().includes(q) ||
-        (r as any).lining_material?.toLowerCase().includes(q) ||
-        r.assignment?.fleet_name?.toLowerCase().includes(q) ||
-        r.assignment?.rider?.rider_name?.toLowerCase().includes(q) ||
-        r.assignment?.rider?.master_lease?.lease_number?.toLowerCase().includes(q);
-      });
-    }
-    if (entityFilter !== "all") rows = rows.filter((r) => (r as any).entity === entityFilter);
-    if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter);
-    if (assignFilter === "assigned")   rows = rows.filter((r) => !!r.assignment);
-    if (assignFilter === "unassigned") rows = rows.filter((r) => !r.assignment);
-
     const getKey = (r: Row): string => {
       switch (sort.key) {
         case "car_number":  return r.car_number;
@@ -434,17 +434,17 @@ export default function AllCars() {
         case "car_type":    return r.car_type ?? "";
         case "fleet":       return r.assignment?.fleet_name ?? "";
         case "rider":       return r.assignment?.rider?.rider_name ?? "";
-        case "lease":       return r.assignment?.rider?.master_lease?.lease_number ?? "";
+        case "lease":       return displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number);
         case "expiration":  return r.assignment?.rider?.expiration_date ?? "";
       }
     };
-    return [...rows].sort((a, b) => {
+    return [...railcars].sort((a, b) => {
       const av = getKey(a), bv = getKey(b);
       if (av < bv) return sort.dir === "asc" ? -1 : 1;
       if (av > bv) return sort.dir === "asc" ? 1 : -1;
       return 0;
     });
-  }, [railcars, search, entityFilter, statusFilter, assignFilter, fleetActiveFilter, sort]);
+  }, [railcars, sort]);
 
   const toggleSort = (key: SortKey) =>
     setSort((prev) => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -489,9 +489,9 @@ export default function AllCars() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All ownership</SelectItem>
-              <SelectItem value="Main">RESIDCO Owned</SelectItem>
-              <SelectItem value="Rail Partners Select">Rail Partners Select (RPS)</SelectItem>
-              <SelectItem value="Coal">Coal</SelectItem>
+              <SelectItem value="Main">MAIN</SelectItem>
+              <SelectItem value="Rail Partners Select">RPS</SelectItem>
+              <SelectItem value="Coal">COAL</SelectItem>
             </SelectContent>
           </Select>
 
@@ -623,6 +623,13 @@ export default function AllCars() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
+            <span>{totalCount.toLocaleString()} cars{totalCount > 0 ? ` · page ${page} of ${totalPages}` : ""}</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</Button>
+              <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, apiGet, railcarsQs } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,10 +82,10 @@ const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secon
 };
 
 const DOC_TYPE_COLORS: Record<string, string> = {
-  "SOW":               "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  "Car List":          "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  "Inspection Report": "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  "Photo":             "bg-green-500/10 text-green-400 border-green-500/20",
+  "SOW":               "bg-umler-steel/10 text-umler-steel border-umler-steel/20",
+  "Car List":          "bg-umler-teal/10 text-umler-teal border-umler-teal/20",
+  "Inspection Report": "bg-umler-amber/10 text-umler-amber border-umler-amber/20",
+  "Photo":             "bg-umler-faint/10 text-umler-faint border-umler-faint/20",
   "Other":             "bg-muted text-muted-foreground border-border",
 };
 
@@ -142,10 +142,6 @@ export default function ProgramsPage() {
       ? apiRequest("GET", `/api/programs/${selectedProgram.id}/cars`).then(r => r.json())
       : Promise.resolve([]),
     enabled: !!selectedProgram,
-  });
-
-  const { data: allCars = [] } = useQuery<Railcar[]>({
-    queryKey: ["/api/railcars"],
   });
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
@@ -313,7 +309,6 @@ export default function ProgramsPage() {
               program={freshSelected}
               docs={docs}
               linkedCars={linkedCars}
-              allCars={allCars}
               onDeleteDoc={(docId) => deleteDocMut.mutate({ programId: freshSelected.id, docId })}
               onUnlinkCar={(linkId) => unlinkCarMut.mutate({ programId: freshSelected.id, linkId })}
               onUploadDone={() => {
@@ -368,13 +363,12 @@ export default function ProgramsPage() {
 // ─── Program Detail Panel ────────────────────────────────────────────────────
 
 function ProgramDetail({
-  program, docs, linkedCars, allCars,
+  program, docs, linkedCars,
   onDeleteDoc, onUnlinkCar, onUploadDone, onCarLinked,
 }: {
   program: Program;
   docs: ProgramDoc[];
   linkedCars: ProgramCar[];
-  allCars: Railcar[];
   onDeleteDoc: (docId: number) => void;
   onUnlinkCar: (linkId: number) => void;
   onUploadDone: () => void;
@@ -468,8 +462,8 @@ function ProgramDetail({
               <Table className="min-w-[420px]">
                 <TableHeader>
                   <TableRow className="text-[11px]">
-                    <TableHead>Car #</TableHead>
                     <TableHead>Marks</TableHead>
+                    <TableHead>Car #</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead>Lessee</TableHead>
                     <TableHead>Entity</TableHead>
@@ -479,15 +473,15 @@ function ProgramDetail({
                 <TableBody>
                   {linkedCars.map(lc => (
                     <TableRow key={lc.id} className="text-xs" data-testid={`row-linked-car-${lc.id}`}>
-                      <TableCell className="font-mono">{lc.railcar.car_number}</TableCell>
                       <TableCell className="font-mono text-muted-foreground">{lc.railcar.reporting_marks || "—"}</TableCell>
+                      <TableCell className="font-mono">{lc.railcar.car_number}</TableCell>
                       <TableCell>{lc.railcar.car_type || "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{lc.railcar.fleet_name || "—"}</TableCell>
                       <TableCell>
                         {lc.railcar.entity === "Main"
-                          ? <Badge variant="outline" className="text-[10px] border-sky-500/40 text-sky-400">Owned</Badge>
+                          ? <Badge variant="outline" className="text-[10px] border-umler-teal/40 text-umler-teal">MAIN</Badge>
                           : lc.railcar.entity === "Rail Partners Select"
-                          ? <Badge variant="outline" className="text-[10px] border-violet-500/40 text-violet-400">RPS</Badge>
+                          ? <Badge variant="outline" className="text-[10px] border-umler-steel/40 text-umler-steel">RPS</Badge>
                           : <span className="text-muted-foreground">—</span>
                         }
                       </TableCell>
@@ -519,7 +513,6 @@ function ProgramDetail({
       <LinkCarsDialog
         open={linkCarsOpen}
         program={program}
-        allCars={allCars}
         linkedCars={linkedCars}
         onClose={() => setLinkCarsOpen(false)}
         onLinked={onCarLinked}
@@ -729,10 +722,9 @@ function UploadDocDialog({ open, program, onClose, onUploaded }: {
 
 // ─── Link Cars Dialog ─────────────────────────────────────────────────────────
 
-function LinkCarsDialog({ open, program, allCars, linkedCars, onClose, onLinked }: {
+function LinkCarsDialog({ open, program, linkedCars, onClose, onLinked }: {
   open: boolean;
   program: Program;
-  allCars: Railcar[];
   linkedCars: ProgramCar[];
   onClose: () => void;
   onLinked: () => void;
@@ -741,6 +733,12 @@ function LinkCarsDialog({ open, program, allCars, linkedCars, onClose, onLinked 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const { data: allCars = [], isLoading: carsLoading } = useQuery<Railcar[]>({
+    queryKey: ["/api/railcars", { all: "1" }],
+    queryFn: () => apiGet<Railcar[]>(railcarsQs({ all: "1" })),
+    enabled: open,
+    staleTime: 45_000,
+  });
 
   const linkedIds = new Set(linkedCars.map(lc => lc.railcar.id));
 
@@ -798,15 +796,15 @@ function LinkCarsDialog({ open, program, allCars, linkedCars, onClose, onLinked 
         <div className="flex-1 overflow-y-auto min-h-0">
           {filteredCars.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center italic p-6">
-              {allCars.length === 0 ? "No railcars in the fleet yet." : "All cars are already linked, or no matches."}
+              {carsLoading ? "Loading fleet…" : allCars.length === 0 ? "No railcars in the fleet yet." : "All cars are already linked, or no matches."}
             </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow className="text-[11px]">
                   <TableHead className="w-8"></TableHead>
-                  <TableHead>Car #</TableHead>
                   <TableHead>Marks</TableHead>
+                  <TableHead>Car #</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Lessee</TableHead>
                 </TableRow>
@@ -824,8 +822,8 @@ function LinkCarsDialog({ open, program, allCars, linkedCars, onClose, onLinked 
                         <input type="checkbox" checked={checked} onChange={() => toggle(c.id)}
                           className="h-3.5 w-3.5 accent-primary" onClick={e => e.stopPropagation()} />
                       </TableCell>
-                      <TableCell className="font-mono">{c.car_number}</TableCell>
                       <TableCell className="font-mono text-muted-foreground">{c.reporting_marks || "—"}</TableCell>
+                      <TableCell className="font-mono">{c.car_number}</TableCell>
                       <TableCell>{c.car_type || "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{c.fleet_name || "—"}</TableCell>
                     </TableRow>

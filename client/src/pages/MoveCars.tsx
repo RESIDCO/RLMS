@@ -18,8 +18,9 @@ import {
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { ArrowRight, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { displayLeaseNumber } from "@shared/residco-import";
 import type { RailcarWithAssignment } from "@shared/schema";
 
 function Step({
@@ -68,7 +69,10 @@ export default function MoveCars() {
 
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
   const { data: railcars, isLoading } = useQuery<RailcarWithAssignment[]>({
-    queryKey: ["/api/railcars"],
+    queryKey: ["/api/railcars", { all: "1", rider_id: fromRiderId }],
+    queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1", rider_id: fromRiderId })),
+    enabled: !!fromRiderId,
+    staleTime: 45_000,
   });
   const { data: history } = useQuery<any[]>({ queryKey: ["/api/history"] });
 
@@ -164,7 +168,7 @@ export default function MoveCars() {
                 {(riders ?? []).map((r: any) => (
                   <SelectItem key={r.id} value={String(r.id)}>
                     {r.rider_name} —{" "}
-                    {r.master_lease?.lease_number ?? "—"} · {r.car_count ?? 0} cars
+                    {displayLeaseNumber(r.master_lease?.lease_number) || "—"} · {r.car_count ?? 0} cars
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -217,7 +221,7 @@ export default function MoveCars() {
                       <thead className="text-muted-foreground bg-muted/30 sticky top-0">
                         <tr className="text-left">
                           <th className="w-10 px-3 py-2" />
-                          <th className="px-3 py-2 font-medium">Car Number</th>
+                          <th className="px-3 py-2 font-medium">Marks / Car Number</th>
                           <th className="px-3 py-2 font-medium">Lessee</th>
                           <th className="px-3 py-2 font-medium">Status</th>
                         </tr>
@@ -334,7 +338,7 @@ export default function MoveCars() {
                   </div>
                   <div className="font-medium truncate">{fromRider?.rider_name}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {fromRider?.master_lease?.lease_number}
+                    {displayLeaseNumber(fromRider?.master_lease?.lease_number)}
                   </div>
                 </div>
                 <ArrowRight className="h-4 w-4 text-primary shrink-0" />
@@ -344,7 +348,7 @@ export default function MoveCars() {
                   </div>
                   <div className="font-medium truncate">{toRiderMatch?.rider_name ?? toRiderLabel}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {toRiderMatch?.master_lease?.lease_number ?? (toRiderMatch ? "—" : "New OL (will create)")}
+                    {displayLeaseNumber(toRiderMatch?.master_lease?.lease_number) || (toRiderMatch ? "—" : "New OL (will create)")}
                   </div>
                 </div>
               </div>
@@ -443,7 +447,7 @@ export default function MoveCars() {
                       {new Date(h.moved_at).toLocaleString()}
                     </td>
                     <td className="px-4 py-2 font-mono-num">
-                      {h.railcar?.car_number ?? `#${h.railcar_id}`}
+                      {h.railcar ? [h.railcar.reporting_marks, h.railcar.car_number].filter(Boolean).join(" ") : `#${h.railcar_id}`}
                     </td>
                     <td className="px-4 py-2">
                       <span className="text-muted-foreground">

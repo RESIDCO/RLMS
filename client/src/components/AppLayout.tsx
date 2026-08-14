@@ -219,7 +219,7 @@ function ChangePasswordDialog({
 
         {success ? (
           <div className="space-y-4">
-            <div className="rounded-md bg-emerald-500/10 border border-emerald-500/30 px-3 py-3 text-sm text-emerald-400">
+            <div className="rounded-md bg-umler-teal/10 border border-umler-teal/30 px-3 py-3 text-sm text-umler-teal">
               Password updated successfully.
             </div>
             <Button className="w-full" onClick={handleClose}>

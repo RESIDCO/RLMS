@@ -218,18 +218,18 @@ export function deriveLeaseKey(lesseeName: string | null | undefined): string | 
 }
 
 /**
- * Synthesize a deterministic master-lease number from the lessee name. Used
- * when the workbook has no explicit lease number — matches what the live DB
- * post-repair settled on (one MLA per lessee, lease_number = "RES-<slug>").
+ * Synthesize a master-lease number from the lessee name when the workbook has
+ * none. Uses the lessee name as-is (no VCF-/RES- prefix) — the prefix was a
+ * load-time artifact, not a real agreement number.
  */
 export function synthesizeLeaseNumber(lesseeName: string): string {
-  const slug = String(lesseeName)
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return `RES-${slug || "UNKNOWN"}`;
+  const name = String(lesseeName).trim().toUpperCase();
+  return name || "UNKNOWN";
+}
+
+/** Strip the synthetic VCF- import prefix for display. Stored values are cleaned in a backfill. */
+export function displayLeaseNumber(n: string | null | undefined): string {
+  return String(n ?? "").replace(/^VCF-/i, "").trim();
 }
 
 /**

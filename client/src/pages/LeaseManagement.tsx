@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -25,6 +25,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useLocation } from "wouter";
 import {
   ChevronRight,
@@ -39,7 +46,6 @@ import {
   StickyNote,
   Wand2,
   Download,
-  AlertTriangle,
   Columns3,
 } from "lucide-react";
 import {
@@ -53,8 +59,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { cn } from "@/lib/utils";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { displayLeaseNumber } from "@shared/residco-import";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import type {
   MasterLeaseWithRiders,
@@ -74,7 +81,7 @@ function downloadLeasesCsv(leases: MasterLeaseWithRiders[]) {
   rows.push("=== MASTER LEASE AGREEMENTS ===");
   rows.push(toCsvRow(["Lease Number","Agreement Number","Lessor","Lessee","Type","Effective Date","Rider Count","Car Count","Notes"]));
   for (const l of leases) {
-    rows.push(toCsvRow([l.lease_number, l.agreement_number, l.lessor, l.lessee, l.lease_type, l.effective_date, l.riders.length, (l as any).car_count, l.notes]));
+    rows.push(toCsvRow([displayLeaseNumber(l.lease_number), l.agreement_number, l.lessor, l.lessee, l.lease_type, l.effective_date, l.riders.length, (l as any).car_count, l.notes]));
   }
 
   rows.push("");
@@ -107,13 +114,17 @@ function fmtDate(d: string | null | undefined) {
 function fmtPct(n: number | null) {
   return n == null ? "—" : `${Number(n).toFixed(3)}%`;
 }
-function fmtMoney(n: number | null) {
-  if (n == null) return "—";
-  return Number(n).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+function olCodesForLease(lease: MasterLeaseWithRiders): string[] {
+  return (lease.riders ?? [])
+    .map((r: any) => String(r.schedule_number || r.rider_name || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function formatOlSummary(codes: string[], max = 4): string {
+  if (codes.length === 0) return "";
+  if (codes.length <= max) return codes.join(", ");
+  return `${codes.slice(0, max).join(", ")} +${codes.length - max} more`;
 }
 
 export default function LeaseManagement() {
@@ -126,6 +137,7 @@ export default function LeaseManagement() {
   const [editLease, setEditLease] = useState<any | null>(null);
   const [addRiderFor, setAddRiderFor] = useState<number | null>(null);
   const [editRider, setEditRider] = useState<any | null>(null);
+  const [sortBy, setSortBy] = useState<"lessee" | "ol">("lessee");
   const { toast } = useToast();
 
   // Parse deep-link params
@@ -145,6 +157,28 @@ export default function LeaseManagement() {
   const { data: leases, isLoading } = useQuery<MasterLeaseWithRiders[]>({
     queryKey: ["/api/leases"],
   });
+
+  const sortedLeases = useMemo(() => {
+    const list = [...(leases ?? [])];
+    if (sortBy === "ol") {
+      list.sort((a, b) => {
+        const ao = olCodesForLease(a)[0] ?? "\uffff";
+        const bo = olCodesForLease(b)[0] ?? "\uffff";
+        const cmp = ao.localeCompare(bo, undefined, { numeric: true, sensitivity: "base" });
+        if (cmp !== 0) return cmp;
+        return (a.lessee ?? a.lease_number).localeCompare(b.lessee ?? b.lease_number, undefined, { sensitivity: "base" });
+      });
+    } else {
+      list.sort((a, b) =>
+        (a.lessee ?? displayLeaseNumber(a.lease_number) ?? "").localeCompare(
+          b.lessee ?? displayLeaseNumber(b.lease_number) ?? "",
+          undefined,
+          { sensitivity: "base" }
+        )
+      );
+    }
+    return list;
+  }, [leases, sortBy]);
 
   // Auto-expand: deep-link rider > ?filter=riders (all) > default first lease
   useEffect(() => {
@@ -245,6 +279,15 @@ export default function LeaseManagement() {
         subtitle="Master lease agreements, rider schedules, and assigned cars"
         actions={
           <div className="flex gap-2">
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as "lessee" | "ol")}>
+              <SelectTrigger className="h-8 w-[170px]" data-testid="sort-leases">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lessee">Lessee name</SelectItem>
+                <SelectItem value="ol">OL / Rider number</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               size="sm"
               variant="outline"
@@ -282,13 +325,13 @@ export default function LeaseManagement() {
 
       {filterExpiring && (
         <div className="mx-4 sm:mx-8 mt-1 px-4 py-2.5 rounded-lg border border-warning/30 bg-warning/5 text-sm text-warning flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="h-2 w-2 rounded-full bg-umler-amber shrink-0" />
           Showing riders expiring within 12 months, sorted by closest expiration date
         </div>
       )}
       {filterExpiring6 && (
         <div className="mx-4 sm:mx-8 mt-1 px-4 py-2.5 rounded-lg border border-[hsl(var(--error))]/30 bg-[hsl(var(--error))]/5 text-sm text-[hsl(var(--error))] flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="h-2 w-2 rounded-full bg-umler-signal shrink-0" />
           Showing riders expiring within 6 months, sorted by closest expiration date
         </div>
       )}
@@ -299,8 +342,10 @@ export default function LeaseManagement() {
             <Skeleton key={i} className="h-24 rounded-lg" />
           ))
         ) : (
-          leases?.map((lease) => {
+          sortedLeases.map((lease) => {
             const open = expandedLeases.has(lease.id);
+            const ols = olCodesForLease(lease);
+            const olLine = formatOlSummary(ols);
             return (
               <div
                 key={lease.id}
@@ -320,13 +365,13 @@ export default function LeaseManagement() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-3">
                       <span className="font-mono-num text-base font-semibold">
-                        {lease.lease_number}
+                        {displayLeaseNumber(lease.lease_number)}
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {lease.agreement_number ?? "—"}
                       </span>
                       {(lease as any).sold_to && (
-                        <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded border bg-amber-500/15 text-amber-400 border-amber-500/30">
+                        <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30">
                           SOLD
                         </span>
                       )}
@@ -335,6 +380,12 @@ export default function LeaseManagement() {
                       {lease.lessor ?? "—"} <span className="opacity-50">lessor</span>
                       <span className="mx-2 opacity-30">·</span>
                       {lease.lessee ?? "—"} <span className="opacity-50">lessee</span>
+                      {olLine && (
+                        <>
+                          <span className="mx-2 opacity-30">·</span>
+                          <span className="font-mono-num text-foreground/80">{olLine}</span>
+                        </>
+                      )}
                       {(lease as any).sold_to && (
                         <span className="ml-2 text-amber-400">→ {(lease as any).sold_to}</span>
                       )}
@@ -437,7 +488,7 @@ export default function LeaseManagement() {
                                     {rider.schedule_number ?? "—"}
                                   </span>
                                   {(rider as any).sold_to && (
-                                    <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-400 border-amber-500/30">
+                                    <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30">
                                       SOLD
                                     </span>
                                   )}
@@ -558,7 +609,9 @@ const RC_OPT_COLS: { key: RCOptCol; label: string }[] = [
 
 function RiderCars({ riderId }: { riderId: number }) {
   const { data: cars, isLoading } = useQuery<RailcarWithAssignment[]>({
-    queryKey: ["/api/railcars"],
+    queryKey: ["/api/railcars", { all: "1", rider_id: riderId }],
+    queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1", rider_id: riderId })),
+    staleTime: 45_000,
   });
   const [page, setPage] = useState(0);
   const pageSize = 25;
@@ -619,6 +672,7 @@ function RiderCars({ riderId }: { riderId: number }) {
             <table className="w-full text-xs">
               <thead className="text-muted-foreground">
                 <tr>
+                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Marks</th>
                   <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Car Number</th>
                   <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Lessee</th>
                   <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Status</th>
@@ -630,6 +684,7 @@ function RiderCars({ riderId }: { riderId: number }) {
               <tbody>
                 {slice.map((c) => (
                   <tr key={c.id} className="border-t border-border">
+                    <td className="px-3 py-1.5 font-mono-num text-muted-foreground">{(c as any).reporting_marks ?? "—"}</td>
                     <td className="px-3 py-1.5 font-mono-num">{c.car_number}</td>
                     <td className="px-3 py-1.5">{c.assignment?.fleet_name ?? "—"}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">{c.status ?? "—"}</td>

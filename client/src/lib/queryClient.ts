@@ -15,6 +15,21 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+export async function apiGet<T>(url: string): Promise<T> {
+  const res = await apiRequest("GET", url);
+  return res.json();
+}
+
+export function railcarsQs(params: Record<string, string | number | undefined | null>): string {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v == null || v === "") continue;
+    sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  return qs ? `/api/railcars?${qs}` : "/api/railcars";
+}
+
 export async function apiRequest(
   method: string,
   url: string,
@@ -61,7 +76,7 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: Infinity,
+      staleTime: 45_000,
       retry: false,
     },
     mutations: {

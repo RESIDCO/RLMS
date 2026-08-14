@@ -180,9 +180,9 @@ eq(deriveLeaseKey(null), null, "lease key null");
 eq(deriveLeaseKey(undefined), null, "lease key undefined");
 
 // --- synthesizeLeaseNumber ---------------------------------------------------
-eq(synthesizeLeaseNumber("Trinity Industries"), "RES-TRINITY-INDUSTRIES", "lease number slugify");
-eq(synthesizeLeaseNumber("IDLE (xAxiall)"), "RES-IDLE-XAXIALL", "lease number strips parens");
-eq(synthesizeLeaseNumber("ACME, Inc."), "RES-ACME-INC", "lease number strips comma+period");
+eq(synthesizeLeaseNumber("Trinity Industries"), "TRINITY INDUSTRIES", "lease number is lessee as-is");
+eq(synthesizeLeaseNumber("Agrex, Inc."), "AGREX, INC.", "lease number keeps punctuation");
+eq(synthesizeLeaseNumber("  ace ethanol  "), "ACE ETHANOL", "lease number trims + uppercases");
 // Same lessee should always produce the same lease_number — i.e. import is idempotent
 eq(
   synthesizeLeaseNumber("Trinity Industries") === synthesizeLeaseNumber("trinity industries"),

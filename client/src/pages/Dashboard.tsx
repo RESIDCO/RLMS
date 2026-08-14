@@ -122,6 +122,7 @@ function monthsUntil(date: string | null) {
 
 function expiryTone(months: number) {
   if (!isFinite(months)) return { label: "—", cls: "text-muted-foreground", dot: "bg-muted-foreground" };
+  if (months < 0)  return { label: `${Math.abs(months).toFixed(0)}mo overdue`, cls: "text-[hsl(var(--error))]",   dot: "bg-[hsl(var(--error))]" };
   if (months < 6)  return { label: `${months.toFixed(1)}mo`, cls: "text-[hsl(var(--error))]",   dot: "bg-[hsl(var(--error))]" };
   if (months < 12) return { label: `${months.toFixed(1)}mo`, cls: "text-[hsl(var(--warning))]", dot: "bg-[hsl(var(--warning))]" };
   return              { label: `${months.toFixed(1)}mo`, cls: "text-[hsl(var(--success))]", dot: "bg-[hsl(var(--success))]" };
@@ -134,9 +135,9 @@ function formatDate(d: string | null) {
 
 // Entity badge (matches Fleet Registry)
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
-  "Rail Partners Select": { label: "RPS",   cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
-  "Main":                 { label: "OWNED", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
-  "Coal":                 { label: "COAL",  cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30" },
+  "Rail Partners Select": { label: "RPS",   cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30" },
+  "Main":                 { label: "MAIN", cls: "bg-umler-teal/15 text-umler-teal border-umler-teal/30" },
+  "Coal":                 { label: "COAL",  cls: "bg-umler-faint/15 text-umler-faint border-umler-faint/30" },
 };
 function EntityBadge({ entity }: { entity: string | null | undefined }) {
   if (!entity) return null;
@@ -149,18 +150,18 @@ function EntityBadge({ entity }: { entity: string | null | undefined }) {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  "Active/In-Service": "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
-  "Storage":           "bg-amber-500/15 text-amber-400 border-amber-500/25",
-  "Bad Order":         "bg-red-500/15 text-red-400 border-red-500/25",
-  "Off-Lease":         "bg-sky-500/15 text-sky-400 border-sky-500/25",
-  "Retired":           "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  "Scrapped":          "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
+  "Active/In-Service": "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
+  "Storage":           "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
+  "Bad Order":         "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
+  "Off-Lease":         "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  "Retired":           "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+  "Scrapped":          "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
 };
 function StatusPill({ status }: { status: string | null }) {
   if (!status) return <span className="text-muted-foreground text-xs">—</span>;
   const cls = STATUS_BADGE[status] ?? "bg-muted text-muted-foreground border-border";
   return (
-    <span className={cn("text-[9px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-full border", cls)}>
+    <span className={cn("text-[9px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-full border whitespace-nowrap", cls)}>
       {status}
     </span>
   );
@@ -184,9 +185,9 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
   // Download fleet car list as CSV
   const downloadCsv = () => {
     const rows = [
-      ["car_number", "reporting_marks", "car_type", "status", "entity", "lessee_name", "rider", "lease", "lessee"],
+      ["reporting_marks", "car_number", "car_type", "status", "entity", "lessee_name", "rider", "lease", "lessee"],
       ...cars.map(c => [
-        c.car_number, c.reporting_marks ?? "", c.car_type ?? "", c.status ?? "", c.entity ?? "",
+        c.reporting_marks ?? "", c.car_number, c.car_type ?? "", c.status ?? "", c.entity ?? "",
         fleet.fleet_name, fleet.rider_name ?? "", fleet.lease_number ?? "", fleet.lessee ?? "",
       ]),
     ];
@@ -253,8 +254,8 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
             <table className="w-full text-xs">
               <thead className="bg-muted/30 text-muted-foreground sticky top-0">
                 <tr>
-                  <th className="px-4 py-2 text-left font-medium">Car #</th>
                   <th className="px-4 py-2 text-left font-medium">Marks</th>
+                  <th className="px-4 py-2 text-left font-medium">Car #</th>
                   <th className="px-4 py-2 text-left font-medium">Type</th>
                   <th className="px-4 py-2 text-left font-medium">Entity</th>
                   <th className="px-4 py-2 text-left font-medium">Status</th>
@@ -263,8 +264,8 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
               <tbody>
                 {cars.map((c) => (
                   <tr key={c.id} className="border-t border-border/40 hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
                     <td className="px-4 py-2.5 text-muted-foreground font-mono">{c.reporting_marks ?? "—"}</td>
+                    <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{c.car_type ?? "—"}</td>
                     <td className="px-4 py-2.5"><EntityBadge entity={c.entity} /></td>
                     <td className="px-4 py-2.5"><StatusPill status={c.status} /></td>
@@ -363,8 +364,8 @@ function DrillDownDrawer({
                 <table className="w-full text-xs">
                   <thead className="bg-muted/30 text-muted-foreground sticky top-0">
                     <tr>
-                      <th className="px-4 py-2 text-left font-medium">Car #</th>
                       <th className="px-4 py-2 text-left font-medium">Marks</th>
+                      <th className="px-4 py-2 text-left font-medium">Car #</th>
                       <th className="px-4 py-2 text-left font-medium">Entity</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-left font-medium">Lessee / Rider</th>
@@ -373,8 +374,8 @@ function DrillDownDrawer({
                   <tbody>
                     {cars.map((c) => (
                       <tr key={c.id} className="border-t border-border/40 hover:bg-muted/20">
-                        <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
                         <td className="px-4 py-2.5 text-muted-foreground font-mono">{c.reporting_marks ?? "—"}</td>
+                        <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
                         <td className="px-4 py-2.5"><EntityBadge entity={c.entity} /></td>
                         <td className="px-4 py-2.5"><StatusPill status={c.status} /></td>
                         <td className="px-4 py-2.5">
@@ -445,14 +446,17 @@ function KpiCard({
   testId,
   onClick,
   subtext,
+  marker = "icon",
 }: {
   label: string;
   value: number | string;
-  icon: any;
+  icon?: any;
   accent?: keyof typeof kpiAccent;
   testId: string;
   onClick?: () => void;
   subtext?: string;
+  /** Timeline-style colored dot for normal metrics; keep icon for true alerts / no-data. */
+  marker?: "icon" | "dot";
 }) {
   const tone = kpiAccent[accent];
   return (
@@ -470,7 +474,11 @@ function KpiCard({
           {label}
         </span>
         <div className="flex items-center gap-1.5">
-          <Icon className={cn("h-4 w-4", tone.icon)} />
+          {marker === "dot" ? (
+            <span className={cn("h-2 w-2 rounded-full shrink-0", tone.bar)} />
+          ) : Icon ? (
+            <Icon className={cn("h-4 w-4", tone.icon)} />
+          ) : null}
           {onClick && (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
           )}
@@ -512,8 +520,8 @@ function UtilRing({ pct }: { pct: number }) {
 export default function Dashboard() {
   const { data, isLoading } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 45_000,
+    refetchOnMount: true,
   });
 
   const [drillKey, setDrillKey] = useState<DrillKey>(null);
@@ -603,21 +611,22 @@ export default function Dashboard() {
                 subtext="No rent-event source yet"
                 icon={AlertTriangle}
                 accent="muted"
+                marker="icon"
               />
               <KpiCard
                 testId="kpi-expiring6"
                 label="Expiring <6mo"
                 value={data.kpis.expiring_6mo}
-                icon={AlertTriangle}
                 accent="error"
+                marker="dot"
                 onClick={() => navigate("/leases?filter=expiring6")}
               />
               <KpiCard
                 testId="kpi-expiring"
                 label="Expiring <12mo"
                 value={data.kpis.expiring_12mo}
-                icon={AlertTriangle}
                 accent="warning"
+                marker="dot"
                 onClick={() => navigate("/leases?filter=expiring")}
               />
               <KpiCard
@@ -636,20 +645,20 @@ export default function Dashboard() {
           <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-3.5 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Fleet Utilization by Entity</h2>
-              <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">RPS vs Owned</span>
+              <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">RPS vs MAIN</span>
             </header>
             <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* RPS */}
-              <div className="rounded-md border border-violet-500/20 bg-violet-500/5 p-4">
+              {/* RPS — muted steel (UMLER chart-1 / underline tone) */}
+              <div className="rounded-md border border-umler-steel/25 bg-umler-steel/5 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-violet-500/15 text-violet-300 border-violet-500/30">RPS</span>
+                    <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-steel/15 text-umler-steel border-umler-steel/30">RPS</span>
                     <span className="text-xs text-muted-foreground ml-2">Rail Partners Select</span>
                   </div>
-                  <span className="text-xl font-semibold tabular-nums font-mono-num text-violet-300">{data.kpis.rps_util_pct}%</span>
+                  <span className="text-xl font-semibold tabular-nums font-mono-num text-umler-steel">{data.kpis.rps_util_pct}%</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-2">
-                  <div className="h-full bg-violet-500 transition-all" style={{ width: `${data.kpis.rps_util_pct}%` }} />
+                  <div className="h-full bg-umler-steel transition-all" style={{ width: `${data.kpis.rps_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
                   <Link href="/fleet?entity=RPS&filter=leased" className="hover:text-foreground hover:underline">
@@ -661,17 +670,17 @@ export default function Dashboard() {
                   <span className="font-mono-num">{data.kpis.rps_total} total</span>
                 </div>
               </div>
-              {/* Owned */}
-              <div className="rounded-md border border-sky-500/20 bg-sky-500/5 p-4">
+              {/* Owned — muted teal (UMLER chart-2 / underline tone) */}
+              <div className="rounded-md border border-umler-teal/25 bg-umler-teal/5 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-300 border-sky-500/30">OWNED</span>
+                    <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-teal/15 text-umler-teal border-umler-teal/30">MAIN</span>
                     <span className="text-xs text-muted-foreground ml-2">RESIDCO Fleet</span>
                   </div>
-                  <span className="text-xl font-semibold tabular-nums font-mono-num text-sky-300">{data.kpis.owned_util_pct}%</span>
+                  <span className="text-xl font-semibold tabular-nums font-mono-num text-umler-teal">{data.kpis.owned_util_pct}%</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-2">
-                  <div className="h-full bg-sky-500 transition-all" style={{ width: `${data.kpis.owned_util_pct}%` }} />
+                  <div className="h-full bg-umler-teal transition-all" style={{ width: `${data.kpis.owned_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
                   <Link href="/fleet?entity=Main&filter=leased" className="hover:text-foreground hover:underline">
@@ -733,6 +742,7 @@ export default function Dashboard() {
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Lease Expiration Timeline</h2>
               <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--error))]" />Overdue</span>
                 <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--error))]" />&lt;6mo</span>
                 <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--warning))]" />&lt;12mo</span>
                 <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]" />&gt;12mo</span>
@@ -744,6 +754,7 @@ export default function Dashboard() {
                   <div key={i} className="px-5 py-4"><Skeleton className="h-10 rounded" /></div>
                 ))
               ) : (() => {
+                type TimelineItem = NonNullable<DashboardData["expiration_timeline"]>[number];
                 const withEnd = data?.expiration_timeline ?? [];
                 const vcfExtra = data?.expiration_timeline_vcf ?? [];
                 if (withEnd.length === 0) {
@@ -753,71 +764,76 @@ export default function Dashboard() {
                     </div>
                   );
                 }
+                const upcoming: TimelineItem[] = [];
+                const overdue: TimelineItem[] = [];
+                for (const r of withEnd) {
+                  const m = monthsUntil(r.expiration_date);
+                  if (m < 0) overdue.push(r);
+                  else upcoming.push(r);
+                }
+                const vcfUpcoming = vcfExtra.filter((r) => monthsUntil(r.expiration_date) >= 0);
+                const vcfOverdue = vcfExtra.filter((r) => monthsUntil(r.expiration_date) < 0);
+
+                const renderRow = (r: TimelineItem, opts?: { supplemental?: boolean }) => {
+                  const months = monthsUntil(r.expiration_date);
+                  const tone = expiryTone(months);
+                  return (
+                    <Link
+                      key={String(r.rider_id)}
+                      href={`/fleet?rider=${encodeURIComponent(r.rider_name)}`}
+                      className={cn(
+                        "px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group",
+                        opts?.supplemental && "py-3 opacity-70"
+                      )}
+                      data-testid={opts?.supplemental ? `rider-timeline-vcf-${r.rider_id}` : `rider-timeline-${r.rider_id}`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate group-hover:text-primary transition-colors">{r.rider_name}</div>
+                          <div className="text-[11px] text-muted-foreground font-mono-num">
+                            {opts?.supplemental ? "VCF · " : ""}{r.lease_number ?? "—"} · {r.car_count} car{r.car_count !== 1 ? "s" : ""}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
+                        <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
+                      </div>
+                    </Link>
+                  );
+                };
+
                 return (
                   <>
                     <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
-                      {withEnd.length} rider deal{withEnd.length !== 1 ? "s" : ""} with a Lease Exp
+                      {upcoming.length} upcoming rider deal{upcoming.length !== 1 ? "s" : ""}
+                      {overdue.length > 0 && (
+                        <> · {overdue.length} overdue</>
+                      )}
                       {data?.kpis.financial_snapshot_month && (
                         <> · snapshot {data.kpis.financial_snapshot_month.slice(0, 7)}</>
                       )}
                     </div>
-                    {withEnd.map((r) => {
-                      const months = monthsUntil(r.expiration_date);
-                      const tone = expiryTone(months);
-                      return (
-                        <Link
-                          key={String(r.rider_id)}
-                          href={`/fleet?rider=${encodeURIComponent(r.rider_name)}`}
-                          className="px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group"
-                          data-testid={`rider-timeline-${r.rider_id}`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium truncate group-hover:text-primary transition-colors">{r.rider_name}</div>
-                              <div className="text-[11px] text-muted-foreground font-mono-num">
-                                {r.lease_number ?? "—"} · {r.car_count} car{r.car_count !== 1 ? "s" : ""}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
-                            <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
-                          </div>
-                        </Link>
-                      );
-                    })}
-                    {vcfExtra.length > 0 && (
-                      <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
-                        {vcfExtra.length} VCF car-level date group{vcfExtra.length !== 1 ? "s" : ""} (supplemental — not used for Expiring tiles)
+                    {upcoming.map((r) => renderRow(r))}
+                    {overdue.length > 0 && (
+                      <div className="px-5 py-2.5 text-[11px] text-umler-signal bg-umler-signal/10 font-medium uppercase tracking-[0.12em]">
+                        Overdue — past Lease Exp ({overdue.length})
                       </div>
                     )}
-                    {vcfExtra.map((r) => {
-                      const months = monthsUntil(r.expiration_date);
-                      const tone = expiryTone(months);
-                      return (
-                        <Link
-                          key={String(r.rider_id)}
-                          href={`/fleet?rider=${encodeURIComponent(r.rider_name)}`}
-                          className="px-5 py-3 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group opacity-70"
-                          data-testid={`rider-timeline-vcf-${r.rider_id}`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className={cn("h-2 w-2 rounded-full shrink-0", tone.dot)} />
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium truncate group-hover:text-primary transition-colors">{r.rider_name}</div>
-                              <div className="text-[11px] text-muted-foreground font-mono-num">
-                                VCF · {r.lease_number ?? "—"} · {r.car_count} car{r.car_count !== 1 ? "s" : ""}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
-                            <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
-                          </div>
-                        </Link>
-                      );
-                    })}
+                    {overdue.map((r) => renderRow(r))}
+                    {vcfUpcoming.length > 0 && (
+                      <div className="px-5 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
+                        {vcfUpcoming.length} VCF car-level date group{vcfUpcoming.length !== 1 ? "s" : ""} (supplemental — not used for Expiring tiles)
+                      </div>
+                    )}
+                    {vcfUpcoming.map((r) => renderRow(r, { supplemental: true }))}
+                    {vcfOverdue.length > 0 && (
+                      <div className="px-5 py-2.5 text-[11px] text-umler-signal/80 bg-umler-signal/5 font-medium uppercase tracking-[0.12em]">
+                        Overdue VCF (supplemental) ({vcfOverdue.length})
+                      </div>
+                    )}
+                    {vcfOverdue.map((r) => renderRow(r, { supplemental: true }))}
                   </>
                 );
               })()}

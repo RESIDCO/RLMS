@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, ArrowUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { displayLeaseNumber } from "@shared/residco-import";
 
 export default function HistoryPage() {
   const [search, setSearch] = useState("");
@@ -119,14 +120,14 @@ export default function HistoryPage() {
                         {new Date(h.moved_at).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 font-mono-num">
-                        {h.railcar?.car_number ?? `#${h.railcar_id}`}
+                        {h.railcar ? [h.railcar.reporting_marks, h.railcar.car_number].filter(Boolean).join(" ") : `#${h.railcar_id}`}
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-sm">
                           {h.from_rider?.rider_name ?? "—"}
                         </div>
                         <div className="text-[11px] text-muted-foreground font-mono-num">
-                          {h.from_rider?.master_lease?.lease_number ?? ""}
+                          {displayLeaseNumber(h.from_rider?.master_lease?.lease_number)}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -134,7 +135,7 @@ export default function HistoryPage() {
                           {h.to_rider?.rider_name ?? "—"}
                         </div>
                         <div className="text-[11px] text-muted-foreground font-mono-num">
-                          {h.to_rider?.master_lease?.lease_number ?? ""}
+                          {displayLeaseNumber(h.to_rider?.master_lease?.lease_number)}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">

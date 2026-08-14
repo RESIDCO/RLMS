@@ -11,17 +11,35 @@ export async function fetchAllRows<T = any>(
   makeQuery: (from: number, to: number) => any
 ): Promise<T[]> {
   const out: T[] = [];
+  const CONCURRENCY = 8;
   let from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const to = from + PAGE - 1;
-    const result = await Promise.resolve(makeQuery(from, to));
-    const { data, error } = result ?? {};
-    if (error) throw error;
-    const chunk = (data ?? []) as T[];
-    if (chunk.length === 0) break;
-    out.push(...chunk);
-    if (chunk.length < PAGE) break;
-    from += PAGE;
+  for (let wave = 0; wave < MAX_PAGES; wave += CONCURRENCY) {
+    const jobs = Array.from({ length: CONCURRENCY }, (_, i) => {
+      const f = from + i * PAGE;
+      return Promise.resolve(makeQuery(f, f + PAGE - 1)).then((result: any) => ({
+        f,
+        data: result?.data,
+        error: result?.error,
+      }));
+    });
+    const results = await Promise.all(jobs);
+    results.sort((a, b) => a.f - b.f);
+    let done = false;
+    for (const r of results) {
+      if (r.error) throw r.error;
+      const chunk = (r.data ?? []) as T[];
+      if (chunk.length === 0) {
+        done = true;
+        break;
+      }
+      out.push(...chunk);
+      if (chunk.length < PAGE) {
+        done = true;
+        break;
+      }
+    }
+    if (done) break;
+    from += CONCURRENCY * PAGE;
   }
   return out;
 }

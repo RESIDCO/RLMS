@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { useSearch } from "wouter";
 import { useCanEdit } from "@/lib/AuthContext";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { InactiveFleetBadge, SoldFleetBadge, IdleFleetBadge, fleetActiveLabel } from "@/components/InactiveFleetBadge";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3 } from "lucide-react";
+import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3 } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -57,24 +57,26 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { displayLeaseNumber } from "@shared/residco-import";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 
 type Row = RailcarWithAssignment;
 
 const TRANSIT_STATUSES = [
-  { value: "repair", label: "At Repair Shop", color: "bg-orange-500/15 text-orange-400 border-orange-500/25" },
-  { value: "transit", label: "In Transit", color: "bg-blue-500/15 text-blue-400 border-blue-500/25" },
-  { value: "cleaning", label: "Cleaning / Prep", color: "bg-purple-500/15 text-purple-400 border-purple-500/25" },
-  { value: "bad_order", label: "Bad Order", color: "bg-red-500/15 text-red-400 border-red-500/25" },
+  { value: "repair", label: "At Repair Shop", color: "bg-umler-signal/15 text-umler-signal border-umler-signal/25" },
+  { value: "transit", label: "In Transit", color: "bg-umler-steel/15 text-umler-steel border-umler-steel/25" },
+  { value: "cleaning", label: "Cleaning / Prep", color: "bg-umler-teal/15 text-umler-teal border-umler-teal/25" },
+  { value: "bad_order", label: "Bad Order", color: "bg-umler-signal/15 text-umler-signal border-umler-signal/25" },
 ] as const;
 
 // Entity ownership badge
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
-  "Rail Partners Select": { label: "RPS",   cls: "bg-violet-500/15 text-violet-300 border-violet-500/30 font-semibold" },
-  "Main":                 { label: "Owned", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30 font-semibold" },
+  "Rail Partners Select": { label: "RPS",  cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30 font-semibold" },
+  "Main":                 { label: "MAIN", cls: "bg-umler-teal/15 text-umler-teal border-umler-teal/30 font-semibold" },
+  "Coal":                 { label: "COAL", cls: "bg-umler-faint/15 text-umler-faint border-umler-faint/30 font-semibold" },
 };
 
 // Fixed status options for the filter dropdown
@@ -132,12 +134,12 @@ function fmtDate(d: string | null | undefined) {
 }
 
 const STATUS_BADGE_MAP: Record<string, string> = {
-  "Active/In-Service": "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
-  "Storage":           "bg-amber-500/15 text-amber-400 border-amber-500/25",
-  "Bad Order":         "bg-red-500/15 text-red-400 border-red-500/25",
-  "Off-Lease":         "bg-sky-500/15 text-sky-400 border-sky-500/25",
-  "Retired":           "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  "Scrapped":          "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
+  "Active/In-Service": "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
+  "Storage":           "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
+  "Bad Order":         "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
+  "Off-Lease":         "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  "Retired":           "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+  "Scrapped":          "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
 };
 
 function StatusBadge({ status }: { status: string | null | undefined }) {
@@ -146,7 +148,7 @@ function StatusBadge({ status }: { status: string | null | undefined }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider whitespace-nowrap",
         cls
       )}
     >
@@ -298,7 +300,19 @@ export default function FleetRegistry() {
   const [bulkOac, setBulkOac] = useState("");
   const [bulkOec, setBulkOec] = useState("");
   const [bulkValuesPending, setBulkValuesPending] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 75;
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const { toast } = useToast();
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter]);
 
   // ── Optional column visibility ─────────────────────────────────────────────
   type OptCol =
@@ -337,11 +351,30 @@ export default function FleetRegistry() {
   // Cast for backwards compat with existing Set<OptCol> usage in JSX
   const visibleCols = visibleColsRaw as Set<OptCol>;
 
-  const { data: railcars, isLoading } = useQuery<Row[]>({
-    queryKey: ["/api/railcars"],
+  const listParams = {
+    page,
+    pageSize,
+    search: debouncedSearch || undefined,
+    status: statusFilter,
+    entity: entityFilter,
+    active: fleetActiveFilter,
+    assigned: assignedFilter,
+    rider: olCodeFilter || undefined,
+    rider_id: riderFilter !== "all" ? riderFilter : undefined,
+    transit: transitFilter,
+  };
+
+  type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
+  const { data: pageData, isLoading } = useQuery<RailcarPage>({
+    queryKey: ["/api/railcars", listParams],
+    queryFn: () => apiGet<RailcarPage>(railcarsQs(listParams)),
+    staleTime: 45_000,
+    placeholderData: keepPreviousData,
   });
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
-  const { data: rentEvents } = useQuery<any[]>({ queryKey: ["/api/rent-events"] });
+  const railcars = pageData?.rows ?? [];
+  const totalCount = pageData?.total_count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   useEffect(() => {
     const q = parseFleetQuery(wouterSearch);
@@ -349,62 +382,8 @@ export default function FleetRegistry() {
     setEntityFilter(q.entity);
     setOlCodeFilter(q.riderOl);
   }, [wouterSearch]);
-  // Derive set of car IDs currently off-rent (most recent event per car is off_rent)
-  const offRentCarIds = useMemo(() => {
-    const seen = new Map<number, string>();
-    for (const ev of (rentEvents ?? []).slice().sort((a: any, b: any) => b.event_date.localeCompare(a.event_date))) {
-      if (!seen.has(ev.car_id)) seen.set(ev.car_id, ev.event_type);
-    }
-    return new Set<number>(Array.from(seen.entries()).filter(([, t]) => t === "off_rent").map(([id]) => id));
-  }, [rentEvents]);
 
   const filtered = useMemo(() => {
-    let rows = railcars ?? [];
-    // §5 fleet membership (active boolean) — default Active; distinct from service status
-    if (fleetActiveFilter === "active") rows = rows.filter((r) => (r as any).active !== false);
-    if (fleetActiveFilter === "inactive") rows = rows.filter((r) => (r as any).active === false);
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      rows = rows.filter((r) => {
-        const combined = `${(r.reporting_marks ?? "").toLowerCase()}${r.car_number.toLowerCase()}`;
-        return (
-          r.car_number.toLowerCase().includes(q) ||
-          r.reporting_marks?.toLowerCase().includes(q) ||
-          combined.includes(q) ||
-          r.assignment?.fleet_name?.toLowerCase().includes(q) ||
-          String((r as any).rider_external_id ?? "").toLowerCase().includes(q) ||
-          String((r as any).lessee_name ?? "").toLowerCase().includes(q)
-        );
-      });
-    }
-    if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter);
-    if (transitFilter === "in_transit") rows = rows.filter((r) => !!r.transit_status);
-    if (transitFilter === "normal") rows = rows.filter((r) => !r.transit_status);
-    if (entityFilter !== "all") rows = rows.filter((r) => (r as any).entity === entityFilter);
-    if (assignedFilter === "unassigned") rows = rows.filter((r) => !r.assignment);
-    if (assignedFilter === "assigned") rows = rows.filter((r) => !!r.assignment);
-    if (assignedFilter === "leased") rows = rows.filter((r) => (r as any).fleet_status === "Leased");
-    if (assignedFilter === "offlease") rows = rows.filter((r) => (r as any).fleet_status === "Idle");
-    if (assignedFilter === "offrent") rows = rows.filter((r) => offRentCarIds.has(r.id));
-    if (assignedFilter === "sold") {
-      rows = rows.filter((r) => (r as any).fleet_status === "Sold");
-    }
-    if (olCodeFilter) {
-      const q = olCodeFilter.toUpperCase();
-      if (/^\d+$/.test(olCodeFilter)) {
-        rows = rows.filter((r) => String(r.assignment?.rider_id ?? "") === olCodeFilter);
-      } else {
-        rows = rows.filter((r) => {
-          const ext = String((r as any).rider_external_id ?? "").trim().toUpperCase();
-          const name = String(r.assignment?.rider?.rider_name ?? "").trim().toUpperCase();
-          const sch = String(r.assignment?.rider?.schedule_number ?? "").trim().toUpperCase();
-          return ext === q || name === q || sch === q;
-        });
-      }
-    }
-    if (riderFilter !== "all")
-      rows = rows.filter((r) => String(r.assignment?.rider_id ?? "") === riderFilter);
-
     const getKey = (r: Row): string => {
       switch (sort.key) {
         case "car_number":
@@ -421,16 +400,14 @@ export default function FleetRegistry() {
           return r.assignment?.rider?.expiration_date ?? "";
       }
     };
-    rows = [...rows].sort((a, b) => {
+    return [...railcars].sort((a, b) => {
       const av = getKey(a);
       const bv = getKey(b);
       if (av < bv) return sort.dir === "asc" ? -1 : 1;
       if (av > bv) return sort.dir === "asc" ? 1 : -1;
       return 0;
     });
-
-    return rows;
-  }, [railcars, search, statusFilter, riderFilter, olCodeFilter, transitFilter, entityFilter, assignedFilter, fleetActiveFilter, offRentCarIds, sort]);
+  }, [railcars, sort]);
 
   // ── Multi-select helpers ──────────────────────────────────────────────────
   const allFilteredIds = filtered.map((r) => r.id);
@@ -584,8 +561,11 @@ export default function FleetRegistry() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => downloadRailcarsCsv(filtered)}
-              disabled={!railcars || filtered.length === 0}
+              onClick={async () => {
+                const rows = await apiGet<Row[]>(railcarsQs({ ...listParams, page: undefined, pageSize: undefined, all: 1 }));
+                downloadRailcarsCsv(rows);
+              }}
+              disabled={isLoading || totalCount === 0}
               data-testid="button-export-railcars"
             >
               <Download className="h-4 w-4" />
@@ -658,8 +638,9 @@ export default function FleetRegistry() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All ownership</SelectItem>
-              <SelectItem value="Main">Owned</SelectItem>
+              <SelectItem value="Main">MAIN</SelectItem>
               <SelectItem value="Rail Partners Select">RPS</SelectItem>
+              <SelectItem value="Coal">COAL</SelectItem>
             </SelectContent>
           </Select>
           <Select value={transitFilter} onValueChange={setTransitFilter}>
@@ -727,7 +708,8 @@ export default function FleetRegistry() {
             </DropdownMenuContent>
           </DropdownMenu>
           <div className="text-xs text-muted-foreground font-mono-num">
-            {filtered.length} / {railcars?.length ?? 0} cars
+            {totalCount.toLocaleString()} cars
+            {totalCount > 0 ? ` · page ${page} of ${totalPages}` : ""}
           </div>
         </div>
 
@@ -837,10 +819,10 @@ export default function FleetRegistry() {
                     />
                   </th>
                   <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">Entity</th>
-                  <Th label="Car Number" k="car_number" sort={sort} onClick={toggleSort} />
                   <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell">
                     Marks
                   </th>
+                  <Th label="Car Number" k="car_number" sort={sort} onClick={toggleSort} />
                   <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell">
                     Type
                   </th>
@@ -894,6 +876,9 @@ export default function FleetRegistry() {
                       <td className="px-4 py-3">
                         <EntityBadge entity={(r as any).entity} />
                       </td>
+                      <td className="px-4 py-3 font-mono-num text-muted-foreground hidden sm:table-cell">
+                        {r.reporting_marks ?? "—"}
+                      </td>
                       <td className="px-4 py-3 font-mono-num font-medium">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span>{r.car_number}</span>
@@ -918,9 +903,6 @@ export default function FleetRegistry() {
                           />
                         </div>
                       </td>
-                      <td className="px-4 py-3 font-mono-num text-muted-foreground hidden sm:table-cell">
-                        {r.reporting_marks ?? "—"}
-                      </td>
                       <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
                         {r.car_type ?? "—"}
                       </td>
@@ -928,7 +910,7 @@ export default function FleetRegistry() {
                         <div className="flex flex-col gap-1">
                           <StatusBadge status={r.status} />
                           {(r as any).sold_to && (
-                            <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-400 border-amber-500/30 w-fit">
+                            <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30 w-fit">
                               SOLD
                             </span>
                           )}
@@ -946,7 +928,7 @@ export default function FleetRegistry() {
                         {r.assignment?.rider?.rider_name ?? "—"}
                       </td>
                       <td className="px-4 py-3 font-mono-num text-muted-foreground">
-                        {r.assignment?.rider?.master_lease?.lease_number ?? "—"}
+                        {displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}
                       </td>
                       <td className="px-4 py-3 font-mono-num text-muted-foreground">
                         {fmtDate((r as any).lease_end_date ?? (r as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}
@@ -1051,6 +1033,22 @@ export default function FleetRegistry() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
+            <span>
+              {totalCount.toLocaleString()} cars
+              {totalCount > 0 && (
+                <> · page {page} of {totalPages}</>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -1299,20 +1297,20 @@ function CarDetail({
           <span className="font-eyebrow">Railcar Detail</span>
           <EntityBadge entity={(r as any).entity} size="lg" />
         </div>
-        <SheetTitle className="font-mono-num">{r.car_number}</SheetTitle>
+        <SheetTitle className="font-mono-num">{[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}</SheetTitle>
         <SheetDescription>
-          {r.reporting_marks} · {r.car_type ?? "—"}{(r as any).mechanical_designation ? ` · ${(r as any).mechanical_designation}` : ""}
+          {r.car_type ?? "—"}{(r as any).mechanical_designation ? ` · ${(r as any).mechanical_designation}` : ""}
         </SheetDescription>
       </SheetHeader>
 
       {/* Sold banner */}
       {(r as any).sold_to && (
-        <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-400 uppercase tracking-wider">
-            <span className="h-2 w-2 rounded-full bg-amber-400" />
+        <div className="mt-4 rounded-md border border-umler-amber/30 bg-umler-amber/10 px-4 py-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-umler-amber uppercase tracking-wider">
+            <span className="h-2 w-2 rounded-full bg-umler-amber" />
             SOLD / TRANSFERRED
           </div>
-          <p className="mt-1 text-xs text-amber-300/90">Sold to: {(r as any).sold_to}</p>
+          <p className="mt-1 text-xs text-umler-amber/90">Sold to: {(r as any).sold_to}</p>
         </div>
       )}
 
@@ -1326,13 +1324,13 @@ function CarDetail({
 
       {/* Transit / repair banner */}
       {r.transit_status && (
-        <div className="mt-4 rounded-md border border-orange-500/30 bg-orange-500/10 px-4 py-3">
-          <div className="flex items-center gap-2 text-xs font-medium text-orange-400">
+        <div className="mt-4 rounded-md border border-umler-signal/30 bg-umler-signal/10 px-4 py-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-umler-signal">
             <Wrench className="h-3.5 w-3.5" />
             <TransitBadge status={r.transit_status} label={null} />
           </div>
           {r.transit_label && (
-            <p className="mt-1 text-xs text-orange-300/80">{r.transit_label}</p>
+            <p className="mt-1 text-xs text-umler-signal/80">{r.transit_label}</p>
           )}
         </div>
       )}
@@ -1449,7 +1447,7 @@ function CarDetail({
             <div className="flex justify-between">
               <span className="text-muted-foreground">Lease</span>
               <span className="font-mono-num">
-                {r.assignment.rider?.master_lease?.lease_number ?? "—"}
+                {displayLeaseNumber(r.assignment.rider?.master_lease?.lease_number) || "—"}
               </span>
             </div>
             <div className="flex justify-between">
@@ -2000,8 +1998,9 @@ function RailcarFormDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— Not set —</SelectItem>
-                <SelectItem value="Main">Owned</SelectItem>
+                <SelectItem value="Main">MAIN</SelectItem>
                 <SelectItem value="Rail Partners Select">RPS</SelectItem>
+                <SelectItem value="Coal">COAL</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -2190,7 +2189,6 @@ function RailcarFormDialog({
   );
 }
 
-import { useEffect } from "react";
 function useMemoReset(
   open: boolean,
   car: Row | null,

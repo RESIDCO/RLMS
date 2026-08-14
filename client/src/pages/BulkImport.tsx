@@ -238,15 +238,15 @@ function downloadErrorReport(rows: PreviewRow[], sourceFileName: string) {
   const problemRows = rows.filter((r) => r.errors.length > 0 || r.warnings.length > 0);
   if (problemRows.length === 0) return;
 
-  const headers = ["Row #", "Car Number", "Reporting Marks", "Issue Type", "Issue Details"];
+  const headers = ["Row #", "Reporting Marks", "Car Number", "Issue Type", "Issue Details"];
   const dataRows: string[][] = [];
 
   for (const row of problemRows) {
     for (const err of row.errors) {
       dataRows.push([
         String(row._row),
-        row.car_number || "(blank)",
         row.reporting_marks ?? "(blank)",
+        row.car_number || "(blank)",
         "Error",
         err,
       ]);
@@ -254,8 +254,8 @@ function downloadErrorReport(rows: PreviewRow[], sourceFileName: string) {
     for (const warn of row.warnings) {
       dataRows.push([
         String(row._row),
-        row.car_number || "(blank)",
         row.reporting_marks ?? "(blank)",
+        row.car_number || "(blank)",
         "Warning",
         warn,
       ]);
@@ -452,7 +452,7 @@ export default function BulkImportPage() {
 
       {/* Success state */}
       {committed && (
-        <div className="mt-6 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-6 text-center">
+        <div className="mt-6 rounded-lg border border-umler-teal/30 bg-umler-teal/10 p-6 text-center">
           <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto mb-3" />
           <div className="text-lg font-semibold text-foreground">{committed.imported} railcars imported</div>
           <div className="text-sm text-muted-foreground mt-1">{committed.assigned} cars assigned to riders</div>
@@ -677,7 +677,7 @@ export default function BulkImportPage() {
                   ["Car Number", "Required · unique, e.g. TFOX88031"],
                   ["Rider ID", "Optional · free-text OL / rider code e.g. EA1503 (new codes are created on import)"],
                   ["Lessee", "Optional · current lessee/operator"],
-                  ["Entity", "Optional · Main → RESIDCO Owned, Rail Partners Select → RPS, Coal → Coal"],
+                  ["Entity", "Optional · Main → MAIN, Rail Partners Select → RPS, Coal → COAL"],
                   ["Active", "Optional · Active / Inactive (drives `active` boolean)"],
                   ["Data Source", "Optional · e.g. VCF_ONLY"],
                   ["Car Type", "Optional · e.g. C214"],
@@ -751,8 +751,8 @@ export default function BulkImportPage() {
                     <thead className="bg-muted/40 text-muted-foreground sticky top-0 z-10">
                       <tr>
                         <th className="px-3 py-2 text-left font-medium">#</th>
-                        <th className="px-3 py-2 text-left font-medium">Car Number</th>
                         <th className="px-3 py-2 text-left font-medium">Marks</th>
+                        <th className="px-3 py-2 text-left font-medium">Car Number</th>
                         <th className="px-3 py-2 text-left font-medium">Type</th>
                         <th className="px-3 py-2 text-left font-medium">Status</th>
                         <th className="px-3 py-2 text-left font-medium">Lessee</th>
@@ -772,8 +772,8 @@ export default function BulkImportPage() {
                           )}
                         >
                           <td className="px-3 py-2 text-muted-foreground">{row._row}</td>
-                          <td className="px-3 py-2 font-mono font-medium">{row.car_number || <span className="text-red-400 italic">missing</span>}</td>
                           <td className="px-3 py-2 text-muted-foreground">{row.reporting_marks ?? "—"}</td>
+                          <td className="px-3 py-2 font-mono font-medium">{row.car_number || <span className="text-red-400 italic">missing</span>}</td>
                           <td className="px-3 py-2 text-muted-foreground">{row.car_type ?? "—"}</td>
                           <td className="px-3 py-2 text-muted-foreground">{row.status}</td>
                           <td className="px-3 py-2">{row.fleet_name ?? "—"}</td>
@@ -842,10 +842,10 @@ function StatChip({
   color?: "emerald" | "yellow" | "amber" | "red";
 }) {
   const COLOR_CLS: Record<string, string> = {
-    emerald: "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
-    yellow:  "border-yellow-500/20 bg-yellow-500/10 text-yellow-400",
-    amber:   "border-amber-500/20 bg-amber-500/10 text-amber-400",
-    red:     "border-red-500/20 bg-red-500/10 text-red-400",
+    emerald: "border-umler-teal/20 bg-umler-teal/10 text-umler-teal",
+    yellow:  "border-umler-amber/20 bg-umler-amber/10 text-umler-amber",
+    amber:   "border-umler-amber/20 bg-umler-amber/10 text-umler-amber",
+    red:     "border-umler-signal/20 bg-umler-signal/10 text-umler-signal",
   };
   const colorCls = (color && COLOR_CLS[color]) || "border-border bg-card text-muted-foreground";
 

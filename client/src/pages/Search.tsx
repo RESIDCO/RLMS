@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Search as SearchIcon, Train, FileText, BookOpen, ChevronRight, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { displayLeaseNumber } from "@shared/residco-import";
 import { InactiveFleetBadge, SoldFleetBadge } from "@/components/InactiveFleetBadge";
 import {
   Select,
@@ -83,14 +84,14 @@ function StatusBadge({ status }: { status: string | null }) {
   const s = status ?? "unknown";
   const cls =
     s === "active"
-      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/20"
+      ? "bg-umler-teal/15 text-umler-teal border-umler-teal/20"
       : s === "stored"
-      ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
+      ? "bg-umler-amber/15 text-umler-amber border-umler-amber/20"
       : s === "retired"
-      ? "bg-red-500/15 text-red-400 border-red-500/20"
+      ? "bg-umler-signal/15 text-umler-signal border-umler-signal/20"
       : "bg-muted text-muted-foreground";
   return (
-    <span className={cn("text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border", cls)}>
+    <span className={cn("text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border whitespace-nowrap", cls)}>
       {s}
     </span>
   );
@@ -98,10 +99,10 @@ function StatusBadge({ status }: { status: string | null }) {
 
 // ── Entity badge (mirrors FleetRegistry) ─────────────────────────────────────
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
-  "Rail Partners Select": { label: "RPS",   cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
-  "Main":                 { label: "OWNED", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
-  "Coal":                 { label: "COAL",  cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30" },
-  "Main-Coal":            { label: "COAL",  cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30" },
+  "Rail Partners Select": { label: "RPS",   cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30" },
+  "Main":                 { label: "MAIN", cls: "bg-umler-teal/15 text-umler-teal border-umler-teal/30" },
+  "Coal":                 { label: "COAL",  cls: "bg-umler-faint/15 text-umler-faint border-umler-faint/30" },
+  "Main-Coal":            { label: "COAL",  cls: "bg-umler-faint/15 text-umler-faint border-umler-faint/30" },
 };
 function EntityBadge({ entity }: { entity: string | null | undefined }) {
   if (!entity) return null;
@@ -143,13 +144,13 @@ function RailcarRow({ car }: { car: RailcarResult }) {
             }}
           />
         </div>
-        <div className="font-mono text-sm font-semibold text-foreground">{car.car_number}</div>
+        <div className="font-mono text-sm font-semibold text-foreground">{[car.reporting_marks, car.car_number].filter(Boolean).join(" ")}</div>
         <div className="text-[11px] text-muted-foreground mt-0.5">{car.car_type ?? "—"}{car.mechanical_designation ? ` · ${car.mechanical_designation}` : ""}</div>
       </div>
       <div className="flex-1 grid grid-cols-3 gap-3 text-xs">
         <div>
           <div className="text-muted-foreground mb-0.5">Fleet / Lessee</div>
-          <div className="text-foreground font-medium">{car.assignment?.fleet_name ?? <span className="text-muted-foreground italic">Unassigned</span>}</div>
+          <div className="text-foreground font-medium">{car.assignment?.fleet_name ?? (car as any).lessee_name ?? <span className="text-muted-foreground italic">Unassigned</span>}</div>
         </div>
         <div>
           <div className="text-muted-foreground mb-0.5">Rider</div>
@@ -160,7 +161,7 @@ function RailcarRow({ car }: { car: RailcarResult }) {
         </div>
         <div>
           <div className="text-muted-foreground mb-0.5">Master Lease</div>
-          <div className="text-foreground">{lease?.lease_number ?? "—"}</div>
+          <div className="text-foreground">{displayLeaseNumber(lease?.lease_number) || "—"}</div>
           {lease?.lessee && (
             <div className="text-muted-foreground text-[11px] truncate">{lease.lessee}</div>
           )}
@@ -186,7 +187,7 @@ function RiderRow({ rider }: { rider: Rider }) {
       <div className="flex-1 grid grid-cols-3 gap-3">
         <div>
           <div className="text-muted-foreground mb-0.5">Master Lease</div>
-          <div className="text-foreground">{rider.master_lease?.lease_number ?? "—"}</div>
+          <div className="text-foreground">{displayLeaseNumber(rider.master_lease?.lease_number) || "—"}</div>
         </div>
         <div>
           <div className="text-muted-foreground mb-0.5">Lessee</div>
@@ -211,7 +212,7 @@ function LeaseRow({ lease }: { lease: MasterLease }) {
   return (
     <div className="flex items-center gap-4 py-3 border-b border-border/40 last:border-0 text-xs">
       <div className="min-w-[120px]">
-        <div className="text-sm font-semibold text-foreground">{lease.lease_number}</div>
+        <div className="text-sm font-semibold text-foreground">{displayLeaseNumber(lease.lease_number)}</div>
         {lease.agreement_number && (
           <div className="text-muted-foreground mt-0.5">Agmt {lease.agreement_number}</div>
         )}

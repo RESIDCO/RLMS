@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
+import { displayLeaseNumber } from "@shared/residco-import";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface MasterLease {
@@ -71,8 +72,9 @@ interface SearchResults {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
-  "Rail Partners Select": { label: "RPS",   cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
-  "Main":                 { label: "OWN",   cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
+  "Rail Partners Select": { label: "RPS",  cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30" },
+  "Main":                 { label: "MAIN", cls: "bg-umler-teal/15 text-umler-teal border-umler-teal/30" },
+  "Coal":                 { label: "COAL", cls: "bg-umler-faint/15 text-umler-faint border-umler-faint/30" },
 };
 
 function EntityPip({ entity }: { entity: string | null | undefined }) {
@@ -88,10 +90,10 @@ function EntityPip({ entity }: { entity: string | null | undefined }) {
 function StatusDot({ status }: { status: string | null }) {
   const s = status ?? "unknown";
   const cls =
-    s === "active"   ? "bg-emerald-400" :
-    s === "stored"   ? "bg-amber-400" :
-    s === "retired"  ? "bg-red-400" :
-    s === "bad order"? "bg-orange-400" : "bg-muted-foreground";
+    s === "active"   ? "bg-umler-teal" :
+    s === "stored"   ? "bg-umler-amber" :
+    s === "retired"  ? "bg-umler-signal" :
+    s === "bad order"? "bg-umler-signal" : "bg-muted-foreground";
   return <span className={cn("inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-0.5", cls)} />;
 }
 
@@ -365,7 +367,7 @@ export default function GlobalSearch() {
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <StatusDot status={car.status} />
                               <span className="font-mono text-xs font-semibold text-foreground tracking-wide">
-                                <Highlight text={car.car_number} terms={terms} />
+                                <Highlight text={[car.reporting_marks, car.car_number].filter(Boolean).join(" ")} terms={terms} />
                               </span>
                             </div>
                             <div className="flex items-center gap-1 pl-3">
@@ -394,7 +396,7 @@ export default function GlobalSearch() {
                           <div className="w-[90px] shrink-0 hidden md:block">
                             <div className="text-[10px] text-muted-foreground leading-none mb-0.5">MLA</div>
                             <div className="text-xs font-mono text-foreground truncate">
-                              <Highlight text={lease?.lease_number ?? "—"} terms={terms} />
+                              <Highlight text={displayLeaseNumber(lease?.lease_number) || "—"} terms={terms} />
                             </div>
                           </div>
                           <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
@@ -455,7 +457,7 @@ export default function GlobalSearch() {
                                 <div className="text-[10px] text-muted-foreground mt-0.5">
                                   MLA{" "}
                                   <span className="font-mono">
-                                    <Highlight text={leaseForLessee.lease_number} terms={terms} />
+                                    <Highlight text={displayLeaseNumber(leaseForLessee.lease_number)} terms={terms} />
                                   </span>
                                   {leaseForLessee.lease_type && ` · ${leaseForLessee.lease_type}`}
                                 </div>
@@ -480,7 +482,7 @@ export default function GlobalSearch() {
               {results.leases.length > 0 && (
                 <section className="border-t border-border/40">
                   <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card/95 backdrop-blur-sm border-b border-border/40 z-10">
-                    <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    <BookOpen className="h-3.5 w-3.5 text-umler-teal shrink-0" />
                     <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Master Leases
                     </span>
@@ -507,7 +509,7 @@ export default function GlobalSearch() {
                         >
                           <div className="w-[110px] shrink-0">
                             <div className="font-mono text-xs font-semibold text-foreground">
-                              <Highlight text={lease.lease_number} terms={terms} />
+                              <Highlight text={displayLeaseNumber(lease.lease_number)} terms={terms} />
                             </div>
                             {lease.agreement_number && (
                               <div className="text-[10px] text-muted-foreground font-mono">
@@ -577,7 +579,7 @@ export default function GlobalSearch() {
                             <div className="text-[10px] text-muted-foreground mt-0.5">
                               {rider.master_lease?.lease_number && (
                                 <span className="font-mono mr-1.5">
-                                  <Highlight text={rider.master_lease.lease_number} terms={terms} />
+                                  <Highlight text={displayLeaseNumber(rider.master_lease.lease_number)} terms={terms} />
                                 </span>
                               )}
                               {rider.master_lease?.lessee && (

@@ -51,11 +51,11 @@ import { carBuildYear, turning50ByYear } from "@shared/build-year";
 import {
   buildFinancialReview,
   financialRowToDbPayload,
-  averageBatches,
-  carToAssetFamily,
-  candidateAssetFamilies,
-  financialSheetForCarEntity,
-  type FinancialParsedRow,
+  buildCarFinancialUpdates,
+  normalizeSnapshotMonth,
+  carFinancialFingerprint,
+  RAILCAR_FINANCIAL_REFRESH_FIELDS,
+  type SummaryRowForRefresh,
 } from "@shared/financial-import";
 import {
   calculateDv,
@@ -2173,12 +2173,24 @@ export async function registerRoutes(
         snapshotMonth ?? null
       );
 
+      const month = normalizeSnapshotMonth(review.snapshotMonth);
+      let existingSnapshotRows = 0;
+      if (month) {
+        const { count, error: cErr } = await supabaseAdmin
+          .from("rider_financial_summary")
+          .select("id", { count: "exact", head: true })
+          .eq("snapshot_month", month);
+        if (cErr) throw cErr;
+        existingSnapshotRows = count ?? 0;
+      }
+
       res.json({
         ok: true,
         mode: "financial",
         productionWrite: false,
-        snapshotMonth: review.snapshotMonth,
+        snapshotMonth: month,
         snapshotMonthDetected: review.snapshotMonthDetected,
+        existingSnapshotRows,
         qualifyingRows: review.qualifyingRows,
         qualifyingCarCount: review.qualifyingCarCount,
         mainRows: review.main.rows.length,
@@ -2186,6 +2198,7 @@ export async function registerRoutes(
         skippedNonRail: review.skippedNonRail,
         flaggedCount: review.flaggedCount,
         flagged: review.flagged,
+        unmatchedRiders: review.unmatchedRiders,
         activeCarsInRlms: review.activeCarsInRlms,
         fileVsActiveDelta: review.fileVsActiveDelta,
         fileNoCarMatchCount: review.fileNoCarMatches.length,
@@ -2195,6 +2208,7 @@ export async function registerRoutes(
         matchPathStats: review.matchPathStats,
         assetFamilyMappingNotes: review.assetFamilyMappingNotes,
         joinRules: review.joinRules,
+        railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
       });
     } catch (err) { errHandler(res, err); }
   });
@@ -2203,24 +2217,48 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const { mainRows, rpsRows, snapshotMonth, confirmProductionImport } = req.body as {
+      const { mainRows, rpsRows, snapshotMonth, confirmReplace } = req.body as {
         mainRows?: unknown[][];
         rpsRows?: unknown[][];
         snapshotMonth?: string | null;
-        confirmProductionImport?: boolean;
+        confirmReplace?: boolean;
       };
-      if (!confirmProductionImport) {
-        return res.status(400).json({
-          message: "Financial commit blocked — set confirmProductionImport: true only after Bruce signs off on the §3.5 reconciliation.",
+
+      const month = normalizeSnapshotMonth(snapshotMonth);
+      if (!month) {
+        return res.status(400).json({ message: "snapshot_month is required — confirm or override it before committing." });
+      }
+
+      const { count: existingCount, error: existErr } = await supabaseAdmin
+        .from("rider_financial_summary")
+        .select("id", { count: "exact", head: true })
+        .eq("snapshot_month", month);
+      if (existErr) throw existErr;
+      if ((existingCount ?? 0) > 0 && !confirmReplace) {
+        return res.status(409).json({
+          message: `${month} already has ${existingCount} rows. Set confirmReplace: true to replace that month only.`,
+          snapshotMonth: month,
+          existingSnapshotRows: existingCount,
         });
+      }
+
+      const colProbe = await supabaseAdmin.from("railcars").select("id, financial_snapshot_month").limit(1);
+      if (colProbe.error) {
+        if (/financial_snapshot_month/i.test(colProbe.error.message)) {
+          return res.status(503).json({
+            message:
+              "railcars.financial_snapshot_month is missing. Run migrations/20260814_financial_snapshot_month.sql in the Supabase SQL editor, then retry. Nothing was written.",
+          });
+        }
+        throw colProbe.error;
       }
 
       const activeCars: any[] = [];
       let from = 0;
       for (;;) {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from("railcars")
-          .select("id, rider_external_id, car_type, mechanical_designation, general_description, entity")
+          .select("id, rider_external_id, car_type, mechanical_designation, general_description, entity, nbv, oec, monthly_rent_per_car, monthly_depr_per_car, financial_snapshot_month")
           .eq("active", true)
           .range(from, from + 999);
         if (error) throw error;
@@ -2234,97 +2272,97 @@ export async function registerRoutes(
         mainRows ?? [],
         rpsRows ?? [],
         activeCars,
-        snapshotMonth ?? null
+        month
       );
       if (!review.snapshotMonth) {
         return res.status(400).json({ message: "snapshot_month required — detect failed; pass snapshotMonth explicitly" });
       }
+
+      // Replace this month only — other months stay. Never append/duplicate.
+      const { error: delErr } = await supabaseAdmin
+        .from("rider_financial_summary")
+        .delete()
+        .eq("snapshot_month", month);
+      if (delErr) throw delErr;
 
       const allRows = [...review.main.rows, ...review.rps.rows];
       const BATCH = 100;
       let inserted = 0;
       for (let i = 0; i < allRows.length; i += BATCH) {
         const slice = allRows.slice(i, i + BATCH).map(financialRowToDbPayload);
-        const { error } = await supabase.from("rider_financial_summary").upsert(slice, {
-          onConflict: "snapshot_month,rider_id,car_type,entity,net_equipment_cost_per_car",
-          ignoreDuplicates: false,
-        });
+        const { error } = await supabaseAdmin.from("rider_financial_summary").insert(slice);
         if (error) throw error;
         inserted += slice.length;
       }
 
-      // Refresh per-car financials from this snapshot (§3.4)
-      // Entity-scoped: Main↔Main, RPS↔RPS; Coal never refreshes (Bruce: no Coal source).
-      const byRiderTypeEntity = new Map<string, FinancialParsedRow[]>();
-      const assetsByRiderEntity = new Map<string, Set<string>>();
-      for (const r of allRows) {
-        const k = `${r.rider_id}|${r.car_type}|${r.entity}`;
-        const list = byRiderTypeEntity.get(k) ?? [];
-        list.push(r);
-        byRiderTypeEntity.set(k, list);
-        const rk = `${r.rider_id}|${r.entity}`;
-        const set = assetsByRiderEntity.get(rk) ?? new Set();
-        set.add(r.car_type);
-        assetsByRiderEntity.set(rk, set);
+      // Recompute cars from the latest month that matches each car (not only this file).
+      const summaryRows = await fetchAllRows<SummaryRowForRefresh>((fromR, toR) =>
+        supabaseAdmin
+          .from("rider_financial_summary")
+          .select("snapshot_month, rider_id, car_type, entity, count_cars, book_value_per_asset, monthly_rent_per_car, monthly_depreciation_per_asset, net_equipment_cost_per_car")
+          .order("id", { ascending: true })
+          .range(fromR, toR)
+      );
+      const { updates, leftBlank, coalSkipped } = buildCarFinancialUpdates(activeCars, summaryRows);
+
+      const byId = new Map(activeCars.map((c: any) => [c.id, c]));
+      let carsUpdated = 0;
+      let carsUnchanged = 0;
+      const WAVE = 40;
+      const pending = updates.filter((u) => {
+        const car = byId.get(u.id);
+        if (car && carFinancialFingerprint(car) === carFinancialFingerprint(u)) {
+          carsUnchanged += 1;
+          return false;
+        }
+        return true;
+      });
+      for (let i = 0; i < pending.length; i += WAVE) {
+        const slice = pending.slice(i, i + WAVE);
+        const results = await Promise.all(
+          slice.map((u) => {
+            const payload: Record<string, unknown> = {};
+            for (const f of RAILCAR_FINANCIAL_REFRESH_FIELDS) payload[f] = u[f];
+            return supabaseAdmin.from("railcars").update(payload).eq("id", u.id);
+          })
+        );
+        for (const r of results) {
+          if (r.error) throw r.error;
+        }
+        carsUpdated += slice.length;
       }
 
-      let refreshed = 0;
-      let leftBlank = 0;
-      let coalSkipped = 0;
-      for (const car of activeCars) {
-        const rider = String(car.rider_external_id ?? "").trim();
-        const sheetEnt = financialSheetForCarEntity(car.entity);
-        if (!rider || !sheetEnt) {
-          if (car.entity === "Coal" || car.entity === "Main-Coal" || !sheetEnt) coalSkipped += 1;
-          leftBlank += 1;
-          continue;
-        }
-        let batches: FinancialParsedRow[] | undefined;
-        for (const asset of candidateAssetFamilies(car)) {
-          const found = byRiderTypeEntity.get(`${rider}|${asset}|${sheetEnt}`);
-          if (found?.length) { batches = found; break; }
-        }
-        if (!batches?.length) {
-          const only = assetsByRiderEntity.get(`${rider}|${sheetEnt}`);
-          if (only && only.size === 1) {
-            batches = byRiderTypeEntity.get(`${rider}|${[...only][0]}|${sheetEnt}`);
-          }
-        }
-        if (!batches?.length) {
-          leftBlank += 1;
-          continue;
-        }
-        const avg = averageBatches(batches);
-        const payload: Record<string, unknown> = {};
-        if (avg.nbv != null) payload.nbv = avg.nbv;
-        if (avg.monthly_rent_per_car != null) payload.monthly_rent_per_car = avg.monthly_rent_per_car;
-        if (avg.monthly_depr_per_car != null) payload.monthly_depr_per_car = avg.monthly_depr_per_car;
-        if (avg.lease_end_residual_per_car != null) payload.lease_end_residual_per_car = avg.lease_end_residual_per_car;
-        if (avg.legal_owner) payload.legal_owner = avg.legal_owner;
-        if (avg.oec != null) payload.oec = avg.oec;
-        if (Object.keys(payload).length === 0) { leftBlank += 1; continue; }
-        let { error } = await supabase.from("railcars").update(payload).eq("id", car.id);
-        // Residual column may not be migrated yet — retry without it rather than aborting the refresh.
-        if (error && payload.lease_end_residual_per_car != null && /lease_end_residual_per_car/i.test(String(error.message ?? ""))) {
-          delete payload.lease_end_residual_per_car;
-          if (Object.keys(payload).length === 0) { leftBlank += 1; continue; }
-          ({ error } = await supabase.from("railcars").update(payload).eq("id", car.id));
-        }
-        if (error) throw error;
-        refreshed += 1;
-      }
+      console.log("[financial-refresh]", JSON.stringify({
+        snapshotMonth: month,
+        summaryRowsDeleted: existingCount ?? 0,
+        summaryRowsWritten: inserted,
+        carsUpdated,
+        carsUnchanged,
+        carsLeftBlank: leftBlank,
+        coalSkipped,
+        unmatchedRiders: review.unmatchedRiders.length,
+        railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
+      }));
 
       res.json({
         ok: true,
-        snapshotMonth: review.snapshotMonth,
-        summaryRowsInserted: inserted,
-        carsRefreshed: refreshed,
+        snapshotMonth: month,
+        summaryRowsDeleted: existingCount ?? 0,
+        summaryRowsWritten: inserted,
+        carsUpdated,
+        carsUnchanged,
         carsLeftBlank: leftBlank,
         coalSkipped,
         flaggedCount: review.flaggedCount,
+        qualifyingRows: review.qualifyingRows,
         qualifyingCarCount: review.qualifyingCarCount,
+        skippedNonRail: review.skippedNonRail,
+        mainRows: review.main.rows.length,
+        rpsRows: review.rps.rows.length,
+        unmatchedRiders: review.unmatchedRiders,
+        fileNoCarMatchCount: review.fileNoCarMatches.length,
         activeCarsInRlms: review.activeCarsInRlms,
-        matchPathStats: review.matchPathStats,
+        railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
       });
     } catch (err) { errHandler(res, err); }
   });

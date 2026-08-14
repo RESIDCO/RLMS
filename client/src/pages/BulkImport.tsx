@@ -13,9 +13,11 @@ import {
   Info,
   Download,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Loose shape — server returns the full normalized row alongside derived fields.
@@ -196,6 +198,7 @@ interface FinancialReviewResult {
   mode: "financial";
   snapshotMonth: string | null;
   snapshotMonthDetected: boolean;
+  existingSnapshotRows: number;
   qualifyingRows: number;
   qualifyingCarCount: number;
   mainRows: number;
@@ -203,6 +206,7 @@ interface FinancialReviewResult {
   skippedNonRail: number;
   flaggedCount: number;
   flagged: Array<{ entity: string; rider_id: string; asset: string; count_cars: number; reason: string; lessee: string | null }>;
+  unmatchedRiders: string[];
   activeCarsInRlms: number;
   fileVsActiveDelta: number;
   fileNoCarMatchCount: number;
@@ -214,6 +218,27 @@ interface FinancialReviewResult {
     sampleMainRps: Array<{ id: number; rider_external_id: string | null; car_type: string | null; mapped_asset: string | null; entity: string | null }>;
   };
   refreshPreview: { carsMatched: number; carsUnmatched: number; multiBatchRiderTypes: number };
+  railcarFieldsWritten?: string[];
+}
+
+interface FinCommitResult {
+  ok: boolean;
+  snapshotMonth: string;
+  summaryRowsDeleted: number;
+  summaryRowsWritten: number;
+  carsUpdated: number;
+  carsUnchanged: number;
+  carsLeftBlank: number;
+  coalSkipped: number;
+  unmatchedRiders: string[];
+  qualifyingRows: number;
+  qualifyingCarCount: number;
+  skippedNonRail: number;
+  mainRows: number;
+  rpsRows: number;
+  fileNoCarMatchCount: number;
+  activeCarsInRlms: number;
+  railcarFieldsWritten: string[];
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -328,22 +353,41 @@ export default function BulkImportPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const finFileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
+  const [finLoading, setFinLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [vcfReview, setVcfReview] = useState<VcfReviewResult | null>(null);
   const [finReview, setFinReview] = useState<FinancialReviewResult | null>(null);
   const [finPayload, setFinPayload] = useState<{ mainRows: unknown[][]; rpsRows: unknown[][] } | null>(null);
+  const [finSnapshotMonth, setFinSnapshotMonth] = useState("");
+  const [replaceAck, setReplaceAck] = useState(false);
   const [committed, setCommitted] = useState<CommitResult | null>(null);
+  const [finCommitted, setFinCommitted] = useState<FinCommitResult | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [finFileName, setFinFileName] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [rawRows, setRawRows] = useState<PreviewRow[]>([]);
   const [vcfRawRows, setVcfRawRows] = useState<Record<string, string>[]>([]);
 
-  async function handleFile(file: File) {
+  async function previewFinancial(mainRows: unknown[][], rpsRows: unknown[][], snapshotMonth?: string | null) {
+    const res = await apiRequest("POST", "/api/import/financial/preview", {
+      mainRows,
+      rpsRows,
+      snapshotMonth: snapshotMonth || null,
+    });
+    const result: FinancialReviewResult = await res.json();
+    setFinReview(result);
+    if (result.snapshotMonth) {
+      setFinSnapshotMonth(result.snapshotMonth.slice(0, 7));
+    }
+    setReplaceAck(false);
+    return result;
+  }
+
+  async function handleCarFile(file: File) {
     setPreview(null);
     setVcfReview(null);
-    setFinReview(null);
-    setFinPayload(null);
     setCommitted(null);
     setFileName(file.name);
     setLoading(true);
@@ -354,20 +398,10 @@ export default function BulkImportPage() {
         if (rows.length === 0) throw new Error("No data rows found in file.");
         if (looksLikeVcf(rows)) {
           setVcfRawRows(rows);
-          const res = await fetch("/api/import/vcf/preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rows }),
-          });
-          if (!res.ok) throw new Error(await res.text());
+          const res = await apiRequest("POST", "/api/import/vcf/preview", { rows });
           setVcfReview(await res.json());
         } else {
-          const res = await fetch("/api/import/preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rows }),
-          });
-          if (!res.ok) throw new Error(await res.text());
+          const res = await apiRequest("POST", "/api/import/preview", { rows });
           const result: PreviewResult = await res.json();
           setPreview(result);
           setRawRows(result.preview);
@@ -375,37 +409,15 @@ export default function BulkImportPage() {
       } else {
         const parsed = await parseWorkbook(file);
         if (parsed.kind === "financial") {
-          setFinPayload({ mainRows: parsed.mainRows, rpsRows: parsed.rpsRows });
-          const res = await fetch("/api/import/financial/preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mainRows: parsed.mainRows, rpsRows: parsed.rpsRows }),
-          });
-          if (!res.ok) throw new Error(await res.text());
-          const result: FinancialReviewResult = await res.json();
-          setFinReview(result);
-          toast({
-            title: "Asset Report review ready",
-            description: `${result.qualifyingCarCount.toLocaleString()} rail cars in file · ${result.refreshPreview.carsMatched.toLocaleString()} active cars would match`,
-          });
+          throw new Error("This looks like an Asset Report. Drop it in Financial Data Refresh below.");
         } else if (parsed.kind === "vcf") {
           setVcfRawRows(parsed.rows);
-          const res = await fetch("/api/import/vcf/preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rows: parsed.rows }),
-          });
-          if (!res.ok) throw new Error(await res.text());
+          const res = await apiRequest("POST", "/api/import/vcf/preview", { rows: parsed.rows });
           setVcfReview(await res.json());
           toast({ title: "Valid Car File review ready" });
         } else {
           if (parsed.rows.length === 0) throw new Error("No data rows found in file.");
-          const res = await fetch("/api/import/preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rows: parsed.rows }),
-          });
-          if (!res.ok) throw new Error(await res.text());
+          const res = await apiRequest("POST", "/api/import/preview", { rows: parsed.rows });
           const result: PreviewResult = await res.json();
           setPreview(result);
           setRawRows(result.preview);
@@ -418,16 +430,79 @@ export default function BulkImportPage() {
     }
   }
 
+  async function handleFinFile(file: File) {
+    setFinReview(null);
+    setFinPayload(null);
+    setFinCommitted(null);
+    setFinFileName(file.name);
+    setFinLoading(true);
+    try {
+      if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
+        throw new Error("Asset Report must be the Excel workbook (RESIDCO By Deal # / RPS By Deal # sheets).");
+      }
+      const parsed = await parseWorkbook(file);
+      if (parsed.kind !== "financial") {
+        throw new Error("This does not look like an Asset Report. Use the Master Car List / Valid Car File section above.");
+      }
+      setFinPayload({ mainRows: parsed.mainRows, rpsRows: parsed.rpsRows });
+      const result = await previewFinancial(parsed.mainRows, parsed.rpsRows);
+      toast({
+        title: "Asset Report review ready",
+        description: `${result.qualifyingCarCount.toLocaleString()} rail cars in file · ${result.refreshPreview.carsMatched.toLocaleString()} active cars would match`,
+      });
+    } catch (e: any) {
+      toast({ title: "Parse error", description: e.message, variant: "destructive" });
+    } finally {
+      setFinLoading(false);
+    }
+  }
+
+  async function handleFinMonthChange(ym: string) {
+    setFinSnapshotMonth(ym);
+    if (!finPayload || !ym) return;
+    setFinLoading(true);
+    try {
+      await previewFinancial(finPayload.mainRows, finPayload.rpsRows, `${ym}-01`);
+    } catch (e: any) {
+      toast({ title: "Could not re-preview", description: e.message, variant: "destructive" });
+    } finally {
+      setFinLoading(false);
+    }
+  }
+
+  async function handleFinCommit() {
+    if (!finPayload || !finSnapshotMonth) return;
+    const existing = finReview?.existingSnapshotRows ?? 0;
+    if (existing > 0 && !replaceAck) {
+      toast({ title: "Confirm replace", description: "Check the box to replace this month's existing rows.", variant: "destructive" });
+      return;
+    }
+    setFinLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/import/financial/commit", {
+        mainRows: finPayload.mainRows,
+        rpsRows: finPayload.rpsRows,
+        snapshotMonth: `${finSnapshotMonth}-01`,
+        confirmReplace: existing > 0 ? true : false,
+      });
+      const result: FinCommitResult = await res.json();
+      setFinCommitted(result);
+      setFinReview(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: `Financial refresh committed for ${finSnapshotMonth}` });
+    } catch (e: any) {
+      toast({ title: "Financial refresh failed", description: e.message, variant: "destructive" });
+    } finally {
+      setFinLoading(false);
+    }
+  }
+
   async function handleCommit() {
     if (!rawRows.length) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/import/commit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: rawRows }),
-      });
-      if (!res.ok) throw new Error(await res.text());
+      const res = await apiRequest("POST", "/api/import/commit", { rows: rawRows });
       const result: CommitResult = await res.json();
       setCommitted(result);
       setPreview(null);
@@ -443,34 +518,76 @@ export default function BulkImportPage() {
 
   const displayRows = showAll ? rawRows : rawRows.slice(0, 50);
 
+  function monthLabel(ym: string) {
+    if (!ym) return "";
+    const [y, m] = ym.split("-").map(Number);
+    if (!y || !m) return ym;
+    return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-5xl mx-auto space-y-8">
       <PageHeader
         title="Bulk Import"
-        subtitle="Upload a Valid Car File, Asset Report (Financial Refresh), or Master Car List workbook"
+        subtitle="Two separate importers — car files never write financials, and the Asset Report never touches car identity or assignments."
       />
 
-      {/* Success state */}
+      {finCommitted && (
+        <div className="rounded-lg border border-umler-teal/30 bg-umler-teal/10 p-6" data-testid="fin-commit-report">
+          <CheckCircle2 className="h-8 w-8 text-emerald-400 mb-3" />
+          <div className="text-lg font-semibold text-foreground">
+            Financial refresh committed — {monthLabel(finCommitted.snapshotMonth.slice(0, 7))}
+          </div>
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+            <div>Summary rows written: <span className="font-mono-num">{finCommitted.summaryRowsWritten}</span></div>
+            <div>Rows replaced: <span className="font-mono-num">{finCommitted.summaryRowsDeleted}</span></div>
+            <div>Cars updated: <span className="font-mono-num">{finCommitted.carsUpdated}</span></div>
+            <div>Cars unchanged: <span className="font-mono-num">{finCommitted.carsUnchanged}</span></div>
+            <div>Cars still blank: <span className="font-mono-num">{finCommitted.carsLeftBlank}</span></div>
+            <div>Coal skipped: <span className="font-mono-num">{finCommitted.coalSkipped}</span></div>
+            <div>Air/Power excluded: <span className="font-mono-num">{finCommitted.skippedNonRail}</span></div>
+            <div>Unmatched riders: <span className="font-mono-num">{finCommitted.unmatchedRiders.length}</span></div>
+          </div>
+          <div className="text-xs text-muted-foreground mt-3">
+            Railcar fields written: {(finCommitted.railcarFieldsWritten ?? []).join(", ")}. Identity, entity, active, lessee, and assignments were not touched.
+          </div>
+          {finCommitted.unmatchedRiders.length > 0 && (
+            <div className="text-xs text-amber-400 mt-2">
+              No RLMS cars for: {finCommitted.unmatchedRiders.slice(0, 20).join(", ")}
+              {finCommitted.unmatchedRiders.length > 20 ? "…" : ""}
+            </div>
+          )}
+          <Button className="mt-4" variant="secondary" onClick={() => { setFinCommitted(null); setFinFileName(null); setFinPayload(null); setFinReview(null); }}>
+            Import another Asset Report
+          </Button>
+        </div>
+      )}
+
       {committed && (
-        <div className="mt-6 rounded-lg border border-umler-teal/30 bg-umler-teal/10 p-6 text-center">
+        <div className="rounded-lg border border-umler-teal/30 bg-umler-teal/10 p-6 text-center">
           <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto mb-3" />
           <div className="text-lg font-semibold text-foreground">{committed.imported} railcars imported</div>
           <div className="text-sm text-muted-foreground mt-1">{committed.assigned} cars assigned to riders</div>
           {committed.skipped > 0 && (
             <div className="text-sm text-amber-400 mt-1">{committed.skipped} rows were skipped due to errors or duplicates</div>
           )}
-          <Button className="mt-4" variant="secondary" onClick={() => { setCommitted(null); setFileName(null); setRawRows([]); setVcfReview(null); setVcfRawRows([]); setFinReview(null); setFinPayload(null); }}>
-            Import another file
+          <Button className="mt-4" variant="secondary" onClick={() => { setCommitted(null); setFileName(null); setRawRows([]); setVcfReview(null); setVcfRawRows([]); }}>
+            Import another car file
           </Button>
         </div>
       )}
 
       {!committed && (
-        <>
-          {/* Drop zone */}
+        <section className="rounded-xl border border-card-border bg-card shadow-card p-5" data-testid="section-car-import">
+          <header className="mb-4">
+            <h2 className="text-base font-semibold">Master Car List / Valid Car File</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Car identity, entity, active flag, lessee, and rider assignments. Does not write Asset Report financials.
+            </p>
+          </header>
           <div
             className={cn(
-              "mt-6 rounded-lg border-2 border-dashed border-border bg-card hover:border-primary/50 transition-colors cursor-pointer text-center p-10",
+              "rounded-lg border-2 border-dashed border-border bg-background hover:border-primary/50 transition-colors cursor-pointer text-center p-10",
               loading && "opacity-60 pointer-events-none"
             )}
             onClick={() => fileRef.current?.click()}
@@ -478,12 +595,12 @@ export default function BulkImportPage() {
             onDrop={(e) => {
               e.preventDefault();
               const f = e.dataTransfer.files[0];
-              if (f) handleFile(f);
+              if (f) handleCarFile(f);
             }}
           >
             <FileSpreadsheet className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
             <div className="text-sm font-medium text-foreground">
-              {fileName ? fileName : "Drop a CSV or Excel file here"}
+              {fileName ? fileName : "Drop a Master Car List or Valid Car File here"}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               or click to browse · .csv, .xlsx, .xls · V_VALID_CARS sheet preferred when present
@@ -493,7 +610,7 @@ export default function BulkImportPage() {
               type="file"
               accept=".csv,.xlsx,.xls,.txt"
               className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCarFile(f); e.target.value = ""; }}
             />
           </div>
 
@@ -588,77 +705,6 @@ export default function BulkImportPage() {
 
               <div className="text-xs text-muted-foreground">
                 Production commit stays locked until Bruce signs off. Existing cars in DB: {vcfReview.existingCarsInDb.toLocaleString()}.
-              </div>
-            </div>
-          )}
-
-          {/* §3.5 Financial / Asset Report review */}
-          {finReview && !loading && (
-            <div className="mt-6 space-y-4">
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
-                <div className="text-sm font-semibold text-foreground">Asset Report — §3.5 reconciliation (dry-run)</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  No production write yet. Snapshot month: {finReview.snapshotMonth ?? "not detected"}.
-                  {finPayload ? ` · Main ${finReview.mainRows} + RPS ${finReview.rpsRows} qualifying rows` : null}
-                </div>
-              </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <StatChip icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Qualifying rows" value={finReview.qualifyingRows} />
-                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />} label="Cars in file (rail)" value={finReview.qualifyingCarCount} color="emerald" />
-                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Active cars in RLMS" value={finReview.activeCarsInRlms} />
-                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="File − RLMS delta" value={finReview.fileVsActiveDelta} />
-                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Would match" value={finReview.refreshPreview.carsMatched} color="emerald" />
-                <StatChip
-                  icon={<AlertTriangle className={`h-3.5 w-3.5 ${finReview.flaggedCount ? "text-amber-400" : "text-muted-foreground"}`} />}
-                  label="Flagged non-car"
-                  value={finReview.flaggedCount}
-                  color={finReview.flaggedCount ? "amber" : undefined}
-                />
-              </div>
-
-              {finReview.flaggedCount > 0 && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
-                  <div className="text-sm font-medium mb-2">Flagged (not imported as rail) — {finReview.flaggedCount}</div>
-                  <ul className="text-xs space-y-1 max-h-40 overflow-auto">
-                    {finReview.flagged.map((f, i) => (
-                      <li key={`${f.rider_id}-${f.asset}-${i}`}>
-                        <span className="font-mono">{f.rider_id}</span> · {f.asset} × {f.count_cars} — {f.reason}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <div className="font-medium text-foreground mb-1">File rider+type with no matching active car</div>
-                  <div className="text-muted-foreground mb-2">{finReview.fileNoCarMatchCount} combinations</div>
-                  <ul className="space-y-1 max-h-48 overflow-auto">
-                    {finReview.fileNoCarMatches.slice(0, 20).map((f) => (
-                      <li key={`${f.rider_id}-${f.car_type}-${f.entity}`}>
-                        <span className="font-mono">{f.rider_id}</span> · {f.car_type} ({f.entity}) × {f.count_cars}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <div className="font-medium text-foreground mb-1">Active cars with no file match</div>
-                  <div className="text-muted-foreground mb-2">
-                    {finReview.carsNoFileMatch.total.toLocaleString()} total · Coal {finReview.carsNoFileMatch.coal.toLocaleString()} (expected) · Main/RPS {finReview.carsNoFileMatch.mainRps.toLocaleString()}
-                  </div>
-                  <ul className="space-y-1 max-h-48 overflow-auto">
-                    {finReview.carsNoFileMatch.sampleMainRps.slice(0, 15).map((c) => (
-                      <li key={c.id}>
-                        <span className="font-mono">{c.rider_external_id}</span> · {c.car_type} → {c.mapped_asset ?? "?"} ({c.entity})
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-
-              <div className="text-xs text-muted-foreground">
-                Skipped non-Rail (Air/Power): {finReview.skippedNonRail}. Multi-batch rider+types: {finReview.refreshPreview.multiBatchRiderTypes}.
-                Production commit stays locked until Bruce signs off.
               </div>
             </div>
           )}
@@ -827,7 +873,193 @@ export default function BulkImportPage() {
               </div>
             </div>
           )}
-        </>
+        </section>
+      )}
+
+      {!finCommitted && (
+        <section className="rounded-xl border border-card-border bg-card shadow-card p-5" data-testid="section-financial-import">
+          <header className="mb-4">
+            <h2 className="text-base font-semibold">Financial Data Refresh (Asset Report)</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Writes only <span className="font-mono">rider_financial_summary</span> and per-car NBV, OEC, Monthly Rent P/C, Monthly Depr P/C, plus which month produced those numbers. Never changes car number, entity, active, lessee, or assignments.
+            </p>
+          </header>
+          <div
+            className={cn(
+              "rounded-lg border-2 border-dashed border-umler-steel/40 bg-umler-steel/5 hover:border-umler-steel/70 transition-colors cursor-pointer text-center p-10",
+              finLoading && "opacity-60 pointer-events-none"
+            )}
+            onClick={() => finFileRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files[0];
+              if (f) handleFinFile(f);
+            }}
+          >
+            <FileSpreadsheet className="h-10 w-10 text-umler-steel mx-auto mb-3" />
+            <div className="text-sm font-medium text-foreground">
+              {finFileName ? finFileName : "Drop the RESIDCO Asset Report workbook here"}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Sheets: RESIDCO By Deal # and RPS By Deal # · .xlsx / .xls
+            </div>
+            <input
+              ref={finFileRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFinFile(f); e.target.value = ""; }}
+            />
+          </div>
+
+          <div className="mt-4 flex items-start gap-3 p-4 rounded-lg border border-border bg-background/60">
+            <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="text-xs text-muted-foreground space-y-1 w-full">
+              <div className="font-medium text-foreground">Expected columns (Asset Report)</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-0.5">
+                {[
+                  ["Sub / Rider", "Deal / OL code (e.g. EA1205)"],
+                  ["Lessee", "Lessee name on the deal"],
+                  ["Count", "Cars in this batch"],
+                  ["Asset", "COV HOPPER, TANK CARS, …"],
+                  ["Air/Rail/Power", "Main sheet — only Rail rows are kept"],
+                  ["Net Equipment Cost / per car", "OEC source"],
+                  ["BV per Asset / Total Book Value", "NBV source"],
+                  ["Monthly Rent P/C / Total", "Rent source"],
+                  ["Monthly Depreciation per asset", "Depr source"],
+                  ["Lease Exp / months until exp", "Used for expiration tiles, not car identity"],
+                  ["Owner Entity", "Legal owner on the deal — not written to railcars.entity"],
+                ].map(([col, desc]) => (
+                  <div key={col}>
+                    <span className="font-mono text-foreground">{col}</span>
+                    <span className="text-muted-foreground"> — {desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {finLoading && (
+            <div className="mt-6 space-y-2">
+              <Skeleton className="h-8 w-1/3" />
+              <Skeleton className="h-48 w-full" />
+            </div>
+          )}
+
+          {finReview && !finLoading && (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+                <div className="text-sm font-semibold text-foreground">Review before commit — nothing written yet</div>
+                <div className="flex flex-wrap items-end gap-4">
+                  <div>
+                    <Label className="text-xs">Snapshot month</Label>
+                    <Input
+                      type="month"
+                      value={finSnapshotMonth}
+                      onChange={(e) => handleFinMonthChange(e.target.value)}
+                      className="mt-1 w-48"
+                      data-testid="input-snapshot-month"
+                    />
+                    <div className="text-[11px] text-muted-foreground mt-1">
+                      {finReview.snapshotMonthDetected ? "Detected from the workbook — confirm or override." : "Could not detect from the file — set this before committing."}
+                    </div>
+                  </div>
+                </div>
+                {(finReview.existingSnapshotRows ?? 0) > 0 && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                    <div className="font-medium text-foreground">
+                      {monthLabel(finSnapshotMonth)} already has {finReview.existingSnapshotRows.toLocaleString()} rows loaded.
+                      Continuing will replace them with this file’s data. Other months are untouched.
+                    </div>
+                    <label className="mt-2 flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={replaceAck}
+                        onChange={(e) => setReplaceAck(e.target.checked)}
+                        data-testid="check-replace-month"
+                      />
+                      Replace {monthLabel(finSnapshotMonth)} with this file
+                    </label>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <StatChip icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Rail rows kept" value={finReview.qualifyingRows} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Air/Power excluded" value={finReview.skippedNonRail} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Main rows" value={finReview.mainRows} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="RPS rows" value={finReview.rpsRows} />
+                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Would update cars" value={finReview.refreshPreview.carsMatched} color="emerald" />
+                <StatChip
+                  icon={<AlertTriangle className={`h-3.5 w-3.5 ${(finReview.unmatchedRiders?.length ?? 0) ? "text-amber-400" : "text-muted-foreground"}`} />}
+                  label="Unmatched riders"
+                  value={finReview.unmatchedRiders?.length ?? 0}
+                  color={(finReview.unmatchedRiders?.length ?? 0) ? "amber" : undefined}
+                />
+              </div>
+
+              {(finReview.unmatchedRiders?.length ?? 0) > 0 && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs">
+                  <div className="font-medium mb-1">Riders in the file with no matching RLMS cars</div>
+                  <div className="font-mono">{finReview.unmatchedRiders.slice(0, 30).join(", ")}{finReview.unmatchedRiders.length > 30 ? "…" : ""}</div>
+                </div>
+              )}
+
+              {finReview.flaggedCount > 0 && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+                  <div className="text-sm font-medium mb-2">Flagged (not imported as rail) — {finReview.flaggedCount}</div>
+                  <ul className="text-xs space-y-1 max-h-40 overflow-auto">
+                    {finReview.flagged.map((f, i) => (
+                      <li key={`${f.rider_id}-${f.asset}-${i}`}>
+                        <span className="font-mono">{f.rider_id}</span> · {f.asset} × {f.count_cars} — {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="rounded-lg border border-border bg-background p-4">
+                  <div className="font-medium text-foreground mb-1">File rider+type with no matching active car</div>
+                  <div className="text-muted-foreground mb-2">{finReview.fileNoCarMatchCount} combinations</div>
+                  <ul className="space-y-1 max-h-48 overflow-auto">
+                    {finReview.fileNoCarMatches.slice(0, 20).map((f) => (
+                      <li key={`${f.rider_id}-${f.car_type}-${f.entity}`}>
+                        <span className="font-mono">{f.rider_id}</span> · {f.car_type} ({f.entity}) × {f.count_cars}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-lg border border-border bg-background p-4">
+                  <div className="font-medium text-foreground mb-1">Active cars with no file match</div>
+                  <div className="text-muted-foreground mb-2">
+                    {finReview.carsNoFileMatch.total.toLocaleString()} total · Coal {finReview.carsNoFileMatch.coal.toLocaleString()} (expected) · Main/RPS {finReview.carsNoFileMatch.mainRps.toLocaleString()}
+                  </div>
+                  <ul className="space-y-1 max-h-48 overflow-auto">
+                    {finReview.carsNoFileMatch.sampleMainRps.slice(0, 15).map((c) => (
+                      <li key={c.id}>
+                        <span className="font-mono">{c.rider_external_id}</span> · {c.car_type} → {c.mapped_asset ?? "?"} ({c.entity})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <Button variant="secondary" onClick={() => { setFinReview(null); setFinPayload(null); setFinFileName(null); setReplaceAck(false); }}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleFinCommit}
+                  disabled={!canEdit || finLoading || !finSnapshotMonth || ((finReview.existingSnapshotRows ?? 0) > 0 && !replaceAck)}
+                  data-testid="button-commit-financial"
+                >
+                  {!canEdit ? "View only" : finLoading ? "Committing…" : `Commit ${monthLabel(finSnapshotMonth) || "this month"}`}
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
       )}
     </div>
   );

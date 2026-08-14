@@ -480,6 +480,7 @@ export type FinancialReview = {
     coalCarsNeverMatch: boolean;
     detail: string;
   };
+  unmatchedRiders: string[];
 };
 
 function riderTypeKey(rider: string, carType: string, entity?: string) {
@@ -609,6 +610,7 @@ export function buildFinancialReview(
   };
   const sampleMainRps: FinancialReview["carsNoFileMatch"]["sampleMainRps"] = [];
   const matchedFileKeys = new Set<string>();
+  const matchedRiderIds = new Set<string>();
   const multiBatchKeys = new Set<string>();
 
   for (const car of activeWithRider) {
@@ -654,6 +656,7 @@ export function buildFinancialReview(
     if (batches && batches.length && usedKey) {
       carsMatched += 1;
       matchedFileKeys.add(usedKey);
+      matchedRiderIds.add(rider);
       if (batches.length > 1) multiBatchKeys.add(usedKey);
       if (path === "alias") matchPathStats.alias += 1;
       else matchPathStats.single_rider_fallback += 1;
@@ -684,6 +687,9 @@ export function buildFinancialReview(
     fileNoCarMatches.push({ rider_id, car_type, entity, count_cars });
   }
   fileNoCarMatches.sort((a, b) => b.count_cars - a.count_cars);
+
+  const fileRiderIds = [...new Set(allRows.map((r) => r.rider_id))];
+  const unmatchedRiders = fileRiderIds.filter((id) => !matchedRiderIds.has(id)).sort();
 
   return {
     snapshotMonth,
@@ -732,6 +738,7 @@ export function buildFinancialReview(
         "Main cars only match Main-sheet rows; RPS cars only match RPS-sheet rows; " +
         "entity=Coal never match (even if Main sheet has COAL GONDOLAS/HOPPERS for the same rider).",
     },
+    unmatchedRiders,
   };
 }
 
@@ -756,10 +763,154 @@ export function financialRowToDbPayload(r: FinancialParsedRow): Record<string, u
     lease_end_residual_total: r.lease_end_residual_total,
     lease_end_residual_per_asset: r.lease_end_residual_per_asset,
     months_until_lease_exp: r.months_until_lease_exp,
+    lease_exp_date: r.lease_exp_date,
     deal_resp: r.deal_resp,
     lender: r.lender,
     liability_insurance_exp: r.liability_insurance_exp,
     property_insurance_exp: r.property_insurance_exp,
     raw_air_rail_power: r.raw_air_rail_power,
   };
+}
+
+/** Per-car fields the financial refresh is allowed to write. Nothing else on railcars. */
+export const RAILCAR_FINANCIAL_REFRESH_FIELDS = [
+  "nbv",
+  "oec",
+  "monthly_rent_per_car",
+  "monthly_depr_per_car",
+  "financial_snapshot_month",
+] as const;
+
+export function normalizeSnapshotMonth(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const ym = s.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?/);
+  if (!ym) return null;
+  return `${ym[1]}-${ym[2].padStart(2, "0")}-01`;
+}
+
+export type SummaryRowForRefresh = {
+  snapshot_month: string;
+  rider_id: string;
+  car_type: string;
+  entity: string;
+  count_cars: number;
+  book_value_per_asset: number | null;
+  monthly_rent_per_car: number | null;
+  monthly_depreciation_per_asset: number | null;
+  net_equipment_cost_per_car: number | null;
+};
+
+export type CarFinancialUpdate = {
+  id: number;
+  nbv: number | null;
+  oec: number | null;
+  monthly_rent_per_car: number | null;
+  monthly_depr_per_car: number | null;
+  financial_snapshot_month: string;
+};
+
+function snapshotKey(raw: string): string {
+  return normalizeSnapshotMonth(raw) ?? String(raw).slice(0, 10);
+}
+
+/**
+ * For each active car, take matching Asset Report batches from the latest
+ * snapshot_month that has a hit for that rider+type+entity. Never averages
+ * across months.
+ */
+export function buildCarFinancialUpdates(
+  cars: ActiveCarForJoin[],
+  summaryRows: SummaryRowForRefresh[]
+): { updates: CarFinancialUpdate[]; leftBlank: number; coalSkipped: number } {
+  const fileByRiderTypeEntity = new Map<string, SummaryRowForRefresh[]>();
+  const assetsByRiderEntity = new Map<string, Set<string>>();
+  for (const r of summaryRows) {
+    const row = { ...r, snapshot_month: snapshotKey(String(r.snapshot_month)) };
+    const k = `${row.rider_id}|${row.car_type}|${row.entity}`;
+    const list = fileByRiderTypeEntity.get(k) ?? [];
+    list.push(row);
+    fileByRiderTypeEntity.set(k, list);
+    const rk = `${row.rider_id}|${row.entity}`;
+    const set = assetsByRiderEntity.get(rk) ?? new Set();
+    set.add(row.car_type);
+    assetsByRiderEntity.set(rk, set);
+  }
+
+  const updates: CarFinancialUpdate[] = [];
+  let leftBlank = 0;
+  let coalSkipped = 0;
+
+  for (const car of cars) {
+    const rider = String(car.rider_external_id ?? "").trim();
+    const sheetEnt = financialSheetForCarEntity(car.entity);
+    if (!rider || !sheetEnt) {
+      if (!sheetEnt) coalSkipped += 1;
+      leftBlank += 1;
+      continue;
+    }
+
+    // Collect hits per asset family, then use the first family (candidate order)
+    // that has the latest snapshot_month. Never average across months, and never
+    // mix two families from the same month.
+    const familyHits: SummaryRowForRefresh[][] = [];
+    for (const asset of candidateAssetFamilies(car)) {
+      const found = fileByRiderTypeEntity.get(`${rider}|${asset}|${sheetEnt}`);
+      if (found?.length) familyHits.push(found);
+    }
+    if (!familyHits.length) {
+      const only = assetsByRiderEntity.get(`${rider}|${sheetEnt}`);
+      if (only && only.size === 1) {
+        const found = fileByRiderTypeEntity.get(`${rider}|${[...only][0]}|${sheetEnt}`);
+        if (found?.length) familyHits.push(found);
+      }
+    }
+    if (!familyHits.length) {
+      leftBlank += 1;
+      continue;
+    }
+    const latest = familyHits
+      .flatMap((rows) => rows.map((b) => b.snapshot_month))
+      .sort()
+      .at(-1)!;
+    const chosen = familyHits.find((rows) => rows.some((b) => b.snapshot_month === latest))!;
+    const latestBatches = chosen.filter((b) => b.snapshot_month === latest);
+    const avg = averageBatches(latestBatches as FinancialParsedRow[]);
+    updates.push({
+      id: car.id,
+      nbv: roundMoney(avg.nbv),
+      oec: roundMoney(avg.oec),
+      monthly_rent_per_car: roundMoney(avg.monthly_rent_per_car),
+      monthly_depr_per_car: roundMoney(avg.monthly_depr_per_car),
+      financial_snapshot_month: latest,
+    });
+  }
+
+  return { updates, leftBlank, coalSkipped };
+}
+
+function roundMoney(v: number | null): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  return Math.round(v * 100) / 100;
+}
+
+export function carFinancialFingerprint(u: {
+  nbv: number | null;
+  oec: number | null;
+  monthly_rent_per_car: number | null;
+  monthly_depr_per_car: number | null;
+  financial_snapshot_month?: string | null;
+}): string {
+  const n = (v: number | null | undefined) => {
+    const r = roundMoney(v ?? null);
+    return r == null ? "" : String(r);
+  };
+  return [
+    n(u.nbv),
+    n(u.oec),
+    n(u.monthly_rent_per_car),
+    n(u.monthly_depr_per_car),
+    snapshotKey(String(u.financial_snapshot_month ?? "")),
+  ].join("|");
 }

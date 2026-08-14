@@ -73,6 +73,7 @@ export type Railcar = {
   lease_expiry: string | null;
   monthly_rent_per_car: number | null;
   monthly_depr_per_car: number | null;
+  financial_snapshot_month?: string | null;
   lease_end_residual_per_car?: number | null;
   total_bv_rider: number | null;
   cars_on_rider_ar: number | null;

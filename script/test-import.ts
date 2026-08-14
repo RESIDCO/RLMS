@@ -20,6 +20,14 @@ import {
   synthesizeLeaseNumber,
 } from "../shared/residco-import";
 import { carBuildYear, turning50ByYear } from "../shared/build-year";
+import {
+  normalizeSnapshotMonth,
+  buildCarFinancialUpdates,
+  carFinancialFingerprint,
+  RAILCAR_FINANCIAL_REFRESH_FIELDS,
+  type ActiveCarForJoin,
+  type SummaryRowForRefresh,
+} from "../shared/financial-import";
 
 let passed = 0;
 let failed = 0;
@@ -357,6 +365,76 @@ eq(carBuildYear({ build_year: null, built_year: null }), null, "carBuildYear nul
   eq(summary.tiles.map((t) => t.count), [1, 1, 0, 0], "turning50 counts by year");
   eq(summary.unknown_count, 2, "turning50 unknown count");
   eq(summary.operating_count, 4, "turning50 operating count");
+}
+
+eq(normalizeSnapshotMonth("2026-07"), "2026-07-01", "normalizeSnapshotMonth YYYY-MM");
+eq(normalizeSnapshotMonth("2026-7-15"), "2026-07-01", "normalizeSnapshotMonth pads month and forces day 01");
+eq(normalizeSnapshotMonth("2026-08-01"), "2026-08-01", "normalizeSnapshotMonth already-canonical");
+eq(normalizeSnapshotMonth(""), null, "normalizeSnapshotMonth empty");
+eq(normalizeSnapshotMonth(null), null, "normalizeSnapshotMonth null");
+eq(
+  [...RAILCAR_FINANCIAL_REFRESH_FIELDS],
+  ["nbv", "oec", "monthly_rent_per_car", "monthly_depr_per_car", "financial_snapshot_month"],
+  "financial refresh writes only the five allowed railcar fields"
+);
+
+{
+  const car: ActiveCarForJoin = {
+    id: 1,
+    rider_external_id: "EA1205",
+    car_type: "C214",
+    mechanical_designation: "LO",
+    general_description: "5250 cf covered hoppers",
+    entity: "Main",
+  };
+  const coal: ActiveCarForJoin = {
+    id: 2,
+    rider_external_id: "EA1205",
+    car_type: "HTS",
+    mechanical_designation: "HTS",
+    general_description: "coal hoppers",
+    entity: "Coal",
+  };
+  const july: SummaryRowForRefresh = {
+    snapshot_month: "2026-07-01",
+    rider_id: "EA1205",
+    car_type: "COV HOPPER",
+    entity: "Main",
+    count_cars: 10,
+    book_value_per_asset: 100,
+    monthly_rent_per_car: 10,
+    monthly_depreciation_per_asset: 1,
+    net_equipment_cost_per_car: 1000,
+  };
+  const august: SummaryRowForRefresh = {
+    ...july,
+    snapshot_month: "2026-08-01",
+    book_value_per_asset: 90,
+    monthly_rent_per_car: 11,
+    monthly_depreciation_per_asset: 2,
+    net_equipment_cost_per_car: 1000,
+  };
+  const first = buildCarFinancialUpdates([car, coal], [july, august]);
+  const second = buildCarFinancialUpdates([car, coal], [july, august]);
+  eq(first.updates.length, 1, "buildCarFinancialUpdates: one Main car matched");
+  eq(first.updates[0].financial_snapshot_month, "2026-08-01", "latest snapshot_month wins over July");
+  eq(first.updates[0].nbv, 90, "NBV comes from August, not averaged with July");
+  eq(first.updates[0].monthly_rent_per_car, 11, "rent comes from August");
+  eq(first.coalSkipped, 1, "Coal cars never match");
+  eq(first.leftBlank, 1, "Coal counted as left blank");
+  eq(
+    carFinancialFingerprint(first.updates[0]),
+    carFinancialFingerprint(second.updates[0]),
+    "recompute twice against the same months is byte-identical"
+  );
+  const julyOnly = buildCarFinancialUpdates([car], [july, { ...july, net_equipment_cost_per_car: 1100, book_value_per_asset: 200, count_cars: 10 }]);
+  eq(julyOnly.updates[0].nbv, 150, "same-month cost-basis batches are weighted-averaged, not summed");
+  eq(julyOnly.updates[0].financial_snapshot_month, "2026-07-01", "same-month average keeps that month stamp");
+  eq(
+    carFinancialFingerprint({ nbv: 24008.060000000005, oec: 25282.700000000004, monthly_rent_per_car: 400, monthly_depr_per_car: 424.88 }),
+    carFinancialFingerprint({ nbv: 24008.06, oec: 25282.7, monthly_rent_per_car: 400, monthly_depr_per_car: 424.88 }),
+    "fingerprint treats float noise as the same cents"
+  );
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

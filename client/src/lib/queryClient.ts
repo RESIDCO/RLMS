@@ -30,6 +30,13 @@ export function railcarsQs(params: Record<string, string | number | undefined | 
   return qs ? `/api/railcars?${qs}` : "/api/railcars";
 }
 
+/** `/api/railcars` is an array when `all=1`, otherwise `{ rows, total_count, page, pageSize }`. */
+export function asRailcarList<T>(data: T[] | { rows?: T[] } | null | undefined): T[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.rows)) return data.rows;
+  return [];
+}
+
 export async function apiRequest(
   method: string,
   url: string,

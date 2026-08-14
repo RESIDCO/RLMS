@@ -59,7 +59,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { cn } from "@/lib/utils";
-import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
+import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
@@ -113,6 +113,14 @@ function fmtDate(d: string | null | undefined) {
 }
 function fmtPct(n: number | null) {
   return n == null ? "—" : `${Number(n).toFixed(3)}%`;
+}
+function fmtMoney(n: number | null) {
+  if (n == null) return "—";
+  return Number(n).toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
 }
 function olCodesForLease(lease: MasterLeaseWithRiders): string[] {
   return (lease.riders ?? [])
@@ -609,8 +617,11 @@ const RC_OPT_COLS: { key: RCOptCol; label: string }[] = [
 
 function RiderCars({ riderId }: { riderId: number }) {
   const { data: cars, isLoading } = useQuery<RailcarWithAssignment[]>({
-    queryKey: ["/api/railcars", { all: "1", rider_id: riderId }],
-    queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1", rider_id: riderId })),
+    queryKey: ["/api/railcars", { all: "1", rider_id: riderId, active: "all" }],
+    queryFn: () =>
+      apiGet<RailcarWithAssignment[]>(
+        railcarsQs({ all: "1", rider_id: riderId, active: "all" })
+      ),
     staleTime: 45_000,
   });
   const [page, setPage] = useState(0);
@@ -620,7 +631,7 @@ function RiderCars({ riderId }: { riderId: number }) {
     useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
   const visibleCols = visibleColsRaw as Set<RCOptCol>;
 
-  const filtered = (cars ?? []).filter((c) => c.assignment?.rider_id === riderId);
+  const filtered = asRailcarList(cars).filter((c) => c.assignment?.rider_id === riderId);
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const slice = filtered.slice(page * pageSize, (page + 1) * pageSize);

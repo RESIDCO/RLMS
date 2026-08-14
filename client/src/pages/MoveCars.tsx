@@ -18,7 +18,7 @@ import {
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { ArrowRight, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
+import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import type { RailcarWithAssignment } from "@shared/schema";
@@ -68,9 +68,12 @@ export default function MoveCars() {
   const { toast } = useToast();
 
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
-  const { data: railcars, isLoading } = useQuery<RailcarWithAssignment[]>({
-    queryKey: ["/api/railcars", { all: "1", rider_id: fromRiderId }],
-    queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1", rider_id: fromRiderId })),
+  const { data: railcars, isLoading, isError, error } = useQuery<RailcarWithAssignment[]>({
+    queryKey: ["/api/railcars", { all: "1", rider_id: fromRiderId, active: "all" }],
+    queryFn: () =>
+      apiGet<RailcarWithAssignment[]>(
+        railcarsQs({ all: "1", rider_id: fromRiderId, active: "all" })
+      ),
     enabled: !!fromRiderId,
     staleTime: 45_000,
   });
@@ -84,8 +87,9 @@ export default function MoveCars() {
   );
 
   const sourceCars = useMemo(() => {
-    if (!fromRiderId || !railcars) return [];
-    const list = railcars.filter(
+    if (!fromRiderId) return [];
+    const rows = asRailcarList(railcars);
+    const list = rows.filter(
       (c) => String(c.assignment?.rider_id ?? "") === fromRiderId
     );
     if (!search.trim()) return list;
@@ -212,6 +216,10 @@ export default function MoveCars() {
                 <div className="rounded-md border border-border max-h-[360px] overflow-auto">
                   {isLoading ? (
                     <Skeleton className="h-40" />
+                  ) : isError ? (
+                    <div className="py-10 text-sm text-destructive italic text-center">
+                      Could not load cars{error instanceof Error ? `: ${error.message}` : "."}
+                    </div>
                   ) : sourceCars.length === 0 ? (
                     <div className="py-10 text-sm text-muted-foreground italic text-center">
                       No cars on this rider.
@@ -354,7 +362,7 @@ export default function MoveCars() {
               </div>
               {/* Selected cars — reporting mark preview */}
               {(() => {
-                const selectedCars = (railcars ?? []).filter((c) => selected.has(c.id));
+                const selectedCars = asRailcarList(railcars).filter((c) => selected.has(c.id));
                 return (
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">

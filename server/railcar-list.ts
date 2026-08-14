@@ -54,21 +54,27 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
       : entityRaw === "Owned" || entityRaw === "owned"
         ? "Main"
         : entityRaw;
+  const rider_id = num(query.rider_id);
+  const lease_id = num(query.lease_id);
+  // Rider/lease pickers need every assigned car, including active=false.
+  const activeDefault = rider_id || lease_id ? "all" : "active";
+  const activeRaw = String(query.active ?? activeDefault).trim();
+  const truthy = (v: unknown) => v === "1" || v === "true" || v === 1 || v === true;
   return {
     search: str(query.search),
     status: str(query.status),
     entity,
-    active: String(query.active ?? "active").trim() === "all" ? "all" : (str(query.active) ?? "active"),
+    active: activeRaw === "all" ? "all" : (str(query.active) ?? activeDefault),
     assigned: str(query.assigned),
     rider: str(query.rider),
-    rider_id: num(query.rider_id),
-    lease_id: num(query.lease_id),
+    rider_id,
+    lease_id,
     transit: str(query.transit),
     sort: str(query.sort) ?? "car_number",
     dir: query.dir === "desc" ? "desc" : "asc",
     page: Math.max(1, num(query.page) ?? 1),
     pageSize: Math.min(200, Math.max(1, num(query.pageSize) ?? 75)),
-    all: query.all === "1" || query.all === "true" || query.export === "1",
+    all: truthy(query.all) || truthy(query.export),
   };
 }
 

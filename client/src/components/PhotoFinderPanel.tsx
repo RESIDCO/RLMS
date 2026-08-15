@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Image, Loader2, ExternalLink, Download } from "lucide-react";
+import { Image, Loader2, ExternalLink, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -148,6 +148,21 @@ export default function PhotoFinderPanel({
     });
   }
 
+  function handleClear() {
+    if (isSearching && trackedJobIdRef.current) {
+      abortPhotoJob(trackedJobIdRef.current);
+    }
+    searchingRef.current = false;
+    seenRunningRef.current = false;
+    trackedJobIdRef.current = null;
+    setIsSearching(false);
+    setText("");
+    setRunStatus(null);
+    setActiveIdx(0);
+    setDlBusy(false);
+    setDlNote("");
+  }
+
   const hitCars = useMemo(() => {
     const cars = runStatus?.result?.cars || [];
     return cars.filter((c: any) => (c.images || []).length > 0);
@@ -217,6 +232,16 @@ export default function PhotoFinderPanel({
         >
           {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4" />}
           {isSearching ? "Searching…" : rows.length ? `Find Photos (${rows.length})` : "Find Photos"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={!isSearching && !text && !runStatus}
+          onClick={handleClear}
+          data-testid="button-photo-search-clear"
+        >
+          <X className="h-4 w-4" />
+          New search
         </Button>
         {isSearching && trackedJobIdRef.current && (
           <Button

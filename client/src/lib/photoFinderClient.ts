@@ -816,8 +816,63 @@ export function triggerBlobDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(href), 30_000);
 }
 
-export async function downloadImagesAsZip() {
-  throw new Error("Zip download is not available in RLMS. Open or save images individually.");
+function loadJSZip() {
+  if (typeof window !== "undefined" && window.JSZip) return Promise.resolve(window.JSZip);
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
+    s.async = true;
+    s.onload = () => {
+      if (window.JSZip) resolve(window.JSZip);
+      else reject(new Error("JSZip failed to load"));
+    };
+    s.onerror = () => reject(new Error("Could not load JSZip"));
+    document.head.appendChild(s);
+  });
+}
+
+/** Zip photo hits. Items may include `filename` (e.g. MARK_NUMBER/01.jpg). */
+export async function downloadImagesAsZip(items, zipName) {
+  const JSZip = await loadJSZip();
+  const zip = new JSZip();
+  let ok = 0;
+  const errors = [];
+  for (let i = 0; i < (items || []).length; i++) {
+    const item = items[i];
+    const url = bestImageUrl(item);
+    if (!url) continue;
+    const extMatch = String(url).match(/\.(jpe?g|png|gif|webp)(\?|$)/i);
+    const ext = extMatch ? `.${extMatch[1].toLowerCase().replace("jpeg", "jpg")}` : ".jpg";
+    const name = item.filename || `${String(i + 1).padStart(2, "0")}${ext}`;
+    try {
+      const blob = await fetchImageBlob(url);
+      zip.file(name, blob);
+      ok += 1;
+    } catch (e) {
+      errors.push(`${name}: ${e?.message || e}`);
+    }
+  }
+  if (!ok) {
+    throw new Error(errors[0] || "Could not download images (network or blocked photo URL).");
+  }
+  const out = await zip.generateAsync({ type: "blob" });
+  triggerBlobDownload(out, zipName || "railcar_photos.zip");
+  return { ok, errors };
+}
+
+export function collectPhotoZipItems(cars) {
+  const items = [];
+  for (const car of cars || []) {
+    const images = car.images || [];
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      items.push({
+        ...img,
+        filename: `${car.mark}_${car.number}/${String(i + 1).padStart(2, "0")}.jpg`,
+      });
+    }
+  }
+  return items;
 }
 
 const STOP_MARKS = new Set([

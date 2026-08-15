@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Image, Loader2, ExternalLink } from "lucide-react";
+import { Image, Loader2, ExternalLink, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,8 @@ import {
   formatEtaSeconds,
   bestThumbUrl,
   bestImageUrl,
+  downloadImagesAsZip,
+  collectPhotoZipItems,
 } from "@/lib/photoFinderClient";
 import {
   startPhotoJob,
@@ -50,6 +52,8 @@ export default function PhotoFinderPanel({
   const [isSearching, setIsSearching] = useState(() => hasRunningPhotoJob());
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [dlBusy, setDlBusy] = useState(false);
+  const [dlNote, setDlNote] = useState("");
   const searchingRef = useRef(hasRunningPhotoJob());
   const seenRunningRef = useRef(hasRunningPhotoJob());
   const trackedJobIdRef = useRef<string | null>(null);
@@ -148,6 +152,29 @@ export default function PhotoFinderPanel({
     const cars = runStatus?.result?.cars || [];
     return cars.filter((c: any) => (c.images || []).length > 0);
   }, [runStatus]);
+  const allPhotoCount = useMemo(
+    () => hitCars.reduce((n: number, c: any) => n + (c.images || []).length, 0),
+    [hitCars],
+  );
+
+  async function downloadAllPhotos() {
+    if (!hitCars.length || dlBusy) return;
+    setDlBusy(true);
+    setDlNote("");
+    try {
+      const items = collectPhotoZipItems(hitCars);
+      const { ok, errors } = await downloadImagesAsZip(items, "railcar_photos.zip");
+      setDlNote(
+        errors?.length
+          ? `Downloaded ${ok} photo${ok === 1 ? "" : "s"}; ${errors.length} failed.`
+          : `Downloaded ${ok} photo${ok === 1 ? "" : "s"}.`,
+      );
+    } catch (e: any) {
+      setDlNote(e?.message || "Download failed — try again.");
+    } finally {
+      setDlBusy(false);
+    }
+  }
   const active = hitCars[activeIdx] || null;
   const images = active?.images || [];
   const pct =
@@ -237,12 +264,32 @@ export default function PhotoFinderPanel({
         )}
         {runStatus?.kind === "done" && (
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-3">
-            <div className="text-sm font-medium">{runStatus.message}</div>
-            {(runStatus.notFoundCount || 0) > 0 && (
-              <div className="text-xs text-muted-foreground mt-1">
-                {runStatus.notFoundCount} car{runStatus.notFoundCount === 1 ? "" : "s"} with none
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-sm font-medium">{runStatus.message}</div>
+                {(runStatus.notFoundCount || 0) > 0 && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {runStatus.notFoundCount} car{runStatus.notFoundCount === 1 ? "" : "s"} with none
+                  </div>
+                )}
+                {dlNote && (
+                  <div className="text-xs text-muted-foreground mt-1">{dlNote}</div>
+                )}
               </div>
-            )}
+              {allPhotoCount > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={dlBusy}
+                  onClick={downloadAllPhotos}
+                  data-testid="button-download-all-photos"
+                >
+                  {dlBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {dlBusy ? "Downloading…" : `Download all photos (${allPhotoCount})`}
+                </Button>
+              )}
+            </div>
           </div>
         )}
         {runStatus?.kind === "error" && (

@@ -25,6 +25,7 @@ import {
   X as XIcon,
   Receipt,
   FolderOpen,
+  BarChart3,
   ExternalLink,
 } from "lucide-react";
 import FreshnessBanner from "@/components/FreshnessBanner";
@@ -60,9 +61,10 @@ const mainNav = [
   { href: "/dv",       label: "DV Calculator",    icon: Calculator },
   { href: "/search",   label: "Search",           icon: Search },
   { href: "/contacts", label: "Contacts",          icon: BookUser },
-  { href: "/ap",       label: "AP Tracker",        icon: Receipt },
-  { href: "/programs", label: "Programs",           icon: FolderOpen },
-  { href: "/import",   label: "Bulk Import",       icon: Upload },
+  { href: "/ap",                  label: "AP Tracker",           icon: Receipt },
+  { href: "/import",              label: "Bulk Import",          icon: Upload },
+  { href: "/fleet-intelligence",  label: "Fleet Intelligence",   icon: BarChart3 },
+  { href: "/programs",            label: "Programs",             icon: FolderOpen },
 ];
 
 const adminNav = [

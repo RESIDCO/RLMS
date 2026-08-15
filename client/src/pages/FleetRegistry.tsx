@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3 } from "lucide-react";
+import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -63,6 +63,7 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 
 type Row = RailcarWithAssignment;
 
@@ -374,6 +375,8 @@ export default function FleetRegistry() {
   const [turning50Year, setTurning50Year] = useState<number | null>(initQ.turning50);
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [photoSeed, setPhotoSeed] = useState("");
   const [bulkStatusPending, setBulkStatusPending] = useState(false);
   const [bulkRiderPending, setBulkRiderPending] = useState(false);
   const [bulkTransitPending, setBulkTransitPending] = useState(false);
@@ -652,6 +655,23 @@ export default function FleetRegistry() {
             <Button
               size="sm"
               variant="outline"
+              onClick={() => {
+                if (selectedIds.size > 0) {
+                  const selected = filtered.filter((r) => selectedIds.has(r.id));
+                  setPhotoSeed(carsToPasteText(selected));
+                } else {
+                  setPhotoSeed("");
+                }
+                setPhotoOpen(true);
+              }}
+              data-testid="button-find-photos"
+            >
+              <Image className="h-4 w-4" />
+              {selectedIds.size > 0 ? `Find Photos (${selectedIds.size})` : "Find Photos"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               onClick={async () => {
                 const rows = await apiGet<Row[]>(railcarsQs({ ...listParams, page: undefined, pageSize: undefined, all: 1 }));
                 downloadRailcarsCsv(rows);
@@ -826,6 +846,19 @@ export default function FleetRegistry() {
               {selectedIds.size} car{selectedIds.size !== 1 ? "s" : ""} selected
             </span>
             <div className="flex items-center gap-2 ml-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const selected = filtered.filter((r) => selectedIds.has(r.id));
+                  setPhotoSeed(carsToPasteText(selected));
+                  setPhotoOpen(true);
+                }}
+                data-testid="bulk-find-photos"
+              >
+                <Image className="h-4 w-4" />
+                Find Photos
+              </Button>
               {/* Bulk status change */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1123,6 +1156,24 @@ export default function FleetRegistry() {
               {bulkValuesPending ? `Saving…` : `Save to ${selectedIds.size} car${selectedIds.size !== 1 ? "s" : ""}`}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={photoOpen} onOpenChange={setPhotoOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Railcar photos</DialogTitle>
+            <DialogDescription>
+              Search RR Picture Archives by reporting mark and number. Paste a list or use the cars you selected.
+            </DialogDescription>
+          </DialogHeader>
+          {photoOpen && (
+            <PhotoFinderPanel
+              key={photoSeed || "paste"}
+              initialText={photoSeed}
+              onClose={() => setPhotoOpen(false)}
+            />
+          )}
         </DialogContent>
       </Dialog>
 

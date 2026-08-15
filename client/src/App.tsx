@@ -20,6 +20,7 @@ import Contacts from "@/pages/Contacts";
 import APTracker from "@/pages/APTracker";
 import Programs from "@/pages/Programs";
 import FleetIntelligence from "@/pages/FleetIntelligence";
+import PhotoSearch from "@/pages/PhotoSearch";
 import Login from "@/pages/Login";
 import SetPassword from "@/pages/SetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
@@ -43,6 +44,7 @@ function AppRouter() {
       <Route path="/contacts" component={Contacts} />
       <Route path="/ap" component={APTracker} />
       <Route path="/fleet-intelligence" component={FleetIntelligence} />
+      <Route path="/photo-search" component={PhotoSearch} />
       <Route path="/programs" component={Programs} />
       <Route path="/users" component={UserManagement} />
       <Route path="/dv" component={DvNewCalculation} />

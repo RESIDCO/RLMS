@@ -26,6 +26,7 @@ import {
   Receipt,
   FolderOpen,
   BarChart3,
+  Image,
   ExternalLink,
 } from "lucide-react";
 import FreshnessBanner from "@/components/FreshnessBanner";
@@ -63,8 +64,9 @@ const mainNav = [
   { href: "/contacts", label: "Contacts",          icon: BookUser },
   { href: "/ap",                  label: "AP Tracker",           icon: Receipt },
   { href: "/import",              label: "Bulk Import",          icon: Upload },
-  { href: "/fleet-intelligence",  label: "Fleet Intelligence",   icon: BarChart3 },
+  { href: "/photo-search",        label: "Photo Search",         icon: Image },
   { href: "/programs",            label: "Programs",             icon: FolderOpen },
+  { href: "/fleet-intelligence",  label: "Fleet Intelligence",   icon: BarChart3 },
 ];
 
 const adminNav = [

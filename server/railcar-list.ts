@@ -31,6 +31,8 @@ export type RailcarListParams = {
   rider_id?: number;
   lease_id?: number;
   transit?: string;
+  /** Tile year: active cars with build_year + 50 === this year. */
+  turning50?: number;
   sort?: string;
   dir?: "asc" | "desc";
   page?: number;
@@ -56,6 +58,7 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
         : entityRaw;
   const rider_id = num(query.rider_id);
   const lease_id = num(query.lease_id);
+  const turning50 = num(query.turning50);
   // Rider/lease pickers need every assigned car, including active=false.
   const activeDefault = rider_id || lease_id ? "all" : "active";
   const activeRaw = String(query.active ?? activeDefault).trim();
@@ -64,7 +67,8 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
     search: str(query.search),
     status: str(query.status),
     entity,
-    active: activeRaw === "all" ? "all" : (str(query.active) ?? activeDefault),
+    active: turning50 ? "active" : activeRaw === "all" ? "all" : (str(query.active) ?? activeDefault),
+    turning50: turning50 && turning50 >= 1900 && turning50 <= 2100 ? turning50 : undefined,
     assigned: str(query.assigned),
     rider: str(query.rider),
     rider_id,
@@ -83,6 +87,23 @@ function sanitizeOrValue(s: string) {
 }
 
 function applyRailcarFilters(query: any, p: RailcarListParams) {
+  if (p.turning50) {
+    query = query.eq("active", true).eq("build_year", p.turning50 - 50);
+    if (p.search) {
+      const q = sanitizeOrValue(p.search);
+      query = query.or(
+        [
+          `car_number.ilike.%${q}%`,
+          `reporting_marks.ilike.%${q}%`,
+          `lessee_name.ilike.%${q}%`,
+          `rider_external_id.ilike.%${q}%`,
+          `car_type.ilike.%${q}%`,
+        ].join(",")
+      );
+    }
+    return query;
+  }
+
   if (p.active === "active") query = query.neq("active", false);
   else if (p.active === "inactive") query = query.eq("active", false);
 

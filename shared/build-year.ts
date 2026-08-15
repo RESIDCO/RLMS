@@ -26,7 +26,18 @@ export type Turning50Summary = {
   operating_count: number;
 };
 
-/** Count operating cars whose build year + 50 equals this year … this year + horizon. */
+/** Fleet-age year from `build_year` only — not the DV `built_year` fallback. */
+export function fleetBuildYear(car: { build_year?: number | string | null }): number | null {
+  const raw = car.build_year;
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const year = Math.trunc(n);
+  if (year < 1800 || year > 2100) return null;
+  return year;
+}
+
+/** Count active cars whose build_year + 50 equals this year … this year + horizon. */
 export function turning50ByYear(
   cars: Array<{ build_year?: number | string | null; built_year?: number | string | null }>,
   fromYear = new Date().getFullYear(),
@@ -36,7 +47,7 @@ export function turning50ByYear(
   const counts = new Map<number, number>(years.map((y) => [y, 0]));
   let unknown = 0;
   for (const c of cars) {
-    const built = carBuildYear(c);
+    const built = fleetBuildYear(c);
     if (built == null) {
       unknown += 1;
       continue;

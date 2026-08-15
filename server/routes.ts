@@ -625,23 +625,15 @@ export async function registerRoutes(
       const sqlUtil = (op: number, leased: number) =>
         op > 0 ? Math.round((leased / op) * 1000) / 10 : 0;
 
-      let ageCars = railcars as any[];
+      let ageCars = activeCars as any[];
       if (sqlKpis) {
-        const ageRaw = await fetchAllRows<any>((from, to) =>
+        ageCars = await fetchAllRows<any>((from, to) =>
           db
             .from("railcars")
-            .select("id, active, rider_external_id, assignment_label, managed_category, build_year, built_year")
+            .select("id, active, build_year")
             .eq("active", true)
             .order("id", { ascending: true })
             .range(from, to)
-        );
-        ageCars = ageRaw.filter((r: any) =>
-          isOperatingFleetCar({
-            active: r.active,
-            rider_external_id: r.rider_external_id,
-            assignment_label: r.assignment_label,
-            managed_category: r.managed_category,
-          })
         );
       }
       const fleet_age = turning50ByYear(ageCars);

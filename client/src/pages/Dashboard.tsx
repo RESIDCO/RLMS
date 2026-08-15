@@ -708,7 +708,7 @@ export default function Dashboard() {
             <header className="px-5 py-3.5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
               <h2 className="text-sm font-semibold">Fleet Age — Turning 50</h2>
               <span className="text-[11px] text-muted-foreground">
-                {(data.fleet_age?.operating_count ?? 0).toLocaleString()} operating cars
+                {(data.fleet_age?.operating_count ?? 0).toLocaleString()} active cars
                 {" — "}
                 build year unknown for {(data.fleet_age?.unknown_count ?? 0).toLocaleString()}
                 {(data.fleet_age?.known_count ?? 0) === 0
@@ -726,6 +726,7 @@ export default function Dashboard() {
                   subtext="cars turning 50"
                   accent={i === 0 ? "warning" : i === 1 ? "warning" : "muted"}
                   marker="dot"
+                  onClick={() => navigate(`/fleet?turning50=${t.year}`)}
                 />
               ))}
             </div>

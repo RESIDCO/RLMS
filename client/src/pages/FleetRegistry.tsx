@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
-import { useSearch } from "wouter";
+import { useSearch, Link } from "wouter";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -313,6 +313,7 @@ function parseFleetQuery(searchStr: string): {
   assigned: string;
   entity: string;
   riderOl: string;
+  turning50: number | null;
 } {
   const fromWouter = new URLSearchParams(String(searchStr || "").replace(/^\?/, ""));
   const hash = typeof window !== "undefined" ? window.location.hash : "";
@@ -341,7 +342,12 @@ function parseFleetQuery(searchStr: string): {
       : raw === "rps" || raw === "rail partners select"
         ? "Rail Partners Select"
         : "all";
-  return { assigned, entity, riderOl: (qs.get("rider") || "").trim() };
+  const turning50Raw = Number(qs.get("turning50"));
+  const turning50 =
+    Number.isFinite(turning50Raw) && turning50Raw >= 1900 && turning50Raw <= 2100
+      ? turning50Raw
+      : null;
+  return { assigned, entity, riderOl: (qs.get("rider") || "").trim(), turning50 };
 }
 
 export default function FleetRegistry() {
@@ -365,6 +371,7 @@ export default function FleetRegistry() {
   const [addOpen, setAddOpen] = useState(false);
   const [transitFilter, setTransitFilter] = useState<string>("all");
   const [entityFilter, setEntityFilter] = useState<string>(initQ.entity);
+  const [turning50Year, setTurning50Year] = useState<number | null>(initQ.turning50);
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkStatusPending, setBulkStatusPending] = useState(false);
@@ -387,7 +394,7 @@ export default function FleetRegistry() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter]);
+  }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter, turning50Year]);
 
   // ── Optional column visibility ─────────────────────────────────────────────
   type OptCol =
@@ -425,18 +432,25 @@ export default function FleetRegistry() {
     useColumnPrefs("fleet_registry", FR_DEFAULT_COLS);
   // Cast for backwards compat with existing Set<OptCol> usage in JSX
   const visibleCols = visibleColsRaw as Set<OptCol>;
+  const tableCols = useMemo(() => {
+    if (!turning50Year || visibleCols.has("build_year")) return visibleCols;
+    const next = new Set(visibleCols);
+    next.add("build_year");
+    return next;
+  }, [turning50Year, visibleCols]);
 
   const listParams = {
     page,
     pageSize,
     search: debouncedSearch || undefined,
-    status: statusFilter,
-    entity: entityFilter,
-    active: fleetActiveFilter,
-    assigned: assignedFilter,
-    rider: olCodeFilter || undefined,
-    rider_id: riderFilter !== "all" ? riderFilter : undefined,
-    transit: transitFilter,
+    status: turning50Year ? undefined : statusFilter,
+    entity: turning50Year ? undefined : entityFilter,
+    active: turning50Year ? "active" : fleetActiveFilter,
+    assigned: turning50Year ? undefined : assignedFilter,
+    rider: turning50Year ? undefined : (olCodeFilter || undefined),
+    rider_id: turning50Year ? undefined : (riderFilter !== "all" ? riderFilter : undefined),
+    transit: turning50Year ? undefined : transitFilter,
+    turning50: turning50Year || undefined,
   };
 
   type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
@@ -456,6 +470,8 @@ export default function FleetRegistry() {
     setAssignedFilter(q.assigned);
     setEntityFilter(q.entity);
     setOlCodeFilter(q.riderOl);
+    setTurning50Year(q.turning50);
+    if (q.turning50) setFleetActiveFilter("active");
   }, [wouterSearch]);
 
   const filtered = useMemo(() => {
@@ -788,6 +804,21 @@ export default function FleetRegistry() {
           </div>
         </div>
 
+        {turning50Year && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-umler-amber/30 bg-umler-amber/10" data-testid="banner-turning50">
+            <div className="text-sm">
+              <span className="font-medium">Turning 50 in {turning50Year}</span>
+              <span className="text-muted-foreground">
+                {" — "}active cars with build year {turning50Year - 50}
+                {totalCount ? ` · ${totalCount.toLocaleString()} cars` : ""}
+              </span>
+            </div>
+            <Link href="/fleet" className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline shrink-0">
+              Clear age filter
+            </Link>
+          </div>
+        )}
+
         {/* Bulk action toolbar — visible when 1+ cars are selected, admin only */}
         {canEdit && selectedIds.size > 0 && (
           <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
@@ -906,7 +937,7 @@ export default function FleetRegistry() {
                   <Th label="Rider" k="rider" sort={sort} onClick={toggleSort} />
                   <Th label="Lease" k="lease" sort={sort} onClick={toggleSort} />
                   <Th label="Expires" k="expiration" sort={sort} onClick={toggleSort} />
-                  {OPT_COLS.filter(c => visibleCols.has(c.key)).map(c => (
+                  {OPT_COLS.filter(c => tableCols.has(c.key)).map(c => (
                     <th key={c.key} className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider whitespace-nowrap">{c.label}</th>
                   ))}
                   <th className="w-10" />
@@ -916,7 +947,7 @@ export default function FleetRegistry() {
                 {isLoading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="border-t border-border">
-                      {Array.from({ length: 10 + visibleCols.size }).map((__, j) => (
+                      {Array.from({ length: 10 + tableCols.size }).map((__, j) => (
                         <td key={j} className="px-4 py-3">
                           <Skeleton className="h-4 w-full" />
                         </td>
@@ -925,7 +956,7 @@ export default function FleetRegistry() {
                   ))
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={10 + visibleCols.size} className="px-4 py-16 text-center text-muted-foreground">
+                    <td colSpan={10 + tableCols.size} className="px-4 py-16 text-center text-muted-foreground">
                       No railcars match these filters.
                     </td>
                   </tr>
@@ -1008,7 +1039,7 @@ export default function FleetRegistry() {
                       <td className="px-4 py-3 font-mono-num text-muted-foreground">
                         {fmtDate((r as any).lease_end_date ?? (r as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}
                       </td>
-                      {OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => renderOptTd(c.key, r))}
+                      {OPT_COLS.filter((c) => tableCols.has(c.key)).map((c) => renderOptTd(c.key, r))}
                       <td className="px-4 py-3 text-muted-foreground">
                         <ChevronRight className="h-4 w-4" />
                       </td>

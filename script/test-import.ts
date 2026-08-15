@@ -21,6 +21,13 @@ import {
 } from "../shared/residco-import";
 import { carBuildYear, turning50ByYear } from "../shared/build-year";
 import {
+  padCarNumber,
+  parseEquipmentId,
+  parseBuiltDate,
+  parseBuildYearCsv,
+  matchKey,
+} from "../shared/build-year-backfill";
+import {
   normalizeSnapshotMonth,
   buildCarFinancialUpdates,
   carFinancialFingerprint,
@@ -355,7 +362,7 @@ eq(carBuildYear({ build_year: null, built_year: null }), null, "carBuildYear nul
     [
       { build_year: 1976 }, // turns 50 in 2026
       { build_year: 1977 },
-      { build_year: null, built_year: null },
+      { build_year: null, built_year: 1976 }, // DV-only year must not enter Turning 50
       { build_year: null, built_year: null },
     ],
     2026,
@@ -363,8 +370,30 @@ eq(carBuildYear({ build_year: null, built_year: null }), null, "carBuildYear nul
   );
   eq(summary.tiles.map((t) => t.year), [2026, 2027, 2028, 2029], "turning50 years this year through +3");
   eq(summary.tiles.map((t) => t.count), [1, 1, 0, 0], "turning50 counts by year");
-  eq(summary.unknown_count, 2, "turning50 unknown count");
+  eq(summary.unknown_count, 2, "turning50 unknown ignores built_year fallback");
   eq(summary.operating_count, 4, "turning50 operating count");
+}
+
+eq(padCarNumber("4058"), "004058", "padCarNumber 4 digits");
+eq(padCarNumber("22766"), "022766", "padCarNumber 5 digits");
+eq(padCarNumber("494311"), "494311", "padCarNumber already 6");
+eq(parseEquipmentId("AOKX 40015"), { mark: "AOKX", car_number: "040015" }, "parseEquipmentId pads number");
+eq(parseEquipmentId("AEX 22766"), { mark: "AEX", car_number: "022766" }, "parseEquipmentId AEX");
+eq(parseBuiltDate("CONFIDENTIAL"), { kind: "confidential" }, "CONFIDENTIAL skipped");
+eq(parseBuiltDate(" confidential "), { kind: "confidential" }, "CONFIDENTIAL trim+case");
+eq(parseBuiltDate("05/01/1992"), { kind: "year", year: 1992 }, "MM/DD/YYYY year");
+eq(parseBuiltDate("13/01/1992"), { kind: "invalid" }, "invalid month skipped");
+eq(matchKey(" AOKX ", "040015"), "AOKX|040015", "matchKey trims");
+{
+  const csv = parseBuildYearCsv(
+    `"Equipment Id","Built Date"\n"AOKX 40015","05/01/1992"\n"AEX 22766","CONFIDENTIAL"\n"ZZZX 1","not-a-date"\n`
+  );
+  eq(csv.totalDataRows, 3, "csv data rows exclude header");
+  eq(csv.dated.length, 1, "csv keeps dated rows");
+  eq(csv.dated[0].year, 1992, "csv year");
+  eq(csv.dated[0].car_number, "040015", "csv padded car number");
+  eq(csv.confidential, 1, "csv confidential count");
+  eq(csv.invalidDates.length, 1, "csv invalid dates logged");
 }
 
 eq(normalizeSnapshotMonth("2026-07"), "2026-07-01", "normalizeSnapshotMonth YYYY-MM");

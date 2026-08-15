@@ -25,7 +25,7 @@ import {
   X as XIcon,
   Receipt,
   FolderOpen,
-  BarChart3,
+  ClipboardList,
   Image,
   ExternalLink,
 } from "lucide-react";
@@ -66,7 +66,7 @@ const mainNav = [
   { href: "/import",              label: "Bulk Import",          icon: Upload },
   { href: "/photo-search",        label: "Photo Search",         icon: Image },
   { href: "/programs",            label: "Programs",             icon: FolderOpen },
-  { href: "/fleet-intelligence",  label: "Fleet Intelligence",   icon: BarChart3 },
+  { href: "/reports",             label: "Reports",              icon: ClipboardList },
 ];
 
 const adminNav = [

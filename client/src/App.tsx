@@ -19,7 +19,7 @@ import UserManagement from "@/pages/UserManagement";
 import Contacts from "@/pages/Contacts";
 import APTracker from "@/pages/APTracker";
 import Programs from "@/pages/Programs";
-import FleetIntelligence from "@/pages/FleetIntelligence";
+import Reports from "@/pages/Reports";
 import PhotoSearch from "@/pages/PhotoSearch";
 import Login from "@/pages/Login";
 import SetPassword from "@/pages/SetPassword";
@@ -43,9 +43,10 @@ function AppRouter() {
       <Route path="/import" component={BulkImportPage} />
       <Route path="/contacts" component={Contacts} />
       <Route path="/ap" component={APTracker} />
-      <Route path="/fleet-intelligence" component={FleetIntelligence} />
       <Route path="/photo-search" component={PhotoSearch} />
       <Route path="/programs" component={Programs} />
+      <Route path="/reports" component={Reports} />
+      <Route path="/fleet-intelligence" component={Reports} />
       <Route path="/users" component={UserManagement} />
       <Route path="/dv" component={DvNewCalculation} />
       <Route path="/dv/history" component={DvHistory} />

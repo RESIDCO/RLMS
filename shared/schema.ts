@@ -82,6 +82,7 @@ export type Railcar = {
   commodity_family: string | null;
   commodity: string | null;
   build_year: number | null; // fleet SoT for car age; import also mirrors to built_year
+  build_date?: string | null;
   lining: string | null;
   dot_code: string | null;
   comment_event_note: string | null;

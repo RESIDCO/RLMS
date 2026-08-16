@@ -7,6 +7,7 @@ export type ParsedBuildRow = {
   mark: string;
   car_number: string;
   year: number;
+  date: string;
   rawId: string;
   rawDate: string;
 };
@@ -36,7 +37,9 @@ export function parseEquipmentId(raw: string): { mark: string; car_number: strin
   return { mark, car_number: padCarNumber(num) };
 }
 
-export function parseBuiltDate(raw: string): { kind: "year"; year: number } | { kind: "confidential" } | { kind: "invalid" } {
+export function parseBuiltDate(
+  raw: string
+): { kind: "dated"; year: number; date: string } | { kind: "confidential" } | { kind: "invalid" } {
   const s = String(raw ?? "").trim();
   if (!s) return { kind: "invalid" };
   if (s.toUpperCase() === "CONFIDENTIAL") return { kind: "confidential" };
@@ -48,7 +51,12 @@ export function parseBuiltDate(raw: string): { kind: "year"; year: number } | { 
   if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1800 || year > 2100) {
     return { kind: "invalid" };
   }
-  return { kind: "year", year };
+  const dt = new Date(year, month - 1, day);
+  if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) {
+    return { kind: "invalid" };
+  }
+  const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return { kind: "dated", year, date };
 }
 
 export function matchKey(mark: string, carNumber: string): string {
@@ -90,6 +98,7 @@ export function parseBuildYearCsv(text: string): BuildCsvParseResult {
       mark: eq.mark,
       car_number: eq.car_number,
       year: built.year,
+      date: built.date,
       rawId: id,
       rawDate: dateRaw,
     });

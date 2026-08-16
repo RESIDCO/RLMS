@@ -1,3 +1,5 @@
+import { parseIsoDateOnly } from "./lease-authority";
+
 /**
  * Fleet source of truth for car age is `railcars.build_year` (Master Car List /
  * Fleet Registry / import). `railcars.built_year` is the older DV-calculator
@@ -15,6 +17,21 @@ export function carBuildYear(car: {
   const year = Math.trunc(n);
   if (year < 1800 || year > 2100) return null;
   return year;
+}
+
+/** Detail-view built date: full calendar date when stored, else year, else dash. */
+export function formatBuiltDisplay(car: {
+  build_date?: string | null;
+  build_year?: number | string | null;
+  built_year?: number | string | null;
+}): string {
+  const iso = String(car.build_date ?? "").trim().slice(0, 10);
+  const d = parseIsoDateOnly(iso);
+  if (d) {
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  }
+  const year = carBuildYear(car);
+  return year != null ? String(year) : "—";
 }
 
 export type Turning50Tile = { year: number; count: number };

@@ -7,7 +7,7 @@ export const RAILCAR_LIST_SELECT = `
 id, car_number, reporting_marks, car_type, status, entity, active, sold_to,
 rider_external_id, assignment_label, managed_category, lessee_name,
 lease_start_date, lease_end_date, lease_expiry, estimated_lease_expiry, lease_expiry_snapshot_month, transit_status, transit_label,
-nbv, oac, oec, monthly_rent_per_car, monthly_depr_per_car, build_year,
+nbv, oac, oec, monthly_rent_per_car, monthly_depr_per_car, build_year, build_date,
 capacity_cf, lining_material, lining, coating, mechanical_designation,
 general_description, commodity, notes, data_source, lease_type, managed,
 total_bv_rider, cars_on_rider_ar, commodity_family, comment_event_note,
@@ -173,23 +173,24 @@ function assignmentEmbed(p: RailcarListParams, select = RAILCAR_LIST_SELECT) {
   return select.replace("assignment:railcar_assignments(", `assignment:${rel}(`);
 }
 
-function selectWithoutExpiryEstimates(select: string) {
+function selectWithoutOptionalDateCols(select: string) {
   return select
     .replace(/\s*estimated_lease_expiry,?\s*/g, " ")
-    .replace(/\s*lease_expiry_snapshot_month,?\s*/g, " ");
+    .replace(/\s*lease_expiry_snapshot_month,?\s*/g, " ")
+    .replace(/\s*build_date,?\s*/g, " ");
 }
 
-function isMissingExpiryEstimateColumn(err: unknown) {
+function isMissingOptionalDateColumn(err: unknown) {
   const msg = String((err as any)?.message ?? err ?? "");
-  return /estimated_lease_expiry|lease_expiry_snapshot_month/i.test(msg);
+  return /estimated_lease_expiry|lease_expiry_snapshot_month|build_date/i.test(msg);
 }
 
 export async function queryRailcars(p: RailcarListParams) {
   try {
     return await queryRailcarsWithSelect(p, assignmentEmbed(p));
   } catch (err) {
-    if (!isMissingExpiryEstimateColumn(err)) throw err;
-    return await queryRailcarsWithSelect(p, assignmentEmbed(p, selectWithoutExpiryEstimates(RAILCAR_LIST_SELECT)));
+    if (!isMissingOptionalDateColumn(err)) throw err;
+    return await queryRailcarsWithSelect(p, assignmentEmbed(p, selectWithoutOptionalDateCols(RAILCAR_LIST_SELECT)));
   }
 }
 

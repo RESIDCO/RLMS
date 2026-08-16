@@ -38,7 +38,7 @@ import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { cn } from "@/lib/utils";
 import type { RailcarWithAssignment } from "@shared/schema";
 import { displayLeaseNumber } from "@shared/residco-import";
-import { carBuildYear } from "@shared/build-year";
+import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
 import { formatCalendarDate } from "@shared/lease-authority";
 
 type Row = RailcarWithAssignment;
@@ -290,7 +290,7 @@ function CarQuickView({ car, onClose }: { car: Row | null; onClose: () => void }
           <DetailRow label="Car Type"          value={car.car_type} />
           <DetailRow label="Mech. Designation" value={r.mechanical_designation} />
           <DetailRow label="Description"       value={r.general_description} />
-          <DetailRow label="Build Year"        value={carBuildYear(r)} />
+          <DetailRow label="Built"             value={formatBuiltDisplay(r)} />
           <DetailRow label="Capacity (cf)"     value={r.capacity_cf != null ? Number(r.capacity_cf).toLocaleString() : null} />
           <DetailRow label="Lining"            value={r.lining_material || r.lining || r.coating} />
 

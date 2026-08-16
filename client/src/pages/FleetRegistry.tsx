@@ -60,7 +60,7 @@ import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
-import { carBuildYear } from "@shared/build-year";
+import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
 import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate } from "@shared/lease-authority";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
@@ -1496,7 +1496,7 @@ function CarDetail({
         <DetailRow label="Capacity (cf)" value={r.capacity_cf ?? "—"} />
         <DetailRow label="Tare (lbs)" value={r.tare_weight_lbs ?? "—"} />
         <DetailRow label="Load Limit" value={r.load_limit_lbs ?? "—"} />
-        <DetailRow label="Build Year" value={carBuildYear(r) ?? "—"} />
+        <DetailRow label="Built" value={formatBuiltDisplay(r)} />
         <DetailRow label="Lining" value={(r as any).lining_material || (r as any).coating || "—"} />
         <DetailRow label="Lease Type" value={(r as any).lease_type ?? "—"} />
         <DetailRow label="Managed By" value={(r as any).managed ?? "—"} />

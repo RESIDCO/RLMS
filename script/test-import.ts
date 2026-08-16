@@ -381,8 +381,9 @@ eq(parseEquipmentId("AOKX 40015"), { mark: "AOKX", car_number: "040015" }, "pars
 eq(parseEquipmentId("AEX 22766"), { mark: "AEX", car_number: "022766" }, "parseEquipmentId AEX");
 eq(parseBuiltDate("CONFIDENTIAL"), { kind: "confidential" }, "CONFIDENTIAL skipped");
 eq(parseBuiltDate(" confidential "), { kind: "confidential" }, "CONFIDENTIAL trim+case");
-eq(parseBuiltDate("05/01/1992"), { kind: "year", year: 1992 }, "MM/DD/YYYY year");
+eq(parseBuiltDate("05/01/1992"), { kind: "dated", year: 1992, date: "1992-05-01" }, "MM/DD/YYYY date");
 eq(parseBuiltDate("13/01/1992"), { kind: "invalid" }, "invalid month skipped");
+eq(parseBuiltDate("02/30/1992"), { kind: "invalid" }, "invalid calendar day skipped");
 eq(matchKey(" AOKX ", "040015"), "AOKX|040015", "matchKey trims");
 {
   const csv = parseBuildYearCsv(
@@ -391,6 +392,7 @@ eq(matchKey(" AOKX ", "040015"), "AOKX|040015", "matchKey trims");
   eq(csv.totalDataRows, 3, "csv data rows exclude header");
   eq(csv.dated.length, 1, "csv keeps dated rows");
   eq(csv.dated[0].year, 1992, "csv year");
+  eq(csv.dated[0].date, "1992-05-01", "csv full date");
   eq(csv.dated[0].car_number, "040015", "csv padded car number");
   eq(csv.confidential, 1, "csv confidential count");
   eq(csv.invalidDates.length, 1, "csv invalid dates logged");

@@ -3,9 +3,13 @@
  * Separate from database RLS — this blocks unauthenticated HTTP access to /api/*.
  */
 import type { Request, Response, NextFunction } from "express";
-import { supabase } from "./supabase";
+import { supabase, supabaseAdmin } from "./supabase";
 
 export type AuthUser = { id: string; email: string };
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 export async function getAuthUser(req: Request): Promise<AuthUser | null> {
   const authHeader = req.headers.authorization;
@@ -28,20 +32,31 @@ export async function getAuthUser(req: Request): Promise<AuthUser | null> {
 export async function getUserRole(user: { id: string; email?: string | null }): Promise<string | null> {
   const { data: byId } = await supabase
     .from("user_roles")
-    .select("role")
+    .select("id, role, user_id")
     .eq("user_id", user.id)
     .maybeSingle();
   if (byId?.role) return byId.role;
 
-  const email = user.email?.trim();
+  const email = user.email ? normalizeEmail(user.email) : "";
   if (!email) return null;
 
   const { data: rows } = await supabase
     .from("user_roles")
-    .select("role")
+    .select("id, role, user_id")
     .ilike("email", email)
     .limit(1);
-  return rows?.[0]?.role ?? null;
+  const row = rows?.[0];
+  if (!row?.role) return null;
+
+  // First Microsoft sign-in against a Grant-access row: attach auth.users.id.
+  if (!row.user_id) {
+    await supabaseAdmin
+      .from("user_roles")
+      .update({ user_id: user.id, email })
+      .eq("id", row.id)
+      .is("user_id", null);
+  }
+  return row.role;
 }
 
 function isAuthMeRequest(req: Request): boolean {

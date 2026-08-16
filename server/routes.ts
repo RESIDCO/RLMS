@@ -4,7 +4,7 @@ import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { queryRailcars, parseRailcarListParams } from "./railcar-list";
-import { getAuthUser, getUserRole, requireApiAuth } from "./auth";
+import { getAuthUser, getUserRole, normalizeEmail, requireApiAuth } from "./auth";
 import {
   insertMasterLeaseSchema,
   insertRiderSchema,
@@ -2668,6 +2668,63 @@ export async function registerRoutes(
     return typeof role === "string" && (VALID_ROLES as readonly string[]).includes(role);
   }
 
+  /** Insert or update user_roles by email (lowercase). Never creates a duplicate. */
+  async function saveUserRole(opts: {
+    email: string;
+    role: AppRole;
+    userId?: string | null;
+  }): Promise<{ id: string; email: string; role: AppRole; user_id: string | null }> {
+    const email = normalizeEmail(opts.email);
+    const { data: existing, error: findErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("id, user_id, role, email")
+      .ilike("email", email)
+      .maybeSingle();
+    if (findErr) throw findErr;
+
+    if (existing) {
+      const patch: Record<string, unknown> = { role: opts.role, email };
+      if (opts.userId) patch.user_id = opts.userId;
+      const { error } = await supabaseAdmin.from("user_roles").update(patch).eq("id", existing.id);
+      if (error) throw error;
+      return {
+        id: existing.id,
+        email,
+        role: opts.role,
+        user_id: (opts.userId ?? existing.user_id) as string | null,
+      };
+    }
+
+    const insert: Record<string, unknown> = { email, role: opts.role, user_id: opts.userId ?? null };
+    const { data: created, error } = await supabaseAdmin
+      .from("user_roles")
+      .insert(insert)
+      .select("id, user_id, role, email")
+      .single();
+    if (error) throw error;
+    return {
+      id: created.id,
+      email: created.email,
+      role: created.role,
+      user_id: created.user_id,
+    };
+  }
+
+  async function findRoleRowByParam(param: string) {
+    const { data: byPk } = await supabase
+      .from("user_roles")
+      .select("id, user_id, email, role")
+      .eq("id", param)
+      .maybeSingle();
+    if (byPk) return byPk;
+    const { data: byUser } = await supabase
+      .from("user_roles")
+      .select("id, user_id, email, role")
+      .eq("user_id", param)
+      .maybeSingle();
+    return byUser;
+  }
+
   /** Require an authenticated user who has a user_roles row. */
   async function requireUser(req: Request, res: Response): Promise<string | null> {
     const user = req.authUser ?? (await getAuthUser(req));
@@ -2737,11 +2794,12 @@ export async function registerRoutes(
       // We store email in user_roles at invite time so we can query it directly
       const { data, error } = await supabase
         .from("user_roles")
-        .select("user_id, role, email, created_at")
+        .select("id, user_id, role, email, created_at")
         .order("created_at", { ascending: true });
       if (error) throw error;
       res.json((data ?? []).map((r: any) => ({
-        id: r.user_id,
+        id: r.id,
+        user_id: r.user_id ?? null,
         email: r.email ?? "unknown",
         role: r.role,
         created_at: r.created_at,
@@ -2754,8 +2812,9 @@ export async function registerRoutes(
     try {
       const adminId = await requireAdmin(req, res);
       if (!adminId) return;
-      const { email, role } = req.body as { email: string; role: AppRole };
-      if (!email || !isValidRole(role)) return res.status(400).json({ error: "email and valid role required" });
+      const { email: rawEmail, role } = req.body as { email: string; role: AppRole };
+      if (!rawEmail || !isValidRole(role)) return res.status(400).json({ error: "email and valid role required" });
+      const email = normalizeEmail(rawEmail);
       // Public app origin for invite/magic-link redirects — never use VITE_API_BASE
       // (that is often "" for same-origin API and previously fell back to a stale host).
       const appUrl =
@@ -2789,26 +2848,26 @@ export async function registerRoutes(
         if (linkErr) {
           return res.status(400).json({ error: `Resend failed: ${linkErr.message}` });
         }
-        // Make sure they have a role record (they may have been invited before the role was saved)
-        const { data: existingRole } = await supabase
-          .from("user_roles").select("user_id").eq("email", email).maybeSingle();
-        if (!existingRole) {
-          const userId = linkData.user?.id;
-          if (userId) {
-            await supabase.from("user_roles")
-              .upsert({ user_id: userId, role, email }, { onConflict: "user_id" });
-          }
-        }
-        return res.json({ id: linkData.user?.id, email, role, resent: true });
+        const saved = await saveUserRole({ email, role, userId: linkData.user?.id ?? null });
+        return res.json({ id: saved.id, user_id: saved.user_id, email, role, resent: true });
       }
 
       const userId = inviteData.user?.id;
       if (!userId) return res.status(500).json({ error: "User ID missing after invite" });
-      // Upsert role + store email for display
-      const { error: roleErr } = await supabase.from("user_roles")
-        .upsert({ user_id: userId, role, email }, { onConflict: "user_id" });
-      if (roleErr) throw roleErr;
-      res.json({ id: userId, email, role, resent: false });
+      const saved = await saveUserRole({ email, role, userId });
+      res.json({ id: saved.id, user_id: saved.user_id, email, role, resent: false });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  // POST /api/admin/users/grant — Microsoft-only allowlist, no email sent (admin only)
+  app.post("/api/admin/users/grant", async (req, res) => {
+    try {
+      const adminId = await requireAdmin(req, res);
+      if (!adminId) return;
+      const { email: rawEmail, role } = req.body as { email: string; role: AppRole };
+      if (!rawEmail || !isValidRole(role)) return res.status(400).json({ error: "email and valid role required" });
+      const saved = await saveUserRole({ email: rawEmail, role });
+      res.json({ id: saved.id, user_id: saved.user_id, email: saved.email, role: saved.role });
     } catch (err) { errHandler(res, err); }
   });
 
@@ -2820,7 +2879,9 @@ export async function registerRoutes(
       const { userId } = req.params;
       const { role } = req.body as { role: AppRole };
       if (!isValidRole(role)) return res.status(400).json({ error: "valid role required" });
-      const { error } = await supabase.from("user_roles").update({ role }).eq("user_id", userId);
+      const row = await findRoleRowByParam(userId);
+      if (!row) return res.status(404).json({ error: "User not found" });
+      const { error } = await supabase.from("user_roles").update({ role }).eq("id", row.id);
       if (error) throw error;
       res.json({ ok: true });
     } catch (err) { errHandler(res, err); }
@@ -2833,8 +2894,12 @@ export async function registerRoutes(
       const adminId = await requireAdmin(req, res);
       if (!adminId) return;
       const { userId } = req.params;
-      if (userId === adminId) return res.status(400).json({ error: "Cannot remove yourself" });
-      const { error } = await supabase.from("user_roles").delete().eq("user_id", userId);
+      const row = await findRoleRowByParam(userId);
+      if (!row) return res.status(404).json({ error: "User not found" });
+      if (row.user_id && row.user_id === adminId) {
+        return res.status(400).json({ error: "Cannot remove yourself" });
+      }
+      const { error } = await supabase.from("user_roles").delete().eq("id", row.id);
       if (error) throw error;
       res.json({ ok: true });
     } catch (err) { errHandler(res, err); }

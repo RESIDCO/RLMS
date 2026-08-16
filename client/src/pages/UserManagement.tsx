@@ -8,16 +8,40 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, Trash2, ShieldCheck, Eye, Pencil, MailIcon } from "lucide-react";
+import { UserPlus, Trash2, ShieldCheck, Eye, Pencil, MailIcon, KeyRound, Link2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 
 type AppRole = "admin" | "editor" | "viewer";
 
 interface AppUser {
   id: string;
+  user_id: string | null;
   email: string;
   role: AppRole;
   created_at: string;
+}
+
+function RoleSelect({
+  value,
+  onChange,
+  testId,
+}: {
+  value: AppRole;
+  onChange: (v: AppRole) => void;
+  testId: string;
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as AppRole)}>
+      <SelectTrigger className="w-32 bg-background" data-testid={testId}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="viewer">Viewer</SelectItem>
+        <SelectItem value="editor">Editor</SelectItem>
+        <SelectItem value="admin">Admin</SelectItem>
+      </SelectContent>
+    </Select>
+  );
 }
 
 export default function UserManagement() {
@@ -26,7 +50,10 @@ export default function UserManagement() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AppRole>("viewer");
   const [inviting, setInviting] = useState(false);
-  const [resending, setResending] = useState<string | null>(null); // email being resent
+  const [grantEmail, setGrantEmail] = useState("");
+  const [grantRole, setGrantRole] = useState<AppRole>("viewer");
+  const [granting, setGranting] = useState(false);
+  const [resending, setResending] = useState<string | null>(null);
 
   const authHeaders = { Authorization: `Bearer ${session?.access_token}` };
 
@@ -66,15 +93,15 @@ export default function UserManagement() {
       const res = await fetch("/api/admin/users/invite", {
         method: "POST",
         headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: JSON.stringify({ email: inviteEmail.trim().toLowerCase(), role: inviteRole }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to invite");
       toast({
         title: data.resent ? "Invite resent" : "Invitation sent",
         description: data.resent
-          ? `A fresh login link has been sent to ${inviteEmail}.`
-          : `${inviteEmail} will receive a login email.`,
+          ? `A fresh login link has been sent to ${inviteEmail.trim().toLowerCase()}.`
+          : `${inviteEmail.trim().toLowerCase()} will receive a login email.`,
       });
       setInviteEmail("");
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -85,13 +112,38 @@ export default function UserManagement() {
     }
   }
 
+  async function handleGrant(e: React.FormEvent) {
+    e.preventDefault();
+    setGranting(true);
+    try {
+      const email = grantEmail.trim().toLowerCase();
+      const res = await fetch("/api/admin/users/grant", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role: grantRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to grant access");
+      toast({
+        title: "Access granted",
+        description: `${email} can sign in with Microsoft. No email was sent.`,
+      });
+      setGrantEmail("");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    } catch (err: any) {
+      toast({ title: "Grant failed", description: err.message, variant: "destructive" });
+    } finally {
+      setGranting(false);
+    }
+  }
+
   async function handleResend(email: string, role: AppRole) {
     setResending(email);
     try {
       const res = await fetch("/api/admin/users/invite", {
         method: "POST",
         headers: { ...authHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ email, role }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), role }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Resend failed");
@@ -106,6 +158,16 @@ export default function UserManagement() {
     }
   }
 
+  async function copyRlmsLink() {
+    const url = window.location.origin;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast({ title: "RLMS link copied", description: url });
+    } catch {
+      toast({ title: "Copy failed", description: url, variant: "destructive" });
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
@@ -114,49 +176,77 @@ export default function UserManagement() {
       />
 
       <div className="flex-1 overflow-auto p-6 space-y-6">
-        {/* Invite form */}
-        <div className="rounded-xl border border-border bg-card shadow-card p-5 max-w-lg">
-          <h2 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
-            <UserPlus className="h-4 w-4 text-primary" />
-            Invite a team member
-          </h2>
-          <p className="text-xs text-muted-foreground mb-4">
-            They’ll receive an email with a login link. The same email is what grants Microsoft sign-in —
-            add them here before they can get in with Microsoft. If they were already invited, a fresh
-            link will be resent automatically.
-          </p>
-          <form onSubmit={handleInvite} className="space-y-3">
-            <div className="flex gap-2">
-              <div className="flex-1 space-y-1">
-                <Label className="text-xs">Email address</Label>
-                <Input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="colleague@residco.com"
-                  required
-                  data-testid="input-invite-email"
-                  className="bg-background"
-                />
+        <div className="grid gap-4 lg:grid-cols-2 max-w-5xl">
+          {/* Invite — email/password */}
+          <div className="rounded-xl border border-border bg-card shadow-card p-5">
+            <h2 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
+              <UserPlus className="h-4 w-4 text-primary" />
+              Send invitation
+            </h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              Creates a password-based login and emails them a setup link. Use this for people who need
+              email/password access.
+            </p>
+            <form onSubmit={handleInvite} className="space-y-3">
+              <div className="flex gap-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Email address</Label>
+                  <Input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="colleague@residco.com"
+                    required
+                    data-testid="input-invite-email"
+                    className="bg-background"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Role</Label>
+                  <RoleSelect value={inviteRole} onChange={setInviteRole} testId="select-invite-role" />
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Role</Label>
-                <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as any)}>
-                  <SelectTrigger className="w-32 bg-background" data-testid="select-invite-role">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="viewer">Viewer</SelectItem>
-                    <SelectItem value="editor">Editor</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
+              <Button type="submit" disabled={inviting} data-testid="button-send-invite">
+                {inviting ? "Sending…" : "Send invitation"}
+              </Button>
+            </form>
+          </div>
+
+          {/* Grant — Microsoft only, no email */}
+          <div className="rounded-xl border border-border bg-card shadow-card p-5">
+            <h2 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-primary" />
+              Grant Microsoft access
+            </h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              Adds this email to the allowlist for Microsoft sign-in only — no email is sent. Share the
+              RLMS link with them yourself; they sign in with{" "}
+              <span className="text-foreground font-medium">Sign in with Microsoft</span>.
+            </p>
+            <form onSubmit={handleGrant} className="space-y-3">
+              <div className="flex gap-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Email address</Label>
+                  <Input
+                    type="email"
+                    value={grantEmail}
+                    onChange={(e) => setGrantEmail(e.target.value)}
+                    placeholder="partner@company.com"
+                    required
+                    data-testid="input-grant-email"
+                    className="bg-background"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Role</Label>
+                  <RoleSelect value={grantRole} onChange={setGrantRole} testId="select-grant-role" />
+                </div>
               </div>
-            </div>
-            <Button type="submit" disabled={inviting} data-testid="button-send-invite">
-              {inviting ? "Sending…" : "Send invitation"}
-            </Button>
-          </form>
+              <Button type="submit" variant="outline" disabled={granting} data-testid="button-grant-access">
+                {granting ? "Saving…" : "Grant access"}
+              </Button>
+            </form>
+          </div>
         </div>
 
         {/* User table */}
@@ -214,21 +304,34 @@ export default function UserManagement() {
                       </Select>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {new Date(u.created_at).toLocaleDateString()}
+                      {u.user_id
+                        ? new Date(u.created_at).toLocaleDateString()
+                        : "Not yet signed in"}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 justify-end">
-                        <button
-                          onClick={() => handleResend(u.email, u.role)}
-                          disabled={resending === u.email}
-                          className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-40"
-                          data-testid={`button-resend-invite-${u.id}`}
-                          title="Resend invite link"
-                        >
-                          {resending === u.email
-                            ? <span className="text-[10px]">Sending…</span>
-                            : <MailIcon className="h-4 w-4" />}
-                        </button>
+                        {u.user_id ? (
+                          <button
+                            onClick={() => handleResend(u.email, u.role)}
+                            disabled={resending === u.email}
+                            className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-40"
+                            data-testid={`button-resend-invite-${u.id}`}
+                            title="Resend invite link"
+                          >
+                            {resending === u.email
+                              ? <span className="text-[10px]">Sending…</span>
+                              : <MailIcon className="h-4 w-4" />}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={copyRlmsLink}
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                            data-testid={`button-copy-rlms-link-${u.id}`}
+                            title="Copy RLMS link"
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => removeUser.mutate(u.id)}
                           className="text-muted-foreground hover:text-destructive transition-colors"

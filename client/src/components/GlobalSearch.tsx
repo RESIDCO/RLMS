@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { parseIsoDateOnly } from "@shared/lease-authority";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface MasterLease {
@@ -529,7 +530,10 @@ export default function GlobalSearch() {
                             <div className="shrink-0 text-right hidden sm:block">
                               <div className="text-[10px] text-muted-foreground">Effective</div>
                               <div className="text-xs text-foreground">
-                                {new Date(lease.effective_date).toLocaleDateString("en-US", { year: "numeric", month: "short" })}
+                                {parseIsoDateOnly(lease.effective_date)?.toLocaleDateString("en-US", {
+                                  year: "numeric",
+                                  month: "short",
+                                }) ?? "—"}
                               </div>
                             </div>
                           )}

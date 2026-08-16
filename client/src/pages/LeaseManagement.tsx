@@ -63,6 +63,7 @@ import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/li
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
+import { formatCalendarDate } from "@shared/lease-authority";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import type {
   MasterLeaseWithRiders,
@@ -105,12 +106,7 @@ function downloadLeasesCsv(leases: MasterLeaseWithRiders[]) {
 }
 
 function fmtDate(d: string | null | undefined) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+  return formatCalendarDate(d);
 }
 function fmtPct(n: number | null) {
   return n == null ? "—" : `${Number(n).toFixed(3)}%`;

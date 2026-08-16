@@ -129,12 +129,7 @@ type SortKey =
   | "expiration";
 
 function fmtDate(d: string | null | undefined) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+  return formatCalendarDate(d);
 }
 
 function EstimatedExpiryMark({

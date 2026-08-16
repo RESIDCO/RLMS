@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import type { RailcarWithAssignment } from "@shared/schema";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
+import { formatCalendarDate } from "@shared/lease-authority";
 
 type Row = RailcarWithAssignment;
 
@@ -88,8 +89,7 @@ function fmtMoney(v: any) {
 }
 
 function fmtDate(d: string | null | undefined) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  return formatCalendarDate(d);
 }
 
 // ── Column definitions ────────────────────────────────────────────────────────

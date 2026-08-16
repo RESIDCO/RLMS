@@ -4,6 +4,7 @@ import { Search as SearchIcon, Train, FileText, BookOpen, ChevronRight, Loader2,
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { formatCalendarDate } from "@shared/lease-authority";
 import { InactiveFleetBadge, SoldFleetBadge } from "@/components/InactiveFleetBadge";
 import {
   Select,
@@ -74,10 +75,7 @@ interface SearchResults {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(date: string | null | undefined) {
-  if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-  });
+  return formatCalendarDate(date);
 }
 
 function StatusBadge({ status }: { status: string | null }) {

@@ -70,7 +70,7 @@ function AppRouter() {
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { session, loading, needsPasswordChange } = useAuth();
+  const { session, loading, needsPasswordChange, accessDenied } = useAuth();
   const [loc] = useHashLocation();
 
   // Invite acceptance is public (token_hash in query) — no session yet
@@ -86,8 +86,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!session) {
-    return <Login />;
+  if (accessDenied || !session) {
+    return <Login accessDenied={accessDenied} />;
   }
 
   // Legacy invite hash (#access_token&type=invite) or recovery

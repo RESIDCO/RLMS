@@ -1,10 +1,11 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
 export type Role = "admin" | "editor" | "viewer" | null;
 
 const NEEDS_PW_KEY = "rlms_needs_password";
+const ACCESS_DENIED_KEY = "rlms_access_denied";
 
 /** Capture invite/recovery type from the hash before Supabase clears it. */
 function captureAuthHashType(): void {
@@ -31,7 +32,9 @@ interface AuthContextValue {
   role: Role;
   loading: boolean;
   needsPasswordChange: boolean;
+  accessDenied: boolean;
   clearNeedsPasswordChange: () => void;
+  clearAccessDenied: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -41,9 +44,13 @@ const AuthContext = createContext<AuthContextValue>({
   role: null,
   loading: true,
   needsPasswordChange: false,
+  accessDenied: false,
   clearNeedsPasswordChange: () => {},
+  clearAccessDenied: () => {},
   signOut: async () => {},
 });
+
+type RoleFetch = { ok: true; role: Role } | { ok: false };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -52,24 +59,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [needsPasswordChange, setNeedsPasswordChange] = useState(
     () => typeof sessionStorage !== "undefined" && !!sessionStorage.getItem(NEEDS_PW_KEY)
   );
+  const [accessDenied, setAccessDenied] = useState(
+    () => typeof sessionStorage !== "undefined" && sessionStorage.getItem(ACCESS_DENIED_KEY) === "1"
+  );
+  const denyingRef = useRef(false);
 
-  async function fetchRole(token: string): Promise<Role> {
+  async function fetchRole(token: string): Promise<RoleFetch> {
     try {
       const RENDER_API = (import.meta.env.VITE_API_BASE as string) || "";
       const res = await fetch(`${RENDER_API}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) return null;
+      if (res.status === 401) return { ok: true, role: null };
+      if (!res.ok) return { ok: false };
       const data = await res.json();
-      return data.role ?? null;
+      const r = data.role;
+      if (r === "admin" || r === "editor" || r === "viewer") return { ok: true, role: r };
+      return { ok: true, role: null };
     } catch {
-      return null;
+      return { ok: false };
     }
   }
 
   function markNeedsPassword(reason: string) {
     sessionStorage.setItem(NEEDS_PW_KEY, reason);
     setNeedsPasswordChange(true);
+  }
+
+  function markAccessDenied() {
+    sessionStorage.setItem(ACCESS_DENIED_KEY, "1");
+    setAccessDenied(true);
+  }
+
+  async function enforceAccess(next: Session | null) {
+    if (!next?.access_token) {
+      setRole(null);
+      return;
+    }
+    const result = await fetchRole(next.access_token);
+    if (!result.ok) return;
+    setRole(result.role);
+    if (result.role) {
+      sessionStorage.removeItem(ACCESS_DENIED_KEY);
+      setAccessDenied(false);
+      return;
+    }
+    // Session is valid but email is not in user_roles — identity ≠ access.
+    if (denyingRef.current) return;
+    denyingRef.current = true;
+    markAccessDenied();
+    await supabase.auth.signOut();
+    setSession(null);
+    setRole(null);
+    denyingRef.current = false;
   }
 
   useEffect(() => {
@@ -81,10 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
-      if (session?.access_token) {
-        const r = await fetchRole(session.access_token);
-        setRole(r);
-      }
+      await enforceAccess(session);
       // After session is established from invite URL, normalize hash for wouter
       if (session && /access_token=/.test(window.location.hash)) {
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/`);
@@ -95,12 +134,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setSession(session);
-        if (session?.access_token) {
-          const r = await fetchRole(session.access_token);
-          setRole(r);
-        } else {
-          setRole(null);
-        }
 
         // Password recovery email link
         if (event === "PASSWORD_RECOVERY") {
@@ -118,6 +151,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (event === "SIGNED_OUT") {
           sessionStorage.removeItem(NEEDS_PW_KEY);
           setNeedsPasswordChange(false);
+          setRole(null);
+        } else {
+          await enforceAccess(session);
         }
 
         if (session && /access_token=/.test(window.location.hash)) {
@@ -144,6 +180,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setNeedsPasswordChange(false);
   };
 
+  const clearAccessDenied = () => {
+    sessionStorage.removeItem(ACCESS_DENIED_KEY);
+    setAccessDenied(false);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -152,7 +193,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role,
         loading,
         needsPasswordChange,
+        accessDenied,
         clearNeedsPasswordChange,
+        clearAccessDenied,
         signOut,
       }}
     >

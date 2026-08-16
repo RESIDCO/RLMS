@@ -121,7 +121,9 @@ export default function UserManagement() {
             Invite a team member
           </h2>
           <p className="text-xs text-muted-foreground mb-4">
-            They’ll receive an email with a login link. If they were already invited, a fresh link will be resent automatically.
+            They’ll receive an email with a login link. The same email is what grants Microsoft sign-in —
+            add them here before they can get in with Microsoft. If they were already invited, a fresh
+            link will be resent automatically.
           </p>
           <form onSubmit={handleInvite} className="space-y-3">
             <div className="flex gap-2">

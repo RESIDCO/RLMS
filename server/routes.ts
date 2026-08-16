@@ -4,7 +4,7 @@ import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { queryRailcars, parseRailcarListParams } from "./railcar-list";
-import { getAuthUser, requireApiAuth } from "./auth";
+import { getAuthUser, getUserRole, requireApiAuth } from "./auth";
 import {
   insertMasterLeaseSchema,
   insertRiderSchema,
@@ -2645,8 +2645,8 @@ export async function registerRoutes(
   async function requireAdmin(req: Request, res: Response): Promise<string | null> {
     const user = req.authUser ?? (await getAuthUser(req));
     if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    const { data } = await supabase.from("user_roles").select("role").eq("user_id", user.id).single();
-    if (data?.role !== "admin") { res.status(403).json({ error: "Forbidden" }); return null; }
+    const role = req.authRole ?? (await getUserRole(user));
+    if (role !== "admin") { res.status(403).json({ error: "Forbidden" }); return null; }
     return user.id;
   }
 
@@ -2654,8 +2654,8 @@ export async function registerRoutes(
   async function requireWrite(req: Request, res: Response): Promise<string | null> {
     const user = req.authUser ?? (await getAuthUser(req));
     if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    const { data } = await supabase.from("user_roles").select("role").eq("user_id", user.id).single();
-    if (data?.role !== "admin" && data?.role !== "editor") {
+    const role = req.authRole ?? (await getUserRole(user));
+    if (role !== "admin" && role !== "editor") {
       res.status(403).json({ error: "Forbidden" });
       return null;
     }
@@ -2668,10 +2668,12 @@ export async function registerRoutes(
     return typeof role === "string" && (VALID_ROLES as readonly string[]).includes(role);
   }
 
-  /** Require any authenticated user (no role check) — used by read routes. */
+  /** Require an authenticated user who has a user_roles row. */
   async function requireUser(req: Request, res: Response): Promise<string | null> {
     const user = req.authUser ?? (await getAuthUser(req));
     if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
+    const role = req.authRole ?? (await getUserRole(user));
+    if (!role) { res.status(403).json({ error: "Forbidden" }); return null; }
     return user.id;
   }
 
@@ -2680,8 +2682,8 @@ export async function registerRoutes(
     try {
       const user = req.authUser ?? (await getAuthUser(req));
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { data } = await supabase.from("user_roles").select("role").eq("user_id", user.id).single();
-      res.json({ id: user.id, email: user.email, role: data?.role ?? null });
+      const role = req.authRole ?? (await getUserRole(user));
+      res.json({ id: user.id, email: user.email, role: role ?? null });
     } catch (err) { errHandler(res, err); }
   });
 

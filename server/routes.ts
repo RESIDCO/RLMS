@@ -3196,22 +3196,40 @@ export async function registerRoutes(
         if (error) throw error;
         rows = data || [];
       } else {
-        // Prefer SQL prefilter on the first token (usually the mark), then AND-match all tokens in memory —
-        // same token semantics as header /api/search, scoped to the full fleet.
-        const lead = tokens[0].replace(/[%_]/g, "");
-        const { data, error } = await supabase
-          .from("railcars")
-          .select(DV_CAR_SELECT)
-          .or(
+        // Tokenize like header /api/search (AND across mark/number). Push both mark and number
+        // into SQL when present — PostgREST caps a single page at ~1000 rows, so mark-only
+        // prefilter + in-memory AND misses high car numbers in large fleets (e.g. OFOX 528345).
+        const safe = (t: string) => t.replace(/[%_,]/g, "");
+        const markTok = tokens.map(safe).find((t) => /[a-z]/i.test(t));
+        const numTok = tokens.map(safe).find((t) => /\d/.test(t));
+        const lead = safe(tokens[0]);
+
+        let q = supabase.from("railcars").select(DV_CAR_SELECT);
+        if (markTok && numTok) {
+          q = q
+            .or(
+              [
+                `reporting_marks.ilike.%${markTok}%`,
+                `car_initial.ilike.%${markTok}%`,
+              ].join(","),
+            )
+            .ilike("car_number", `%${numTok}%`);
+        } else if (numTok && !markTok) {
+          q = q.ilike("car_number", `%${numTok}%`);
+        } else {
+          q = q.or(
             [
               `reporting_marks.ilike.%${lead}%`,
               `car_number.ilike.%${lead}%`,
               `car_initial.ilike.%${lead}%`,
             ].join(","),
-          )
+          );
+        }
+
+        const { data, error } = await q
           .order("reporting_marks", { ascending: true })
           .order("car_number", { ascending: true })
-          .limit(5000);
+          .limit(1000);
         if (error) throw error;
 
         const blobOf = (c: any) =>

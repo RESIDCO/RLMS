@@ -3168,24 +3168,97 @@ export async function registerRoutes(
   });
 
   // Railcar lookup for DV auto-fill — distinct path so it doesn't collide with other /api/railcars routes.
+  // Matching mirrors /api/search: whitespace tokens are AND'd across mark/number (so "OFOX 528345" works).
   app.get("/api/dv/railcars", async (req, res) => {
     try {
-      const q = String(req.query.q || "").trim();
-      let sel = supabase.from("railcars")
-        .select(`
+      const raw = String(req.query.q || "").trim();
+      const tokens = raw
+        .toLowerCase()
+        .split(/[\s,]+/)
+        .map((t) => t.replace(/[()]/g, "").trim())
+        .filter(Boolean);
+
+      const DV_CAR_SELECT = `
           id, car_initial, car_number, reporting_marks, tare_weight_lbs,
           built_year, build_year, build_date, oec, railinc_oec, oac, nbv,
-          car_type, mechanical_designation,
-          railcar_ab_items ( seq, code, amount, sign, signed_amount, application_date )
-        `)
-        .order("car_initial", { ascending: true }).order("car_number", { ascending: true }).limit(50);
-      if (q.length) {
-        sel = sel.or(
-          `car_initial.ilike.%${q}%,car_number.ilike.%${q}%,reporting_marks.ilike.%${q}%`,
-        );
+          car_type, mechanical_designation
+        `;
+
+      let rows: any[] = [];
+      if (tokens.length === 0) {
+        // Empty query: small browse list only (picker still requires typing to find a specific car).
+        const { data, error } = await supabase
+          .from("railcars")
+          .select(DV_CAR_SELECT)
+          .order("reporting_marks", { ascending: true })
+          .order("car_number", { ascending: true })
+          .limit(50);
+        if (error) throw error;
+        rows = data || [];
+      } else {
+        // Prefer SQL prefilter on the first token (usually the mark), then AND-match all tokens in memory —
+        // same token semantics as header /api/search, scoped to the full fleet.
+        const lead = tokens[0].replace(/[%_]/g, "");
+        const { data, error } = await supabase
+          .from("railcars")
+          .select(DV_CAR_SELECT)
+          .or(
+            [
+              `reporting_marks.ilike.%${lead}%`,
+              `car_number.ilike.%${lead}%`,
+              `car_initial.ilike.%${lead}%`,
+            ].join(","),
+          )
+          .order("reporting_marks", { ascending: true })
+          .order("car_number", { ascending: true })
+          .limit(5000);
+        if (error) throw error;
+
+        const blobOf = (c: any) =>
+          [
+            c.car_number,
+            c.reporting_marks,
+            c.car_initial,
+            `${c.reporting_marks ?? ""}${c.car_number ?? ""}`,
+            `${c.car_initial ?? ""}${c.car_number ?? ""}`,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+        rows = (data || [])
+          .map((c: any) => {
+            const blob = blobOf(c);
+            if (!tokens.every((t) => blob.includes(t))) return null;
+            const phrase = tokens.join(" ");
+            const score = blob.includes(phrase) ? 0 : 1;
+            return { c, score };
+          })
+          .filter(Boolean)
+          .sort(
+            (a: any, b: any) =>
+              a.score - b.score ||
+              String(a.c.reporting_marks ?? "").localeCompare(String(b.c.reporting_marks ?? "")) ||
+              String(a.c.car_number ?? "").localeCompare(String(b.c.car_number ?? "")),
+          )
+          .slice(0, 50)
+          .map((x: any) => x.c);
       }
-      const { data, error } = await sel;
-      if (error) throw error;
+
+      const ids = rows.map((r: any) => r.id);
+      let abByCar = new Map<number, any[]>();
+      if (ids.length) {
+        const { data: abRows, error: abErr } = await supabase
+          .from("railcar_ab_items")
+          .select("railcar_id, seq, code, amount, sign, signed_amount, application_date")
+          .in("railcar_id", ids);
+        if (abErr) throw abErr;
+        for (const it of abRows || []) {
+          const list = abByCar.get(it.railcar_id) ?? [];
+          list.push(it);
+          abByCar.set(it.railcar_id, list);
+        }
+      }
 
       const { data: abData } = await supabase
         .from("dv_ab_codes")
@@ -3194,26 +3267,24 @@ export async function registerRoutes(
         (abData || []).map((r: any) => [r.code, r]),
       );
 
-      res.json((data || []).map((r: any) => {
+      res.json(rows.map((r: any) => {
         const initial = r.car_initial || r.reporting_marks || "";
-        const items = Array.isArray(r.railcar_ab_items)
-          ? [...r.railcar_ab_items]
-              .sort((a: any, b: any) => Number(a.seq) - Number(b.seq))
-              .map((it: any) => {
-                const meta = abMeta.get(it.code);
-                return {
-                  seq: it.seq,
-                  code: it.code,
-                  amount: Number(it.amount),
-                  sign: it.sign,
-                  signed_amount: Number(it.signed_amount),
-                  application_date: it.application_date,
-                  rate_basis: meta?.rate_basis ?? null,
-                  rate: meta != null ? Number(meta.rate) : null,
-                  max_depreciation: meta != null ? Number(meta.max_depreciation) : null,
-                };
-              })
-          : [];
+        const items = [...(abByCar.get(r.id) ?? [])]
+          .sort((a: any, b: any) => Number(a.seq) - Number(b.seq))
+          .map((it: any) => {
+            const meta = abMeta.get(it.code);
+            return {
+              seq: it.seq,
+              code: it.code,
+              amount: Number(it.amount),
+              sign: it.sign,
+              signed_amount: Number(it.signed_amount),
+              application_date: it.application_date,
+              rate_basis: meta?.rate_basis ?? null,
+              rate: meta != null ? Number(meta.rate) : null,
+              max_depreciation: meta != null ? Number(meta.max_depreciation) : null,
+            };
+          });
         return {
           ...r,
           car_initial: initial,

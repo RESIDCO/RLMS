@@ -188,8 +188,7 @@ export default function GlobalSearch() {
       return;
     }
     if (item.type === "car") {
-      // Navigate to all-cars with filter pre-filled
-      navigate(`/all-cars?highlight=${encodeURIComponent(item.data.car_number)}`);
+      navigate(`/fleet?search=${encodeURIComponent(item.data.car_number)}`);
       return;
     }
     if (item.type === "rider") {

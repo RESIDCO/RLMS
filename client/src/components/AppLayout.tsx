@@ -5,7 +5,6 @@ import GlobalSearch from "@/components/GlobalSearch";
 import {
   LayoutDashboard,
   Train,
-  List,
   FileText,
   ArrowRightLeft,
   History,
@@ -54,8 +53,7 @@ const UMLER_EXTERNAL_URL = "https://railcarumlerportal.vercel.app/";
 
 const mainNav = [
   { href: "/",         label: "Dashboard",       icon: LayoutDashboard },
-  { href: "/fleet",    label: "Fleet Registry",   icon: Train },
-  { href: "/all-cars", label: "All Railcars",     icon: List },
+  { href: "/fleet",    label: "Railcars",         icon: Train },
   { href: "/leases",   label: "Lease Management", icon: FileText },
   { href: "/move",     label: "Move Cars",        icon: ArrowRightLeft },
   { href: "/history",  label: "History",          icon: History },

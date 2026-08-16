@@ -354,6 +354,7 @@ function parseFleetQuery(searchStr: string): {
   entity: string;
   riderOl: string;
   turning50: number | null;
+  search: string;
 } {
   const fromWouter = new URLSearchParams(String(searchStr || "").replace(/^\?/, ""));
   const hash = typeof window !== "undefined" ? window.location.hash : "";
@@ -387,7 +388,13 @@ function parseFleetQuery(searchStr: string): {
     Number.isFinite(turning50Raw) && turning50Raw >= 1900 && turning50Raw <= 2100
       ? turning50Raw
       : null;
-  return { assigned, entity, riderOl: (qs.get("rider") || "").trim(), turning50 };
+  return {
+    assigned,
+    entity,
+    riderOl: (qs.get("rider") || "").trim(),
+    turning50,
+    search: (qs.get("search") || qs.get("highlight") || "").trim(),
+  };
 }
 
 export default function FleetRegistry() {
@@ -395,7 +402,7 @@ export default function FleetRegistry() {
   const wouterSearch = useSearch();
   const initQ = parseFleetQuery(wouterSearch);
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initQ.search);
   const [assignedFilter, setAssignedFilter] = useState<string>(initQ.assigned);
   const [riderFilter, setRiderFilter] = useState<string>("all");
   const [olCodeFilter, setOlCodeFilter] = useState<string>(initQ.riderOl);
@@ -645,7 +652,7 @@ export default function FleetRegistry() {
             car_ids: [id],
             to_rider_id: riderId,
             moved_by: "bulk-action",
-            reason: "Bulk assignment from Fleet Registry",
+            reason: "Bulk assignment from Railcars",
           })
         )
       );
@@ -687,7 +694,7 @@ export default function FleetRegistry() {
   return (
     <div>
       <PageHeader
-        title="Fleet Registry"
+        title="Railcars"
         subtitle="All railcars under management, current assignments, and lease status"
         actions={
           <div className="flex gap-2">

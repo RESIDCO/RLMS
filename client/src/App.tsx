@@ -1,4 +1,4 @@
-import { Switch, Route, Router } from "wouter";
+import { Switch, Route, Router, Redirect, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -13,7 +13,6 @@ import MoveCars from "@/pages/MoveCars";
 import HistoryPage from "@/pages/History";
 import SearchPage from "@/pages/Search";
 import BulkImportPage from "@/pages/BulkImport";
-import AllCars from "@/pages/AllCars";
 import LeaseWizard from "@/pages/LeaseWizard";
 import UserManagement from "@/pages/UserManagement";
 import Contacts from "@/pages/Contacts";
@@ -29,12 +28,25 @@ import DvHistory from "@/pages/DvCalculator/History";
 import DvReference from "@/pages/DvCalculator/Reference";
 import NotFound from "@/pages/not-found";
 
+function RedirectAllCars() {
+  const [loc] = useLocation();
+  const qIndex = loc.indexOf("?");
+  const params = new URLSearchParams(qIndex >= 0 ? loc.slice(qIndex + 1) : "");
+  if (params.has("highlight") && !params.get("search")) {
+    params.set("search", params.get("highlight") || "");
+    params.delete("highlight");
+  }
+  const qs = params.toString();
+  return <Redirect to={qs ? `/fleet?${qs}` : "/fleet"} />;
+}
+
 function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/fleet" component={FleetRegistry} />
-      <Route path="/all-cars" component={AllCars} />
+      <Route path="/railcars" component={FleetRegistry} />
+      <Route path="/all-cars" component={RedirectAllCars} />
       <Route path="/leases" component={LeaseManagement} />
       <Route path="/lease-wizard" component={LeaseWizard} />
       <Route path="/move" component={MoveCars} />

@@ -51,9 +51,9 @@ import { Button } from "@/components/ui/button";
 /** UMLER Intelligence portal (Vercel). Independent login from RLMS. */
 const UMLER_EXTERNAL_URL = "https://railcarumlerportal.vercel.app/";
 
-const mainNav = [
+const mainNav: { href: string; label: string; icon: React.ElementType; aliases?: string[] }[] = [
   { href: "/",         label: "Dashboard",       icon: LayoutDashboard },
-  { href: "/fleet",    label: "Railcars",         icon: Train },
+  { href: "/railcars", label: "Railcars",         icon: Train, aliases: ["/fleet"] },
   { href: "/leases",   label: "Lease Management", icon: FileText },
   { href: "/move",     label: "Move Cars",        icon: ArrowRightLeft },
   { href: "/history",  label: "History",          icon: History },
@@ -70,6 +70,14 @@ const mainNav = [
 const adminNav = [
   { href: "/users", label: "Users", icon: Users },
 ];
+
+function isNavActive(href: string, location: string, aliases: string[] = []) {
+  return [href, ...aliases].some(
+    (h) =>
+      location === h ||
+      (h !== "/" && (location.startsWith(h + "?") || location.startsWith(h + "/"))),
+  );
+}
 
 function Logo({ collapsed }: { collapsed: boolean }) {
   return (
@@ -354,7 +362,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
         <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
           {mainNav.map((n) => {
-            const active = location === n.href || (n.href !== "/" && location.startsWith(n.href));
+            const active = isNavActive(n.href, location, n.aliases);
             return (
               <NavItem key={n.href} href={n.href} label={n.label} icon={n.icon} active={active} collapsed={false} />
             );
@@ -416,9 +424,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
         <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
           {mainNav.map((n) => {
-            const active =
-              location === n.href ||
-              (n.href !== "/" && location.startsWith(n.href));
+            const active = isNavActive(n.href, location, n.aliases);
             return (
               <NavItem
                 key={n.href}

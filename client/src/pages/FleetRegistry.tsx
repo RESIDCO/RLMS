@@ -879,7 +879,7 @@ export default function FleetRegistry() {
                 {totalCount ? ` · ${totalCount.toLocaleString()} cars` : ""}
               </span>
             </div>
-            <Link href="/fleet" className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline shrink-0">
+            <Link href="/railcars" className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline shrink-0">
               Clear age filter
             </Link>
           </div>

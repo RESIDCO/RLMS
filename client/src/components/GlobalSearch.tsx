@@ -188,7 +188,7 @@ export default function GlobalSearch() {
       return;
     }
     if (item.type === "car") {
-      navigate(`/fleet?search=${encodeURIComponent(item.data.car_number)}`);
+      navigate(`/railcars?search=${encodeURIComponent(item.data.car_number)}`);
       return;
     }
     if (item.type === "rider") {

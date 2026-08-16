@@ -559,21 +559,21 @@ export default function Dashboard() {
                 value={data.kpis.total_fleet}
                 icon={Train}
                 accent="primary"
-                onClick={() => navigate("/fleet?filter=all")}
+                onClick={() => navigate("/railcars?filter=all")}
               />
               <KpiCard
                 testId="kpi-active-assignments"
                 label="Active Assignments"
                 value={data.kpis.active_assignments}
                 icon={LinkIcon}
-                onClick={() => navigate("/fleet?filter=assigned")}
+                onClick={() => navigate("/railcars?filter=assigned")}
               />
               <KpiCard
                 testId="kpi-unassigned"
                 label="Unassigned Cars"
                 value={data.kpis.unassigned_cars}
                 icon={CircleDashed}
-                onClick={() => navigate("/fleet?filter=unassigned")}
+                onClick={() => navigate("/railcars?filter=unassigned")}
               />
               {/* Utilization — special card with ring */}
               <button
@@ -608,7 +608,7 @@ export default function Dashboard() {
                 value={data.kpis.sold_count}
                 icon={PackageMinus}
                 accent="warning"
-                onClick={() => navigate("/fleet?filter=sold")}
+                onClick={() => navigate("/railcars?filter=sold")}
               />
               <KpiCard
                 testId="kpi-off-rent"
@@ -667,10 +667,10 @@ export default function Dashboard() {
                   <div className="h-full bg-umler-steel transition-all" style={{ width: `${data.kpis.rps_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
-                  <Link href="/fleet?entity=RPS&filter=leased" className="hover:text-foreground hover:underline">
+                  <Link href="/railcars?entity=RPS&filter=leased" className="hover:text-foreground hover:underline">
                     {data.kpis.rps_assigned} assigned
                   </Link>
-                  <Link href="/fleet?entity=RPS&filter=offlease" className="hover:text-foreground hover:underline">
+                  <Link href="/railcars?entity=RPS&filter=offlease" className="hover:text-foreground hover:underline">
                     {data.kpis.rps_total - data.kpis.rps_assigned} off-lease
                   </Link>
                   <span className="font-mono-num">{data.kpis.rps_total} total</span>
@@ -689,10 +689,10 @@ export default function Dashboard() {
                   <div className="h-full bg-umler-teal transition-all" style={{ width: `${data.kpis.owned_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
-                  <Link href="/fleet?entity=Main&filter=leased" className="hover:text-foreground hover:underline">
+                  <Link href="/railcars?entity=Main&filter=leased" className="hover:text-foreground hover:underline">
                     {data.kpis.owned_assigned} assigned
                   </Link>
-                  <Link href="/fleet?entity=Main&filter=offlease" className="hover:text-foreground hover:underline">
+                  <Link href="/railcars?entity=Main&filter=offlease" className="hover:text-foreground hover:underline">
                     {data.kpis.owned_total - data.kpis.owned_assigned} off-lease
                   </Link>
                   <span className="font-mono-num">{data.kpis.owned_total} total</span>
@@ -726,7 +726,7 @@ export default function Dashboard() {
                   subtext="cars turning 50"
                   accent={i === 0 ? "warning" : i === 1 ? "warning" : "muted"}
                   marker="dot"
-                  onClick={() => navigate(`/fleet?turning50=${t.year}`)}
+                  onClick={() => navigate(`/railcars?turning50=${t.year}`)}
                 />
               ))}
             </div>
@@ -817,7 +817,7 @@ export default function Dashboard() {
                   return (
                     <Link
                       key={String(r.rider_id)}
-                      href={`/fleet?rider=${encodeURIComponent(r.rider_name)}`}
+                      href={`/railcars?rider=${encodeURIComponent(r.rider_name)}`}
                       className={cn(
                         "px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group",
                         opts?.supplemental && "py-3 opacity-70"

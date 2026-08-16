@@ -37,7 +37,7 @@ function RedirectAllCars() {
     params.delete("highlight");
   }
   const qs = params.toString();
-  return <Redirect to={qs ? `/fleet?${qs}` : "/fleet"} />;
+  return <Redirect to={qs ? `/railcars?${qs}` : "/railcars"} />;
 }
 
 function AppRouter() {

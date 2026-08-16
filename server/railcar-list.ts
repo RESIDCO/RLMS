@@ -6,7 +6,7 @@ import { fetchAllRows } from "./fetch-all";
 export const RAILCAR_LIST_SELECT = `
 id, car_number, reporting_marks, car_type, status, entity, active, sold_to,
 rider_external_id, assignment_label, managed_category, lessee_name,
-lease_start_date, lease_end_date, lease_expiry, transit_status, transit_label,
+lease_start_date, lease_end_date, lease_expiry, estimated_lease_expiry, lease_expiry_snapshot_month, transit_status, transit_label,
 nbv, oac, oec, monthly_rent_per_car, monthly_depr_per_car, build_year,
 capacity_cf, lining_material, lining, coating, mechanical_designation,
 general_description, commodity, notes, data_source, lease_type, managed,
@@ -167,15 +167,34 @@ function mapRow(r: any) {
   return { ...r, assignment, fleet_status };
 }
 
-function assignmentEmbed(p: RailcarListParams) {
+function assignmentEmbed(p: RailcarListParams, select = RAILCAR_LIST_SELECT) {
   const inner = p.assigned === "assigned" || p.rider_id || p.lease_id;
   const rel = inner ? "railcar_assignments!inner" : "railcar_assignments";
-  return RAILCAR_LIST_SELECT.replace("assignment:railcar_assignments(", `assignment:${rel}(`);
+  return select.replace("assignment:railcar_assignments(", `assignment:${rel}(`);
+}
+
+function selectWithoutExpiryEstimates(select: string) {
+  return select
+    .replace(/\s*estimated_lease_expiry,?\s*/g, " ")
+    .replace(/\s*lease_expiry_snapshot_month,?\s*/g, " ");
+}
+
+function isMissingExpiryEstimateColumn(err: unknown) {
+  const msg = String((err as any)?.message ?? err ?? "");
+  return /estimated_lease_expiry|lease_expiry_snapshot_month/i.test(msg);
 }
 
 export async function queryRailcars(p: RailcarListParams) {
+  try {
+    return await queryRailcarsWithSelect(p, assignmentEmbed(p));
+  } catch (err) {
+    if (!isMissingExpiryEstimateColumn(err)) throw err;
+    return await queryRailcarsWithSelect(p, assignmentEmbed(p, selectWithoutExpiryEstimates(RAILCAR_LIST_SELECT)));
+  }
+}
+
+async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   const db = supabaseAdmin;
-  const select = assignmentEmbed(p);
   const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
 
   if (p.assigned === "unassigned") {

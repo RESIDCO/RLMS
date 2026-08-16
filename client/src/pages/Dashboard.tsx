@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { formatCalendarDate, parseIsoDateOnly } from "@shared/lease-authority";
 import {
   Sheet,
   SheetContent,
@@ -121,9 +122,9 @@ type DashboardData = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function monthsUntil(date: string | null) {
   if (!date) return Infinity;
-  const d = new Date(date).getTime();
-  const now = Date.now();
-  return (d - now) / (1000 * 60 * 60 * 24 * 30.4);
+  const d = parseIsoDateOnly(date) ?? new Date(date);
+  if (Number.isNaN(d.getTime())) return Infinity;
+  return (d.getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30.4);
 }
 
 function expiryTone(months: number) {
@@ -135,8 +136,7 @@ function expiryTone(months: number) {
 }
 
 function formatDate(d: string | null) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  return formatCalendarDate(d);
 }
 
 // Entity badge (matches Fleet Registry)

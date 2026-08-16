@@ -239,6 +239,12 @@ interface FinCommitResult {
   fileNoCarMatchCount: number;
   activeCarsInRlms: number;
   railcarFieldsWritten: string[];
+  leaseExpiryEstimates?: {
+    updated: number;
+    noMatch: number;
+    conflicted: number;
+    unchanged?: number;
+  };
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -547,9 +553,28 @@ export default function BulkImportPage() {
             <div>Coal skipped: <span className="font-mono-num">{finCommitted.coalSkipped}</span></div>
             <div>Air/Power excluded: <span className="font-mono-num">{finCommitted.skippedNonRail}</span></div>
             <div>Unmatched riders: <span className="font-mono-num">{finCommitted.unmatchedRiders.length}</span></div>
+            {finCommitted.leaseExpiryEstimates && (
+              <>
+                <div>
+                  Lease expiry estimates:{" "}
+                  <span className="font-mono-num">{finCommitted.leaseExpiryEstimates.updated.toLocaleString()}</span>
+                </div>
+                <div>
+                  No rider match:{" "}
+                  <span className="font-mono-num">{finCommitted.leaseExpiryEstimates.noMatch.toLocaleString()}</span>
+                </div>
+                <div>
+                  Skipped (conflicting rider data):{" "}
+                  <span className="font-mono-num">{finCommitted.leaseExpiryEstimates.conflicted.toLocaleString()}</span>
+                </div>
+              </>
+            )}
           </div>
           <div className="text-xs text-muted-foreground mt-3">
             Railcar fields written: {(finCommitted.railcarFieldsWritten ?? []).join(", ")}. Identity, entity, active, lessee, and assignments were not touched.
+            {finCommitted.leaseExpiryEstimates && (
+              <> {finCommitted.leaseExpiryEstimates.updated.toLocaleString()} active cars updated with a lease expiry estimate, {finCommitted.leaseExpiryEstimates.noMatch.toLocaleString()} cars had no rider match, {finCommitted.leaseExpiryEstimates.conflicted.toLocaleString()} cars skipped due to conflicting rider data.</>
+            )}
           </div>
           {finCommitted.unmatchedRiders.length > 0 && (
             <div className="text-xs text-amber-400 mt-2">
@@ -881,7 +906,7 @@ export default function BulkImportPage() {
           <header className="mb-4">
             <h2 className="text-base font-semibold">Financial Data Refresh (Asset Report)</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Writes only <span className="font-mono">rider_financial_summary</span> and per-car NBV, OEC, Monthly Rent P/C, Monthly Depr P/C, plus which month produced those numbers. Never changes car number, entity, active, lessee, or assignments.
+              Writes only <span className="font-mono">rider_financial_summary</span> and per-car NBV, OEC, Monthly Rent P/C, Monthly Depr P/C, plus which month produced those numbers. Also refreshes active-car <span className="font-mono">estimated_lease_expiry</span> from that month’s rider terms. Never changes car number, entity, active, lessee, assignments, or real <span className="font-mono">lease_end_date</span>.
             </p>
           </header>
           <div

@@ -45,8 +45,13 @@ import {
   carLesseeName,
   carOlCode,
   parseIsoDateOnly,
-  addCalendarMonths,
+  estimatedExpiryDateFromAssetMonths,
 } from "@shared/lease-authority";
+import {
+  MissingExpiryEstimateColumnsError,
+  probeEstimatedLeaseExpiryColumns,
+  refreshEstimatedLeaseExpiry,
+} from "./refresh-estimated-lease-expiry";
 import { carBuildYear, turning50ByYear } from "@shared/build-year";
 import {
   buildFinancialReview,
@@ -513,7 +518,7 @@ export async function registerRoutes(
           /^\d{4}-\d{2}-\d{2}$/.test(leaseExp)
             ? leaseExp
             : months != null && Number.isFinite(months) && latestSnap
-              ? addCalendarMonths(latestSnap, months)
+              ? estimatedExpiryDateFromAssetMonths(latestSnap, months)
               : null;
         if (!date) continue;
         const existing = finByOl.get(key);
@@ -2244,6 +2249,14 @@ export async function registerRoutes(
         }
         throw colProbe.error;
       }
+      try {
+        await probeEstimatedLeaseExpiryColumns(supabaseAdmin);
+      } catch (probeErr) {
+        if (probeErr instanceof MissingExpiryEstimateColumnsError) {
+          return res.status(503).json({ message: probeErr.message });
+        }
+        throw probeErr;
+      }
 
       const activeCars: any[] = [];
       let from = 0;
@@ -2324,6 +2337,8 @@ export async function registerRoutes(
         carsUpdated += slice.length;
       }
 
+      const leaseExpiryEstimates = await refreshEstimatedLeaseExpiry(supabaseAdmin, month);
+
       console.log("[financial-refresh]", JSON.stringify({
         snapshotMonth: month,
         summaryRowsDeleted: existingCount ?? 0,
@@ -2334,6 +2349,7 @@ export async function registerRoutes(
         coalSkipped,
         unmatchedRiders: review.unmatchedRiders.length,
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
+        leaseExpiryEstimates,
       }));
 
       res.json({
@@ -2355,6 +2371,7 @@ export async function registerRoutes(
         fileNoCarMatchCount: review.fileNoCarMatches.length,
         activeCarsInRlms: review.activeCarsInRlms,
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
+        leaseExpiryEstimates,
       });
     } catch (err) { errHandler(res, err); }
   });

@@ -61,9 +61,11 @@ import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
+import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate } from "@shared/lease-authority";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type Row = RailcarWithAssignment;
 
@@ -133,6 +135,48 @@ function fmtDate(d: string | null | undefined) {
     month: "short",
     day: "2-digit",
   });
+}
+
+function EstimatedExpiryMark({
+  date,
+  snapshotMonth,
+}: {
+  date: string;
+  snapshotMonth?: string | null;
+}) {
+  const month = formatAssetReportMonth(snapshotMonth);
+  const title = month
+    ? `Estimated from the ${month} Asset Report`
+    : "Estimated from the Asset Report";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="italic text-muted-foreground/90 cursor-help whitespace-nowrap"
+          title={title}
+        >
+          ~ {formatCalendarDate(date)}{" "}
+          <span className="text-[10px] not-italic tracking-wide">(est.)</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ExpiresDisplay({ r }: { r: any }) {
+  const real = carLeaseEndDate(r);
+  if (real) return <span>{fmtDate(real)}</span>;
+  const estimate = String(r.estimated_lease_expiry ?? "").trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(estimate)) {
+    return (
+      <EstimatedExpiryMark
+        date={estimate}
+        snapshotMonth={r.lease_expiry_snapshot_month}
+      />
+    );
+  }
+  return <span className="text-muted-foreground">—</span>;
 }
 
 function fmtUsd(v: unknown, digits = 0) {
@@ -1070,7 +1114,7 @@ export default function FleetRegistry() {
                         {displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}
                       </td>
                       <td className="px-4 py-3 font-mono-num text-muted-foreground">
-                        {fmtDate((r as any).lease_end_date ?? (r as any).lease_expiry ?? r.assignment?.rider?.expiration_date)}
+                        <ExpiresDisplay r={r} />
                       </td>
                       {OPT_COLS.filter((c) => tableCols.has(c.key)).map((c) => renderOptTd(c.key, r))}
                       <td className="px-4 py-3 text-muted-foreground">
@@ -1479,6 +1523,19 @@ function CarDetail({
         <DetailRow label="Lease Start" value={fmtDate((r as any).lease_start_date)} />
         <DetailRow label="Lease End" value={fmtDate((r as any).lease_end_date)} />
         <DetailRow label="Lease Expiry" value={fmtDate((r as any).lease_expiry)} />
+        <DetailRow
+          label="Estimated expiry"
+          value={
+            String((r as any).estimated_lease_expiry ?? "").slice(0, 10).match(/^\d{4}-\d{2}-\d{2}$/) ? (
+              <EstimatedExpiryMark
+                date={String((r as any).estimated_lease_expiry).slice(0, 10)}
+                snapshotMonth={(r as any).lease_expiry_snapshot_month}
+              />
+            ) : (
+              "—"
+            )
+          }
+        />
         <DetailRow label="Comment / Event Note" value={(r as any).comment_event_note ?? "—"} />
       </dl>
 
@@ -1518,15 +1575,9 @@ function CarDetail({
             <div className="flex justify-between">
               <span className="text-muted-foreground">Expires</span>
               <span className="font-mono-num">
-                {fmtDate((r as any).lease_end_date ?? (r as any).lease_expiry) || "—"}
+                <ExpiresDisplay r={r} />
               </span>
             </div>
-            {!(r as any).lease_end_date && !(r as any).lease_expiry && r.assignment?.rider?.expiration_date && (
-              <div className="flex justify-between text-[11px] text-muted-foreground">
-                <span>Rider table (cache)</span>
-                <span className="font-mono-num">{fmtDate(r.assignment.rider.expiration_date)}</span>
-              </div>
-            )}
           </div>
         ) : (
           <div className="text-sm text-muted-foreground italic">Unassigned</div>

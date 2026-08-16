@@ -54,10 +54,56 @@ export function addCalendarMonths(iso: string, months: number): string | null {
   const d = parseIsoDateOnly(iso);
   if (!d) return null;
   d.setMonth(d.getMonth() + months);
+  return formatIsoDateOnly(d);
+}
+
+function formatIsoDateOnly(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * Asset Report lease-term date used by Dashboard Lease Expiration Timeline
+ * and per-car estimated_lease_expiry.
+ *
+ * Snapshot months are stored as the 1st (e.g. 2026-07-01). Adding N months
+ * lands on the 1st of a later month; the Timeline displays that as the last
+ * day of the prior month (verified: July 2026 + 3.0 → Sep 30, 2026). Round
+ * fractional months the same way the Timeline does (Math.round). Negative
+ * values are overdue terms and are allowed.
+ */
+export function estimatedExpiryDateFromAssetMonths(
+  snapshotMonth: string,
+  monthsUntil: number
+): string | null {
+  const months = Math.round(Number(monthsUntil));
+  if (!Number.isFinite(months)) return null;
+  const snap = String(snapshotMonth ?? "").trim().slice(0, 10);
+  const landed = addCalendarMonths(snap, months);
+  if (!landed) return null;
+  const d = parseIsoDateOnly(landed);
+  if (!d) return null;
+  d.setDate(d.getDate() - 1);
+  return formatIsoDateOnly(d);
+}
+
+/** Format a YYYY-MM-DD (or timestamp) as a calendar date without UTC shift. */
+export function formatCalendarDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const s = String(iso).trim().slice(0, 10);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00`) : new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+}
+
+export function formatAssetReportMonth(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const s = String(iso).trim().slice(0, 10);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00`) : new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
 /**

@@ -58,9 +58,25 @@ export interface RailcarRow {
   car_number: string;
   tare_weight_lbs: number | null;
   built_year: number | null;
+  build_date?: string | null;
   oec: number | null;
+  /** True Railinc/AAR OEC — use this for DV original_cost, never fall back to oec. */
+  railinc_oec?: number | null;
   oac: number | null;
   nbv: number | null;
+  car_type?: string | null;
+  mechanical_designation?: string | null;
+  railcar_ab_items?: Array<{
+    seq: number;
+    code: string;
+    amount: number;
+    sign: "P" | "N";
+    signed_amount: number;
+    application_date: string;
+    rate_basis?: AbRateBasis;
+    rate?: number;
+    max_depreciation?: number;
+  }>;
 }
 
 export interface DvLineResult {

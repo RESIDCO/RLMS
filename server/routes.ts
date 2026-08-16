@@ -3172,12 +3172,55 @@ export async function registerRoutes(
     try {
       const q = String(req.query.q || "").trim();
       let sel = supabase.from("railcars")
-        .select("id, car_initial, car_number, tare_weight_lbs, built_year, build_year, oec, oac, nbv")
+        .select(`
+          id, car_initial, car_number, reporting_marks, tare_weight_lbs,
+          built_year, build_year, build_date, oec, railinc_oec, oac, nbv,
+          car_type, mechanical_designation,
+          railcar_ab_items ( seq, code, amount, sign, signed_amount, application_date )
+        `)
         .order("car_initial", { ascending: true }).order("car_number", { ascending: true }).limit(50);
-      if (q.length) sel = sel.or(`car_initial.ilike.%${q}%,car_number.ilike.%${q}%`);
+      if (q.length) {
+        sel = sel.or(
+          `car_initial.ilike.%${q}%,car_number.ilike.%${q}%,reporting_marks.ilike.%${q}%`,
+        );
+      }
       const { data, error } = await sel;
       if (error) throw error;
-      res.json((data || []).map((r: any) => ({ ...r, built_year: carBuildYear(r) })));
+
+      const { data: abData } = await supabase
+        .from("dv_ab_codes")
+        .select("code, rate_basis, rate, max_depreciation");
+      const abMeta = new Map(
+        (abData || []).map((r: any) => [r.code, r]),
+      );
+
+      res.json((data || []).map((r: any) => {
+        const initial = r.car_initial || r.reporting_marks || "";
+        const items = Array.isArray(r.railcar_ab_items)
+          ? [...r.railcar_ab_items]
+              .sort((a: any, b: any) => Number(a.seq) - Number(b.seq))
+              .map((it: any) => {
+                const meta = abMeta.get(it.code);
+                return {
+                  seq: it.seq,
+                  code: it.code,
+                  amount: Number(it.amount),
+                  sign: it.sign,
+                  signed_amount: Number(it.signed_amount),
+                  application_date: it.application_date,
+                  rate_basis: meta?.rate_basis ?? null,
+                  rate: meta != null ? Number(meta.rate) : null,
+                  max_depreciation: meta != null ? Number(meta.max_depreciation) : null,
+                };
+              })
+          : [];
+        return {
+          ...r,
+          car_initial: initial,
+          built_year: carBuildYear(r),
+          railcar_ab_items: items,
+        };
+      }));
     } catch (err) { errHandler(res, err); }
   });
 

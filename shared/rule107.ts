@@ -304,7 +304,7 @@ export function calculateDv(
   //      Capped at code's max.
   // -------------------------------------------------------------------------
   const abLines: DvLineResult[] = inputs.abItems
-    .filter((ab) => ab && ab.value > 0)
+    .filter((ab) => ab && Number.isFinite(ab.value) && ab.value !== 0)
     .map((ab) => {
       const rate = ab.rate ?? carRate.annualRate;
       const max = ab.max ?? carRate.maxDepreciation;

@@ -164,15 +164,36 @@ export default function NewCalculationPage() {
               <Field className="col-span-12 sm:col-span-5" label="Find existing railcar">
                 <RailcarFinder
                   value={form.carInitial && form.carNumber ? `${form.carInitial} ${form.carNumber}` : ""}
-                  onPick={(r) => setForm((f) => ({
-                    ...f,
-                    carInitial: r.car_initial,
-                    carNumber: r.car_number,
-                    tareWeightLb: r.tare_weight_lbs ? String(r.tare_weight_lbs) : f.tareWeightLb,
-                    buildDate: r.built_year ? `${r.built_year}-01-01` : f.buildDate,
-                    originalCost: r.oec ? String(r.oec) : f.originalCost,
-                    railcarId: r.id,
-                  }))}
+                  onPick={(r) => setForm((f) => {
+                    const buildDate =
+                      (r.build_date && String(r.build_date).slice(0, 10)) ||
+                      (r.built_year ? `${r.built_year}-01-01` : f.buildDate);
+                    // Never fall back to railcars.oec — blank if no Railinc OEC.
+                    const originalCost =
+                      r.railinc_oec != null && Number.isFinite(Number(r.railinc_oec))
+                        ? String(r.railinc_oec)
+                        : "";
+                    const abItems = (r.railcar_ab_items ?? [])
+                      .slice()
+                      .sort((a, b) => a.seq - b.seq)
+                      .map((it) => ({
+                        code: it.code,
+                        value: String(it.signed_amount),
+                        installDate: String(it.application_date).slice(0, 10),
+                      }));
+                    const equipmentType = guessEquipmentType(r) ?? f.equipmentType;
+                    return {
+                      ...f,
+                      carInitial: r.car_initial,
+                      carNumber: r.car_number,
+                      tareWeightLb: r.tare_weight_lbs ? String(r.tare_weight_lbs) : f.tareWeightLb,
+                      buildDate,
+                      originalCost,
+                      railcarId: r.id,
+                      abItems,
+                      equipmentType,
+                    };
+                  })}
                 />
               </Field>
               <Field className="col-span-12 sm:col-span-3" label="Car Initial"><Input data-testid="input-car-initial" value={form.carInitial} onChange={(e) => set("carInitial", e.target.value.toUpperCase())} /></Field>
@@ -292,6 +313,27 @@ export default function NewCalculationPage() {
 
 /* ------------------------------------------------------------- helpers */
 
+/** Best-effort map from fleet fields → Exhibit IV equipment category. Leaves null when unclear. */
+function guessEquipmentType(r: RailcarRow): EquipmentType | null {
+  const blob = `${r.car_type ?? ""} ${r.mechanical_designation ?? ""}`.toUpperCase();
+  if (/\bRACK\b|\bAUTORACK\b|\bBI-?LEVEL\b|\bTRI-?LEVEL\b/.test(blob)) {
+    const y = r.built_year ?? (r.build_date ? Number(String(r.build_date).slice(0, 4)) : null);
+    if (y != null && y >= 2016) return "RACK_POST_2016";
+    if (y != null) return "RACK_PRE_2016";
+  }
+  if (/\bTANK\b|\bT\d*\b/.test(blob) || /^T\b/.test((r.mechanical_designation ?? "").toUpperCase())) {
+    if (/UNCOATED|CORROSIVE/.test(blob)) return "TANK_UNCOATED_CORROSIVE";
+    // Prefer modern tank default over pre-1974 unless age is clearly old.
+    const y = r.built_year ?? (r.build_date ? Number(String(r.build_date).slice(0, 4)) : null);
+    if (y != null && y < 1974) return "TANK_COATED_OR_NONCORROSIVE_PRE_1974";
+    return "MODERN_OR_ILS";
+  }
+  const y = r.built_year ?? (r.build_date ? Number(String(r.build_date).slice(0, 4)) : null);
+  if (y != null && y < 1974) return "OTHER_PRE_1974";
+  if (y != null) return "MODERN_OR_ILS";
+  return null;
+}
+
 function toPayload(f: FormState): CalculationPayload {
   return {
     railcarId: f.railcarId,
@@ -311,7 +353,7 @@ function toPayload(f: FormState): CalculationPayload {
     nonMetallicWeightLb: Number(f.nonMetallicWeightLb) || 0,
     equipmentType: f.equipmentType,
     abItems: f.abItems
-      .filter((r) => r.code && Number(r.value) > 0 && r.installDate)
+      .filter((r) => r.code && r.installDate && Number.isFinite(Number(r.value)) && Number(r.value) !== 0)
       .map((r) => ({ code: r.code, value: Number(r.value), installDate: r.installDate })),
   };
 }

@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { parseIsoDateOnly } from "@shared/lease-authority";
+import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface MasterLease {
@@ -88,14 +89,16 @@ function EntityPip({ entity }: { entity: string | null | undefined }) {
   );
 }
 
-function StatusDot({ status }: { status: string | null }) {
-  const s = status ?? "unknown";
+function StatusDot({ car }: { car: RailcarResult }) {
+  const label = displayRailcarStatus(displayStatusInputFromRailcar(car as any));
   const cls =
-    s === "active"   ? "bg-umler-teal" :
-    s === "stored"   ? "bg-umler-amber" :
-    s === "retired"  ? "bg-umler-signal" :
-    s === "bad order"? "bg-umler-signal" : "bg-muted-foreground";
-  return <span className={cn("inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-0.5", cls)} />;
+    label === "Leased" || label === "Active/In-Service" ? "bg-umler-teal" :
+    label === "Sold" ? "bg-umler-amber" :
+    label === "Idle" ? "bg-umler-steel" :
+    label === "Off-Lease" || label === "Retired" || label === "Scrapped" ? "bg-muted-foreground" :
+    label === "Bad Order" ? "bg-umler-signal" :
+    "bg-muted-foreground";
+  return <span className={cn("inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-0.5", cls)} title={label} />;
 }
 
 // Highlight matched terms inside a string
@@ -365,7 +368,7 @@ export default function GlobalSearch() {
                           {/* Car number + entity */}
                           <div className="w-[130px] shrink-0">
                             <div className="flex items-center gap-1.5 mb-0.5">
-                              <StatusDot status={car.status} />
+                              <StatusDot car={car} />
                               <span className="font-mono text-xs font-semibold text-foreground tracking-wide">
                                 <Highlight text={[car.reporting_marks, car.car_number].filter(Boolean).join(" ")} terms={terms} />
                               </span>

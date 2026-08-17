@@ -772,7 +772,9 @@ export function financialRowToDbPayload(r: FinancialParsedRow): Record<string, u
   };
 }
 
-/** Per-car fields the financial refresh is allowed to write. Nothing else on railcars. */
+/** Per-car fields the financial refresh is allowed to write. Nothing else on railcars.
+ *  Intentionally excludes fleet_status / fleet_status_source — a monthly Asset Report
+ *  must never reset a human Idle/Sold pick. */
 export const RAILCAR_FINANCIAL_REFRESH_FIELDS = [
   "nbv",
   "oec",

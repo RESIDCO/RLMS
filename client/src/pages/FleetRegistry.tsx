@@ -3,7 +3,8 @@ import { useSearch, Link } from "wouter";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
-import { InactiveFleetBadge, SoldFleetBadge, IdleFleetBadge, fleetActiveLabel } from "@/components/InactiveFleetBadge";
+import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
+import { displayStatusInputFromRailcar, FLEET_STATUSES, type FleetStatus } from "@shared/fleet-status";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,20 @@ const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
 };
 
 // Fixed status options for the filter dropdown
-const STATUS_OPTIONS = [
+// Fleet-status filter (stored column). Lifecycle Status stays on the Edit form.
+const STATUS_FILTER_OPTIONS = [
+  { value: "Leased",            label: "Leased" },
+  { value: "Idle",              label: "Idle" },
+  { value: "Sold",              label: "Sold" },
+  { value: "Off-Lease",         label: "Off-Lease" },
+  { value: "Storage",           label: "Storage" },
+  { value: "Bad Order",         label: "Bad Order" },
+  { value: "Retired",           label: "Retired" },
+  { value: "Scrapped",          label: "Scrapped" },
+];
+
+/** Values that may be written to railcars.status (not derived fleet Sold/Idle). */
+const STATUS_EDIT_OPTIONS = [
   { value: "Active/In-Service", label: "Active / In-Service" },
   { value: "Storage",           label: "Storage" },
   { value: "Bad Order",         label: "Bad Order" },
@@ -238,30 +252,6 @@ function renderOptTd(key: string, r: any) {
   }
 }
 
-const STATUS_BADGE_MAP: Record<string, string> = {
-  "Active/In-Service": "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
-  "Storage":           "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
-  "Bad Order":         "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
-  "Off-Lease":         "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
-  "Retired":           "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
-  "Scrapped":          "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
-};
-
-function StatusBadge({ status }: { status: string | null | undefined }) {
-  if (!status) return <span className="text-muted-foreground">—</span>;
-  const cls = STATUS_BADGE_MAP[status] ?? "bg-muted text-muted-foreground border-border";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider whitespace-nowrap",
-        cls
-      )}
-    >
-      {status}
-    </span>
-  );
-}
-
 function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
   // Headers mirror the RESIDCO Master Car List workbook so an exported file can
   // be re-imported through Bulk Import without manual remapping. Internal
@@ -277,7 +267,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     "Build Year", "Lining", "Mech Desig.", "DOT Code",
     "Comment / Event Note",
     // Internal columns (post-workbook)
-    "Managed Category", "Reporting Marks", "Status", "Transit Status", "Transit Label",
+    "Managed Category", "Reporting Marks", "Status", "Fleet Status", "Transit Status", "Transit Label",
     "Rider Name", "Schedule #", "MLA Lease #", "Lessor", "Expiration Date",
     "OAC",
   ];
@@ -320,6 +310,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     r.managed_category ?? "",
     r.reporting_marks ?? "",
     r.status ?? "",
+    displayRailcarStatus(displayStatusInputFromRailcar(r)),
     r.transit_status ?? "",
     r.transit_label ?? "",
     r.assignment?.rider?.rider_name ?? "",
@@ -414,6 +405,8 @@ export default function FleetRegistry() {
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoSeed, setPhotoSeed] = useState("");
   const [bulkStatusPending, setBulkStatusPending] = useState(false);
+  const [bulkFleetStatusPending, setBulkFleetStatusPending] = useState(false);
+  const [selectingAllMatching, setSelectingAllMatching] = useState(false);
   const [bulkRiderPending, setBulkRiderPending] = useState(false);
   const [bulkTransitPending, setBulkTransitPending] = useState(false);
   const [bulkValuesOpen, setBulkValuesOpen] = useState(false);
@@ -433,6 +426,7 @@ export default function FleetRegistry() {
 
   useEffect(() => {
     setPage(1);
+    setSelectedIds(new Set());
   }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter, turning50Year]);
 
   // ── Optional column visibility ─────────────────────────────────────────────
@@ -519,7 +513,7 @@ export default function FleetRegistry() {
         case "car_number":
           return r.car_number;
         case "status":
-          return r.status ?? "";
+          return displayRailcarStatus(displayStatusInputFromRailcar(r));
         case "fleet":
           return r.assignment?.fleet_name ?? "";
         case "rider":
@@ -567,6 +561,46 @@ export default function FleetRegistry() {
   }, [allFilteredIds]);
 
   const clearSelection = () => setSelectedIds(new Set());
+
+  const selectAllMatchingFilter = async () => {
+    setSelectingAllMatching(true);
+    try {
+      const listUrl = railcarsQs({ ...listParams, page: undefined, pageSize: undefined });
+      const idsUrl = listUrl.replace("/api/railcars", "/api/railcars/ids");
+      const json = await apiGet<{ ids: number[]; total_count: number }>(idsUrl);
+      const ids = json.ids ?? [];
+      setSelectedIds(new Set(ids));
+      toast({ title: `Selected ${ids.length.toLocaleString()} cars matching this filter` });
+    } catch (e: any) {
+      toast({ title: "Could not select all matching cars", description: e.message, variant: "destructive" });
+    } finally {
+      setSelectingAllMatching(false);
+    }
+  };
+
+  const bulkUpdateFleetStatus = async (next: FleetStatus) => {
+    const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Set fleet status to ${next} for ${ids.length} selected car${ids.length !== 1 ? "s" : ""}?`,
+      description:
+        next === "Sold"
+          ? "Sold / Transferred To is left blank on a bulk change — fill buyer names per car afterward if needed."
+          : `This marks the selected cars as ${next}.`,
+    });
+    if (!ok) return;
+    setBulkFleetStatusPending(true);
+    try {
+      await apiRequest("POST", "/api/railcars/bulk-fleet-status", { ids, fleet_status: next });
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} set to ${next}` });
+      clearSelection();
+    } catch (e: any) {
+      toast({ title: "Bulk fleet status update failed", description: e.message, variant: "destructive" });
+    } finally {
+      setBulkFleetStatusPending(false);
+    }
+  };
 
   const bulkUpdateStatus = async (newStatus: string) => {
     const ids = Array.from(selectedIds);
@@ -775,8 +809,8 @@ export default function FleetRegistry() {
               <SelectValue placeholder="Service status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All service statuses</SelectItem>
-              {STATUS_OPTIONS.map((s) => (
+              <SelectItem value="all">All fleet statuses</SelectItem>
+              {STATUS_FILTER_OPTIONS.map((s) => (
                 <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
               ))}
             </SelectContent>
@@ -892,10 +926,25 @@ export default function FleetRegistry() {
 
         {/* Bulk action toolbar — visible when 1+ cars are selected, admin only */}
         {canEdit && selectedIds.size > 0 && (
-          <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
             <span className="text-sm font-medium text-foreground">
-              {selectedIds.size} car{selectedIds.size !== 1 ? "s" : ""} selected
+              {selectedIds.size.toLocaleString()} car{selectedIds.size !== 1 ? "s" : ""} selected
             </span>
+            {totalCount > filtered.length && selectedIds.size < totalCount && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={selectingAllMatching}
+                onClick={selectAllMatchingFilter}
+                data-testid="select-all-matching-filter"
+              >
+                {selectingAllMatching ? "Selecting…" : `Select all ${totalCount.toLocaleString()} matching this filter`}
+              </Button>
+            )}
+            {selectedIds.size === totalCount && totalCount > filtered.length && (
+              <span className="text-xs text-muted-foreground">All matching cars selected</span>
+            )}
             <div className="flex items-center gap-2 ml-2">
               <Button
                 variant="outline"
@@ -910,6 +959,24 @@ export default function FleetRegistry() {
                 <Image className="h-4 w-4" />
                 Find Photos
               </Button>
+              {/* Bulk fleet status */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={bulkFleetStatusPending} data-testid="bulk-fleet-status-dropdown">
+                    Set Fleet Status
+                    <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>Leased / Idle / Sold for selected cars</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {FLEET_STATUSES.map((s) => (
+                    <DropdownMenuItem key={s} onSelect={() => bulkUpdateFleetStatus(s)}>
+                      {s}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               {/* Bulk status change */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -921,7 +988,7 @@ export default function FleetRegistry() {
                 <DropdownMenuContent align="start">
                   <DropdownMenuLabel>Change status for selected cars</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {STATUS_OPTIONS.map((s) => (
+                  {STATUS_EDIT_OPTIONS.map((s) => (
                     <DropdownMenuItem key={s.value} onSelect={() => bulkUpdateStatus(s.value)}>
                       {s.label}
                     </DropdownMenuItem>
@@ -1016,7 +1083,7 @@ export default function FleetRegistry() {
                   <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell">
                     Type
                   </th>
-                  <Th label="Status" k="status" sort={sort} onClick={toggleSort} />
+                  <Th label="Fleet Status" k="status" sort={sort} onClick={toggleSort} />
                   <Th label="Lessee" k="fleet" sort={sort} onClick={toggleSort} />
                   <Th label="Rider" k="rider" sort={sort} onClick={toggleSort} />
                   <Th label="Lease" k="lease" sort={sort} onClick={toggleSort} />
@@ -1073,38 +1140,13 @@ export default function FleetRegistry() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span>{r.car_number}</span>
                           <InactiveFleetBadge active={(r as any).active} />
-                          <SoldFleetBadge
-                            car={{
-                              active: (r as any).active,
-                              rider_external_id: (r as any).rider_external_id,
-                              assignment_label: (r as any).assignment_label,
-                              fleet_name: r.assignment?.fleet_name ?? null,
-                              managed_category: (r as any).managed_category,
-                            }}
-                          />
-                          <IdleFleetBadge
-                            car={{
-                              active: (r as any).active,
-                              rider_external_id: (r as any).rider_external_id,
-                              assignment_label: (r as any).assignment_label,
-                              fleet_name: r.assignment?.fleet_name ?? null,
-                              managed_category: (r as any).managed_category,
-                            }}
-                          />
                         </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
                         {r.car_type ?? "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex flex-col gap-1">
-                          <StatusBadge status={r.status} />
-                          {(r as any).sold_to && (
-                            <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30 w-fit">
-                              SOLD
-                            </span>
-                          )}
-                        </div>
+                        <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
                       </td>
                       <td className="px-4 py-3">
                         <div className="space-y-1">
@@ -1495,6 +1537,7 @@ function CarDetail({
       </div>
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 mt-5 text-sm">
+        <DetailRow label="Fleet Status" value={displayRailcarStatus(displayStatusInputFromRailcar(r))} />
         <DetailRow label="Status" value={r.status ?? "—"} />
         <DetailRow label="Car Type" value={r.car_type ?? "—"} />
         <DetailRow label="Mech. Designation" value={(r as any).mechanical_designation ?? "—"} />
@@ -1980,6 +2023,7 @@ function RailcarFormDialog({
     reporting_marks: car?.reporting_marks ?? "HWCX",
     car_type: car?.car_type ?? "Hopper",
     status: car?.status ?? "Active/In-Service",
+    fleet_status: ((car as any)?.fleet_status as FleetStatus | undefined) ?? "Leased",
     entity: (car as any)?.entity ?? "",
     transit_status: (car as any)?.transit_status ?? "",
     transit_label: (car as any)?.transit_label ?? "",
@@ -1991,6 +2035,7 @@ function RailcarFormDialog({
     // Merge coating into lining_material — prefer lining_material, fall back to coating
     lining_material: (car as any)?.lining_material || (car as any)?.coating || "",
     notes: car?.notes ?? "",
+    sold_to: (car as any)?.sold_to ?? "",
     nbv: (car as any)?.nbv != null ? String((car as any).nbv) : "",
     oac: (car as any)?.oac != null ? String((car as any).oac) : "",
     oec: (car as any)?.oec != null ? String((car as any).oec) : "",
@@ -2140,7 +2185,7 @@ function RailcarFormDialog({
               <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
                 <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
                 <SelectContent>
-                  {STATUS_OPTIONS.map((s) => (
+                  {STATUS_EDIT_OPTIONS.map((s) => (
                     <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -2151,6 +2196,34 @@ function RailcarFormDialog({
               <Input value={form.mechanical_designation} onChange={(e) => setForm({ ...form, mechanical_designation: e.target.value })} placeholder="e.g. LO, GT, HTS" />
             </div>
           </div>
+          <div>
+            <Label>Fleet Status</Label>
+            <p className="text-[11px] text-muted-foreground mb-1.5">Is this car leased out, idle, or sold?</p>
+            <Select
+              value={form.fleet_status || "Leased"}
+              onValueChange={(v) => setForm({ ...form, fleet_status: v as FleetStatus })}
+            >
+              <SelectTrigger data-testid="select-fleet-status">
+                <SelectValue placeholder="Select fleet status" />
+              </SelectTrigger>
+              <SelectContent>
+                {FLEET_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {form.fleet_status === "Sold" && (
+            <div>
+              <Label>Sold / Transferred To</Label>
+              <Input
+                value={form.sold_to ?? ""}
+                onChange={(e) => setForm({ ...form, sold_to: e.target.value })}
+                placeholder="Buyer / transferee company name (leave blank if not sold)"
+                data-testid="input-sold-to"
+              />
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Lining <span className="text-[10px] text-muted-foreground font-normal">(coating / lining material)</span></Label>
@@ -2241,20 +2314,16 @@ function RailcarFormDialog({
               />
             </div>
           )}
-          <div>
-            <Label>Sold / Transferred To</Label>
-            <Input
-              value={form.sold_to ?? ""}
-              onChange={(e) => setForm({ ...form, sold_to: e.target.value })}
-              placeholder="Buyer / transferee company name (leave blank if not sold)"
-            />
-            {form.sold_to?.trim() && (
-              <p className="text-xs text-amber-400 mt-1 flex items-center gap-1">
-                <span className="inline-block w-2 h-2 rounded-full bg-amber-400" />
-                This car will be marked as SOLD
-              </p>
-            )}
-          </div>
+          {form.fleet_status !== "Sold" && (
+            <div>
+              <Label>Sold / Transferred To</Label>
+              <Input
+                value={form.sold_to ?? ""}
+                onChange={(e) => setForm({ ...form, sold_to: e.target.value })}
+                placeholder="Buyer / transferee company name (leave blank if not sold)"
+              />
+            </div>
+          )}
           <div>
             <Label>Notes</Label>
             <Textarea
@@ -2331,6 +2400,7 @@ function useMemoReset(
         reporting_marks: car?.reporting_marks ?? "HWCX",
         car_type: car?.car_type ?? "Hopper",
         status: car?.status ?? "Active/In-Service",
+        fleet_status: ((car as any)?.fleet_status as FleetStatus | undefined) ?? "Leased",
         transit_status: (car as any)?.transit_status ?? "",
         transit_label: (car as any)?.transit_label ?? "",
         notes: car?.notes ?? "",

@@ -18,6 +18,7 @@ import {
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { ArrowRight, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
@@ -274,7 +275,7 @@ export default function MoveCars() {
                                 {c.assignment?.fleet_name ?? "—"}
                               </td>
                               <td className="px-3 py-1.5 text-muted-foreground">
-                                {c.status ?? "—"}
+                                {displayRailcarStatus(displayStatusInputFromRailcar(c as any))}
                               </td>
                             </tr>
                           );

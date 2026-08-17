@@ -57,6 +57,8 @@ export type Railcar = {
   lining_material: string | null;
   active: boolean;
   status: string | null;
+  fleet_status?: "Leased" | "Idle" | "Sold" | null;
+  fleet_status_source?: "auto" | "manual" | null;
   coating: string | null;
   transit_status: string | null;
   transit_label: string | null;
@@ -238,6 +240,7 @@ export const insertRailcarSchema = z.object({
   lining_material: z.string().nullable().optional(),
   active: z.boolean().optional(),
   status: z.string().nullable().optional(),
+  fleet_status: z.enum(["Leased", "Idle", "Sold"]).optional(),
   coating: z.string().nullable().optional(),
   transit_status: z.string().nullable().optional(),
   transit_label: z.string().nullable().optional(),

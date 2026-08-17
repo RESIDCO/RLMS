@@ -36,10 +36,11 @@ def fetch_all(table: str, cols: str, order: str = "id"):
 
 
 def is_sold(c):
-    return (
-        str(c.get("rider_external_id") or "").strip().upper() == "SOLD"
-        or str(c.get("assignment_label") or "").strip().upper() == "SOLD"
-    )
+    return str(c.get("fleet_status") or "").strip() == "Sold"
+
+
+def is_idle(c):
+    return str(c.get("fleet_status") or "").strip() == "Idle"
 
 
 def car_end(c):
@@ -60,7 +61,7 @@ def car_ol(c):
 def main():
     cars = fetch_all(
         "railcars",
-        "id,active,entity,rider_external_id,assignment_label,managed_category,"
+        "id,active,entity,fleet_status,rider_external_id,assignment_label,managed_category,"
         "lessee_name,lease_start_date,lease_end_date,lease_expiry",
     )
     asg = fetch_all("railcar_assignments", "id,railcar_id,rider_id,fleet_name")
@@ -69,8 +70,8 @@ def main():
 
     active = [c for c in cars if c.get("active") is True]
     operating = [c for c in active if not is_sold(c)]
-    leased = [c for c in operating if str(c.get("managed_category") or "").strip() != "Idle"]
-    idle = [c for c in operating if str(c.get("managed_category") or "").strip() == "Idle"]
+    leased = [c for c in operating if not is_idle(c)]
+    idle = [c for c in operating if is_idle(c)]
     op_ids = {c["id"] for c in operating}
     asg_op = [a for a in asg if a["railcar_id"] in op_ids]
     assigned = {a["railcar_id"] for a in asg_op}

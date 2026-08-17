@@ -1,10 +1,10 @@
 import { supabaseAdmin } from "./supabase";
-import { deriveFleetStatus } from "@shared/fleet-status";
+import { parseFleetStatus } from "@shared/fleet-status";
 import { fetchAllRows } from "./fetch-all";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
 export const RAILCAR_LIST_SELECT = `
-id, car_number, reporting_marks, car_type, status, entity, active, sold_to,
+id, car_number, reporting_marks, car_type, status, fleet_status, fleet_status_source, entity, active, sold_to,
 rider_external_id, assignment_label, managed_category, lessee_name,
 lease_start_date, lease_end_date, lease_expiry, estimated_lease_expiry, lease_expiry_snapshot_month, transit_status, transit_label,
 nbv, oac, oec, monthly_rent_per_car, monthly_depr_per_car, build_year, build_date,
@@ -107,25 +107,30 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
   if (p.active === "active") query = query.neq("active", false);
   else if (p.active === "inactive") query = query.eq("active", false);
 
-  if (p.status) query = query.eq("status", p.status);
   if (p.entity) query = query.eq("entity", p.entity);
 
   if (p.transit === "in_transit") query = query.not("transit_status", "is", null);
   if (p.transit === "normal") query = query.is("transit_status", null);
 
-  // Sold = assignment_label contains "sold" (primary), or rider_external_id is exactly SOLD.
-  // Keep in sync with shared/fleet-status.ts isSoldAssignment + rlms_fleet_kpis.
-  const soldOr = "assignment_label.ilike.%sold%,rider_external_id.ilike.SOLD";
-  if (p.assigned === "sold") {
-    query = query.or(soldOr);
-  } else if (p.assigned === "offlease") {
-    query = query.eq("managed_category", "Idle");
-    query = query.or("rider_external_id.is.null,rider_external_id.not.ilike.SOLD");
-    query = query.or("assignment_label.is.null,assignment_label.not.ilike.%sold%");
-  } else if (p.assigned === "leased") {
-    query = query.or("managed_category.is.null,managed_category.neq.Idle");
-    query = query.or("rider_external_id.is.null,rider_external_id.not.ilike.SOLD");
-    query = query.or("assignment_label.is.null,assignment_label.not.ilike.%sold%");
+  // Fleet status is the stored railcars.fleet_status column (not text-matching).
+  const statusFleet =
+    p.status === "Sold" || p.status === "Idle" || p.status === "Leased" || p.status === "Active/In-Service"
+      ? p.status === "Sold"
+        ? "sold"
+        : p.status === "Idle"
+          ? "offlease"
+          : "leased"
+      : null;
+  const assignedMode = statusFleet ?? p.assigned;
+
+  if (assignedMode === "sold") {
+    query = query.eq("fleet_status", "Sold");
+  } else if (assignedMode === "offlease") {
+    query = query.eq("fleet_status", "Idle");
+  } else if (assignedMode === "leased") {
+    query = query.eq("fleet_status", "Leased");
+  } else if (p.status) {
+    query = query.eq("status", p.status);
   }
 
   if (p.rider_id) {
@@ -159,14 +164,7 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
 
 function mapRow(r: any) {
   const assignment = Array.isArray(r.assignment) ? r.assignment[0] ?? null : r.assignment;
-  const fleet_status = deriveFleetStatus({
-    active: r.active,
-    rider_external_id: r.rider_external_id,
-    assignment_label: r.assignment_label,
-    fleet_name: assignment?.fleet_name ?? null,
-    managed_category: r.managed_category,
-  });
-  return { ...r, assignment, fleet_status };
+  return { ...r, assignment, fleet_status: parseFleetStatus(r.fleet_status) ?? r.fleet_status ?? null };
 }
 
 function assignmentEmbed(p: RailcarListParams, select = RAILCAR_LIST_SELECT) {
@@ -194,6 +192,21 @@ export async function queryRailcars(p: RailcarListParams) {
     if (!isMissingOptionalDateColumn(err)) throw err;
     return await queryRailcarsWithSelect(p, assignmentEmbed(p, selectWithoutOptionalDateCols(RAILCAR_LIST_SELECT)));
   }
+}
+
+/** IDs matching the current filter (all pages) — for select-all-matching bulk actions. */
+export async function queryRailcarIds(p: RailcarListParams): Promise<number[]> {
+  const slim = assignmentEmbed(p, "id, assignment:railcar_assignments(id)");
+  if (p.assigned === "unassigned") {
+    const result = await queryRailcarsWithSelect({ ...p, all: true, page: 1, pageSize: 1 }, slim);
+    return result.rows.map((r: any) => r.id);
+  }
+  const data = await fetchAllRows<{ id: number }>((from, to) => {
+    let q = supabaseAdmin.from("railcars").select(slim).order("id", { ascending: true }).range(from, to);
+    q = applyRailcarFilters(q, p);
+    return q;
+  });
+  return data.map((r) => r.id);
 }
 
 async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {

@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate } from "@shared/lease-authority";
-import { InactiveFleetBadge, SoldFleetBadge } from "@/components/InactiveFleetBadge";
+import { InactiveFleetBadge, FleetAwareStatusBadge } from "@/components/InactiveFleetBadge";
+import { displayStatusInputFromRailcar } from "@shared/fleet-status";
 import {
   Select,
   SelectContent,
@@ -78,23 +79,6 @@ function fmt(date: string | null | undefined) {
   return formatCalendarDate(date);
 }
 
-function StatusBadge({ status }: { status: string | null }) {
-  const s = status ?? "unknown";
-  const cls =
-    s === "active"
-      ? "bg-umler-teal/15 text-umler-teal border-umler-teal/20"
-      : s === "stored"
-      ? "bg-umler-amber/15 text-umler-amber border-umler-amber/20"
-      : s === "retired"
-      ? "bg-umler-signal/15 text-umler-signal border-umler-signal/20"
-      : "bg-muted text-muted-foreground";
-  return (
-    <span className={cn("text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded border whitespace-nowrap", cls)}>
-      {s}
-    </span>
-  );
-}
-
 // ── Entity badge (mirrors FleetRegistry) ─────────────────────────────────────
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
   "Rail Partners Select": { label: "RPS",   cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30" },
@@ -132,15 +116,6 @@ function RailcarRow({ car }: { car: RailcarResult }) {
         <div className="flex items-center gap-1.5 mb-0.5">
           <EntityBadge entity={car.entity} />
           <InactiveFleetBadge active={car.active} />
-          <SoldFleetBadge
-            car={{
-              active: car.active,
-              rider_external_id: (car as any).rider_external_id,
-              assignment_label: (car as any).assignment_label,
-              fleet_name: car.assignment?.fleet_name ?? null,
-              managed_category: (car as any).managed_category,
-            }}
-          />
         </div>
         <div className="font-mono text-sm font-semibold text-foreground">{[car.reporting_marks, car.car_number].filter(Boolean).join(" ")}</div>
         <div className="text-[11px] text-muted-foreground mt-0.5">{car.car_type ?? "—"}{car.mechanical_designation ? ` · ${car.mechanical_designation}` : ""}</div>
@@ -166,7 +141,7 @@ function RailcarRow({ car }: { car: RailcarResult }) {
         </div>
       </div>
       <div className="shrink-0">
-        <StatusBadge status={car.status} />
+        <FleetAwareStatusBadge car={displayStatusInputFromRailcar(car as any)} />
       </div>
     </div>
   );

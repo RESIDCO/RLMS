@@ -53,6 +53,7 @@ import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import { formatCalendarDate } from "@shared/lease-authority";
+import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import type {
@@ -668,7 +669,7 @@ function RiderCars({ riderId }: { riderId: number }) {
                     <td className="px-3 py-1.5 font-mono-num text-muted-foreground">{(c as any).reporting_marks ?? "—"}</td>
                     <td className="px-3 py-1.5 font-mono-num">{c.car_number}</td>
                     <td className="px-3 py-1.5">{c.assignment?.fleet_name ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground">{c.status ?? "—"}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{displayRailcarStatus(displayStatusInputFromRailcar(c as any))}</td>
                     {visibleCols.has("entity") && (
                       <td className="px-3 py-1.5 text-muted-foreground">{(c as any).entity ?? "—"}</td>
                     )}

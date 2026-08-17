@@ -3,7 +3,7 @@ import type { Server } from "http";
 import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
-import { queryRailcars, parseRailcarListParams } from "./railcar-list";
+import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railcar-list";
 import {
   getAuthUser,
   getUserRole,
@@ -49,6 +49,8 @@ import {
 import {
   deriveFleetStatus,
   isOperatingFleetCar,
+  autoFleetStatusFromLegacyText,
+  parseFleetStatus,
   type FleetStatus,
 } from "@shared/fleet-status";
 import {
@@ -310,7 +312,7 @@ export async function registerRoutes(
           db
             .from("railcars")
             .select(
-              `id, entity, active, rider_external_id, assignment_label, managed_category,
+              `id, entity, active, fleet_status, rider_external_id, assignment_label, managed_category,
                lessee_name, lease_end_date, lease_expiry, build_year, built_year`
             )
             .eq("active", true)
@@ -331,6 +333,7 @@ export async function registerRoutes(
       const allRailcars = allRailcarsRaw.map((r: any) => {
         const fleetStatus: FleetStatus | null = deriveFleetStatus({
           active: r.active,
+          fleet_status: r.fleet_status,
           rider_external_id: r.rider_external_id,
           assignment_label: r.assignment_label,
           managed_category: r.managed_category,
@@ -342,6 +345,7 @@ export async function registerRoutes(
       const railcars = activeCars.filter((r: any) =>
         isOperatingFleetCar({
           active: r.active,
+          fleet_status: r.fleet_status,
           rider_external_id: r.rider_external_id,
           assignment_label: r.assignment_label,
           managed_category: r.managed_category,
@@ -655,9 +659,6 @@ export async function registerRoutes(
       }
       const fleet_age = turning50ByYear(ageCars);
 
-      // Correct Sold detection (assignment_label ILIKE '%sold%') may be newer than the
-      // deployed rlms_fleet_kpis() body — recompute fleet composition via PostgREST using
-      // the same rules as shared/fleet-status.ts so dashboard KPIs stay accurate.
       let fleetKpis = sqlKpis
         ? {
             total_fleet: Number(sqlKpis.operating) || 0,
@@ -675,55 +676,6 @@ export async function registerRoutes(
             railcars_scanned: Number(sqlKpis.scanned) || 0,
           }
         : null;
-
-      if (sqlKpis) {
-        const headCount = async (make: (q: any) => any) => {
-          let q = db.from("railcars").select("id", { count: "exact", head: true }).eq("active", true);
-          q = make(q);
-          const { count, error } = await q;
-          if (error) throw error;
-          return count ?? 0;
-        };
-        const notSold = (q: any) =>
-          q
-            .or("assignment_label.is.null,assignment_label.not.ilike.%sold%")
-            .or("rider_external_id.is.null,rider_external_id.not.ilike.SOLD");
-        const [soldN, idleN, activeN, ownedTotal, ownedAssigned, rpsTotal, rpsAssigned, coalTotal] =
-          await Promise.all([
-            headCount((q) => q.or("assignment_label.ilike.%sold%,rider_external_id.ilike.SOLD")),
-            headCount((q) => notSold(q.eq("managed_category", "Idle"))),
-            headCount((q) => q),
-            headCount((q) => notSold(q.eq("entity", "Main"))),
-            headCount((q) =>
-              notSold(q.eq("entity", "Main").or("managed_category.is.null,managed_category.neq.Idle")),
-            ),
-            headCount((q) => notSold(q.eq("entity", "Rail Partners Select"))),
-            headCount((q) =>
-              notSold(
-                q
-                  .eq("entity", "Rail Partners Select")
-                  .or("managed_category.is.null,managed_category.neq.Idle"),
-              ),
-            ),
-            headCount((q) => notSold(q.eq("entity", "Coal"))),
-          ]);
-        const operatingN = activeN - soldN;
-        const leasedN = operatingN - idleN;
-        fleetKpis = {
-          ...fleetKpis!,
-          sold_count: soldN,
-          idle_count: idleN,
-          leased_count: leasedN,
-          active_cars_including_sold: activeN,
-          total_fleet: operatingN,
-          active_assignments: leasedN,
-          owned_total: ownedTotal,
-          owned_assigned: ownedAssigned,
-          rps_total: rpsTotal,
-          rps_assigned: rpsAssigned,
-          coal_total: coalTotal,
-        };
-      }
 
       res.json({
         kpis: fleetKpis
@@ -854,7 +806,7 @@ export async function registerRoutes(
         supabaseAdmin
           .from("railcars")
           .select(
-            "id, car_number, reporting_marks, car_type, status, entity, active, lessee_name, rider_external_id, assignment_label, managed_category"
+            "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, lessee_name, rider_external_id, assignment_label, managed_category, sold_to"
           )
           .eq("active", true)
           .eq("lessee_name", name)
@@ -864,6 +816,7 @@ export async function registerRoutes(
       const operating = cars.filter((r: any) =>
         isOperatingFleetCar({
           active: r.active,
+          fleet_status: r.fleet_status,
           rider_external_id: r.rider_external_id,
           assignment_label: r.assignment_label,
           managed_category: r.managed_category,
@@ -880,6 +833,17 @@ export async function registerRoutes(
             car_type: c.car_type,
             status: c.status,
             entity: c.entity,
+            active: c.active,
+            rider_external_id: c.rider_external_id,
+            assignment_label: c.assignment_label,
+            managed_category: c.managed_category,
+            fleet_status: parseFleetStatus(c.fleet_status) ?? deriveFleetStatus({
+              active: c.active,
+              fleet_status: c.fleet_status,
+              rider_external_id: c.rider_external_id,
+              assignment_label: c.assignment_label,
+              managed_category: c.managed_category,
+            }),
           }))
           .sort((a: any, b: any) => String(a.car_number).localeCompare(String(b.car_number))),
       });
@@ -910,6 +874,50 @@ export async function registerRoutes(
         return;
       }
       res.json(result);
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/railcars/ids", async (req: Request, res: Response) => {
+    try {
+      const params = parseRailcarListParams(req.query as Record<string, unknown>);
+      const ids = await queryRailcarIds({ ...params, all: true });
+      res.json({ ids, total_count: ids.length });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/railcars/bulk-fleet-status", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0) : [];
+      const fleet_status = parseFleetStatus(req.body?.fleet_status);
+      if (!fleet_status) {
+        return res.status(400).json({ message: "fleet_status must be Leased, Idle, or Sold" });
+      }
+      if (idsRaw.length === 0) {
+        return res.status(400).json({ message: "ids required" });
+      }
+      if (idsRaw.length > 20_000) {
+        return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
+      }
+      const uniqueIds = [...new Set(idsRaw)];
+      const CHUNK = 200;
+      let updated = 0;
+      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+        const slice = uniqueIds.slice(i, i + CHUNK);
+        const { data, error } = await supabase
+          .from("railcars")
+          .update({ fleet_status, fleet_status_source: "manual" })
+          .in("id", slice)
+          .select("id");
+        if (error) throw error;
+        updated += data?.length ?? 0;
+      }
+      res.json({ ok: true, updated, fleet_status });
     } catch (err) {
       errHandler(res, err);
     }
@@ -968,9 +976,17 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertRailcarSchema.parse(req.body);
+      const insertRow: Record<string, unknown> = { ...parsed };
+      if (parsed.fleet_status) {
+        insertRow.fleet_status = parsed.fleet_status;
+        insertRow.fleet_status_source = "manual";
+      } else {
+        insertRow.fleet_status = autoFleetStatusFromLegacyText(parsed);
+        insertRow.fleet_status_source = "auto";
+      }
       const { data, error } = await supabase
         .from("railcars")
-        .insert(parsed)
+        .insert(insertRow)
         .select()
         .single();
       if (error) throw error;
@@ -986,9 +1002,14 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRailcarSchema.partial().parse(req.body);
+      const updateRow: Record<string, unknown> = { ...parsed };
+      if (parsed.fleet_status) {
+        updateRow.fleet_status = parsed.fleet_status;
+        updateRow.fleet_status_source = "manual";
+      }
       const { data, error } = await supabase
         .from("railcars")
-        .update(parsed)
+        .update(updateRow)
         .eq("id", id)
         .select()
         .single();
@@ -1597,6 +1618,14 @@ export async function registerRoutes(
       dot_code: dotCode,
       dot_specification: dotCode, // mirror — keeps DV calculator path working
       comment_event_note: commentEventNote,
+      fleet_status: autoFleetStatusFromLegacyText({
+        active: activeBool,
+        rider_external_id: riderExternalId,
+        assignment_label: assignmentLabel,
+        fleet_name: fleetName,
+        managed_category: managedCategory,
+      }),
+      fleet_status_source: "auto",
       // Raw original headers preserved for debugging / round-trip
       _normalized: n,
     };
@@ -2102,18 +2131,40 @@ export async function registerRoutes(
             // Skip entity in update when unchanged so the old managed_category trigger doesn't fire
             const { data: existingCar } = await supabase
               .from("railcars")
-              .select("entity")
+              .select("entity, fleet_status_source")
               .eq("id", existingId)
               .maybeSingle();
             const updatePayload = { ...payload };
             if (existingCar && (existingCar as any).entity === payload.entity) {
               delete (updatePayload as any).entity;
             }
+            // Never overwrite a human fleet_status pick. Auto rows re-derive from this VCF period.
+            if ((existingCar as any)?.fleet_status_source === "manual") {
+              delete (updatePayload as any).fleet_status;
+              delete (updatePayload as any).fleet_status_source;
+            } else {
+              (updatePayload as any).fleet_status = autoFleetStatusFromLegacyText({
+                active: payload.active as boolean | undefined,
+                rider_external_id: payload.rider_external_id as string | null,
+                assignment_label: payload.assignment_label as string | null,
+                managed_category: payload.managed_category as string | null,
+              });
+              (updatePayload as any).fleet_status_source = "auto";
+            }
             const { error } = await supabase.from("railcars").update(updatePayload).eq("id", existingId);
             if (error) throw error;
             updated += 1;
           } else {
-            const { data: ins, error } = await supabase.from("railcars").insert(payload).select("id").single();
+            const { data: ins, error } = await supabase.from("railcars").insert({
+              ...payload,
+              fleet_status: autoFleetStatusFromLegacyText({
+                active: payload.active as boolean | undefined,
+                rider_external_id: payload.rider_external_id as string | null,
+                assignment_label: payload.assignment_label as string | null,
+                managed_category: payload.managed_category as string | null,
+              }),
+              fleet_status_source: "auto",
+            }).select("id").single();
             if (error) throw error;
             railcarId = ins!.id;
             keyToId.set(car.carKey, railcarId);
@@ -2572,7 +2623,7 @@ export async function registerRoutes(
         let q = supabaseAdmin
           .from("railcars")
           .select(
-            `id, car_number, reporting_marks, car_type, status, entity, active, mechanical_designation,
+            `id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation,
              lessee_name, rider_external_id, assignment_label, managed_category,
              assignment:railcar_assignments(
                id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,

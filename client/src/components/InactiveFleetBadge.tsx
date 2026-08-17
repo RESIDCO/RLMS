@@ -1,5 +1,10 @@
 import { cn } from "@/lib/utils";
-import { deriveFleetStatus, type FleetStatusInput } from "@shared/fleet-status";
+import {
+  deriveFleetStatus,
+  displayRailcarStatus,
+  type DisplayStatusInput,
+  type FleetStatusInput,
+} from "@shared/fleet-status";
 
 /**
  * Fleet-membership inactive indicator (§5).
@@ -28,8 +33,8 @@ export function InactiveFleetBadge({
 }
 
 /**
- * Sold-but-still-tracked (active=true, fleet_status=Sold).
- * Distinct from Inactive gray pill — these remain active for repair billing.
+ * Sold-but-still-tracked (fleet_status=Sold).
+ * Prefer FleetAwareStatusBadge in the STATUS column; this pill is for compact layouts.
  */
 export function SoldFleetBadge({
   car,
@@ -46,14 +51,14 @@ export function SoldFleetBadge({
         className
       )}
       data-testid="badge-sold-fleet"
-      title="Sold — kept active for repair billing until remarked"
+      title="Sold — kept in the fleet until the new owner remarks the car"
     >
       Sold
     </span>
   );
 }
 
-/** Idle via managed_category (VCF §4.2) — stays in operating fleet / util denominator. */
+/** Idle (fleet_status=Idle). Prefer FleetAwareStatusBadge in the STATUS column. */
 export function IdleFleetBadge({
   car,
   className,
@@ -69,9 +74,57 @@ export function IdleFleetBadge({
         className
       )}
       data-testid="badge-idle-fleet"
-      title="Idle (managed_category) — counted in Total Fleet / utilization denominator"
+      title="Idle — still owned by RESIDCO, not currently on rent"
     >
       Idle
+    </span>
+  );
+}
+
+const STATUS_BADGE_MAP: Record<string, string> = {
+  "Active/In-Service": "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
+  Leased: "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
+  Sold: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
+  Idle: "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  Storage: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
+  "Bad Order": "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
+  "Off-Lease": "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  Retired: "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+  Scrapped: "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+};
+
+/** STATUS column badge: Leased / Idle / Sold from stored fleet_status. */
+export function FleetAwareStatusBadge({
+  car,
+  className,
+}: {
+  car: DisplayStatusInput;
+  className?: string;
+}) {
+  const label = displayRailcarStatus(car);
+  if (!label || label === "—") {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const cls = STATUS_BADGE_MAP[label] ?? "bg-muted text-muted-foreground border-border";
+  const title =
+    label === "Sold"
+      ? "Sold — no longer owned by RESIDCO, still tracked until remarked"
+      : label === "Idle"
+        ? "Idle — still owned by RESIDCO, not currently on rent"
+        : label === "Leased" || label === "Active/In-Service"
+          ? "Leased / in revenue service"
+          : undefined;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider whitespace-nowrap",
+        cls,
+        className,
+      )}
+      data-testid="badge-fleet-aware-status"
+      title={title}
+    >
+      {label}
     </span>
   );
 }
@@ -81,3 +134,5 @@ export function fleetActiveLabel(active: boolean | null | undefined): "Active" |
   if (active === true) return "Active";
   return "";
 }
+
+export { displayRailcarStatus };

@@ -5,6 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatCalendarDate, parseIsoDateOnly } from "@shared/lease-authority";
+import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import {
   Sheet,
   SheetContent,
@@ -35,10 +36,15 @@ type CarRow = {
   car_type: string | null;
   status: string | null;
   entity: string | null;
-  fleet_name: string | null;
-  rider_name: string | null;
-  lease_number: string | null;
-  lessee: string | null;
+  active?: boolean | null;
+  fleet_status?: "Sold" | "Idle" | "Leased" | null;
+  rider_external_id?: string | null;
+  assignment_label?: string | null;
+  managed_category?: string | null;
+  fleet_name?: string | null;
+  rider_name?: string | null;
+  lease_number?: string | null;
+  lessee?: string | null;
 };
 
 type RiderRow = {
@@ -59,7 +65,7 @@ type FleetDetail = {
   rider_name: string | null;
   schedule_number: string | null;
   expiration_date: string | null;
-  cars: { id: number; car_number: string; reporting_marks: string | null; car_type: string | null; status: string | null; entity: string | null }[];
+  cars: CarRow[];
 };
 
 type DashboardData = {
@@ -158,14 +164,18 @@ function EntityBadge({ entity }: { entity: string | null | undefined }) {
 
 const STATUS_BADGE: Record<string, string> = {
   "Active/In-Service": "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
-  "Storage":           "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
-  "Bad Order":         "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
-  "Off-Lease":         "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
-  "Retired":           "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
-  "Scrapped":          "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+  Leased: "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
+  Sold: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
+  Idle: "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  Storage: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
+  "Bad Order": "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
+  "Off-Lease": "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  Retired: "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+  Scrapped: "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
 };
-function StatusPill({ status }: { status: string | null }) {
-  if (!status) return <span className="text-muted-foreground text-xs">—</span>;
+function StatusPill({ car }: { car: CarRow }) {
+  const status = displayRailcarStatus(displayStatusInputFromRailcar(car));
+  if (!status || status === "—") return <span className="text-muted-foreground text-xs">—</span>;
   const cls = STATUS_BADGE[status] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span className={cn("text-[9px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-full border whitespace-nowrap", cls)}>
@@ -194,7 +204,7 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
     const rows = [
       ["reporting_marks", "car_number", "car_type", "status", "entity", "lessee_name", "rider", "lease", "lessee"],
       ...cars.map(c => [
-        c.reporting_marks ?? "", c.car_number, c.car_type ?? "", c.status ?? "", c.entity ?? "",
+        c.reporting_marks ?? "", c.car_number, c.car_type ?? "", displayRailcarStatus(displayStatusInputFromRailcar(c)), c.entity ?? "",
         fleet.fleet_name, fleet.rider_name ?? "", fleet.lease_number ?? "", fleet.lessee ?? "",
       ]),
     ];
@@ -275,7 +285,7 @@ function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: (
                     <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{c.car_type ?? "—"}</td>
                     <td className="px-4 py-2.5"><EntityBadge entity={c.entity} /></td>
-                    <td className="px-4 py-2.5"><StatusPill status={c.status} /></td>
+                    <td className="px-4 py-2.5"><StatusPill car={c} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -304,7 +314,7 @@ function DrillDownDrawer({
   const config: Record<NonNullable<DrillKey>, { title: string; description: string }> = {
     total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold). Equals Idle + Active Assignments (+ Unassigned)." },
     active_assignments: { title: "Active Assignments",   description: "Leased cars in the operating fleet (fleet_status = Leased)" },
-    unassigned_cars:    { title: "Unassigned Cars",      description: "Operating cars with no railcar_assignments row — distinct from Idle (managed_category)" },
+    unassigned_cars:    { title: "Unassigned Cars",      description: "Operating cars with no railcar_assignments row — distinct from Idle (fleet_status)" },
     expiring_12mo:      { title: "Expiring <12 months", description: "Rider deals whose Asset Report Lease Exp falls within the next 12 months (not VCF car-level lease_end_date)." },
     riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
     utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
@@ -384,7 +394,7 @@ function DrillDownDrawer({
                         <td className="px-4 py-2.5 text-muted-foreground font-mono">{c.reporting_marks ?? "—"}</td>
                         <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
                         <td className="px-4 py-2.5"><EntityBadge entity={c.entity} /></td>
-                        <td className="px-4 py-2.5"><StatusPill status={c.status} /></td>
+                        <td className="px-4 py-2.5"><StatusPill car={c} /></td>
                         <td className="px-4 py-2.5">
                           <div className="font-medium text-foreground">{c.fleet_name ?? <span className="text-muted-foreground italic">Unassigned</span>}</div>
                           {c.rider_name && <div className="text-[10px] text-muted-foreground">{c.rider_name}</div>}
@@ -618,8 +628,7 @@ export default function Dashboard() {
                 testId="kpi-sold"
                 label="Sold"
                 value={data.kpis.sold_count}
-                // Sold = assignment_label contains "sold" (see shared/fleet-status.ts + rlms_fleet_kpis).
-                subtext="Active cars with sold in assignment label"
+                subtext="fleet_status = Sold (still tracked until remarked)"
                 icon={PackageMinus}
                 accent="warning"
                 onClick={() => navigate("/railcars?filter=sold")}

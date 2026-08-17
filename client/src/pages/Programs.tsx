@@ -12,9 +12,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import {
   FolderOpen, Plus, Upload, Trash2, FileText, Image, File,
-  Search, ChevronRight, Link2, X, ExternalLink, Pencil,
+  ChevronRight, Link2, X, ExternalLink, Pencil,
   CheckCircle2, Archive, FileEdit, Car, MoreHorizontal,
   Paperclip, Download
 } from "lucide-react";
@@ -213,11 +214,13 @@ export default function ProgramsPage() {
 
       {/* Filter bar */}
       <div className="flex items-center gap-2 mb-5 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-9 h-9" placeholder="Search programs…" value={search}
-            onChange={e => setSearch(e.target.value)} />
-        </div>
+        <ClearableSearchInput
+          className="relative flex-1 min-w-[200px] max-w-sm"
+          inputClassName="h-9"
+          placeholder="Search programs…"
+          value={search}
+          onChange={setSearch}
+        />
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="h-9 w-36 text-sm">
             <SelectValue placeholder="All statuses" />
@@ -817,11 +820,13 @@ function LinkCarsDialog({ open, program, linkedCars, onClose, onLinked }: {
           <DialogDescription>Associate cars from the fleet with <strong>{program.name}</strong></DialogDescription>
         </DialogHeader>
         <div className="px-4 py-3 border-b border-border">
-          <div className="relative">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9 h-9 text-sm" placeholder="Filter by car number, marks, lessee…"
-              value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
+          <ClearableSearchInput
+            className="relative max-w-none"
+            inputClassName="h-9 text-sm"
+            placeholder="Filter by car number, marks, lessee…"
+            value={search}
+            onChange={setSearch}
+          />
           {selected.size > 0 && (
             <p className="text-xs text-primary mt-2">{selected.size} car{selected.size > 1 ? "s" : ""} selected</p>
           )}

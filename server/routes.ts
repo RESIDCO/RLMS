@@ -6,6 +6,8 @@ import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railcar-list";
 import { runGlobalSearch } from "./global-search";
+import { countCarsByRiderId } from "./rider-car-counts";
+import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import {
   getAuthUser,
   getUserRole,
@@ -1018,6 +1020,48 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/railcars/bulk-entity", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0) : [];
+      const rawEntity = String(req.body?.entity ?? "").trim();
+      const entity =
+        rawEntity === "RPS" || rawEntity.toLowerCase() === "rps" || rawEntity === "Rail Partners Select"
+          ? "Rail Partners Select"
+          : rawEntity === "Main"
+            ? "Main"
+            : rawEntity === "Coal"
+              ? "Coal"
+              : null;
+      if (!entity) {
+        return res.status(400).json({ message: "entity must be Main, RPS, or Coal" });
+      }
+      if (idsRaw.length === 0) {
+        return res.status(400).json({ message: "ids required" });
+      }
+      if (idsRaw.length > 20_000) {
+        return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
+      }
+      const uniqueIds = [...new Set(idsRaw)];
+      const CHUNK = 200;
+      let updated = 0;
+      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+        const slice = uniqueIds.slice(i, i + CHUNK);
+        const { data, error } = await supabase
+          .from("railcars")
+          .update({ entity })
+          .in("id", slice)
+          .select("id");
+        if (error) throw error;
+        updated += data?.length ?? 0;
+      }
+      res.json({ ok: true, updated, entity });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
   app.get("/api/acquisition-batches", async (_req, res) => {
     try {
       const { data, error } = await supabaseAdmin
@@ -1235,19 +1279,13 @@ export async function registerRoutes(
   // ---------- Leases (Master + nested riders) ----------
   app.get("/api/leases", async (_req, res) => {
     try {
-      const [leasesRes, ridersRes, assignmentsRes] = await Promise.all([
+      const [leasesRes, ridersRes, countByRider] = await Promise.all([
         supabase.from("master_leases").select("*").order("lease_number"),
         supabase.from("riders").select("*").order("rider_name"),
-        supabase.from("railcar_assignments").select("rider_id"),
+        countCarsByRiderId(),
       ]);
       if (leasesRes.error) throw leasesRes.error;
       if (ridersRes.error) throw ridersRes.error;
-      if (assignmentsRes.error) throw assignmentsRes.error;
-
-      const countByRider = new Map<number, number>();
-      for (const a of assignmentsRes.data ?? []) {
-        countByRider.set(a.rider_id, (countByRider.get(a.rider_id) ?? 0) + 1);
-      }
 
       const riders = (ridersRes.data ?? []).map((r) => ({
         ...r,
@@ -1333,18 +1371,18 @@ export async function registerRoutes(
   // ---------- Riders ----------
   app.get("/api/riders", async (_req, res) => {
     try {
-      const { data, error } = await supabaseAdmin
-        .from("riders")
-        .select("*, master_lease:master_leases(id, lease_number), railcar_assignments(count)")
-        .order("rider_name", { ascending: true });
-      if (error) throw error;
-      const out = (data ?? []).map((r: any) => {
-        const counted = Array.isArray(r.railcar_assignments)
-          ? r.railcar_assignments[0]?.count
-          : r.railcar_assignments?.count;
-        const { railcar_assignments: _drop, ...rest } = r;
-        return { ...rest, car_count: Number(counted) || 0 };
-      });
+      const [ridersRes, countByRider] = await Promise.all([
+        supabaseAdmin
+          .from("riders")
+          .select("*, master_lease:master_leases(id, lease_number)")
+          .order("rider_name", { ascending: true }),
+        countCarsByRiderId(),
+      ]);
+      if (ridersRes.error) throw ridersRes.error;
+      const out = (ridersRes.data ?? []).map((r: any) => ({
+        ...r,
+        car_count: countByRider.get(r.id) ?? 0,
+      }));
       res.json(out);
     } catch (err) {
       errHandler(res, err);
@@ -2619,6 +2657,7 @@ export async function registerRoutes(
       }
 
       const leaseExpiryEstimates = await refreshEstimatedLeaseExpiry(supabaseAdmin, month);
+      const riderRentRollup = await fillBlankRiderMonthlyRent();
 
       console.log("[financial-refresh]", JSON.stringify({
         snapshotMonth: month,
@@ -2631,6 +2670,7 @@ export async function registerRoutes(
         unmatchedRiders: review.unmatchedRiders.length,
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
         leaseExpiryEstimates,
+        riderRentRollup,
       }));
 
       res.json({
@@ -2653,6 +2693,7 @@ export async function registerRoutes(
         activeCarsInRlms: review.activeCarsInRlms,
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
         leaseExpiryEstimates,
+        riderRentRollup,
       });
     } catch (err) { errHandler(res, err); }
   });

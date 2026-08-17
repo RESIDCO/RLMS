@@ -34,7 +34,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList } from "lucide-react";
+import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList } from "lucide-react";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -451,6 +452,7 @@ export default function FleetRegistry() {
   const [bulkRentalTarget, setBulkRentalTarget] = useState<FleetStatus | null>(null);
   const [bulkRentalEffectiveDate, setBulkRentalEffectiveDate] = useState(todayIsoDateOnly);
   const [bulkNeedsCompletionPending, setBulkNeedsCompletionPending] = useState(false);
+  const [bulkEntityPending, setBulkEntityPending] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 75;
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -677,6 +679,27 @@ export default function FleetRegistry() {
     }
   };
 
+  const bulkMoveEntity = async (label: "Main" | "RPS" | "Coal") => {
+    const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Move ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""} to ${label}?`,
+      description: "This only changes Entity. It does not change rental status, assignments, or financials.",
+    });
+    if (!ok) return;
+    setBulkEntityPending(true);
+    try {
+      await apiRequest("POST", "/api/railcars/bulk-entity", { ids, entity: label });
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: `${ids.length} railcar${ids.length !== 1 ? "s" : ""} moved to ${label}` });
+      clearSelection();
+    } catch (e: any) {
+      toast({ title: "Bulk entity move failed", description: e.message, variant: "destructive" });
+    } finally {
+      setBulkEntityPending(false);
+    }
+  };
+
   const bulkUpdateStatus = async (newStatus: string) => {
     const ids = Array.from(selectedIds);
     const ok = await confirmSave({
@@ -863,16 +886,12 @@ export default function FleetRegistry() {
       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
         {/* Filter bar */}
         <div className="shrink-0 flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[180px] max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              data-testid="input-search-railcars"
-              placeholder="Search marks, car number, lessee, rider / OL…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
+          <ClearableSearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search marks, car number, lessee, rider / OL…"
+            testId="input-search-railcars"
+          />
           <Select value={fleetActiveFilter} onValueChange={(v) => setFleetActiveFilter(v as "active" | "inactive" | "all")}>
             <SelectTrigger className="w-[150px]" data-testid="filter-fleet-active">
               <SelectValue placeholder="Active / inactive" />
@@ -1136,6 +1155,23 @@ export default function FleetRegistry() {
                 <ClipboardList className="h-4 w-4" />
                 Clear Needs Completion
               </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={bulkEntityPending} data-testid="bulk-entity-dropdown">
+                    Move to Entity
+                    <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>Reclassify selected cars</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {(["Main", "RPS", "Coal"] as const).map((label) => (
+                    <DropdownMenuItem key={label} onSelect={() => bulkMoveEntity(label)}>
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               {/* Bulk rider assignment */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

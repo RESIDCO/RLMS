@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, ArrowUpDown } from "lucide-react";
+import { ArrowUpDown } from "lucide-react";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
 
@@ -38,16 +38,12 @@ export default function HistoryPage() {
 
       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
         <div className="shrink-0 flex items-center gap-2">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search car number…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-              data-testid="input-search-history"
-            />
-          </div>
+          <ClearableSearchInput
+            placeholder="Search car number…"
+            value={search}
+            onChange={setSearch}
+            testId="input-search-history"
+          />
           <div className="text-xs text-muted-foreground ml-auto font-mono-num">
             {rows.length} records
           </div>

@@ -33,8 +33,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import {
-  Search,
   Plus,
   Download,
   Upload,
@@ -1068,16 +1068,13 @@ export default function APTracker() {
 
         {/* Filter bar */}
         <div className="shrink-0 flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[180px] max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search invoice #, lessee, vendor…"
-              className="pl-9 h-9 text-sm"
-              data-testid="input-search-invoices"
-            />
-          </div>
+          <ClearableSearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search invoice #, lessee, vendor…"
+            inputClassName="h-9 text-sm"
+            testId="input-search-invoices"
+          />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-[140px] h-9 text-sm" data-testid="select-status-filter">
               <SelectValue placeholder="Status" />

@@ -16,7 +16,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
@@ -196,16 +197,13 @@ export default function MoveCars() {
             ) : (
               <>
                 <div className="flex items-center gap-2 mb-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Filter by car # or lessee…"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="pl-9"
-                      data-testid="input-filter-source-cars"
-                    />
-                  </div>
+                  <ClearableSearchInput
+                    className="relative flex-1 max-w-none"
+                    placeholder="Filter by car # or lessee…"
+                    value={search}
+                    onChange={setSearch}
+                    testId="input-filter-source-cars"
+                  />
                   <Button
                     size="sm"
                     variant="secondary"

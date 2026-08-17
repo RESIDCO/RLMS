@@ -2,13 +2,13 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Trash2, Search, Download, FileText, Share2, Eye, X } from "lucide-react";
+import { Trash2, Download, FileText, Share2, Eye, X } from "lucide-react";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import DvSubNav from "./DvSubNav";
 import { useToast } from "@/hooks/use-toast";
 import { confirmDelete } from "@/components/ConfirmActionDialog";
@@ -104,16 +104,13 @@ export default function HistoryPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 sm:min-w-[300px]">
-          <div className="relative flex-1">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Filter by car, railroad, DDCT…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              data-testid="input-search-history"
-            />
-          </div>
+          <ClearableSearchInput
+            className="relative flex-1 max-w-none"
+            placeholder="Filter by car, railroad, DDCT…"
+            value={q}
+            onChange={setQ}
+            testId="input-search-history"
+          />
         </div>
       </header>
 

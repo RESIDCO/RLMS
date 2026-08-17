@@ -33,6 +33,7 @@ import {
   FileText, Plus, Trash2, ChevronRight, ChevronLeft,
   CheckCircle2, AlertCircle, Car, Users, Search, X,
 } from "lucide-react";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -221,15 +222,12 @@ function ExistingCarPicker({
           <DialogTitle>Add Existing Unassigned Cars</DialogTitle>
           <p className="text-sm text-muted-foreground">Select cars from the registry that have no current assignment.</p>
         </DialogHeader>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
+          <ClearableSearchInput
+            className="relative max-w-none"
             placeholder="Search car #, marks, type…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
           />
-        </div>
         <div className="flex-1 overflow-y-auto border border-border rounded-lg">
           {isLoading ? (
             <div className="p-4 space-y-2">

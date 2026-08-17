@@ -482,12 +482,20 @@ export default function LeaseManagement() {
                                   )}
                                 </div>
                                 <div className="text-xs text-muted-foreground mt-0.5 font-mono-num">
-                                  {fmtDate(rider.effective_date)} →{" "}
-                                  {fmtDate(rider.expiration_date)} · rate{" "}
-                                  {fmtPct(rider.monthly_rate_pct)} · cost{" "}
-                                  {fmtMoney(rider.lessors_cost)}
+                                  <span title="Effective Date">Effective: {fmtDate(rider.effective_date)}</span>
+                                  {" · "}
+                                  <span title="Expiration Date">Expires: {fmtDate(rider.expiration_date)}</span>
+                                  {" · "}
+                                  <span title="Monthly Rate %">Rate: {fmtPct(rider.monthly_rate_pct)}</span>
+                                  {" · "}
+                                  <span title="Lessor's Cost">Lessor's Cost: {fmtMoney(rider.lessors_cost)}</span>
                                   {(rider as any).monthly_rent_per_car != null && (
-                                    <> · <span className="text-foreground">{fmtMoney((rider as any).monthly_rent_per_car)}/car</span></>
+                                    <>
+                                      {" · "}
+                                      <span title="Monthly Rent per Car" className="text-foreground">
+                                        Rent/car: {fmtMoney((rider as any).monthly_rent_per_car)}
+                                      </span>
+                                    </>
                                   )}
                                   {(rider as any).sold_to && (
                                     <> · <span className="text-amber-400">→ {(rider as any).sold_to}</span></>

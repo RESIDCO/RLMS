@@ -15,9 +15,10 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Search, Phone, Mail, User, StickyNote, Building2, FileText,
+  Phone, Mail, User, StickyNote, Building2, FileText,
   Zap, ArrowRightLeft, ExternalLink, Plus, Pencil, Trash2, MoreHorizontal,
 } from "lucide-react";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/lib/AuthContext";
@@ -488,12 +489,12 @@ export default function Contacts() {
       <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-5">
         {/* Search + New Contact */}
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search name, lessee, phone, email…"
-              value={search} onChange={e => setSearch(e.target.value)}
-              data-testid="contacts-search" />
-          </div>
+          <ClearableSearchInput
+            placeholder="Search name, lessee, phone, email…"
+            value={search}
+            onChange={setSearch}
+            testId="contacts-search"
+          />
           <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}
             data-testid="button-new-contact">
             <Plus className="h-4 w-4" /> New Contact

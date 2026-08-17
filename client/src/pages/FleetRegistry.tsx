@@ -337,6 +337,7 @@ function parseFleetQuery(searchStr: string): {
   riderOl: string;
   turning50: number | null;
   search: string;
+  transit: string;
 } {
   const fromWouter = new URLSearchParams(String(searchStr || "").replace(/^\?/, ""));
   const hash = typeof window !== "undefined" ? window.location.hash : "";
@@ -349,7 +350,7 @@ function parseFleetQuery(searchStr: string): {
       ? fromHash
       : fromSearch;
   const f = qs.get("filter");
-  const assigned =
+  let assigned =
     f === "unassigned" ||
     f === "assigned" ||
     f === "offrent" ||
@@ -359,6 +360,11 @@ function parseFleetQuery(searchStr: string): {
     f === "abatement"
       ? f
       : "all";
+  let transit = qs.get("transit") === "in_transit" || qs.get("transit") === "normal" ? qs.get("transit")! : "all";
+  if (f === "intransit") {
+    assigned = "leased";
+    transit = "in_transit";
+  }
   const raw = (qs.get("entity") || "").trim().toLowerCase();
   const entity =
     raw === "main" || raw === "owned"
@@ -377,6 +383,7 @@ function parseFleetQuery(searchStr: string): {
     riderOl: (qs.get("rider") || "").trim(),
     turning50,
     search: (qs.get("search") || qs.get("highlight") || "").trim(),
+    transit,
   };
 }
 
@@ -399,7 +406,7 @@ export default function FleetRegistry() {
   const [openCarId, setOpenCarId] = useState<number | null>(null);
   const [editCar, setEditCar] = useState<Row | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [transitFilter, setTransitFilter] = useState<string>("all");
+  const [transitFilter, setTransitFilter] = useState<string>(initQ.transit);
   const [entityFilter, setEntityFilter] = useState<string>(initQ.entity);
   const [turning50Year, setTurning50Year] = useState<number | null>(initQ.turning50);
   // Multi-select state
@@ -481,13 +488,13 @@ export default function FleetRegistry() {
     page,
     pageSize,
     search: debouncedSearch || undefined,
-    status: turning50Year ? undefined : statusFilter,
-    entity: turning50Year ? undefined : entityFilter,
+    status: turning50Year || statusFilter === "all" ? undefined : statusFilter,
+    entity: turning50Year || entityFilter === "all" ? undefined : entityFilter,
     active: turning50Year ? "active" : fleetActiveFilter,
-    assigned: turning50Year ? undefined : assignedFilter,
+    assigned: turning50Year || assignedFilter === "all" ? undefined : assignedFilter,
     rider: turning50Year ? undefined : (olCodeFilter || undefined),
     rider_id: turning50Year ? undefined : (riderFilter !== "all" ? riderFilter : undefined),
-    transit: turning50Year ? undefined : transitFilter,
+    transit: turning50Year || transitFilter === "all" ? undefined : transitFilter,
     turning50: turning50Year || undefined,
   };
 
@@ -496,7 +503,9 @@ export default function FleetRegistry() {
     queryKey: ["/api/railcars", listParams],
     queryFn: () => apiGet<RailcarPage>(railcarsQs(listParams)),
     staleTime: 45_000,
-    placeholderData: keepPreviousData,
+    // Don't keep the unfiltered page on screen while a search request is in flight —
+    // that made mark/lessee queries look like they matched unrelated cars (or didn't fire).
+    placeholderData: debouncedSearch ? undefined : keepPreviousData,
   });
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
   const railcars = pageData?.rows ?? [];
@@ -509,6 +518,7 @@ export default function FleetRegistry() {
     setEntityFilter(q.entity);
     setOlCodeFilter(q.riderOl);
     setTurning50Year(q.turning50);
+    setTransitFilter(q.transit);
     if (q.turning50) setFleetActiveFilter("active");
   }, [wouterSearch]);
 
@@ -799,7 +809,7 @@ export default function FleetRegistry() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               data-testid="input-search-railcars"
-              placeholder="Search car number, marks, lessee…"
+              placeholder="Search marks, car number, lessee, rider / OL…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
@@ -1165,15 +1175,15 @@ export default function FleetRegistry() {
                         {r.car_type ?? "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="space-y-1">
-                          <div>{r.assignment?.fleet_name ?? <span className="text-muted-foreground">Unassigned</span>}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
                           {r.transit_status && (
                             <TransitBadge status={r.transit_status} label={r.transit_label} />
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>{r.assignment?.fleet_name ?? <span className="text-muted-foreground">Unassigned</span>}</div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {r.assignment?.rider?.rider_name ?? "—"}

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "./supabase";
 import { parseFleetStatus } from "@shared/fleet-status";
+import { splitCarNumber } from "@shared/residco-import";
 import { fetchAllRows } from "./fetch-all";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
@@ -86,21 +87,70 @@ function sanitizeOrValue(s: string) {
   return s.replace(/[,()]/g, " ").trim();
 }
 
+function safeIlikeToken(s: string) {
+  return s.replace(/[%_,()]/g, "").trim();
+}
+
+/**
+ * Railcars search tokens. "OFOX 6829" / "OFOX006829" / "OFOX 006829" all become
+ * mark + number ANDed across fields. Digit-only tokens match car_number only
+ * (not build year / NBV). Letter tokens match marks, lessee, rider/OL, assignment label.
+ */
+export function railcarSearchTokens(raw: string): string[] {
+  const tokens: string[] = [];
+  for (const part of String(raw ?? "").trim().split(/\s+/).filter(Boolean)) {
+    const split = splitCarNumber(part);
+    if (split.reporting_marks && split.car_number) {
+      tokens.push(split.reporting_marks, split.car_number);
+    } else if (split.reporting_marks) {
+      tokens.push(split.reporting_marks);
+    } else if (split.car_number) {
+      tokens.push(split.car_number);
+    } else {
+      tokens.push(part);
+    }
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tokens) {
+    const s = safeIlikeToken(t);
+    if (!s) continue;
+    const key = s.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+const SEARCH_TEXT_FIELDS = [
+  "reporting_marks",
+  "car_initial",
+  "car_number",
+  "lessee_name",
+  "rider_external_id",
+  "assignment_label",
+] as const;
+
+function applySearchFilter(query: any, rawSearch: string | undefined) {
+  if (!rawSearch) return query;
+  const tokens = railcarSearchTokens(rawSearch);
+  for (const t of tokens) {
+    const hasLetter = /[a-z]/i.test(t);
+    const hasDigit = /\d/.test(t);
+    if (hasDigit && !hasLetter) {
+      query = query.ilike("car_number", `%${t}%`);
+    } else {
+      query = query.or(SEARCH_TEXT_FIELDS.map((col) => `${col}.ilike.%${t}%`).join(","));
+    }
+  }
+  return query;
+}
+
 function applyRailcarFilters(query: any, p: RailcarListParams) {
   if (p.turning50) {
     query = query.eq("active", true).eq("build_year", p.turning50 - 50);
-    if (p.search) {
-      const q = sanitizeOrValue(p.search);
-      query = query.or(
-        [
-          `car_number.ilike.%${q}%`,
-          `reporting_marks.ilike.%${q}%`,
-          `lessee_name.ilike.%${q}%`,
-          `rider_external_id.ilike.%${q}%`,
-          `car_type.ilike.%${q}%`,
-        ].join(",")
-      );
-    }
+    query = applySearchFilter(query, p.search);
     return query;
   }
 
@@ -150,18 +200,7 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
     );
   }
 
-  if (p.search) {
-    const q = sanitizeOrValue(p.search);
-    query = query.or(
-      [
-        `car_number.ilike.%${q}%`,
-        `reporting_marks.ilike.%${q}%`,
-        `lessee_name.ilike.%${q}%`,
-        `rider_external_id.ilike.%${q}%`,
-        `car_type.ilike.%${q}%`,
-      ].join(",")
-    );
-  }
+  query = applySearchFilter(query, p.search);
 
   return query;
 }

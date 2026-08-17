@@ -662,6 +662,14 @@ export async function registerRoutes(
       }
       const fleet_age = turning50ByYear(ageCars);
 
+      const { count: inTransitLeasedCount } = await db
+        .from("railcars")
+        .select("id", { count: "exact", head: true })
+        .eq("active", true)
+        .eq("fleet_status", "Leased")
+        .not("transit_status", "is", null);
+      const in_transit_leased_count = Number(inTransitLeasedCount) || 0;
+
       let fleetKpis = sqlKpis
         ? {
             total_fleet: Number(sqlKpis.operating) || 0,
@@ -698,6 +706,7 @@ export async function registerRoutes(
               idle_count: fleetKpis.idle_count,
               leased_count: fleetKpis.leased_count,
               abatement_count: fleetKpis.abatement_count,
+              in_transit_leased_count,
               active_cars_including_sold: fleetKpis.active_cars_including_sold,
               rps_total: fleetKpis.rps_total,
               rps_assigned: fleetKpis.rps_assigned,
@@ -725,6 +734,7 @@ export async function registerRoutes(
           idle_count: idleCars.length,
           leased_count: leasedCars.length,
           abatement_count: abatementCars.length,
+          in_transit_leased_count,
           active_cars_including_sold: activeCars.length,
           rps_total: rpsCars.length,
           rps_assigned: rpsAssigned,

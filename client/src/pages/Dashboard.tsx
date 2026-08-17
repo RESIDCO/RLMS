@@ -27,6 +27,7 @@ import {
   PackageMinus,
   PauseCircle,
   TimerOff,
+  Wrench,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ type DashboardData = {
     idle_count?: number;
     leased_count?: number;
     abatement_count?: number;
+    in_transit_leased_count?: number;
     rps_total: number;
     rps_assigned: number;
     rps_util_pct: number;
@@ -561,7 +563,7 @@ export default function Dashboard() {
         {/* KPIs — Total Fleet = Idle + Active Assignments (+ Unassigned); Sold is outside operating fleet */}
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0">
           {isLoading ? (
-            Array.from({ length: 11 }).map((_, i) => (
+            Array.from({ length: 12 }).map((_, i) => (
               <Skeleton key={i} className="h-[110px] rounded-lg" />
             ))
           ) : data ? (
@@ -606,6 +608,14 @@ export default function Dashboard() {
                 subtext="Neither idle nor leased (no assignment row)"
                 icon={CircleDashed}
                 onClick={() => navigate("/railcars?filter=unassigned")}
+              />
+              <KpiCard
+                testId="kpi-in-transit-leased"
+                label="In Transit (Not Yet Earning)"
+                value={data.kpis.in_transit_leased_count ?? 0}
+                subtext="Leased cars flagged at shop / in transit / cleaning / bad order"
+                icon={Wrench}
+                onClick={() => navigate("/railcars?filter=intransit")}
               />
               {/* Utilization — special card with ring */}
               <button

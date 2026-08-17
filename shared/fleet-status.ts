@@ -2,10 +2,15 @@
  * Derived fleet_status for active cars (§5 follow-on).
  * Sold / Idle / Leased are independent checks — never one shared heuristic bucket.
  *
- * - Sold: current assignment/rider label indicates SOLD (no longer RESIDCO-owned;
- *   kept active=true for repair billing).
- * - Idle: managed_category === 'Idle' (VCF §4.2 canonical) and not Sold.
- * - Leased: otherwise (real rider/lessee).
+ * - Sold: `rider_external_id` OR `assignment_label` (OR assignment `fleet_name` in TS)
+ *   equals the literal string "SOLD" (case-insensitive). These cars stay `active=true`
+ *   for repair billing but are excluded from Total Fleet / utilization.
+ *   This is NOT `railcars.sold_to`, NOT a managed_category value, and NOT a financial
+ *   snapshot comparison — see `isSoldAssignment` and SQL `rlms_fleet_kpis`.
+ *   Fragility note: matching is exact after trim/upper — typos, trailing spaces that
+ *   survive trim oddly, or alternate labels ("Sold - Buyer") silently miss the Sold bucket.
+ * - Idle: `managed_category === 'Idle'` (VCF §4.2 canonical) and not Sold.
+ * - Leased: otherwise (any other managed_category / real rider).
  *
  * Inactive cars (active !== true) are out of scope — callers keep separate treatment.
  */

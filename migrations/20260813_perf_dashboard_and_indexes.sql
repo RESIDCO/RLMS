@@ -30,6 +30,8 @@ WITH c AS (
       WHEN active IS NOT TRUE THEN NULL
       WHEN upper(btrim(coalesce(rider_external_id, ''))) = 'SOLD'
         OR upper(btrim(coalesce(assignment_label, ''))) = 'SOLD' THEN 'Sold'
+      -- Sold means the car's current OL/assignment label is the literal "SOLD" marker
+      -- (kept active for billing). Not sold_to, not managed_category, not financial import.
       WHEN btrim(coalesce(managed_category, '')) = 'Idle' THEN 'Idle'
       ELSE 'Leased'
     END AS fleet_status,

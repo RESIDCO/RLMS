@@ -24,6 +24,7 @@ import {
   Building2,
   CalendarClock,
   PackageMinus,
+  PauseCircle,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -301,9 +302,9 @@ function DrillDownDrawer({
   const open = !!drillKey && !!data;
 
   const config: Record<NonNullable<DrillKey>, { title: string; description: string }> = {
-    total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold cars kept for repair billing)" },
-    active_assignments: { title: "Active Assignments",   description: "Cars currently assigned to a rider / lessee" },
-    unassigned_cars:    { title: "Unassigned Cars",      description: "Cars in the registry with no active assignment — available for new leases" },
+    total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold). Equals Idle + Active Assignments (+ Unassigned)." },
+    active_assignments: { title: "Active Assignments",   description: "Leased cars in the operating fleet (fleet_status = Leased)" },
+    unassigned_cars:    { title: "Unassigned Cars",      description: "Operating cars with no railcar_assignments row — distinct from Idle (managed_category)" },
     expiring_12mo:      { title: "Expiring <12 months", description: "Rider deals whose Asset Report Lease Exp falls within the next 12 months (not VCF car-level lease_end_date)." },
     riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
     utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
@@ -545,10 +546,10 @@ export default function Dashboard() {
       />
 
       <div className="px-4 sm:px-8 py-5 sm:py-7 space-y-7">
-        {/* KPIs */}
-<div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-9 gap-3 [&>*]:min-w-0">
+        {/* KPIs — Total Fleet = Idle + Active Assignments (+ Unassigned); Sold is outside operating fleet */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0">
           {isLoading ? (
-            Array.from({ length: 7 }).map((_, i) => (
+            Array.from({ length: 10 }).map((_, i) => (
               <Skeleton key={i} className="h-[110px] rounded-lg" />
             ))
           ) : data ? (
@@ -557,14 +558,24 @@ export default function Dashboard() {
                 testId="kpi-total-fleet"
                 label="Total Fleet"
                 value={data.kpis.total_fleet}
+                subtext="Active operating fleet (excludes Sold)"
                 icon={Train}
                 accent="primary"
                 onClick={() => navigate("/railcars?filter=all")}
               />
               <KpiCard
+                testId="kpi-idle"
+                label="Idle"
+                value={data.kpis.idle_count ?? 0}
+                subtext="Active cars not currently leased"
+                icon={PauseCircle}
+                onClick={() => navigate("/railcars?filter=offlease")}
+              />
+              <KpiCard
                 testId="kpi-active-assignments"
                 label="Active Assignments"
                 value={data.kpis.active_assignments}
+                subtext="Leased cars in the operating fleet"
                 icon={LinkIcon}
                 onClick={() => navigate("/railcars?filter=assigned")}
               />
@@ -572,6 +583,7 @@ export default function Dashboard() {
                 testId="kpi-unassigned"
                 label="Unassigned Cars"
                 value={data.kpis.unassigned_cars}
+                subtext="Neither idle nor leased (no assignment row)"
                 icon={CircleDashed}
                 onClick={() => navigate("/railcars?filter=unassigned")}
               />
@@ -606,6 +618,9 @@ export default function Dashboard() {
                 testId="kpi-sold"
                 label="Sold"
                 value={data.kpis.sold_count}
+                // Sold = active cars whose rider_external_id or assignment_label is exactly "SOLD"
+                // (see shared/fleet-status.ts + rlms_fleet_kpis). Not sold_to / managed_category.
+                subtext="Active cars labeled SOLD (kept for billing)"
                 icon={PackageMinus}
                 accent="warning"
                 onClick={() => navigate("/railcars?filter=sold")}
@@ -613,10 +628,10 @@ export default function Dashboard() {
               <KpiCard
                 testId="kpi-off-rent"
                 label="Off Rent"
-                value="—"
-                subtext="No rent-event source yet"
+                value={data.kpis.off_rent_count}
+                subtext="Latest rent_events status is off_rent"
                 icon={AlertTriangle}
-                accent="muted"
+                accent={data.kpis.off_rent_count > 0 ? "warning" : "muted"}
                 marker="icon"
               />
               <KpiCard

@@ -150,13 +150,13 @@ export default function MoveCars() {
     !(toRiderMatch && String(toRiderMatch.id) === fromRiderId);
 
   return (
-    <div>
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="Move Cars"
         subtitle="Reassign one or more railcars from one rider to another. Every move is logged."
       />
 
-      <div className="px-4 sm:px-8 py-4 sm:py-6 grid grid-cols-1 xl:grid-cols-3 gap-5">
+      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 sm:py-6 grid grid-cols-1 xl:grid-cols-3 gap-5 content-start">
         <div className="xl:col-span-2 space-y-4">
           <Step n={1} title="Select source rider" done={!!fromRiderId}>
             <Select

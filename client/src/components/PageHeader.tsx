@@ -10,7 +10,7 @@ export default function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="px-4 sm:px-8 pt-5 sm:pt-7 pb-4 sm:pb-5 border-b border-border flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-6">
+    <div className="shrink-0 px-4 sm:px-8 pt-5 sm:pt-7 pb-4 sm:pb-5 border-b border-border flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-6">
       <div>
         <div className="font-eyebrow mb-1.5">
           RLMS

@@ -318,7 +318,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }, [location]);
 
   return (
-    <div className="min-h-screen flex bg-background text-foreground">
+    // Viewport-locked shell: only the main pane scrolls. Without h-dvh + overflow-hidden,
+    // min-h-screen grows with content and the sidebar scrolls off-screen with the page.
+    <div className="h-dvh max-h-dvh overflow-hidden flex bg-background text-foreground">
       <ChangePasswordDialog open={changePwOpen} onClose={() => setChangePwOpen(false)} />
 
       {/* ── Mobile overlay backdrop ── */}
@@ -412,10 +414,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* ── Desktop sidebar ── */}
+      {/* ── Desktop sidebar — pinned for the full viewport height ── */}
       <aside
         className={cn(
-          "hidden md:flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200",
+          "hidden md:flex flex-col shrink-0 h-full border-r border-sidebar-border bg-sidebar transition-[width] duration-200",
           collapsed ? "w-[64px]" : "w-[224px]"
         )}
         data-testid="sidebar"
@@ -525,7 +527,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
         {/* Top bar */}
         <div className="flex items-center gap-3 px-3 sm:px-6 py-2.5 border-b border-sidebar-border bg-sidebar/60 backdrop-blur-sm shrink-0">
           {/* Hamburger — mobile only */}
@@ -549,9 +551,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <span className="hidden sm:inline">UMLER</span>
           </button>
         </div>
-        <main className="flex-1 min-w-0 overflow-auto">
-          <FreshnessBanner />
-          {children}
+        <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+          <div className="shrink-0">
+            <FreshnessBanner />
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto">
+            {children}
+          </div>
         </main>
       </div>
     </div>

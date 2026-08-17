@@ -169,7 +169,7 @@ function SortTh({
   return (
     <th
       className={cn(
-        "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none hover:text-foreground transition-colors",
+        "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none hover:text-foreground transition-colors bg-muted/40",
         active ? "text-foreground" : "",
         className
       )}
@@ -1001,7 +1001,7 @@ export default function APTracker() {
   }
 
   return (
-    <div className="flex flex-col min-h-0">
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="AP Tracker"
         subtitle="Track outstanding repair invoices, disputes, and collection activity"
@@ -1037,9 +1037,9 @@ export default function APTracker() {
         }
       />
 
-      <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-5">
+      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4 overflow-hidden">
         {/* KPI bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="shrink-0 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
           <KpiTile label="Total Outstanding" value={fmt$(kpis.totalOutstanding)} sub={`${kpis.totalOpen} open invoices`} icon={DollarSign} accent="error"
             onClick={() => { setStatusFilter("unpaid"); setDisputedFilter(false); setSearch(""); }} />
           <KpiTile label="Disputed" value={String(kpis.disputed)} sub="invoices" icon={Scale} accent="warning"
@@ -1055,15 +1055,19 @@ export default function APTracker() {
         {/* Lessee stats toggle */}
         <button
           onClick={() => setShowLesseeStats(s => !s)}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="shrink-0 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           {showLesseeStats ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           {showLesseeStats ? "Hide" : "Show"} lessee breakdown
         </button>
-        {showLesseeStats && <LesseeStats invoices={allInvoices} />}
+        {showLesseeStats && (
+          <div className="shrink-0 max-h-[280px] overflow-auto">
+            <LesseeStats invoices={allInvoices} />
+          </div>
+        )}
 
         {/* Filter bar */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="shrink-0 flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-[180px] max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -1102,28 +1106,28 @@ export default function APTracker() {
           )}
         </div>
 
-        {/* Invoice table */}
-        <div className="rounded-xl border border-card-border bg-card overflow-hidden">
-          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        {/* Invoice table — bounded panel so horizontal scrollbar stays on-screen */}
+        <div className="flex-1 min-h-[240px] rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
+          <div className="shrink-0 px-4 py-3 border-b border-border flex items-center justify-between">
             <span className="text-xs text-muted-foreground uppercase tracking-wider">
               {isLoading ? "Loading…" : `${sortedInvoices.length} invoice${sortedInvoices.length !== 1 ? "s" : ""}`}
             </span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="flex-1 min-h-0 overflow-auto">
             <table className="w-full text-sm min-w-[800px]">
-              <thead className="bg-muted/40 text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr className="text-left">
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">Invoice #</th>
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">Invoice #</th>
                   <SortTh label="Lessee" sortKey="lessee_name" sort={sort} onSort={toggleSort} />
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell">Vendor</th>
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell bg-muted/40">Vendor</th>
                   <SortTh label="Amount" sortKey="amount" sort={sort} onSort={toggleSort} />
                   <SortTh label="Balance" sortKey="balance" sort={sort} onSort={toggleSort} className="hidden md:table-cell" />
                   <SortTh label="Due Date" sortKey="due_date" sort={sort} onSort={toggleSort} />
                   <SortTh label="Overdue" sortKey="overdue" sort={sort} onSort={toggleSort} />
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden lg:table-cell">Last Contact</th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden lg:table-cell">Follow-up</th>
-                  {canEdit && <th className="px-4 py-3" />}
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">Status</th>
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden lg:table-cell bg-muted/40">Last Contact</th>
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden lg:table-cell bg-muted/40">Follow-up</th>
+                  {canEdit && <th className="px-4 py-3 bg-muted/40" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">

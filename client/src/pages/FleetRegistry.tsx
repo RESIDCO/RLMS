@@ -731,7 +731,7 @@ export default function FleetRegistry() {
   });
 
   return (
-    <div>
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="Railcars"
         subtitle="All railcars under management, current assignments, and lease status"
@@ -781,9 +781,9 @@ export default function FleetRegistry() {
         }
       />
 
-      <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-4">
+      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
         {/* Filter bar */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="shrink-0 flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-[180px] max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -910,7 +910,7 @@ export default function FleetRegistry() {
         </div>
 
         {turning50Year && (
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-umler-amber/30 bg-umler-amber/10" data-testid="banner-turning50">
+          <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-umler-amber/30 bg-umler-amber/10" data-testid="banner-turning50">
             <div className="text-sm">
               <span className="font-medium">Turning 50 in {turning50Year}</span>
               <span className="text-muted-foreground">
@@ -926,7 +926,7 @@ export default function FleetRegistry() {
 
         {/* Bulk action toolbar — visible when 1+ cars are selected, admin only */}
         {canEdit && selectedIds.size > 0 && (
-          <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
+          <div className="shrink-0 flex flex-wrap items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
             <span className="text-sm font-medium text-foreground">
               {selectedIds.size.toLocaleString()} car{selectedIds.size !== 1 ? "s" : ""} selected
             </span>
@@ -1060,13 +1060,13 @@ export default function FleetRegistry() {
           </div>
         )}
 
-        {/* Table */}
-        <div className="rounded-lg border border-card-border bg-card overflow-hidden">
-          <div className="overflow-x-auto">
+        {/* Table — bounded panel: both scrollbars stay on-screen; header sticky */}
+        <div className="flex-1 min-h-[240px] rounded-lg border border-card-border bg-card overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-auto">
             <table className="w-full text-sm min-w-[700px]">
-              <thead className="bg-muted/40 text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr className="text-left">
-                  <th className="pl-4 pr-2 py-3 w-10">
+                  <th className="pl-4 pr-2 py-3 w-10 bg-muted/40">
                     <Checkbox
                       checked={allSelected}
                       data-state={someSelected ? "indeterminate" : allSelected ? "checked" : "unchecked"}
@@ -1075,12 +1075,12 @@ export default function FleetRegistry() {
                       data-testid="checkbox-select-all"
                     />
                   </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">Entity</th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">Entity</th>
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell bg-muted/40">
                     Marks
                   </th>
                   <Th label="Car Number" k="car_number" sort={sort} onClick={toggleSort} />
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell bg-muted/40">
                     Type
                   </th>
                   <Th label="Fleet Status" k="status" sort={sort} onClick={toggleSort} />
@@ -1089,9 +1089,9 @@ export default function FleetRegistry() {
                   <Th label="Lease" k="lease" sort={sort} onClick={toggleSort} />
                   <Th label="Expires" k="expiration" sort={sort} onClick={toggleSort} />
                   {OPT_COLS.filter(c => tableCols.has(c.key)).map(c => (
-                    <th key={c.key} className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider whitespace-nowrap">{c.label}</th>
+                    <th key={c.key} className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider whitespace-nowrap bg-muted/40">{c.label}</th>
                   ))}
-                  <th className="w-10" />
+                  <th className="w-10 bg-muted/40" />
                 </tr>
               </thead>
               <tbody>
@@ -1175,7 +1175,7 @@ export default function FleetRegistry() {
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
+          <div className="shrink-0 flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground bg-card">
             <span>
               {totalCount.toLocaleString()} cars
               {totalCount > 0 && (
@@ -1307,7 +1307,7 @@ function Th({
     <th
       onClick={() => onClick(k)}
       className={cn(
-        "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none hover:text-foreground",
+        "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none hover:text-foreground bg-muted/40",
         active && "text-foreground"
       )}
     >

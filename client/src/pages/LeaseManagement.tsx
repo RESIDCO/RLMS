@@ -269,7 +269,7 @@ export default function LeaseManagement() {
   });
 
   return (
-    <div>
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="Lease Management"
         subtitle="Master lease agreements, rider schedules, and assigned cars"
@@ -332,7 +332,7 @@ export default function LeaseManagement() {
         </div>
       )}
 
-      <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-3">
+      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 sm:py-6 space-y-3">
         {isLoading ? (
           Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-lg" />
@@ -650,16 +650,16 @@ function RiderCars({ riderId }: { riderId: number }) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <div className="rounded-md border border-border bg-card overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="text-muted-foreground">
+          <div className="rounded-md border border-border bg-card overflow-auto max-h-[360px]">
+            <table className="w-full text-xs min-w-[480px]">
+              <thead className="sticky top-0 z-10 text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Marks</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Car Number</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Lessee</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Status</th>
+                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Marks</th>
+                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Car Number</th>
+                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Lessee</th>
+                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Status</th>
                   {RC_OPT_COLS.filter(c => visibleCols.has(c.key)).map(c => (
-                    <th key={c.key} className="text-left px-3 py-2 font-medium whitespace-nowrap">{c.label}</th>
+                    <th key={c.key} className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">{c.label}</th>
                   ))}
                 </tr>
               </thead>

@@ -30,14 +30,14 @@ export default function HistoryPage() {
   }, [data, search, dir]);
 
   return (
-    <div>
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="Assignment History"
         subtitle="Full audit trail of every railcar move across the fleet"
       />
 
-      <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-4">
-        <div className="flex items-center gap-2">
+      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
+        <div className="shrink-0 flex items-center gap-2">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -53,14 +53,14 @@ export default function HistoryPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-card-border bg-card overflow-hidden">
-          <div className="overflow-auto">
-            <table className="w-full text-sm">
-              <thead className="text-muted-foreground bg-muted/40">
+        <div className="flex-1 min-h-[240px] rounded-lg border border-card-border bg-card overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-auto">
+            <table className="w-full text-sm min-w-[700px]">
+              <thead className="sticky top-0 z-10 text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr className="text-left">
                   <th
                     className={cn(
-                      "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none",
+                      "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none bg-muted/40",
                       "text-foreground"
                     )}
                     onClick={() => setDir((d) => (d === "desc" ? "asc" : "desc"))}
@@ -69,22 +69,22 @@ export default function HistoryPage() {
                       Date <ArrowUpDown className="h-3 w-3" />
                     </span>
                   </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
                     Car
                   </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
                     From
                   </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
                     To
                   </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
                     Lessee
                   </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
                     Reason
                   </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
                     By
                   </th>
                 </tr>

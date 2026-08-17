@@ -192,7 +192,7 @@ export default function ProgramsPage() {
     : null;
 
   return (
-    <div className="px-4 md:px-8 py-5 md:py-8 max-w-[1600px]">
+    <div className="h-full min-h-0 overflow-auto px-4 md:px-8 py-5 md:py-8 max-w-[1600px]">
       {/* Header */}
       <header className="mb-5 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>

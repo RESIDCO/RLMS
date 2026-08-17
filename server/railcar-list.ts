@@ -142,7 +142,7 @@ const SEARCH_TEXT_FIELDS = [
   "assignment_label",
 ] as const;
 
-function applySearchFilter(query: any, rawSearch: string | undefined) {
+export function applySearchFilter(query: any, rawSearch: string | undefined) {
   if (!rawSearch) return query;
   const tokens = railcarSearchTokens(rawSearch);
   for (const t of tokens) {

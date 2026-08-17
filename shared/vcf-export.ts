@@ -297,20 +297,22 @@ export function sortVValidExportRows(rows: VValidExportRow[]): VValidExportRow[]
   });
 }
 
+export function exportRowToValues(r: VValidExportRow): (string | number)[] {
+  return V_VALID_EXPORT_HEADERS.map((h) => {
+    const v = r[h];
+    if (h === "ACTIVE" && (v === -1 || v === 0)) return v;
+    if (v === "" || v == null) return EMPTY;
+    return String(v);
+  });
+}
+
 export function exportRowsToAoa(rows: VValidExportRow[]): (string | number)[][] {
-  const header = [...V_VALID_EXPORT_HEADERS];
-  const body = rows.map((r) =>
-    header.map((h) => {
-      const v = r[h];
-      if (h === "ACTIVE" && (v === -1 || v === 0)) return v;
-      if (v === "" || v == null) return EMPTY;
-      return String(v);
-    }),
-  );
-  return [header, ...body];
+  return [[...V_VALID_EXPORT_HEADERS], ...rows.map(exportRowToValues)];
 }
 
 export type VValidViewRow = {
+  export_src?: number | null;
+  export_id?: number | null;
   car_initial?: string | null;
   car_number?: string | null;
   car_type?: string | null;

@@ -1,143 +1,290 @@
 import { randomUUID } from "crypto";
-import XLSX from "xlsx";
+import { readFile, unlink } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
-import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import {
-  buildVValidExportRows,
-  exportRowsToAoa,
-  sortVValidExportRows,
+  V_VALID_EXPORT_HEADERS,
+  exportRowToValues,
   viewRowToExport,
-  type VValidExportRow,
   type VValidViewRow,
 } from "@shared/vcf-export";
 
 export type VcfExportJobPublic = {
   id: string;
-  status: "running" | "ready" | "error";
+  status: "running" | "ready" | "failed";
   error?: string;
   filename?: string;
   rowCount?: number;
 };
 
-type VcfExportJob = VcfExportJobPublic & {
-  buffer?: Buffer;
-  createdAt: number;
+type ExportJobRow = {
+  id: string;
+  kind: string;
+  status: "running" | "ready" | "failed";
+  created_at: string;
+  updated_at: string;
+  error_message: string | null;
+  row_count: number | null;
+  storage_path: string | null;
+  filename: string | null;
 };
 
-const jobs = new Map<string, VcfExportJob>();
-const TTL_MS = 15 * 60 * 1000;
-const MAX_RUNNING = 2;
+const KIND = "v_valid_cars";
+const BATCH_SIZE = 3000;
+const STORAGE_BUCKET = "rlms-attachments";
+const SQL_HINT =
+  "Apply migrations/20260817_export_jobs.sql in the Supabase SQL editor, then retry.";
 
-const CAR_SELECT =
-  "id, car_initial, car_number, car_type, mechanical_designation, general_description, dot_code, lining_material, lease_type, managed, managed_category, entity, legal_owner, legacy_valid_car_id, client_id, cover_sheet, update_made, update_needed_next_vcf, rider_external_id, assignment_label, lessee_name, active, acquisition_date";
-const CAR_SELECT_NO_ACQ = CAR_SELECT.replace(", acquisition_date", "");
+const VIEW_SELECT = [
+  "export_src",
+  "export_id",
+  "car_initial",
+  "car_number",
+  "car_type",
+  "mechanical_designation",
+  "general_description",
+  "dot_code",
+  "lining_material",
+  "lease_type",
+  "managed",
+  "managed_category",
+  "entity",
+  "active",
+  "start_date",
+  "end_date",
+  "rider",
+  "assignment",
+  "assignment_id",
+  "lessee",
+  "old_car_initial",
+  "old_car_number",
+  "owner",
+  "valid_car_id",
+  "client_id",
+  "cover_sheet",
+  "comment",
+  "update_made",
+  "update_needed_next_vcf",
+].join(", ");
 
-function gc() {
-  const now = Date.now();
-  for (const [id, job] of Array.from(jobs.entries())) {
-    if (now - job.createdAt > TTL_MS) jobs.delete(id);
-  }
+const WORKER_RESTARTED = "Worker restarted before the export finished.";
+
+function logMem(jobId: string, label: string, extra?: Record<string, unknown>) {
+  const mu = process.memoryUsage();
+  const bits = extra
+    ? " " +
+      Object.entries(extra)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" ")
+    : "";
+  console.log(
+    `[vcf-export] ${jobId} ${label} rss=${Math.round(mu.rss / 1048576)}MB heapUsed=${Math.round(mu.heapUsed / 1048576)}MB${bits}`,
+  );
 }
 
-function isMissingRelation(err: unknown) {
-  const msg = String((err as any)?.message ?? err ?? "");
+function errMessage(err: unknown): string {
+  return String((err as { message?: string })?.message ?? err ?? "Export failed");
+}
+
+function isMissingExportJobs(err: unknown) {
+  const msg = errMessage(err);
+  const code = (err as { code?: string })?.code;
+  return code === "42P01" || (/export_jobs/i.test(msg) && /does not exist|schema cache/i.test(msg));
+}
+
+function isMissingView(err: unknown) {
+  const msg = errMessage(err);
   return /v_valid_export_rows|rlms_vcf_lessee/i.test(msg) && /does not exist|schema cache|42703/i.test(msg);
 }
 
-async function fetchFromJoinedView(): Promise<VValidExportRow[] | null> {
+function isUniqueViolation(err: unknown) {
+  return (err as { code?: string })?.code === "23505";
+}
+
+function publicFromRow(row: ExportJobRow): VcfExportJobPublic {
+  return {
+    id: row.id,
+    status: row.status,
+    error: row.error_message ?? undefined,
+    filename: row.filename ?? undefined,
+    rowCount: row.row_count ?? undefined,
+  };
+}
+
+async function updateJob(id: string, patch: Record<string, unknown>) {
+  const { error } = await supabaseAdmin
+    .from("export_jobs")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+async function failJob(id: string, message: string) {
   try {
-    const raw = await fetchAllRows<VValidViewRow>((from, to) =>
-      supabaseAdmin
-        .from("v_valid_export_rows")
-        .select("*")
-        .order("export_src", { ascending: true })
-        .order("export_id", { ascending: true })
-        .range(from, to),
-    );
-    return sortVValidExportRows(raw.map(viewRowToExport));
+    await updateJob(id, { status: "failed", error_message: message });
   } catch (err) {
-    if (isMissingRelation(err)) return null;
-    throw err;
+    console.error(`[vcf-export] ${id} failed to persist error status:`, err);
   }
 }
 
-async function fetchFromTables(): Promise<VValidExportRow[]> {
-  const histJob = fetchAllRowsOrThrow(supabaseAdmin, "assignment_history", (from, to) =>
-    supabaseAdmin
-      .from("assignment_history")
-      .select("id, railcar_id, rider_external_id, assignment_label, start_date, end_date, active, comment, assignment_id_ext")
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  const remarkJob = fetchAllRowsOrThrow(supabaseAdmin, "car_number_history", (from, to) =>
-    supabaseAdmin
-      .from("car_number_history")
-      .select("railcar_id, changed_at, old_car_initial, old_car_number")
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  const carsJob = (async () => {
-    try {
-      return await fetchAllRowsOrThrow(supabaseAdmin, "railcars", (from, to) =>
-        supabaseAdmin.from("railcars").select(CAR_SELECT).order("id", { ascending: true }).range(from, to),
-      );
-    } catch (err) {
-      const msg = String((err as any)?.message ?? err ?? "");
-      if (!/acquisition_date/i.test(msg)) throw err;
-      return await fetchAllRowsOrThrow(supabaseAdmin, "railcars", (from, to) =>
-        supabaseAdmin.from("railcars").select(CAR_SELECT_NO_ACQ).order("id", { ascending: true }).range(from, to),
-      );
+async function fetchBatch(src: 1 | 2, afterId: number): Promise<VValidViewRow[]> {
+  let q = supabaseAdmin
+    .from("v_valid_export_rows")
+    .select(VIEW_SELECT)
+    .eq("export_src", src)
+    .order("export_id", { ascending: true })
+    .limit(BATCH_SIZE);
+  if (afterId > 0) q = q.gt("export_id", afterId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as VValidViewRow[];
+}
+
+async function uploadWorkbook(jobId: string, tmpPath: string): Promise<string> {
+  const storagePath = `exports/v-valid/${jobId}.xlsx`;
+  const buf = await readFile(tmpPath);
+  const { error } = await supabaseAdmin.storage.from(STORAGE_BUCKET).upload(storagePath, buf, {
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    upsert: true,
+  });
+  if (error) throw error;
+  return storagePath;
+}
+
+async function runJob(jobId: string) {
+  const tmpPath = join(tmpdir(), `vcf-export-${jobId}.xlsx`);
+  logMem(jobId, "start");
+  try {
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+      filename: tmpPath,
+      useStyles: false,
+      useSharedStrings: false,
+    });
+    const sheet = workbook.addWorksheet("V_VALID_CARS");
+    sheet.addRow([...V_VALID_EXPORT_HEADERS]).commit();
+
+    let rowCount = 0;
+    for (const src of [1, 2] as const) {
+      let afterId = 0;
+      for (;;) {
+        const batch = await fetchBatch(src, afterId);
+        if (!batch.length) break;
+        for (const raw of batch) {
+          const values = exportRowToValues(viewRowToExport(raw));
+          sheet.addRow(values).commit();
+          rowCount += 1;
+        }
+        afterId = Number(batch[batch.length - 1]?.export_id ?? afterId);
+        logMem(jobId, "batch", { src, afterId, rowCount, batch: batch.length });
+        if (batch.length < BATCH_SIZE) break;
+      }
     }
-  })();
-  const [history, remarks, cars] = await Promise.all([histJob, remarkJob, carsJob]);
-  return buildVValidExportRows(history as any, cars as any, remarks as any);
-}
 
-function workbookBuffer(rows: VValidExportRow[]): Buffer {
-  const aoa = exportRowsToAoa(rows);
-  const ws = XLSX.utils.aoa_to_sheet(aoa, { raw: true });
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "V_VALID_CARS");
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-}
+    await workbook.commit();
+    logMem(jobId, "workbook-committed", { rowCount });
 
-async function runJob(job: VcfExportJob) {
-  const joined = await fetchFromJoinedView();
-  const rows = joined ?? (await fetchFromTables());
-  const stamp = new Date().toISOString().slice(0, 10);
-  job.buffer = workbookBuffer(rows);
-  job.filename = `V_VALID_CARS_${stamp}.xlsx`;
-  job.rowCount = rows.length;
-  job.status = "ready";
-}
+    const storagePath = await uploadWorkbook(jobId, tmpPath);
+    logMem(jobId, "uploaded", { rowCount });
 
-export function startVcfExportJob(): { id: string } | { error: string; status: number } {
-  gc();
-  const running = Array.from(jobs.values()).filter((j) => j.status === "running").length;
-  if (running >= MAX_RUNNING) {
-    return { error: "An export is already running. Wait for it to finish, then try again.", status: 429 };
+    await updateJob(jobId, {
+      status: "ready",
+      row_count: rowCount,
+      storage_path: storagePath,
+    });
+    logMem(jobId, "ready", { rowCount });
+  } catch (err) {
+    const message = isMissingView(err)
+      ? "v_valid_export_rows is missing. Apply migrations/20260817_v_valid_export_view.sql, then retry."
+      : errMessage(err);
+    console.error(`[vcf-export] ${jobId} failed:`, err);
+    await failJob(jobId, message);
+  } finally {
+    await unlink(tmpPath).catch(() => undefined);
   }
+}
+
+export async function recoverStaleExportJobs(): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("export_jobs")
+    .update({
+      status: "failed",
+      error_message: WORKER_RESTARTED,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("status", "running")
+    .select("id");
+  if (error) {
+    if (isMissingExportJobs(error)) {
+      console.warn(`[vcf-export] export_jobs table missing. ${SQL_HINT}`);
+      return;
+    }
+    console.error("[vcf-export] recover failed:", error);
+    return;
+  }
+  if (data?.length) {
+    console.log(`[vcf-export] marked ${data.length} stale running job(s) failed after restart`);
+  }
+}
+
+export async function startVcfExportJob(): Promise<{ id: string } | { error: string; status: number }> {
   const id = randomUUID();
-  const job: VcfExportJob = { id, status: "running", createdAt: Date.now() };
-  jobs.set(id, job);
-  void runJob(job).catch((err) => {
-    job.status = "error";
-    job.error = String((err as any)?.message ?? err);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const filename = `V_VALID_CARS_${stamp}.xlsx`;
+  const { error } = await supabaseAdmin.from("export_jobs").insert({
+    id,
+    kind: KIND,
+    status: "running",
+    filename,
+  });
+  if (error) {
+    if (isMissingExportJobs(error)) {
+      return { error: `export_jobs table is missing. ${SQL_HINT}`, status: 503 };
+    }
+    if (isUniqueViolation(error) || /duplicate key|export_jobs_one_running/i.test(errMessage(error))) {
+      return { error: "An export is already running. Wait for it to finish, then try again.", status: 409 };
+    }
+    return { error: errMessage(error), status: 500 };
+  }
+  void runJob(id).catch(async (err) => {
+    console.error(`[vcf-export] ${id} unhandled:`, err);
+    await failJob(id, errMessage(err));
   });
   return { id };
 }
 
-export function getVcfExportJob(id: string): VcfExportJob | null {
-  gc();
-  return jobs.get(id) ?? null;
+export async function getVcfExportJob(id: string): Promise<VcfExportJobPublic | null> {
+  const { data, error } = await supabaseAdmin.from("export_jobs").select("*").eq("id", id).maybeSingle();
+  if (error) {
+    if (isMissingExportJobs(error)) return null;
+    throw error;
+  }
+  if (!data) return null;
+  return publicFromRow(data as ExportJobRow);
 }
 
-export function publicVcfExportJob(job: VcfExportJob): VcfExportJobPublic {
-  return {
-    id: job.id,
-    status: job.status,
-    error: job.error,
-    filename: job.filename,
-    rowCount: job.rowCount,
-  };
+export async function getVcfExportFile(
+  id: string,
+): Promise<
+  | { ok: true; buffer: Buffer; filename: string }
+  | { ok: false; status: number; message: string }
+> {
+  const { data, error } = await supabaseAdmin.from("export_jobs").select("*").eq("id", id).maybeSingle();
+  if (error) {
+    if (isMissingExportJobs(error)) return { ok: false, status: 404, message: "Export job not found" };
+    throw error;
+  }
+  const row = data as ExportJobRow | null;
+  if (!row) return { ok: false, status: 404, message: "Export job not found" };
+  if (row.status === "running") return { ok: false, status: 409, message: "Export is still running" };
+  if (row.status === "failed") return { ok: false, status: 500, message: row.error_message || "Export failed" };
+  if (!row.storage_path) return { ok: false, status: 500, message: "Export file is missing" };
+
+  const downloaded = await supabaseAdmin.storage.from(STORAGE_BUCKET).download(row.storage_path);
+  if (downloaded.error || !downloaded.data) {
+    return { ok: false, status: 500, message: downloaded.error?.message || "Could not read export file from storage" };
+  }
+  const buffer = Buffer.from(await downloaded.data.arrayBuffer());
+  return { ok: true, buffer, filename: row.filename || "V_VALID_CARS.xlsx" };
 }

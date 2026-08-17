@@ -3,8 +3,9 @@ import type { Server } from "http";
 import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
-import { startVcfExportJob, getVcfExportJob, publicVcfExportJob } from "./vcf-export-job";
+import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railcar-list";
+import { runGlobalSearch } from "./global-search";
 import {
   getAuthUser,
   getUserRole,
@@ -36,7 +37,6 @@ import {
   splitCarNumber,
   deriveLeaseKey,
   synthesizeLeaseNumber,
-  displayLeaseNumber,
 } from "@shared/residco-import";
 import {
   buildVcfReview,
@@ -216,6 +216,8 @@ export async function registerRoutes(
   // Gate every /api route: valid Supabase session (Bearer JWT) required.
   // Writes still use requireWrite / requireAdmin for role checks on top of this.
   app.use("/api", requireApiAuth);
+
+  await recoverStaleExportJobs();
 
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
@@ -1036,7 +1038,7 @@ export async function registerRoutes(
 
   app.post("/api/reports/v-valid-cars/jobs", async (_req, res) => {
     try {
-      const started = startVcfExportJob();
+      const started = await startVcfExportJob();
       if ("error" in started) {
         return res.status(started.status).json({ message: started.error });
       }
@@ -1048,9 +1050,9 @@ export async function registerRoutes(
 
   app.get("/api/reports/v-valid-cars/jobs/:id", async (req, res) => {
     try {
-      const job = getVcfExportJob(String(req.params.id));
-      if (!job) return res.status(404).json({ message: "Export job not found or expired" });
-      res.json(publicVcfExportJob(job));
+      const job = await getVcfExportJob(String(req.params.id));
+      if (!job) return res.status(404).json({ message: "Export job not found" });
+      res.json(job);
     } catch (err) {
       errHandler(res, err);
     }
@@ -1058,16 +1060,12 @@ export async function registerRoutes(
 
   app.get("/api/reports/v-valid-cars/jobs/:id/file", async (req, res) => {
     try {
-      const job = getVcfExportJob(String(req.params.id));
-      if (!job) return res.status(404).json({ message: "Export job not found or expired" });
-      if (job.status === "running") return res.status(409).json({ message: "Export is still running" });
-      if (job.status === "error" || !job.buffer) {
-        return res.status(500).json({ message: job.error || "Export failed" });
-      }
+      const file = await getVcfExportFile(String(req.params.id));
+      if (!file.ok) return res.status(file.status).json({ message: file.message });
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename="${job.filename ?? "V_VALID_CARS.xlsx"}"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
       res.setHeader("Cache-Control", "no-store");
-      res.send(job.buffer);
+      res.send(file.buffer);
     } catch (err) {
       errHandler(res, err);
     }
@@ -2935,148 +2933,8 @@ export async function registerRoutes(
     try {
       const raw = (req.query.q as string | undefined)?.trim() ?? "";
       if (!raw) return res.json({ railcars: [], riders: [], leases: [] });
-
-      // Comma-separated groups are OR (multi-car lookup). Within a group,
-      // every whitespace token must match (AND), with contiguous phrase
-      // matches ranked above scattered token matches.
-      const groups = raw.split(",").map((g) => g.trim()).filter(Boolean);
-      const scoreBlob = (blob: string, group: string): number | null => {
-        const phrase = group.toLowerCase();
-        const tokens = phrase.split(/\s+/).filter(Boolean);
-        if (tokens.length === 0) return null;
-        if (!tokens.every((t) => blob.includes(t))) return null;
-        return blob.includes(phrase) ? 0 : 1;
-      };
-      const bestScore = (blob: string): number | null => {
-        let best: number | null = null;
-        for (const g of groups) {
-          const s = scoreBlob(blob, g);
-          if (s == null) continue;
-          best = best == null ? s : Math.min(best, s);
-        }
-        return best;
-      };
-
       const fleetActive = String(req.query.fleet_active ?? "active").toLowerCase();
-
-      const allCarsRaw = await fetchAllRows((from, to) => {
-        let q = supabaseAdmin
-          .from("railcars")
-          .select(
-            `id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation,
-             lessee_name, rider_external_id, assignment_label, managed_category,
-             assignment:railcar_assignments(
-               id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
-               rider:riders(
-                 id, rider_name, schedule_number, expiration_date,
-                 master_lease:master_leases(id, lease_number, lessor, lessee)
-               )
-             )`
-          )
-          .order("id", { ascending: true })
-          .range(from, to);
-        if (fleetActive === "inactive") q = q.eq("active", false);
-        else if (fleetActive !== "all") q = q.neq("active", false);
-        return q;
-      });
-
-      const cars = allCarsRaw.map((r: any) => ({
-        ...r,
-        assignment: Array.isArray(r.assignment) ? r.assignment[0] ?? null : r.assignment,
-      }));
-
-      const carBlob = (c: any) =>
-        [
-          c.car_number,
-          c.reporting_marks,
-          `${c.reporting_marks ?? ""}${c.car_number ?? ""}`,
-          c.lessee_name,
-          c.rider_external_id,
-          c.assignment_label,
-          c.assignment?.fleet_name,
-          c.assignment?.rider?.rider_name,
-          c.assignment?.rider?.master_lease?.lessee,
-          displayLeaseNumber(c.assignment?.rider?.master_lease?.lease_number),
-          c.assignment?.sub_lease_number,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-
-      const matchedCars = cars
-        .map((c: any) => ({ c, score: bestScore(carBlob(c)) }))
-        .filter((x: { score: number | null }) => x.score != null)
-        .sort((a: any, b: any) => a.score - b.score || String(a.c.car_number).localeCompare(String(b.c.car_number)))
-        .map((x: any) => x.c);
-
-      const { data: allRiders, error: rErr } = await supabaseAdmin
-        .from("riders")
-        .select(`*, master_lease:master_leases(id, lease_number, lessor, lessee)`)
-        .order("rider_name");
-      if (rErr) throw rErr;
-
-      const countByRider = new Map<number, number>();
-      for (const c of cars.filter((x: any) => x.active === true)) {
-        const rid = (c as any).assignment?.rider?.id;
-        if (rid) countByRider.set(rid, (countByRider.get(rid) ?? 0) + 1);
-      }
-
-      const riderBlob = (r: any) =>
-        [
-          r.rider_name,
-          r.schedule_number,
-          r.master_lease?.lessee,
-          displayLeaseNumber(r.master_lease?.lease_number),
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-
-      const matchedRiders = (allRiders ?? [])
-        .map((r: any) => ({ r, score: bestScore(riderBlob(r)) }))
-        .filter((x: { score: number | null }) => x.score != null)
-        .sort((a: any, b: any) => a.score - b.score)
-        .map((x: any) => ({ ...x.r, car_count: countByRider.get(x.r.id) ?? 0 }));
-
-      const { data: allLeases, error: lErr } = await supabaseAdmin
-        .from("master_leases")
-        .select("*")
-        .order("lease_number");
-      if (lErr) throw lErr;
-
-      const leaseBlob = (l: any) =>
-        [
-          displayLeaseNumber(l.lease_number),
-          l.lease_number,
-          l.lessee,
-          l.lessor,
-          l.agreement_number,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-
-      const matchedLeases = (allLeases ?? [])
-        .map((l: any) => ({ l, score: bestScore(leaseBlob(l)) }))
-        .filter((x: { score: number | null }) => x.score != null)
-        .sort((a: any, b: any) => a.score - b.score)
-        .map((x: any) => x.l);
-
-      const terms = groups.flatMap((g) => g.split(/\s+/).filter(Boolean));
-
-      res.json({
-        query: raw,
-        terms,
-        railcars: matchedCars,
-        riders: matchedRiders,
-        leases: matchedLeases,
-        counts: {
-          railcars: matchedCars.length,
-          riders: matchedRiders.length,
-          leases: matchedLeases.length,
-          total: matchedCars.length + matchedRiders.length + matchedLeases.length,
-        },
-      });
+      res.json(await runGlobalSearch(raw, fleetActive));
     } catch (err) {
       errHandler(res, err);
     }

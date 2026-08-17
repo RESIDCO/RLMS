@@ -4,7 +4,9 @@ import {
   useEffect,
   useCallback,
   KeyboardEvent,
+  CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import { useLocation } from "wouter";
 import {
   Search,
@@ -150,9 +152,37 @@ export default function GlobalSearch() {
 
   const inputRef    = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
 
   const navItems = buildNavItems(results);
+
+  const updatePanelPos = useCallback(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    const r = input.getBoundingClientRect();
+    const width = Math.min(640, Math.max(280, window.innerWidth - 32));
+    const left = Math.min(Math.max(16, r.left), window.innerWidth - width - 16);
+    setPanelStyle({
+      position: "fixed",
+      top: r.bottom + 6,
+      left,
+      width,
+      zIndex: 200,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePanelPos();
+    window.addEventListener("resize", updatePanelPos);
+    window.addEventListener("scroll", updatePanelPos, true);
+    return () => {
+      window.removeEventListener("resize", updatePanelPos);
+      window.removeEventListener("scroll", updatePanelPos, true);
+    };
+  }, [open, results, updatePanelPos]);
 
   // ── Search ──────────────────────────────────────────────────────────────────
   const runSearch = useCallback(async (q: string) => {
@@ -247,9 +277,9 @@ export default function GlobalSearch() {
   // ── Click-outside to dismiss ─────────────────────────────────────────────────
   useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (containerRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
@@ -318,9 +348,11 @@ export default function GlobalSearch() {
       </div>
 
       {/* Dropdown panel */}
-      {open && (
+      {open && createPortal(
         <div
-          className="absolute top-[calc(100%+6px)] left-0 w-[640px] max-w-[calc(100vw-32px)] bg-card border border-border rounded-xl shadow-2xl shadow-black/40 z-50 overflow-hidden"
+          ref={panelRef}
+          style={panelStyle}
+          className="isolate bg-card border border-border rounded-xl shadow-2xl shadow-black/40 overflow-hidden"
           data-testid="search-results-panel"
         >
           {/* No results */}
@@ -339,7 +371,7 @@ export default function GlobalSearch() {
               {/* ── Railcars ─────────────────────────────────────────── */}
               {results.railcars.length > 0 && (
                 <section>
-                  <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card/95 backdrop-blur-sm border-b border-border/40 z-10">
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card border-b border-border/40 z-10">
                     <Train className="h-3.5 w-3.5 text-primary shrink-0" />
                     <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Railcars
@@ -419,7 +451,7 @@ export default function GlobalSearch() {
                 const offset = Math.min(results.railcars.length, 8);
                 return (
                   <section className="border-t border-border/40">
-                    <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card/95 backdrop-blur-sm border-b border-border/40 z-10">
+                    <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card border-b border-border/40 z-10">
                       <Building2 className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                       <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                         Lessees
@@ -484,7 +516,7 @@ export default function GlobalSearch() {
               {/* ── Master Leases ─────────────────────────────────────── */}
               {results.leases.length > 0 && (
                 <section className="border-t border-border/40">
-                  <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card/95 backdrop-blur-sm border-b border-border/40 z-10">
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card border-b border-border/40 z-10">
                     <BookOpen className="h-3.5 w-3.5 text-umler-teal shrink-0" />
                     <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Master Leases
@@ -550,7 +582,7 @@ export default function GlobalSearch() {
               {/* ── Riders ───────────────────────────────────────────── */}
               {results.riders.length > 0 && (
                 <section className="border-t border-border/40">
-                  <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card/95 backdrop-blur-sm border-b border-border/40 z-10">
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 sticky top-0 bg-card border-b border-border/40 z-10">
                     <FileText className="h-3.5 w-3.5 text-blue-400 shrink-0" />
                     <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Riders / Schedules
@@ -651,7 +683,8 @@ export default function GlobalSearch() {
               </span>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

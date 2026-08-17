@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 
 type ExportJob = {
   id: string;
-  status: "running" | "ready" | "error";
+  status: "running" | "ready" | "failed";
   error?: string;
   filename?: string;
   rowCount?: number;
@@ -16,6 +16,23 @@ type ExportJob = {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function exportErrorMessage(e: unknown): string {
+  const raw = String((e as { message?: string })?.message ?? "");
+  const m = raw.match(/^\d{3}:\s*([\s\S]*)$/);
+  const status = m ? Number(raw.slice(0, 3)) : 0;
+  const body = m ? m[1] : raw;
+  try {
+    const parsed = JSON.parse(body) as { message?: string };
+    if (parsed.message) return parsed.message;
+  } catch {
+    /* not JSON */
+  }
+  if (status === 404) return "The export worker restarted before the file finished. Try again.";
+  if (status === 409) return "An export is already running. Wait for it to finish, then try again.";
+  if (status === 502 || status === 503) return "The server went down while building the export. Try again.";
+  return raw || "Could not build the V_Valid Car File.";
 }
 
 export default function Reports() {
@@ -33,7 +50,7 @@ export default function Reports() {
         await sleep(1000);
         job = await apiGet<ExportJob>(`/api/reports/v-valid-cars/jobs/${started.id}`);
         if (job.status === "ready") break;
-        if (job.status === "error") {
+        if (job.status === "failed") {
           throw new Error(job.error || "Export failed");
         }
       }
@@ -49,10 +66,10 @@ export default function Reports() {
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         title: "Export failed",
-        description: e.message ?? "Could not build the V_Valid Car File.",
+        description: exportErrorMessage(e),
         variant: "destructive",
       });
     } finally {

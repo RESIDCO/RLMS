@@ -79,6 +79,15 @@ import {
   type SummaryRowForRefresh,
 } from "@shared/financial-import";
 import {
+  classifyAcquisitionRows,
+  buildExistingCarKeySet,
+  parseAcquisitionEntity,
+  parseAcquisitionPrice,
+  resolveBatchRentalStatus,
+  skipReasonLabel,
+  type AcquisitionParsedRow,
+} from "@shared/acquisition-import";
+import {
   calculateDv,
   type DvInputs,
   type DvReferenceData,
@@ -970,6 +979,55 @@ export async function registerRoutes(
         }
       }
       res.json({ ok: true, updated, fleet_status });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/railcars/bulk-needs-completion", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0) : [];
+      if (idsRaw.length === 0) {
+        return res.status(400).json({ message: "ids required" });
+      }
+      if (idsRaw.length > 20_000) {
+        return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
+      }
+      const needs_completion = req.body?.needs_completion === true;
+      const uniqueIds = [...new Set(idsRaw)];
+      const CHUNK = 200;
+      let updated = 0;
+      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+        const slice = uniqueIds.slice(i, i + CHUNK);
+        const { data, error } = await supabase
+          .from("railcars")
+          .update({ needs_completion })
+          .in("id", slice)
+          .select("id");
+        if (error) throw error;
+        updated += data?.length ?? 0;
+      }
+      res.json({ ok: true, updated, needs_completion });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/acquisition-batches", async (_req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("acquisition_batches")
+        .select("id, label, acquisition_date, entity, default_rental_status, car_count, created_at")
+        .order("created_at", { ascending: false });
+      if (error) {
+        if (/acquisition_batches/i.test(error.message) && /does not exist|schema cache/i.test(error.message)) {
+          return res.json([]);
+        }
+        throw error;
+      }
+      res.json(data ?? []);
     } catch (err) {
       errHandler(res, err);
     }
@@ -2559,6 +2617,196 @@ export async function registerRoutes(
         leaseExpiryEstimates,
       });
     } catch (err) { errHandler(res, err); }
+  });
+
+  function summarizeAcquisition(classified: AcquisitionParsedRow[]) {
+    const toInsert = classified.filter((r) => !r.skip_reason);
+    const skippedExists = classified.filter((r) => r.skip_reason === "already_exists");
+    const skippedInvalid = classified.filter((r) => r.skip_reason === "missing_identity" || r.skip_reason === "duplicate_in_file");
+    const skipped = classified
+      .filter((r) => r.skip_reason)
+      .map((r) => ({
+        row: r.row,
+        marks: r.marks,
+        car_number: r.car_number,
+        skip_reason: r.skip_reason,
+        skip_label: skipReasonLabel(r.skip_reason),
+      }));
+    return {
+      total: classified.length,
+      new_count: toInsert.length,
+      skipped_exists: skippedExists.length,
+      skipped_invalid: skippedInvalid.length,
+      skipped,
+      to_insert: toInsert,
+    };
+  }
+
+  async function classifyAcquisitionUpload(rows: Record<string, string>[]) {
+    const existing = await fetchAllRows<{
+      car_number: string | null;
+      reporting_marks: string | null;
+      car_initial: string | null;
+    }>((from, to) =>
+      supabaseAdmin
+        .from("railcars")
+        .select("car_number, reporting_marks, car_initial")
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
+    const classified = classifyAcquisitionRows(rows, buildExistingCarKeySet(existing));
+    return summarizeAcquisition(classified);
+  }
+
+  const ACQUISITION_SCHEMA_HINT =
+    "Acquisition tables are missing. Run migrations/20260817_acquisition_batches.sql in the Supabase SQL editor, then retry. Nothing was written.";
+
+  app.post("/api/import/acquisitions/preview", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const { rows } = req.body as { rows?: Record<string, string>[] };
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No rows provided" });
+      }
+      const review = await classifyAcquisitionUpload(rows);
+      res.json({
+        ok: true,
+        total: review.total,
+        new_count: review.new_count,
+        skipped_exists: review.skipped_exists,
+        skipped_invalid: review.skipped_invalid,
+        skipped: review.skipped,
+      });
+    } catch (err) {
+      const msg = String((err as any)?.message ?? err ?? "");
+      if (/acquisition_batch|needs_completion|purchase_price/i.test(msg) && /does not exist|schema cache/i.test(msg)) {
+        return res.status(503).json({ message: ACQUISITION_SCHEMA_HINT });
+      }
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/import/acquisitions/commit", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const body = req.body as {
+        rows?: Record<string, string>[];
+        label?: string;
+        acquisition_date?: string;
+        entity?: string;
+        default_purchase_price?: unknown;
+        default_rental_status?: unknown;
+      };
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      if (rows.length === 0) {
+        return res.status(400).json({ message: "No rows provided" });
+      }
+      const label = String(body.label ?? "").trim();
+      if (!label) return res.status(400).json({ message: "Batch label is required" });
+      const acquisition_date = String(body.acquisition_date ?? "").trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(acquisition_date)) {
+        return res.status(400).json({ message: "Acquisition date is required (YYYY-MM-DD)" });
+      }
+      const entity = parseAcquisitionEntity(String(body.entity ?? ""));
+      if (!entity) {
+        return res.status(400).json({ message: "Entity must be Main, RPS, or Coal" });
+      }
+      const default_purchase_price = parseAcquisitionPrice(body.default_purchase_price);
+      const default_rental_status = resolveBatchRentalStatus(body.default_rental_status);
+
+      const review = await classifyAcquisitionUpload(rows);
+      if (review.new_count === 0) {
+        return res.json({
+          ok: true,
+          inserted: 0,
+          skipped_exists: review.skipped_exists,
+          skipped_invalid: review.skipped_invalid,
+          batch: null,
+        });
+      }
+
+      const { data: batch, error: batchErr } = await supabaseAdmin
+        .from("acquisition_batches")
+        .insert({
+          label,
+          acquisition_date,
+          entity,
+          default_purchase_price,
+          default_rental_status,
+          created_by: String(writerId),
+          car_count: 0,
+        })
+        .select("id, label, acquisition_date, entity, default_rental_status")
+        .single();
+      if (batchErr) {
+        const msg = String(batchErr.message ?? "");
+        if (/acquisition_batches/i.test(msg) && /does not exist|schema cache/i.test(msg)) {
+          return res.status(503).json({ message: ACQUISITION_SCHEMA_HINT });
+        }
+        throw batchErr;
+      }
+
+      const payloads = review.to_insert.map((r) => ({
+        reporting_marks: r.marks,
+        car_initial: r.marks,
+        car_number: r.car_number,
+        car_type: r.car_type,
+        notes: r.notes,
+        comment_event_note: r.notes,
+        entity,
+        fleet_status: default_rental_status,
+        fleet_status_source: "manual",
+        active: true,
+        status: "Active/In-Service",
+        acquisition_batch_id: batch.id,
+        acquisition_date,
+        purchase_price: r.purchase_price ?? default_purchase_price,
+        needs_completion: true,
+      }));
+
+      let inserted = 0;
+      const CHUNK = 100;
+      for (let i = 0; i < payloads.length; i += CHUNK) {
+        const slice = payloads.slice(i, i + CHUNK);
+        const { data, error } = await supabaseAdmin.from("railcars").insert(slice).select("id");
+        if (error) {
+          if (String(error.code) === "23505" || /duplicate|unique/i.test(error.message ?? "")) {
+            for (const row of slice) {
+              const one = await supabaseAdmin.from("railcars").insert(row).select("id");
+              if (one.error) {
+                if (String(one.error.code) === "23505" || /duplicate|unique/i.test(one.error.message ?? "")) continue;
+                throw one.error;
+              }
+              inserted += one.data?.length ?? 0;
+            }
+            continue;
+          }
+          throw error;
+        }
+        inserted += data?.length ?? 0;
+      }
+
+      await supabaseAdmin
+        .from("acquisition_batches")
+        .update({ car_count: inserted })
+        .eq("id", batch.id);
+
+      res.json({
+        ok: true,
+        inserted,
+        skipped_exists: review.skipped_exists,
+        skipped_invalid: review.skipped_invalid,
+        batch: { ...batch, car_count: inserted },
+      });
+    } catch (err) {
+      const msg = String((err as any)?.message ?? err ?? "");
+      if (/acquisition_batch|needs_completion|purchase_price/i.test(msg) && /does not exist|schema cache/i.test(msg)) {
+        return res.status(503).json({ message: ACQUISITION_SCHEMA_HINT });
+      }
+      errHandler(res, err);
+    }
   });
 
   // ---------- Cleanup test/sample railcars (admin-only, dry-run by default) ----------

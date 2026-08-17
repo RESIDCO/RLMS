@@ -92,6 +92,10 @@ export type Railcar = {
   nbv: number | null;
   oec: number | null;
   oac: number | null;
+  acquisition_batch_id?: number | null;
+  acquisition_date?: string | null;
+  purchase_price?: number | null;
+  needs_completion?: boolean | null;
   // ── V_Valid / 3rd-party reference (bulk import §1.1) ──
   legacy_valid_car_id: string | null;
   client_id: string | null;

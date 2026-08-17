@@ -482,6 +482,7 @@ export default function Contacts() {
       <PageHeader
         title="Contacts"
         subtitle="All rider contacts across every lease — searchable in one place"
+        note="Additional features and functionality coming soon — this page is under active development and will change."
       />
 
       <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-5">

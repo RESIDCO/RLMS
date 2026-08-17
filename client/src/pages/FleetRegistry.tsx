@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image } from "lucide-react";
+import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -108,6 +108,19 @@ function EntityBadge({ entity, size = "sm" }: { entity: string | null | undefine
       style.cls
     )}>
       {style.label}
+    </span>
+  );
+}
+
+function NeedsCompletionBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300"
+      title="New acquisition — still needs lessee, rider, and financials filled in"
+      data-testid="badge-needs-completion"
+    >
+      <ClipboardList className="h-2.5 w-2.5" />
+      Needs data
     </span>
   );
 }
@@ -338,6 +351,8 @@ function parseFleetQuery(searchStr: string): {
   turning50: number | null;
   search: string;
   transit: string;
+  batch: string;
+  needsCompletion: string;
 } {
   const fromWouter = new URLSearchParams(String(searchStr || "").replace(/^\?/, ""));
   const hash = typeof window !== "undefined" ? window.location.hash : "";
@@ -384,6 +399,13 @@ function parseFleetQuery(searchStr: string): {
     turning50,
     search: (qs.get("search") || qs.get("highlight") || "").trim(),
     transit,
+    batch: (qs.get("batch") || qs.get("acquisition_batch_id") || "").trim(),
+    needsCompletion:
+      qs.get("needs_completion") === "yes" || qs.get("filter") === "needscompletion"
+        ? "yes"
+        : qs.get("needs_completion") === "no"
+          ? "no"
+          : "all",
   };
 }
 
@@ -409,6 +431,8 @@ export default function FleetRegistry() {
   const [transitFilter, setTransitFilter] = useState<string>(initQ.transit);
   const [entityFilter, setEntityFilter] = useState<string>(initQ.entity);
   const [turning50Year, setTurning50Year] = useState<number | null>(initQ.turning50);
+  const [batchFilter, setBatchFilter] = useState<string>(initQ.batch || "all");
+  const [needsCompletionFilter, setNeedsCompletionFilter] = useState<string>(initQ.needsCompletion);
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -426,6 +450,7 @@ export default function FleetRegistry() {
   const [bulkRentalOpen, setBulkRentalOpen] = useState(false);
   const [bulkRentalTarget, setBulkRentalTarget] = useState<FleetStatus | null>(null);
   const [bulkRentalEffectiveDate, setBulkRentalEffectiveDate] = useState(todayIsoDateOnly);
+  const [bulkNeedsCompletionPending, setBulkNeedsCompletionPending] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 75;
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -439,7 +464,7 @@ export default function FleetRegistry() {
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter, turning50Year]);
+  }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter, turning50Year, batchFilter, needsCompletionFilter]);
 
   // ── Optional column visibility ─────────────────────────────────────────────
   type OptCol =
@@ -496,6 +521,8 @@ export default function FleetRegistry() {
     rider_id: turning50Year ? undefined : (riderFilter !== "all" ? riderFilter : undefined),
     transit: turning50Year || transitFilter === "all" ? undefined : transitFilter,
     turning50: turning50Year || undefined,
+    batch: turning50Year || batchFilter === "all" ? undefined : batchFilter,
+    needs_completion: turning50Year || needsCompletionFilter === "all" ? undefined : needsCompletionFilter,
   };
 
   type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
@@ -508,6 +535,12 @@ export default function FleetRegistry() {
     placeholderData: debouncedSearch ? undefined : keepPreviousData,
   });
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
+  type AcqBatch = { id: number; label: string; acquisition_date: string; entity: string; car_count: number };
+  const { data: acquisitionBatches } = useQuery<AcqBatch[]>({
+    queryKey: ["/api/acquisition-batches"],
+    queryFn: () => apiGet<AcqBatch[]>("/api/acquisition-batches"),
+    staleTime: 60_000,
+  });
   const railcars = pageData?.rows ?? [];
   const totalCount = pageData?.total_count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -519,6 +552,8 @@ export default function FleetRegistry() {
     setOlCodeFilter(q.riderOl);
     setTurning50Year(q.turning50);
     setTransitFilter(q.transit);
+    setBatchFilter(q.batch || "all");
+    setNeedsCompletionFilter(q.needsCompletion);
     if (q.turning50) setFleetActiveFilter("active");
   }, [wouterSearch]);
 
@@ -616,6 +651,29 @@ export default function FleetRegistry() {
       toast({ title: "Bulk rental status update failed", description: e.message, variant: "destructive" });
     } finally {
       setBulkFleetStatusPending(false);
+    }
+  };
+
+  const bulkClearNeedsCompletion = async () => {
+    const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Clear Needs Completion on ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
+      description: "This only clears the flag. It does not change rental status, assignments, or financials.",
+    });
+    if (!ok) return;
+    setBulkNeedsCompletionPending(true);
+    try {
+      await apiRequest("POST", "/api/railcars/bulk-needs-completion", {
+        ids,
+        needs_completion: false,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      toast({ title: `Needs Completion cleared on ${ids.length} car${ids.length !== 1 ? "s" : ""}` });
+      clearSelection();
+    } catch (e: any) {
+      toast({ title: "Could not clear Needs Completion", description: e.message, variant: "destructive" });
+    } finally {
+      setBulkNeedsCompletionPending(false);
     }
   };
 
@@ -870,6 +928,29 @@ export default function FleetRegistry() {
               <SelectItem value="normal">Normal service</SelectItem>
             </SelectContent>
           </Select>
+          <Select value={needsCompletionFilter} onValueChange={setNeedsCompletionFilter}>
+            <SelectTrigger className="w-[180px]" data-testid="filter-needs-completion">
+              <SelectValue placeholder="Needs completion" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All completion</SelectItem>
+              <SelectItem value="yes">Needs completion</SelectItem>
+              <SelectItem value="no">Complete</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={batchFilter} onValueChange={setBatchFilter}>
+            <SelectTrigger className="w-[220px]" data-testid="filter-acquisition-batch">
+              <SelectValue placeholder="Acquisition batch" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All acquisition batches</SelectItem>
+              {(acquisitionBatches ?? []).map((b) => (
+                <SelectItem key={b.id} value={String(b.id)}>
+                  {b.label} ({b.acquisition_date}) · {b.car_count}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={assignedFilter} onValueChange={setAssignedFilter}>
             <SelectTrigger className="w-[170px]" data-testid="filter-assigned">
               <SelectValue placeholder="Assignment" />
@@ -1045,6 +1126,16 @@ export default function FleetRegistry() {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={bulkNeedsCompletionPending}
+                onClick={bulkClearNeedsCompletion}
+                data-testid="bulk-clear-needs-completion"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Clear Needs Completion
+              </Button>
               {/* Bulk rider assignment */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1180,6 +1271,7 @@ export default function FleetRegistry() {
                           {r.transit_status && (
                             <TransitBadge status={r.transit_status} label={r.transit_label} />
                           )}
+                          {(r as any).needs_completion && <NeedsCompletionBadge />}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -1566,6 +1658,13 @@ function CarDetail({
         </div>
       )}
 
+      {(r as any).needs_completion && (
+        <div className="mt-4 rounded-md border border-sky-500/30 bg-sky-500/10 px-4 py-3 flex items-center gap-2">
+          <NeedsCompletionBadge />
+          <span className="text-xs text-sky-300/90">Still needs lessee, rider, and financials filled in.</span>
+        </div>
+      )}
+
       <div className="flex gap-2 mt-4">
         {canEdit && (
           <Button size="sm" variant="secondary" onClick={onEdit} data-testid="button-edit-car">
@@ -1624,6 +1723,8 @@ function CarDetail({
         <DetailRow label="Lease Type" value={(r as any).lease_type ?? "—"} />
         <DetailRow label="Managed By" value={(r as any).managed ?? "—"} />
         <DetailRow label="Managed Category" value={(r as any).managed_category ?? "—"} />
+        <DetailRow label="Purchase Price" value={(r as any).purchase_price != null ? `$${Number((r as any).purchase_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
+        <DetailRow label="Acquisition Date" value={fmtDate((r as any).acquisition_date) || "—"} />
         <DetailRow label="NBV" value={(r as any).nbv != null ? `$${Number((r as any).nbv).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         {/* OAC = Original Acquired Cost — distinct from OEC (Original Est. Build Cost). Often blank when Master Car List import only supplies OEC. */}
         <DetailRow label="OAC (Acquired Cost)" value={(r as any).oac != null ? `$${Number((r as any).oac).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />

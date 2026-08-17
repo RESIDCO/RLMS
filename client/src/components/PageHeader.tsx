@@ -3,10 +3,12 @@ import { ReactNode } from "react";
 export default function PageHeader({
   title,
   subtitle,
+  note,
   actions,
 }: {
   title: string;
   subtitle?: string;
+  note?: string;
   actions?: ReactNode;
 }) {
   return (
@@ -20,6 +22,9 @@ export default function PageHeader({
         </h1>
         {subtitle && (
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">{subtitle}</p>
+        )}
+        {note && (
+          <p className="text-[11px] text-muted-foreground italic mt-1.5">{note}</p>
         )}
       </div>
       {actions && <div className="flex gap-2 items-center flex-wrap">{actions}</div>}

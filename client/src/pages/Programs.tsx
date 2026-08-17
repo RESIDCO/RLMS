@@ -201,6 +201,9 @@ export default function ProgramsPage() {
           <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
             Scopes of work, car lists, inspection reports and supporting documents
           </p>
+          <p className="text-[11px] text-muted-foreground italic mt-1.5">
+            Additional features and functionality coming soon — this page is under active development and will change.
+          </p>
         </div>
         <Button size="sm" className="gap-1.5 self-start sm:self-auto" onClick={() => setCreateOpen(true)}
           data-testid="button-create-program">

@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import AcquisitionImportSection from "./AcquisitionImportSection";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Loose shape — server returns the full normalized row alongside derived fields.
@@ -535,7 +536,7 @@ export default function BulkImportPage() {
     <div className="p-6 max-w-5xl mx-auto space-y-8">
       <PageHeader
         title="Bulk Import"
-        subtitle="Two separate importers — car files never write financials, and the Asset Report never touches car identity or assignments."
+        subtitle="Three separate importers — car files never write financials, the Asset Report never touches car identity or assignments, and New Acquisitions only inserts cars that do not already exist."
       />
 
       {finCommitted && (
@@ -1086,6 +1087,8 @@ export default function BulkImportPage() {
           )}
         </section>
       )}
+
+      <AcquisitionImportSection />
     </div>
   );
 }

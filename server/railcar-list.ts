@@ -13,6 +13,7 @@ capacity_cf, lining_material, lining, coating, mechanical_designation,
 general_description, commodity, notes, data_source, lease_type, managed,
 total_bv_rider, cars_on_rider_ar, commodity_family, comment_event_note,
 car_initial, description, active_status, built_year, dot_code, dot_specification,
+acquisition_batch_id, acquisition_date, purchase_price, needs_completion,
 assignment:railcar_assignments(
   id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
@@ -39,6 +40,8 @@ export type RailcarListParams = {
   page?: number;
   pageSize?: number;
   all?: boolean;
+  acquisition_batch_id?: number;
+  needs_completion?: "yes" | "no";
 };
 
 export function parseRailcarListParams(query: Record<string, unknown>): RailcarListParams {
@@ -80,6 +83,13 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
     page: Math.max(1, num(query.page) ?? 1),
     pageSize: Math.min(200, Math.max(1, num(query.pageSize) ?? 75)),
     all: truthy(query.all) || truthy(query.export),
+    acquisition_batch_id: num(query.acquisition_batch_id) ?? num(query.batch),
+    needs_completion:
+      query.needs_completion === "yes" || query.needs_completion === "1" || query.needs_completion === "true"
+        ? "yes"
+        : query.needs_completion === "no" || query.needs_completion === "0" || query.needs_completion === "false"
+          ? "no"
+          : undefined,
   };
 }
 
@@ -159,6 +169,10 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
 
   if (p.entity) query = query.eq("entity", p.entity);
 
+  if (p.acquisition_batch_id) query = query.eq("acquisition_batch_id", p.acquisition_batch_id);
+  if (p.needs_completion === "yes") query = query.eq("needs_completion", true);
+  if (p.needs_completion === "no") query = query.eq("needs_completion", false);
+
   if (p.transit === "in_transit") query = query.not("transit_status", "is", null);
   if (p.transit === "normal") query = query.is("transit_status", null);
 
@@ -220,12 +234,16 @@ function selectWithoutOptionalDateCols(select: string) {
   return select
     .replace(/\s*estimated_lease_expiry,?\s*/g, " ")
     .replace(/\s*lease_expiry_snapshot_month,?\s*/g, " ")
-    .replace(/\s*build_date,?\s*/g, " ");
+    .replace(/\s*build_date,?\s*/g, " ")
+    .replace(/\s*acquisition_batch_id,?\s*/g, " ")
+    .replace(/\s*acquisition_date,?\s*/g, " ")
+    .replace(/\s*purchase_price,?\s*/g, " ")
+    .replace(/\s*needs_completion,?\s*/g, " ");
 }
 
 function isMissingOptionalDateColumn(err: unknown) {
   const msg = String((err as any)?.message ?? err ?? "");
-  return /estimated_lease_expiry|lease_expiry_snapshot_month|build_date/i.test(msg);
+  return /estimated_lease_expiry|lease_expiry_snapshot_month|build_date|acquisition_batch_id|acquisition_date|purchase_price|needs_completion/i.test(msg);
 }
 
 export async function queryRailcars(p: RailcarListParams) {

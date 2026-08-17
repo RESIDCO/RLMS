@@ -3,8 +3,7 @@ import type { Server } from "http";
 import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
-import XLSX from "xlsx";
-import { buildVValidExportRows, exportRowsToAoa } from "@shared/vcf-export";
+import { startVcfExportJob, getVcfExportJob, publicVcfExportJob } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railcar-list";
 import {
   getAuthUser,
@@ -1035,69 +1034,40 @@ export async function registerRoutes(
     }
   });
 
-  const VCF_EXPORT_CAR_SELECT =
-    "id, car_initial, car_number, car_type, mechanical_designation, general_description, dot_code, lining_material, lease_type, managed, managed_category, entity, legal_owner, legacy_valid_car_id, client_id, cover_sheet, update_made, update_needed_next_vcf, rider_external_id, assignment_label, lessee_name, active, acquisition_date";
-  const VCF_EXPORT_CAR_SELECT_NO_ACQ = VCF_EXPORT_CAR_SELECT.replace(", acquisition_date", "");
-
-  app.get("/api/reports/v-valid-cars", async (req, res) => {
+  app.post("/api/reports/v-valid-cars/jobs", async (_req, res) => {
     try {
-      req.setTimeout(180_000);
-      res.setTimeout(180_000);
-      const histJob = fetchAllRowsOrThrow(supabaseAdmin, "assignment_history", (from, to) =>
-        supabaseAdmin
-          .from("assignment_history")
-          .select("id, railcar_id, rider_external_id, assignment_label, start_date, end_date, active, comment, assignment_id_ext")
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-      const remarkJob = fetchAllRowsOrThrow(supabaseAdmin, "car_number_history", (from, to) =>
-        supabaseAdmin
-          .from("car_number_history")
-          .select("railcar_id, changed_at, old_car_initial, old_car_number")
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-      const carsJob = (async () => {
-        try {
-          return await fetchAllRowsOrThrow(supabaseAdmin, "railcars", (from, to) =>
-            supabaseAdmin.from("railcars").select(VCF_EXPORT_CAR_SELECT).order("id", { ascending: true }).range(from, to)
-          );
-        } catch (err) {
-          const msg = String((err as any)?.message ?? err ?? "");
-          if (!/acquisition_date/i.test(msg)) throw err;
-          return await fetchAllRowsOrThrow(supabaseAdmin, "railcars", (from, to) =>
-            supabaseAdmin.from("railcars").select(VCF_EXPORT_CAR_SELECT_NO_ACQ).order("id", { ascending: true }).range(from, to)
-          );
-        }
-      })();
-
-      const [history, remarks, cars] = await Promise.all([histJob, remarkJob, carsJob]);
-      const rows = buildVValidExportRows(history as any, cars as any, remarks as any);
-      const aoa = exportRowsToAoa(rows);
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-      // Keep car numbers, sentinels (1901-01-01 / 4000-12-31), and IDs as text so SheetJS
-      // does not coerce leading zeros or out-of-range dates.
-      const headers = aoa[0] ?? [];
-      for (let r = 1; r < aoa.length; r++) {
-        for (let c = 0; c < headers.length; c++) {
-          const addr = XLSX.utils.encode_cell({ r, c });
-          const val = aoa[r][c];
-          if (headers[c] === "ACTIVE" && (val === -1 || val === 0)) {
-            ws[addr] = { t: "n", v: val };
-          } else {
-            ws[addr] = { t: "s", v: val == null ? "" : String(val) };
-          }
-        }
+      const started = startVcfExportJob();
+      if ("error" in started) {
+        return res.status(started.status).json({ message: started.error });
       }
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "V_VALID_CARS");
-      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-      const stamp = new Date().toISOString().slice(0, 10);
-      const filename = `V_VALID_CARS_${stamp}.xlsx`;
+      res.status(202).json({ id: started.id, status: "running" });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/reports/v-valid-cars/jobs/:id", async (req, res) => {
+    try {
+      const job = getVcfExportJob(String(req.params.id));
+      if (!job) return res.status(404).json({ message: "Export job not found or expired" });
+      res.json(publicVcfExportJob(job));
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/reports/v-valid-cars/jobs/:id/file", async (req, res) => {
+    try {
+      const job = getVcfExportJob(String(req.params.id));
+      if (!job) return res.status(404).json({ message: "Export job not found or expired" });
+      if (job.status === "running") return res.status(409).json({ message: "Export is still running" });
+      if (job.status === "error" || !job.buffer) {
+        return res.status(500).json({ message: job.error || "Export failed" });
+      }
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${job.filename ?? "V_VALID_CARS.xlsx"}"`);
       res.setHeader("Cache-Control", "no-store");
-      res.send(buf);
+      res.send(job.buffer);
     } catch (err) {
       errHandler(res, err);
     }

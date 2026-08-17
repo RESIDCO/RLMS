@@ -276,7 +276,11 @@ export function buildVValidExportRows(
     rows.push(orphanCarToExport(car));
   }
 
-  rows.sort((a, b) => {
+  return sortVValidExportRows(rows);
+}
+
+export function sortVValidExportRows(rows: VValidExportRow[]): VValidExportRow[] {
+  return [...rows].sort((a, b) => {
     const ia = String(a.CAR_INITIAL);
     const ib = String(b.CAR_INITIAL);
     if (ia !== ib) return ia.localeCompare(ib);
@@ -291,12 +295,80 @@ export function buildVValidExportRows(
     if (aa !== ab) return aa.localeCompare(ab);
     return String(a.ASSIGNMENT).localeCompare(String(b.ASSIGNMENT));
   });
-
-  return rows;
 }
 
 export function exportRowsToAoa(rows: VValidExportRow[]): (string | number)[][] {
   const header = [...V_VALID_EXPORT_HEADERS];
-  const body = rows.map((r) => header.map((h) => (r[h] === "" || r[h] == null ? EMPTY : r[h])));
+  const body = rows.map((r) =>
+    header.map((h) => {
+      const v = r[h];
+      if (h === "ACTIVE" && (v === -1 || v === 0)) return v;
+      if (v === "" || v == null) return EMPTY;
+      return String(v);
+    }),
+  );
   return [header, ...body];
+}
+
+export type VValidViewRow = {
+  car_initial?: string | null;
+  car_number?: string | null;
+  car_type?: string | null;
+  mechanical_designation?: string | null;
+  general_description?: string | null;
+  dot_code?: string | null;
+  lining_material?: string | null;
+  lease_type?: string | null;
+  managed?: string | null;
+  managed_category?: string | null;
+  entity?: string | null;
+  active?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  rider?: string | null;
+  assignment?: string | null;
+  assignment_id?: string | null;
+  lessee?: string | null;
+  old_car_initial?: string | null;
+  old_car_number?: string | null;
+  owner?: string | null;
+  valid_car_id?: string | null;
+  client_id?: string | null;
+  cover_sheet?: string | null;
+  comment?: string | null;
+  update_made?: string | null;
+  update_needed_next_vcf?: string | null;
+};
+
+export function viewRowToExport(r: VValidViewRow): VValidExportRow {
+  const active = r.active === -1 || r.active === 0 ? r.active : EMPTY;
+  return {
+    CAR_INITIAL: cell(r.car_initial),
+    CAR_NUMBER: cell(r.car_number),
+    CAR_TYPE: cell(r.car_type),
+    MECHANICAL_DESIGNATION: cell(r.mechanical_designation),
+    GENERAL_DESCRIPTION: cell(r.general_description),
+    DOT_CODE: cell(r.dot_code),
+    LINING_MATERIAL: cell(r.lining_material),
+    LEASE_TYPE: cell(r.lease_type),
+    MANAGED: cell(r.managed),
+    MANAGED_CATEGORY: cell(r.managed_category),
+    Entity: exportVcfEntity(r.entity),
+    ACTIVE: active,
+    START_DATE: exportVcfDate(r.start_date),
+    END_DATE: exportVcfDate(r.end_date),
+    Rider: cell(r.rider),
+    ASSIGNMENT: cell(r.assignment),
+    ASSIGNMENT_ID: cell(r.assignment_id),
+    Lessee: cell(r.lessee),
+    OLD_CAR_INITIAL: cell(r.old_car_initial),
+    OLD_CAR_NUMBER: cell(r.old_car_number),
+    Owner: cell(r.owner),
+    VALID_CAR_ID: cell(r.valid_car_id),
+    CLIENT_ID: cell(r.client_id),
+    COVER_SHEET: cell(r.cover_sheet),
+    COMMENT: cell(r.comment),
+    "UPDATE MADE": cell(r.update_made),
+    "UPDATE NEEDED NEXT VCF": cell(r.update_needed_next_vcf),
+  };
 }

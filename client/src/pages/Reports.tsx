@@ -3,8 +3,20 @@ import PageHeader from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ClipboardList, Download, FileSpreadsheet } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, apiGet } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+
+type ExportJob = {
+  id: string;
+  status: "running" | "ready" | "error";
+  error?: string;
+  filename?: string;
+  rowCount?: number;
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export default function Reports() {
   const { toast } = useToast();
@@ -13,11 +25,24 @@ export default function Reports() {
   async function exportVValid() {
     setExporting(true);
     try {
-      const res = await apiRequest("GET", "/api/reports/v-valid-cars");
+      const startRes = await apiRequest("POST", "/api/reports/v-valid-cars/jobs");
+      const started = (await startRes.json()) as { id: string };
+      const deadline = Date.now() + 180_000;
+      let job: ExportJob | null = null;
+      while (Date.now() < deadline) {
+        await sleep(1000);
+        job = await apiGet<ExportJob>(`/api/reports/v-valid-cars/jobs/${started.id}`);
+        if (job.status === "ready") break;
+        if (job.status === "error") {
+          throw new Error(job.error || "Export failed");
+        }
+      }
+      if (!job || job.status !== "ready") {
+        throw new Error("Export is still running after 3 minutes. Try again.");
+      }
+      const res = await apiRequest("GET", `/api/reports/v-valid-cars/jobs/${started.id}/file`);
       const blob = await res.blob();
-      const cd = res.headers.get("Content-Disposition") ?? "";
-      const named = /filename="?([^"]+)"?/i.exec(cd);
-      const filename = named?.[1] || `V_VALID_CARS_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const filename = job.filename || `V_VALID_CARS_${new Date().toISOString().slice(0, 10)}.xlsx`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -65,8 +90,9 @@ export default function Reports() {
                 {exporting ? "Building export…" : "Export V_Valid Car File (.xlsx)"}
               </Button>
               <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
-                OLD_CAR_INITIAL / OLD_CAR_NUMBER are matched when a remark’s date equals that period’s
-                start date — a best-effort reconstruction, not a guaranteed row-level link.
+                Builds in the background so the download is not cut off by a proxy timeout. OLD_CAR_INITIAL
+                / OLD_CAR_NUMBER are matched when a remark’s date equals that period’s start date — a
+                best-effort reconstruction, not a guaranteed row-level link.
               </p>
             </div>
           </CardContent>

@@ -32,7 +32,7 @@ type ExportJobRow = {
 };
 
 const KIND = "v_valid_cars";
-const BATCH_SIZE = 3000;
+const BATCH_SIZE = 1000;
 const STORAGE_BUCKET = "rlms-attachments";
 const SQL_HINT =
   "Apply migrations/20260817_export_jobs.sql in the Supabase SQL editor, then retry.";
@@ -135,7 +135,7 @@ async function fetchBatch(src: 1 | 2, afterId: number): Promise<VValidViewRow[]>
     .select(VIEW_SELECT)
     .eq("export_src", src)
     .order("export_id", { ascending: true })
-    .limit(BATCH_SIZE);
+    .range(0, BATCH_SIZE - 1);
   if (afterId > 0) q = q.gt("export_id", afterId);
   const { data, error } = await q;
   if (error) throw error;
@@ -176,9 +176,10 @@ async function runJob(jobId: string) {
           sheet.addRow(values).commit();
           rowCount += 1;
         }
-        afterId = Number(batch[batch.length - 1]?.export_id ?? afterId);
-        logMem(jobId, "batch", { src, afterId, rowCount, batch: batch.length });
-        if (batch.length < BATCH_SIZE) break;
+        const nextId = Number(batch[batch.length - 1]?.export_id);
+        logMem(jobId, "batch", { src, afterId, nextId, rowCount, batch: batch.length });
+        if (!Number.isFinite(nextId) || nextId <= afterId) break;
+        afterId = nextId;
       }
     }
 

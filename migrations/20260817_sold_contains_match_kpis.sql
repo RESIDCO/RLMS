@@ -1,12 +1,7 @@
--- Performance: indexes for Fleet Registry filters + SQL dashboard aggregates.
--- Safe to re-run.
-
-CREATE INDEX IF NOT EXISTS idx_railcars_lessee_name ON public.railcars (lessee_name);
-CREATE INDEX IF NOT EXISTS idx_railcars_car_number ON public.railcars (car_number);
-CREATE INDEX IF NOT EXISTS idx_railcars_reporting_marks ON public.railcars (reporting_marks);
-CREATE INDEX IF NOT EXISTS idx_railcars_assignment_label ON public.railcars (assignment_label);
-CREATE INDEX IF NOT EXISTS idx_railcars_lease_end_date ON public.railcars (lease_end_date);
-CREATE INDEX IF NOT EXISTS idx_railcars_entity_active ON public.railcars (entity, active);
+-- Correct Sold detection: assignment_label ILIKE '%sold%' (primary),
+-- plus rider_external_id = 'SOLD' (secondary). Replaces exact-match-only logic.
+-- Safe to re-run. Dashboard also recomputes these counts in Express if the
+-- function body is temporarily stale.
 
 CREATE OR REPLACE FUNCTION public.rlms_fleet_kpis()
 RETURNS jsonb
@@ -28,8 +23,6 @@ WITH c AS (
     managed_category,
     CASE
       WHEN active IS NOT TRUE THEN NULL
-      -- Sold: assignment_label contains 'sold' (primary), or rider_external_id is exactly SOLD.
-      -- Not sold_to / managed_category / financial import. See shared/fleet-status.ts.
       WHEN coalesce(assignment_label, '') ILIKE '%sold%'
         OR upper(btrim(coalesce(rider_external_id, ''))) = 'SOLD' THEN 'Sold'
       WHEN btrim(coalesce(managed_category, '')) = 'Idle' THEN 'Idle'
@@ -168,6 +161,3 @@ SELECT jsonb_build_object(
 )
 FROM k;
 $$;
-
-GRANT EXECUTE ON FUNCTION public.rlms_fleet_kpis() TO service_role;
-GRANT EXECUTE ON FUNCTION public.rlms_fleet_kpis() TO authenticated;

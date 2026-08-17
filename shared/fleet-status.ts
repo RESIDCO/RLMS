@@ -2,13 +2,14 @@
  * Derived fleet_status for active cars (§5 follow-on).
  * Sold / Idle / Leased are independent checks — never one shared heuristic bucket.
  *
- * - Sold: `rider_external_id` OR `assignment_label` (OR assignment `fleet_name` in TS)
- *   equals the literal string "SOLD" (case-insensitive). These cars stay `active=true`
- *   for repair billing but are excluded from Total Fleet / utilization.
- *   This is NOT `railcars.sold_to`, NOT a managed_category value, and NOT a financial
- *   snapshot comparison — see `isSoldAssignment` and SQL `rlms_fleet_kpis`.
- *   Fragility note: matching is exact after trim/upper — typos, trailing spaces that
- *   survive trim oddly, or alternate labels ("Sold - Buyer") silently miss the Sold bucket.
+ * - Sold (primary): `assignment_label` contains "sold" (case-insensitive), e.g.
+ *   "Sold to Progress Rail", "xOL1707 - SOLD". Confirmed no false-positive labels
+ *   in the active fleet as of 2026-08-17 (7 distinct values, 848 cars).
+ * - Sold (secondary): `rider_external_id` is exactly "SOLD" (kept for data that
+ *   may set the OL code without a sold phrase in the label).
+ * - Also treats assignment `fleet_name` containing "sold" the same way.
+ *   This is NOT `railcars.sold_to`, NOT a managed_category value, and NOT a
+ *   financial snapshot comparison — see `isSoldAssignment` and SQL `rlms_fleet_kpis`.
  * - Idle: `managed_category === 'Idle'` (VCF §4.2 canonical) and not Sold.
  * - Leased: otherwise (any other managed_category / real rider).
  *
@@ -25,18 +26,18 @@ export type FleetStatusInput = {
   managed_category?: string | null;
 };
 
-/** True when the current rider / assignment label is the SOLD marker (~770 cars). */
+/** True when assignment/rider indicates the car is Sold (kept active for billing). */
 export function isSoldAssignment(input: {
   rider_external_id?: string | null;
   assignment_label?: string | null;
   fleet_name?: string | null;
 }): boolean {
+  const label = String(input.assignment_label ?? "").toUpperCase();
+  if (label.includes("SOLD")) return true;
+  const fleet = String(input.fleet_name ?? "").toUpperCase();
+  if (fleet.includes("SOLD")) return true;
   const rider = String(input.rider_external_id ?? "").trim().toUpperCase();
   if (rider === "SOLD") return true;
-  const label = String(input.assignment_label ?? "").trim().toUpperCase();
-  if (label === "SOLD") return true;
-  const fleet = String(input.fleet_name ?? "").trim().toUpperCase();
-  if (fleet === "SOLD") return true;
   return false;
 }
 

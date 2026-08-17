@@ -618,9 +618,8 @@ export default function Dashboard() {
                 testId="kpi-sold"
                 label="Sold"
                 value={data.kpis.sold_count}
-                // Sold = active cars whose rider_external_id or assignment_label is exactly "SOLD"
-                // (see shared/fleet-status.ts + rlms_fleet_kpis). Not sold_to / managed_category.
-                subtext="Active cars labeled SOLD (kept for billing)"
+                // Sold = assignment_label contains "sold" (see shared/fleet-status.ts + rlms_fleet_kpis).
+                subtext="Active cars with sold in assignment label"
                 icon={PackageMinus}
                 accent="warning"
                 onClick={() => navigate("/railcars?filter=sold")}

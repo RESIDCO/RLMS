@@ -655,33 +655,103 @@ export async function registerRoutes(
       }
       const fleet_age = turning50ByYear(ageCars);
 
+      // Correct Sold detection (assignment_label ILIKE '%sold%') may be newer than the
+      // deployed rlms_fleet_kpis() body — recompute fleet composition via PostgREST using
+      // the same rules as shared/fleet-status.ts so dashboard KPIs stay accurate.
+      let fleetKpis = sqlKpis
+        ? {
+            total_fleet: Number(sqlKpis.operating) || 0,
+            active_assignments: Number(sqlKpis.leased_operating) || 0,
+            unassigned_cars: Number(sqlKpis.unassigned) || 0,
+            sold_count: Number(sqlKpis.sold) || 0,
+            idle_count: Number(sqlKpis.idle) || 0,
+            leased_count: Number(sqlKpis.leased) || 0,
+            active_cars_including_sold: Number(sqlKpis.active_including_sold) || 0,
+            rps_total: Number(sqlKpis.rps_total) || 0,
+            rps_assigned: Number(sqlKpis.rps_assigned) || 0,
+            owned_total: Number(sqlKpis.owned_total) || 0,
+            owned_assigned: Number(sqlKpis.owned_assigned) || 0,
+            coal_total: Number(sqlKpis.coal_total) || 0,
+            railcars_scanned: Number(sqlKpis.scanned) || 0,
+          }
+        : null;
+
+      if (sqlKpis) {
+        const headCount = async (make: (q: any) => any) => {
+          let q = db.from("railcars").select("id", { count: "exact", head: true }).eq("active", true);
+          q = make(q);
+          const { count, error } = await q;
+          if (error) throw error;
+          return count ?? 0;
+        };
+        const notSold = (q: any) =>
+          q
+            .or("assignment_label.is.null,assignment_label.not.ilike.%sold%")
+            .or("rider_external_id.is.null,rider_external_id.not.ilike.SOLD");
+        const [soldN, idleN, activeN, ownedTotal, ownedAssigned, rpsTotal, rpsAssigned, coalTotal] =
+          await Promise.all([
+            headCount((q) => q.or("assignment_label.ilike.%sold%,rider_external_id.ilike.SOLD")),
+            headCount((q) => notSold(q.eq("managed_category", "Idle"))),
+            headCount((q) => q),
+            headCount((q) => notSold(q.eq("entity", "Main"))),
+            headCount((q) =>
+              notSold(q.eq("entity", "Main").or("managed_category.is.null,managed_category.neq.Idle")),
+            ),
+            headCount((q) => notSold(q.eq("entity", "Rail Partners Select"))),
+            headCount((q) =>
+              notSold(
+                q
+                  .eq("entity", "Rail Partners Select")
+                  .or("managed_category.is.null,managed_category.neq.Idle"),
+              ),
+            ),
+            headCount((q) => notSold(q.eq("entity", "Coal"))),
+          ]);
+        const operatingN = activeN - soldN;
+        const leasedN = operatingN - idleN;
+        fleetKpis = {
+          ...fleetKpis!,
+          sold_count: soldN,
+          idle_count: idleN,
+          leased_count: leasedN,
+          active_cars_including_sold: activeN,
+          total_fleet: operatingN,
+          active_assignments: leasedN,
+          owned_total: ownedTotal,
+          owned_assigned: ownedAssigned,
+          rps_total: rpsTotal,
+          rps_assigned: rpsAssigned,
+          coal_total: coalTotal,
+        };
+      }
+
       res.json({
-        kpis: sqlKpis
+        kpis: fleetKpis
           ? {
-              total_fleet: Number(sqlKpis.operating) || 0,
-              active_assignments: Number(sqlKpis.leased_operating) || 0,
-              unassigned_cars: Number(sqlKpis.unassigned) || 0,
+              total_fleet: fleetKpis.total_fleet,
+              active_assignments: fleetKpis.active_assignments,
+              unassigned_cars: fleetKpis.unassigned_cars,
               expiring_12mo: expiring12mo,
               expiring_6mo: expiring6mo,
               off_rent_count: Number(sqlKpis.off_rent) || 0,
               undefined_end_car_count: Number(sqlKpis.undefined_end) || 0,
               financial_snapshot_month: latestSnap,
               riders_count: Number(sqlKpis.riders_count) || 0,
-              utilization_pct: sqlUtil(Number(sqlKpis.operating) || 0, Number(sqlKpis.leased_operating) || 0),
-              sold_count: Number(sqlKpis.sold) || 0,
-              idle_count: Number(sqlKpis.idle) || 0,
-              leased_count: Number(sqlKpis.leased) || 0,
-              active_cars_including_sold: Number(sqlKpis.active_including_sold) || 0,
-              rps_total: Number(sqlKpis.rps_total) || 0,
-              rps_assigned: Number(sqlKpis.rps_assigned) || 0,
-              rps_util_pct: sqlUtil(Number(sqlKpis.rps_total) || 0, Number(sqlKpis.rps_assigned) || 0),
-              owned_total: Number(sqlKpis.owned_total) || 0,
-              owned_assigned: Number(sqlKpis.owned_assigned) || 0,
-              owned_util_pct: sqlUtil(Number(sqlKpis.owned_total) || 0, Number(sqlKpis.owned_assigned) || 0),
-              coal_total: Number(sqlKpis.coal_total) || 0,
+              utilization_pct: sqlUtil(fleetKpis.total_fleet, fleetKpis.active_assignments),
+              sold_count: fleetKpis.sold_count,
+              idle_count: fleetKpis.idle_count,
+              leased_count: fleetKpis.leased_count,
+              active_cars_including_sold: fleetKpis.active_cars_including_sold,
+              rps_total: fleetKpis.rps_total,
+              rps_assigned: fleetKpis.rps_assigned,
+              rps_util_pct: sqlUtil(fleetKpis.rps_total, fleetKpis.rps_assigned),
+              owned_total: fleetKpis.owned_total,
+              owned_assigned: fleetKpis.owned_assigned,
+              owned_util_pct: sqlUtil(fleetKpis.owned_total, fleetKpis.owned_assigned),
+              coal_total: fleetKpis.coal_total,
               lessee_count: Array.isArray(fleetSql?.cars_by_fleet) ? fleetSql.cars_by_fleet.length : 0,
               lease_authority: "railcars",
-              railcars_scanned: Number(sqlKpis.scanned) || 0,
+              railcars_scanned: fleetKpis.railcars_scanned,
             }
           : {
           total_fleet: railcars.length,

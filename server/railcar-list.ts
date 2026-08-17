@@ -113,17 +113,19 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
   if (p.transit === "in_transit") query = query.not("transit_status", "is", null);
   if (p.transit === "normal") query = query.is("transit_status", null);
 
-  const soldOr = "rider_external_id.ilike.SOLD,assignment_label.ilike.SOLD";
+  // Sold = assignment_label contains "sold" (primary), or rider_external_id is exactly SOLD.
+  // Keep in sync with shared/fleet-status.ts isSoldAssignment + rlms_fleet_kpis.
+  const soldOr = "assignment_label.ilike.%sold%,rider_external_id.ilike.SOLD";
   if (p.assigned === "sold") {
     query = query.or(soldOr);
   } else if (p.assigned === "offlease") {
     query = query.eq("managed_category", "Idle");
     query = query.or("rider_external_id.is.null,rider_external_id.not.ilike.SOLD");
-    query = query.or("assignment_label.is.null,assignment_label.not.ilike.SOLD");
+    query = query.or("assignment_label.is.null,assignment_label.not.ilike.%sold%");
   } else if (p.assigned === "leased") {
     query = query.or("managed_category.is.null,managed_category.neq.Idle");
     query = query.or("rider_external_id.is.null,rider_external_id.not.ilike.SOLD");
-    query = query.or("assignment_label.is.null,assignment_label.not.ilike.SOLD");
+    query = query.or("assignment_label.is.null,assignment_label.not.ilike.%sold%");
   }
 
   if (p.rider_id) {

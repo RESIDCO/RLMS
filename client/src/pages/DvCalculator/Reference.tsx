@@ -13,6 +13,7 @@ import { Plus } from "lucide-react";
 import DvSubNav from "./DvSubNav";
 import type { AbCodeRow, CarDepRateRow, CostFactorRow, SalvageQuarterRow } from "@/lib/dv/types";
 import { fmtUsd, fmtPct, quarterLabel } from "@/lib/dv/format";
+import { confirmSave } from "@/components/ConfirmActionDialog";
 
 export default function ReferencePage() {
   return (
@@ -83,7 +84,18 @@ function CostFactors() {
           <Button
             size="sm"
             disabled={!year || !factor || mut.isPending}
-            onClick={() => mut.mutate({ year: Number(year), factor: Number(factor), publication_q: Number(pub) || 0, source: "Manual entry" })}
+            onClick={async () => {
+              const y = Number(year);
+              const existing = data.some((r) => r.year === y);
+              if (existing) {
+                const ok = await confirmSave({
+                  title: `Update cost factor for year ${y}?`,
+                  description: "An existing row for this year will be overwritten.",
+                });
+                if (!ok) return;
+              }
+              mut.mutate({ year: y, factor: Number(factor), publication_q: Number(pub) || 0, source: "Manual entry" });
+            }}
             data-testid="button-add-cf"
           >
             <Plus className="h-3.5 w-3.5 mr-1" />Add / Update
@@ -128,14 +140,25 @@ function Salvage() {
             <Button
               size="sm"
               disabled={!f.quarter_code || !f.dismantling_per_gt || mut.isPending}
-              onClick={() => mut.mutate({
-                quarter_code: Number(f.quarter_code),
-                steel_per_lb: Number(f.steel_per_lb) || 0,
-                aluminum_per_lb: Number(f.aluminum_per_lb) || 0,
-                stainless_per_lb: f.stainless_per_lb ? Number(f.stainless_per_lb) : null,
-                dismantling_per_gt: Number(f.dismantling_per_gt) || 0,
-                source: "Manual entry",
-              })}
+              onClick={async () => {
+                const qc = Number(f.quarter_code);
+                const existing = data.some((r) => r.quarter_code === qc);
+                if (existing) {
+                  const ok = await confirmSave({
+                    title: `Update salvage rates for ${quarterLabel(qc)}?`,
+                    description: "An existing row for this quarter will be overwritten.",
+                  });
+                  if (!ok) return;
+                }
+                mut.mutate({
+                  quarter_code: qc,
+                  steel_per_lb: Number(f.steel_per_lb) || 0,
+                  aluminum_per_lb: Number(f.aluminum_per_lb) || 0,
+                  stainless_per_lb: f.stainless_per_lb ? Number(f.stainless_per_lb) : null,
+                  dismantling_per_gt: Number(f.dismantling_per_gt) || 0,
+                  source: "Manual entry",
+                });
+              }}
               data-testid="button-add-sv"
             ><Plus className="h-3.5 w-3.5 mr-1" />Add / Update</Button>
           </div>

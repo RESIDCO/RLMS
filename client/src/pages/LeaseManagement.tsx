@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
+import { useCanEdit, useIsAdmin, usePermissions } from "@/lib/AuthContext";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -14,17 +14,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -65,6 +54,7 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import { formatCalendarDate } from "@shared/lease-authority";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import type {
   MasterLeaseWithRiders,
   RailcarWithAssignment,
@@ -417,30 +407,22 @@ export default function LeaseManagement() {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>}
-                    {isAdmin && <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button size="icon" variant="ghost">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete master lease?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Cannot delete a lease that has riders. Remove the riders
-                            first.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => deleteLease.mutate(lease.id)}
-                          >
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>}
+                    {isAdmin && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={async () => {
+                          const name = lease.lease_number || lease.agreement_number || `lease #${lease.id}`;
+                          const ok = await confirmDelete({
+                            title: `Delete master lease ${name}?`,
+                            description: "Cannot delete a lease that has riders. Remove the riders first.",
+                          });
+                          if (ok) deleteLease.mutate(lease.id);
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -528,30 +510,21 @@ export default function LeaseManagement() {
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>}
-                                {canEdit && <AlertDialog>
-                                  <AlertDialogTrigger asChild>
-                                    <Button size="icon" variant="ghost">
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </AlertDialogTrigger>
-                                  <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                      <AlertDialogTitle>Delete rider?</AlertDialogTitle>
-                                      <AlertDialogDescription>
-                                        Cannot delete a rider with cars assigned. Move
-                                        cars first.
-                                      </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                      <AlertDialogAction
-                                        onClick={() => deleteRider.mutate(rider.id)}
-                                      >
-                                        Delete
-                                      </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                  </AlertDialogContent>
-                                </AlertDialog>}
+                                {canEdit && (
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={async () => {
+                                      const ok = await confirmDelete({
+                                        title: `Delete rider "${rider.rider_name}"?`,
+                                        description: "Cannot delete a rider with cars assigned. Move cars first.",
+                                      });
+                                      if (ok) deleteRider.mutate(rider.id);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
                               </div>
                             </div>
                             {open && (
@@ -765,6 +738,7 @@ function RiderCars({ riderId }: { riderId: number }) {
 
 function RiderContactsPanel({ riderId }: { riderId: number }) {
   const { toast } = useToast();
+  const { canDeleteContacts } = usePermissions();
   const [addOpen, setAddOpen] = useState(false);
   const [editContact, setEditContact] = useState<RiderContact | null>(null);
 
@@ -832,23 +806,22 @@ function RiderContactsPanel({ riderId }: { riderId: number }) {
                 <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditContact(c)}>
                   <Pencil className="h-3 w-3" />
                 </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button size="icon" variant="ghost" className="h-7 w-7">
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Remove contact?</AlertDialogTitle>
-                      <AlertDialogDescription>This will permanently delete {c.name}.</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => deleteContact.mutate(c.id)}>Remove</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                {canDeleteContacts && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    onClick={async () => {
+                      const ok = await confirmDelete({
+                        title: `Delete contact "${c.name}"?`,
+                        description: "This will permanently delete this contact.",
+                      });
+                      if (ok) deleteContact.mutate(c.id);
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             </div>
           ))}
@@ -942,7 +915,19 @@ function ContactForm({
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending || !form.name?.trim()}>
+          <Button
+            onClick={async () => {
+              if (contact) {
+                const ok = await confirmSave({
+                  title: `Save changes to ${form.name?.trim() || contact.name}?`,
+                  description: "Updates will be written to this contact record.",
+                });
+                if (!ok) return;
+              }
+              save.mutate();
+            }}
+            disabled={save.isPending || !form.name?.trim()}
+          >
             {save.isPending ? "Saving…" : contact ? "Save" : "Add Contact"}
           </Button>
         </DialogFooter>
@@ -1083,7 +1068,20 @@ function MasterLeaseForm({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button
+            onClick={async () => {
+              if (lease) {
+                const name = form.lease_number || lease.lease_number || `lease #${lease.id}`;
+                const ok = await confirmSave({
+                  title: `Save changes to ${name}?`,
+                  description: "Master lease details will be updated.",
+                });
+                if (!ok) return;
+              }
+              save.mutate();
+            }}
+            disabled={save.isPending}
+          >
             {save.isPending ? "Saving…" : lease ? "Save" : "Create"}
           </Button>
         </DialogFooter>
@@ -1275,7 +1273,20 @@ function RiderForm({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button
+            onClick={async () => {
+              if (rider) {
+                const name = form.rider_name || rider.rider_name || `rider #${rider.id}`;
+                const ok = await confirmSave({
+                  title: `Save changes to ${name}?`,
+                  description: "Rider details will be updated.",
+                });
+                if (!ok) return;
+              }
+              save.mutate();
+            }}
+            disabled={save.isPending}
+          >
             {save.isPending ? "Saving…" : rider ? "Save" : "Create"}
           </Button>
         </DialogFooter>

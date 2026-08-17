@@ -4,7 +4,8 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider, useAuth } from "@/lib/AuthContext";
+import { AuthProvider, useAuth, usePermissions } from "@/lib/AuthContext";
+import { ConfirmActionHost } from "@/components/ConfirmActionDialog";
 import AppLayout from "@/components/AppLayout";
 import Dashboard from "@/pages/Dashboard";
 import FleetRegistry from "@/pages/FleetRegistry";
@@ -40,6 +41,21 @@ function RedirectAllCars() {
   return <Redirect to={qs ? `/railcars?${qs}` : "/railcars"} />;
 }
 
+function AdminOnlyUsers() {
+  const { isAdmin } = usePermissions();
+  if (!isAdmin) {
+    return (
+      <div className="p-8 max-w-lg">
+        <h1 className="text-lg font-semibold text-foreground mb-2">Admins only</h1>
+        <p className="text-sm text-muted-foreground">
+          User management is restricted to administrators. Contact an admin if you need access granted or changed.
+        </p>
+      </div>
+    );
+  }
+  return <UserManagement />;
+}
+
 function AppRouter() {
   return (
     <Switch>
@@ -59,7 +75,7 @@ function AppRouter() {
       <Route path="/programs" component={Programs} />
       <Route path="/reports" component={Reports} />
       <Route path="/fleet-intelligence" component={Reports} />
-      <Route path="/users" component={UserManagement} />
+      <Route path="/users" component={AdminOnlyUsers} />
       <Route path="/dv" component={DvNewCalculation} />
       <Route path="/dv/history" component={DvHistory} />
       <Route path="/dv/history/:id" component={DvHistory} />
@@ -104,6 +120,7 @@ function App() {
       <TooltipProvider>
         <Toaster />
         <AuthProvider>
+          <ConfirmActionHost />
           <Router hook={useHashLocation}>
             <AuthGate>
               <AppLayout>

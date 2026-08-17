@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Trash2, Search, Download, FileText, Share2, Eye, X } from "lucide-react";
 import DvSubNav from "./DvSubNav";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete } from "@/components/ConfirmActionDialog";
 import { useRoute } from "wouter";
 import type { DvCalculation } from "@/lib/dv/types";
 import { fmtUsd, fmtDate, fmtPct, quarterLabel } from "@/lib/dv/format";
@@ -171,7 +172,15 @@ export default function HistoryPage() {
                               variant="ghost"
                               className="h-7 w-7"
                               title="Delete"
-                              onClick={(e) => { e.stopPropagation(); if (confirm("Delete this calculation?")) del.mutate(it.id); }}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const label = [it.car_initial, it.car_number].filter(Boolean).join(" ") || `#${it.id}`;
+                                const ok = await confirmDelete({
+                                  title: `Delete calculation for ${label}?`,
+                                  description: "This can't be undone.",
+                                });
+                                if (ok) del.mutate(it.id);
+                              }}
                               data-testid={`button-delete-${it.id}`}
                             >
                               <Trash2 className="h-3.5 w-3.5" />

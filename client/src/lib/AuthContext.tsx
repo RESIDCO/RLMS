@@ -208,14 +208,34 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-/** Returns true if the current user can make data changes (admin or editor) */
+/** Returns true if the current user can make fleet/lease/AP/programs data changes (admin or editor) */
 export function useCanEdit() {
-  const { role } = useAuth();
-  return role === "admin" || role === "editor";
+  return usePermissions().canEditFleet;
 }
 
 /** Returns true if the current user can manage users / delete master leases */
 export function useIsAdmin() {
+  return usePermissions().isAdmin;
+}
+
+/** Single source of truth for role capability flags across the UI. */
+export function usePermissions() {
   const { role } = useAuth();
-  return role === "admin";
+  const isAdmin = role === "admin";
+  const isEditor = role === "editor";
+  const isViewer = role === "viewer";
+  const canEditFleet = isAdmin || isEditor;
+  return {
+    role,
+    isAdmin,
+    isEditor,
+    isViewer,
+    canManageUsers: isAdmin,
+    canEditFleet,
+    canDeleteFleet: canEditFleet,
+    canEditContacts: !!role,
+    canDeleteContacts: canEditFleet,
+    canUseDv: !!role,
+    canUsePhotoSearch: !!role,
+  };
 }

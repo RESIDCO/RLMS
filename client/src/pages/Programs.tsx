@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import {
   FolderOpen, Plus, Upload, Trash2, FileText, Image, File,
   Search, ChevronRight, Link2, X, ExternalLink, Pencil,
@@ -287,7 +288,13 @@ export default function ProgramsPage() {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
-                              onClick={() => { if (confirm(`Delete "${p.name}" and all its documents?`)) deleteProgramMut.mutate(p.id); }}
+                              onClick={async () => {
+                                const ok = await confirmDelete({
+                                  title: `Delete "${p.name}" and all its documents?`,
+                                  description: "This can't be undone.",
+                                });
+                                if (ok) deleteProgramMut.mutate(p.id);
+                              }}
                             >
                               <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
                             </DropdownMenuItem>
@@ -437,7 +444,14 @@ function ProgramDetail({
                     </Button>
                     <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
                       title="Remove"
-                      onClick={() => { if (confirm(`Remove "${doc.file_name}"?`)) onDeleteDoc(doc.id); }}
+                      onClick={async () => {
+                        const ok = await confirmDelete({
+                          title: `Remove "${doc.file_name}"?`,
+                          description: "This can't be undone.",
+                          confirmLabel: "Remove",
+                        });
+                        if (ok) onDeleteDoc(doc.id);
+                      }}
                       data-testid={`button-delete-doc-${doc.id}`}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -487,7 +501,16 @@ function ProgramDetail({
                       </TableCell>
                       <TableCell>
                         <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => onUnlinkCar(lc.id)} title="Unlink"
+                          onClick={async () => {
+                            const mark = [lc.railcar?.reporting_marks, lc.railcar?.car_number].filter(Boolean).join(" ") || "this car";
+                            const ok = await confirmDelete({
+                              title: `Unlink ${mark} from this program?`,
+                              description: "The railcar itself is not deleted.",
+                              confirmLabel: "Unlink",
+                            });
+                            if (ok) onUnlinkCar(lc.id);
+                          }}
+                          title="Unlink"
                           data-testid={`button-unlink-car-${lc.id}`}>
                           <X className="h-3.5 w-3.5" />
                         </Button>
@@ -542,6 +565,13 @@ function ProgramFormDialog({
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (isEdit) {
+      const ok = await confirmSave({
+        title: `Save changes to ${name.trim()}?`,
+        description: "Program details will be updated.",
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       const method = isEdit ? "PATCH" : "POST";

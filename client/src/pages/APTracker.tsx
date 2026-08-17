@@ -30,18 +30,9 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import {
   Search,
   Plus,
@@ -420,8 +411,6 @@ function InvoiceDetailSheet({
   const [commOpen, setCommOpen] = useState(false);
   const [disputeForm, setDisputeForm] = useState({ log_date: "", description: "", outcome: "" });
   const [commForm, setCommForm] = useState({ comm_date: "", comm_type: "email", contact_name: "", notes: "" });
-  const [deleteDisputeId, setDeleteDisputeId] = useState<string | null>(null);
-  const [deleteCommId, setDeleteCommId] = useState<string | null>(null);
 
   const { data: inv, isLoading } = useQuery<InvoiceDetail>({
     queryKey: ["/api/invoices", invoiceId],
@@ -443,7 +432,7 @@ function InvoiceDetailSheet({
 
   const delDisputeMut = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/dispute-logs/${id}`).then(r => r.json()),
-    onSuccess: () => { invalidate(); setDeleteDisputeId(null); toast({ title: "Dispute entry removed" }); },
+    onSuccess: () => { invalidate(); toast({ title: "Dispute entry removed" }); },
     onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
   });
 
@@ -456,7 +445,7 @@ function InvoiceDetailSheet({
 
   const delCommMut = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/communications/${id}`).then(r => r.json()),
-    onSuccess: () => { invalidate(); setDeleteCommId(null); toast({ title: "Communication removed" }); },
+    onSuccess: () => { invalidate(); toast({ title: "Communication removed" }); },
     onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
   });
 
@@ -623,7 +612,15 @@ function InvoiceDetailSheet({
                           {c.logged_by && <p className="text-[11px] text-muted-foreground mt-1">Logged by {c.logged_by}</p>}
                           {canEdit && (
                             <button
-                              onClick={() => setDeleteCommId(c.id)}
+                              onClick={async () => {
+                                const ok = await confirmDelete({
+                                  title: "Remove communication entry?",
+                                  description: c.contact_name
+                                    ? `Delete communication with ${c.contact_name} on ${fmtDate(c.comm_date)}? This cannot be undone.`
+                                    : "This cannot be undone.",
+                                });
+                                if (ok) delCommMut.mutate(c.id);
+                              }}
                               className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-error"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -669,7 +666,15 @@ function InvoiceDetailSheet({
                           )}
                           {canEdit && (
                             <button
-                              onClick={() => setDeleteDisputeId(d.id)}
+                              onClick={async () => {
+                                const ok = await confirmDelete({
+                                  title: "Remove dispute entry?",
+                                  description: d.description
+                                    ? `Delete dispute logged ${fmtDate(d.log_date)}? This cannot be undone.`
+                                    : "This cannot be undone.",
+                                });
+                                if (ok) delDisputeMut.mutate(d.id);
+                              }}
                               className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-error"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -760,34 +765,6 @@ function InvoiceDetailSheet({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Delete dispute confirm */}
-      <AlertDialog open={!!deleteDisputeId} onOpenChange={o => !o && setDeleteDisputeId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove dispute entry?</AlertDialogTitle>
-            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleteDisputeId && delDisputeMut.mutate(deleteDisputeId)} className="bg-error hover:bg-error/90">Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Delete comm confirm */}
-      <AlertDialog open={!!deleteCommId} onOpenChange={o => !o && setDeleteCommId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove communication entry?</AlertDialogTitle>
-            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleteCommId && delCommMut.mutate(deleteCommId)} className="bg-error hover:bg-error/90">Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }
@@ -855,7 +832,6 @@ export default function APTracker() {
   const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [showLesseeStats, setShowLesseeStats] = useState(false);
   type SortKey = "lessee_name" | "amount" | "balance" | "due_date" | "overdue";
@@ -922,6 +898,11 @@ export default function APTracker() {
 
   async function handleUpdateInvoice(data: Record<string, any>, pdfFile?: File) {
     if (!editInvoice) return;
+    const ok = await confirmSave({
+      title: `Save changes to invoice ${editInvoice.invoice_number}?`,
+      description: "Invoice details will be updated.",
+    });
+    if (!ok) return;
     setEditSaving(true);
     try {
       await apiRequest("PATCH", `/api/invoices/${editInvoice.id}`, data);
@@ -944,7 +925,7 @@ export default function APTracker() {
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/invoices/${id}`).then(r => r.json()),
-    onSuccess: () => { invalidate(); setDeleteId(null); toast({ title: "Invoice deleted" }); },
+    onSuccess: () => { invalidate(); toast({ title: "Invoice deleted" }); },
     onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
   });
 
@@ -1214,7 +1195,18 @@ export default function APTracker() {
                               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditInvoice(inv)}>
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-error" onClick={() => setDeleteId(inv.id)}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-error"
+                                onClick={async () => {
+                                  const ok = await confirmDelete({
+                                    title: `Delete invoice ${inv.invoice_number}?`,
+                                    description: "This will permanently delete the invoice and all its dispute and communication history. This cannot be undone.",
+                                  });
+                                  if (ok) deleteMut.mutate(inv.id);
+                                }}
+                              >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
@@ -1285,27 +1277,6 @@ export default function APTracker() {
           )}
         </DialogContent>
       </Dialog>
-
-      {/* Delete confirm */}
-      <AlertDialog open={!!deleteId} onOpenChange={o => !o && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete invoice?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete the invoice and all its dispute and communication history. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deleteId && deleteMut.mutate(deleteId)}
-              className="bg-error hover:bg-error/90"
-            >
-              Delete Invoice
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Plus, Trash2, Save, Calculator, AlertCircle, Check, Search, Download, Share2 } from "lucide-react";
 import DvSubNav from "./DvSubNav";
 import { useToast } from "@/hooks/use-toast";
+import { confirmSave } from "@/components/ConfirmActionDialog";
 import { useLocation } from "wouter";
 import type { AbCodeRow, CarDepRateRow, DvResult, EquipmentType, RailcarRow, CalculationPayload } from "@/lib/dv/types";
 import { fmtUsd, fmtPct, fmtDate, quarterLabel, fmtInt } from "@/lib/dv/format";
@@ -149,7 +150,20 @@ export default function NewCalculationPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={resetForm} data-testid="button-reset">Reset</Button>
-          <Button size="sm" disabled={!canSave} onClick={() => saveMut.mutate()} data-testid="button-save">
+          <Button
+            size="sm"
+            disabled={!canSave}
+            onClick={async () => {
+              const label = [form.carInitial, form.carNumber].filter(Boolean).join(" ") || "this calculation";
+              const ok = await confirmSave({
+                title: `Save calculation for ${label}?`,
+                description: "It will be stored in DV History.",
+                confirmLabel: "Save",
+              });
+              if (ok) saveMut.mutate();
+            }}
+            data-testid="button-save"
+          >
             <Save className="h-4 w-4 mr-1.5" />
             {saveMut.isPending ? "Saving…" : "Save"}
           </Button>

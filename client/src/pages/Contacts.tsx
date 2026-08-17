@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/lib/AuthContext";
+import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -130,6 +132,13 @@ function ContactFormDialog({
     e.preventDefault();
     if (!form.name.trim()) return;
     if (!selectedRiderId) return;
+    if (isEdit) {
+      const ok = await confirmSave({
+        title: `Save changes to ${form.name.trim()}?`,
+        description: "Updates will be written to this contact record.",
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -266,11 +275,13 @@ function ContactCard({
   onNavigate,
   onEdit,
   onDelete,
+  canDelete,
 }: {
   contact: Contact;
   onNavigate: (path: string) => void;
   onEdit: (c: Contact) => void;
   onDelete: (c: Contact) => void;
+  canDelete: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const lessee = contact.rider?.master_lease?.lessee ?? null;
@@ -327,13 +338,17 @@ function ContactCard({
                 <DropdownMenuItem onSelect={() => onEdit(contact)} className="gap-2">
                   <Pencil className="h-3.5 w-3.5" /> Edit
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive gap-2"
-                  onSelect={() => onDelete(contact)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </DropdownMenuItem>
+                {canDelete && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive gap-2"
+                      onSelect={() => onDelete(contact)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -400,6 +415,7 @@ export default function Contacts() {
   const [, navigate] = useLocation();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { canDeleteContacts } = usePermissions();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [editContact, setEditContact] = useState<Contact | null>(null);
@@ -428,8 +444,12 @@ export default function Contacts() {
     onError: () => toast({ title: "Failed to delete contact", variant: "destructive" }),
   });
 
-  function handleDelete(c: Contact) {
-    if (confirm(`Delete contact "${c.name}"?`)) deleteMut.mutate(c.id);
+  async function handleDelete(c: Contact) {
+    const ok = await confirmDelete({
+      title: `Delete contact "${c.name}"?`,
+      description: "This can't be undone.",
+    });
+    if (ok) deleteMut.mutate(c.id);
   }
 
   function handleSaved() {
@@ -513,6 +533,7 @@ export default function Contacts() {
                   onNavigate={navigate}
                   onEdit={setEditContact}
                   onDelete={handleDelete}
+                  canDelete={canDeleteContacts}
                 />
               ))}
             </div>

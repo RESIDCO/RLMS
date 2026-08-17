@@ -6,16 +6,6 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   Paperclip,
   Upload,
   Download,
@@ -26,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { confirmDelete } from "@/components/ConfirmActionDialog";
 
 type Attachment = {
   id: number;
@@ -74,7 +65,6 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
   const qc = useQueryClient();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   const qKey = [`/api/attachments/${entityType}/${entityId}`];
@@ -120,11 +110,9 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qKey });
       toast({ title: "Attachment deleted" });
-      setDeletingId(null);
     },
     onError: (err: Error) => {
       toast({ title: "Delete failed", description: err.message, variant: "destructive" });
-      setDeletingId(null);
     },
   });
 
@@ -155,6 +143,14 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
     } finally {
       setDownloadingId(null);
     }
+  }
+
+  async function handleDelete(att: Attachment) {
+    const ok = await confirmDelete({
+      title: `Delete "${att.file_name}"?`,
+      description: "This permanently removes the file from storage. This cannot be undone.",
+    });
+    if (ok) deleteMutation.mutate(att.id);
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -263,7 +259,8 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
                     size="icon"
                     variant="ghost"
                     className="h-6 w-6 text-destructive hover:text-destructive"
-                    onClick={() => setDeletingId(att.id)}
+                    onClick={() => handleDelete(att)}
+                    disabled={deleteMutation.isPending}
                     title="Delete attachment"
                     data-testid={`attachment-delete-${att.id}`}
                   >
@@ -275,28 +272,6 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
           ))}
         </div>
       )}
-
-      {/* Delete confirmation */}
-      <AlertDialog open={deletingId !== null} onOpenChange={(o) => !o && setDeletingId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete attachment?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes the file from storage. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => deletingId !== null && deleteMutation.mutate(deletingId)}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? "Deleting…" : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

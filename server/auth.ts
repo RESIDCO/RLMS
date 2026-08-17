@@ -97,3 +97,66 @@ export async function requireApiAuth(req: Request, res: Response, next: NextFunc
     return res.status(401).json({ error: "Unauthorized" });
   }
 }
+
+export type AppRole = "admin" | "editor" | "viewer";
+export const VALID_ROLES = ["admin", "editor", "viewer"] as const;
+
+export function isValidRole(role: unknown): role is AppRole {
+  return typeof role === "string" && (VALID_ROLES as readonly string[]).includes(role);
+}
+
+async function resolveAuth(
+  req: Request,
+  res: Response,
+): Promise<{ user: AuthUser; role: string } | null> {
+  const user = req.authUser ?? (await getAuthUser(req));
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
+  const role = req.authRole ?? (await getUserRole(user));
+  if (!role) {
+    res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+  return { user, role };
+}
+
+/** Admin only — Users management and a few destructive ops. */
+export async function requireAdmin(req: Request, res: Response): Promise<string | null> {
+  const auth = await resolveAuth(req, res);
+  if (!auth) return null;
+  if (auth.role !== "admin") {
+    res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+  return auth.user.id;
+}
+
+/** Admin or editor — fleet/lease/move/import/programs/AP writes. */
+export async function requireWrite(req: Request, res: Response): Promise<string | null> {
+  const auth = await resolveAuth(req, res);
+  if (!auth) return null;
+  if (auth.role !== "admin" && auth.role !== "editor") {
+    res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+  return auth.user.id;
+}
+
+/** Any role with a user_roles row (admin, editor, or viewer). */
+export async function requireUser(req: Request, res: Response): Promise<string | null> {
+  const auth = await resolveAuth(req, res);
+  if (!auth) return null;
+  return auth.user.id;
+}
+
+/** All roles may add/edit contacts (Viewer carve-out). */
+export async function requireContactsWrite(req: Request, res: Response): Promise<string | null> {
+  return requireUser(req, res);
+}
+
+/** Contact delete is Editor/Admin only — Viewers cannot delete. */
+export async function requireContactsDelete(req: Request, res: Response): Promise<string | null> {
+  return requireWrite(req, res);
+}

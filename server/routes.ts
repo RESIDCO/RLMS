@@ -4,7 +4,19 @@ import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { queryRailcars, parseRailcarListParams } from "./railcar-list";
-import { getAuthUser, getUserRole, normalizeEmail, requireApiAuth } from "./auth";
+import {
+  getAuthUser,
+  getUserRole,
+  normalizeEmail,
+  requireApiAuth,
+  requireAdmin,
+  requireWrite,
+  requireUser,
+  requireContactsWrite,
+  requireContactsDelete,
+  isValidRole,
+  type AppRole,
+} from "./auth";
 import {
   insertMasterLeaseSchema,
   insertRiderSchema,
@@ -1359,7 +1371,7 @@ export async function registerRoutes(
 
   app.post("/api/riders/:id/contacts", async (req, res) => {
     try {
-      const writerId = await requireWrite(req, res);
+      const writerId = await requireContactsWrite(req, res);
       if (!writerId) return;
       const riderId = Number(req.params.id);
       const parsed = insertRiderContactSchema.parse({ ...req.body, rider_id: riderId });
@@ -1373,7 +1385,7 @@ export async function registerRoutes(
   // POST /api/contacts — create a contact directly (rider_id in body)
   app.post("/api/contacts", async (req, res) => {
     try {
-      const writerId = await requireWrite(req, res);
+      const writerId = await requireContactsWrite(req, res);
       if (!writerId) return;
       const parsed = insertRiderContactSchema.parse(req.body);
       const { data, error } = await supabase
@@ -1385,7 +1397,7 @@ export async function registerRoutes(
 
   app.patch("/api/contacts/:id", async (req, res) => {
     try {
-      const writerId = await requireWrite(req, res);
+      const writerId = await requireContactsWrite(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRiderContactSchema.partial().parse(req.body);
@@ -1398,7 +1410,7 @@ export async function registerRoutes(
 
   app.delete("/api/contacts/:id", async (req, res) => {
     try {
-      const writerId = await requireWrite(req, res);
+      const writerId = await requireContactsDelete(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
       const { error } = await supabase.from("rider_contacts").delete().eq("id", id);
@@ -2641,32 +2653,11 @@ export async function registerRoutes(
   // AUTH ROUTES
   // ─────────────────────────────────────────────────────────────
 
-  // Helper: require admin role
-  async function requireAdmin(req: Request, res: Response): Promise<string | null> {
-    const user = req.authUser ?? (await getAuthUser(req));
-    if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    const role = req.authRole ?? (await getUserRole(user));
-    if (role !== "admin") { res.status(403).json({ error: "Forbidden" }); return null; }
-    return user.id;
-  }
-
-  /** Require admin or editor — full read/write on fleet/lease/AP/programs/etc. */
-  async function requireWrite(req: Request, res: Response): Promise<string | null> {
-    const user = req.authUser ?? (await getAuthUser(req));
-    if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    const role = req.authRole ?? (await getUserRole(user));
-    if (role !== "admin" && role !== "editor") {
-      res.status(403).json({ error: "Forbidden" });
-      return null;
-    }
-    return user.id;
-  }
+  // Role helpers (requireAdmin / requireWrite / requireUser / contacts) live in ./auth
 
   const VALID_ROLES = ["admin", "editor", "viewer"] as const;
   type AppRole = (typeof VALID_ROLES)[number];
-  function isValidRole(role: unknown): role is AppRole {
-    return typeof role === "string" && (VALID_ROLES as readonly string[]).includes(role);
-  }
+  // isValidRole imported from ./auth
 
   /** Insert or update user_roles by email (lowercase). Never creates a duplicate. */
   async function saveUserRole(opts: {
@@ -2723,15 +2714,6 @@ export async function registerRoutes(
       .eq("user_id", param)
       .maybeSingle();
     return byUser;
-  }
-
-  /** Require an authenticated user who has a user_roles row. */
-  async function requireUser(req: Request, res: Response): Promise<string | null> {
-    const user = req.authUser ?? (await getAuthUser(req));
-    if (!user) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    const role = req.authRole ?? (await getUserRole(user));
-    if (!role) { res.status(403).json({ error: "Forbidden" }); return null; }
-    return user.id;
   }
 
   // GET /api/auth/me — returns current user's role
@@ -3313,10 +3295,10 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  // Pure-engine calc (no persist)
+  // Pure-engine calc (no persist) — all roles (Viewer carve-out for DV)
   app.post("/api/calculate", async (req, res) => {
     try {
-      const writerId = await requireWrite(req, res);
+      const writerId = await requireUser(req, res);
       if (!writerId) return;
       const ref = await dvLoadReferenceData();
       const { data: abData } = await supabase.from("dv_ab_codes").select("code, rate_basis, rate, max_depreciation");
@@ -3350,7 +3332,7 @@ export async function registerRoutes(
   });
   app.post("/api/calculations", async (req, res) => {
     try {
-      const writerId = await requireWrite(req, res);
+      const writerId = await requireUser(req, res);
       if (!writerId) return;
       const ref = await dvLoadReferenceData();
       const { data: abData } = await supabase.from("dv_ab_codes").select("code, rate_basis, rate, max_depreciation");
@@ -3406,7 +3388,7 @@ export async function registerRoutes(
   });
   app.delete("/api/calculations/:id", async (req, res) => {
     try {
-      const writerId = await requireWrite(req, res);
+      const writerId = await requireUser(req, res);
       if (!writerId) return;
       const { error } = await supabase.from("dv_calculations").delete().eq("id", req.params.id).eq("visitor_id", writerId);
       if (error) throw error; res.json({ ok: true });

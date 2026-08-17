@@ -31,17 +31,6 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Search, Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image } from "lucide-react";
@@ -66,6 +55,7 @@ import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 
 type Row = RailcarWithAssignment;
 
@@ -579,8 +569,13 @@ export default function FleetRegistry() {
   const clearSelection = () => setSelectedIds(new Set());
 
   const bulkUpdateStatus = async (newStatus: string) => {
-    setBulkStatusPending(true);
     const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Update status for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
+      description: `Set status to "${newStatus}".`,
+    });
+    if (!ok) return;
+    setBulkStatusPending(true);
     try {
       await Promise.all(
         ids.map((id) => apiRequest("PATCH", `/api/railcars/${id}`, { status: newStatus }))
@@ -597,8 +592,13 @@ export default function FleetRegistry() {
   };
 
   const bulkUpdateTransit = async (transitStatus: string, label: string) => {
-    setBulkTransitPending(true);
     const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Update transit status for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
+      description: transitStatus === "none" ? "Clear transit/repair flags." : `Flag as "${label}".`,
+    });
+    if (!ok) return;
+    setBulkTransitPending(true);
     try {
       await Promise.all(
         ids.map((id) =>
@@ -620,8 +620,13 @@ export default function FleetRegistry() {
 
   const bulkUpdateValues = async () => {
     if (!bulkNbv.trim() && !bulkOac.trim() && !bulkOec.trim()) return;
-    setBulkValuesPending(true);
     const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Update values for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
+      description: "NBV/OAC/OEC fields will be overwritten on the selected cars.",
+    });
+    if (!ok) return;
+    setBulkValuesPending(true);
     const payload: Record<string, number> = {};
     if (bulkNbv.trim()) payload.nbv = parseFloat(bulkNbv);
     if (bulkOac.trim()) payload.oac = parseFloat(bulkOac);
@@ -1461,26 +1466,22 @@ function CarDetail({
           </Button>
         )}
         {canEdit && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button size="sm" variant="destructive" data-testid="button-delete-car">
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete this railcar?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This cannot be undone. Cars with active assignments cannot be deleted.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={onDelete}>Delete</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <Button
+            size="sm"
+            variant="destructive"
+            data-testid="button-delete-car"
+            onClick={async () => {
+              const mark = [r.reporting_marks, r.car_number].filter(Boolean).join(" ");
+              const ok = await confirmDelete({
+                title: `Delete railcar ${mark}?`,
+                description: "This cannot be undone. Cars with active assignments cannot be deleted.",
+              });
+              if (ok) onDelete();
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
         )}
       </div>
 
@@ -2051,6 +2052,17 @@ function RailcarFormDialog({
       toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
 
+  async function handleSave() {
+    if (car) {
+      const mark = [form.reporting_marks, form.car_number].filter(Boolean).join(" ")
+        || [car.reporting_marks, car.car_number].filter(Boolean).join(" ")
+        || "this railcar";
+      const ok = await confirmSave({ title: `Save changes to ${mark}?` });
+      if (!ok) return;
+    }
+    save.mutate();
+  }
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
@@ -2298,7 +2310,7 @@ function RailcarFormDialog({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button onClick={handleSave} disabled={save.isPending}>
             {save.isPending ? "Saving…" : car ? "Save" : (assignRiderId.trim() ? "Create & Assign" : "Create")}
           </Button>
         </DialogFooter>

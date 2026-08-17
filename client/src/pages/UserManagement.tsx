@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, Trash2, ShieldCheck, Eye, Pencil, MailIcon, KeyRound, Link2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
+import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 
 type AppRole = "admin" | "editor" | "viewer";
 
@@ -76,6 +77,15 @@ export default function UserManagement() {
     onError: () => toast({ title: "Failed to update role", variant: "destructive" }),
   });
 
+  async function handleRoleChange(userId: string, email: string, role: string) {
+    const ok = await confirmSave({
+      title: `Change role for ${email}?`,
+      description: `They will become ${role}.`,
+      confirmLabel: "Change role",
+    });
+    if (ok) updateRole.mutate({ userId, role });
+  }
+
   const removeUser = useMutation({
     mutationFn: async (userId: string) =>
       apiRequest("DELETE", `/api/admin/users/${userId}`, undefined, authHeaders),
@@ -85,6 +95,15 @@ export default function UserManagement() {
     },
     onError: () => toast({ title: "Failed to remove user", variant: "destructive" }),
   });
+
+  async function handleRemoveUser(u: AppUser) {
+    const ok = await confirmDelete({
+      title: `Revoke access for ${u.email}?`,
+      description: "They will no longer be able to sign in to RLMS. This can't be undone from here.",
+      confirmLabel: "Revoke",
+    });
+    if (ok) removeUser.mutate(u.id);
+  }
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -279,7 +298,7 @@ export default function UserManagement() {
                     <td className="px-4 py-3">
                       <Select
                         value={u.role}
-                        onValueChange={(v) => updateRole.mutate({ userId: u.id, role: v })}
+                        onValueChange={(v) => handleRoleChange(u.id, u.email, v)}
                       >
                         <SelectTrigger className="w-28 h-7 text-xs bg-background border-border">
                           <SelectValue />
@@ -333,7 +352,7 @@ export default function UserManagement() {
                           </button>
                         )}
                         <button
-                          onClick={() => removeUser.mutate(u.id)}
+                          onClick={() => handleRemoveUser(u)}
                           className="text-muted-foreground hover:text-destructive transition-colors"
                           data-testid={`button-remove-user-${u.id}`}
                           title="Remove user"
@@ -357,8 +376,12 @@ export default function UserManagement() {
             <p className="text-xs text-muted-foreground">Full access — can add, edit, delete railcars, leases, riders, and manage users.</p>
           </div>
           <div className="flex items-start gap-3">
+            <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5 border-amber-500/40 text-amber-700 dark:text-amber-400">Editor</Badge>
+            <p className="text-xs text-muted-foreground">Full access to view, use, and edit railcars, leases, riders, contacts, and all tools — except managing other users.</p>
+          </div>
+          <div className="flex items-start gap-3">
             <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5">Viewer</Badge>
-            <p className="text-xs text-muted-foreground">Read-only — can view all data and export CSVs, but cannot make changes.</p>
+            <p className="text-xs text-muted-foreground">Read-only for railcars, leases, and other records — can view all data, filter, run reports, and export CSVs. Can also fully use the DV Calculator and Photo Search, and can add or edit contacts.</p>
           </div>
         </div>
       </div>

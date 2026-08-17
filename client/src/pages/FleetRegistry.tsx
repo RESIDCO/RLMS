@@ -51,7 +51,7 @@ import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
-import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate } from "@shared/lease-authority";
+import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate, todayIsoDateOnly } from "@shared/lease-authority";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
@@ -80,6 +80,7 @@ const STATUS_FILTER_OPTIONS = [
   { value: "Leased",            label: "Leased" },
   { value: "Idle",              label: "Idle" },
   { value: "Sold",              label: "Sold" },
+  { value: "Abatement",         label: "Abatement" },
   { value: "Off-Lease",         label: "Off-Lease" },
   { value: "Storage",           label: "Storage" },
   { value: "Bad Order",         label: "Bad Order" },
@@ -267,7 +268,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     "Build Year", "Lining", "Mech Desig.", "DOT Code",
     "Comment / Event Note",
     // Internal columns (post-workbook)
-    "Managed Category", "Reporting Marks", "Status", "Fleet Status", "Transit Status", "Transit Label",
+    "Managed Category", "Reporting Marks", "Car Status", "Rental Status", "Transit Status", "Transit Label",
     "Rider Name", "Schedule #", "MLA Lease #", "Lessor", "Expiration Date",
     "OAC",
   ];
@@ -354,7 +355,8 @@ function parseFleetQuery(searchStr: string): {
     f === "offrent" ||
     f === "sold" ||
     f === "leased" ||
-    f === "offlease"
+    f === "offlease" ||
+    f === "abatement"
       ? f
       : "all";
   const raw = (qs.get("entity") || "").trim().toLowerCase();
@@ -414,6 +416,9 @@ export default function FleetRegistry() {
   const [bulkOac, setBulkOac] = useState("");
   const [bulkOec, setBulkOec] = useState("");
   const [bulkValuesPending, setBulkValuesPending] = useState(false);
+  const [bulkRentalOpen, setBulkRentalOpen] = useState(false);
+  const [bulkRentalTarget, setBulkRentalTarget] = useState<FleetStatus | null>(null);
+  const [bulkRentalEffectiveDate, setBulkRentalEffectiveDate] = useState(todayIsoDateOnly);
   const [page, setPage] = useState(1);
   const pageSize = 75;
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -578,25 +583,27 @@ export default function FleetRegistry() {
     }
   };
 
-  const bulkUpdateFleetStatus = async (next: FleetStatus) => {
+  const bulkUpdateFleetStatus = async () => {
+    if (!bulkRentalTarget) return;
     const ids = Array.from(selectedIds);
-    const ok = await confirmSave({
-      title: `Set fleet status to ${next} for ${ids.length} selected car${ids.length !== 1 ? "s" : ""}?`,
-      description:
-        next === "Sold"
-          ? "Sold / Transferred To is left blank on a bulk change — fill buyer names per car afterward if needed."
-          : `This marks the selected cars as ${next}.`,
-    });
-    if (!ok) return;
+    const next = bulkRentalTarget;
     setBulkFleetStatusPending(true);
     try {
-      await apiRequest("POST", "/api/railcars/bulk-fleet-status", { ids, fleet_status: next });
+      await apiRequest("POST", "/api/railcars/bulk-fleet-status", {
+        ids,
+        fleet_status: next,
+        effective_date: bulkRentalEffectiveDate || todayIsoDateOnly(),
+        moved_by: "bulk-action",
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/history"] });
       toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} set to ${next}` });
+      setBulkRentalOpen(false);
+      setBulkRentalTarget(null);
       clearSelection();
     } catch (e: any) {
-      toast({ title: "Bulk fleet status update failed", description: e.message, variant: "destructive" });
+      toast({ title: "Bulk rental status update failed", description: e.message, variant: "destructive" });
     } finally {
       setBulkFleetStatusPending(false);
     }
@@ -605,8 +612,7 @@ export default function FleetRegistry() {
   const bulkUpdateStatus = async (newStatus: string) => {
     const ids = Array.from(selectedIds);
     const ok = await confirmSave({
-      title: `Update status for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
-      description: `Set status to "${newStatus}".`,
+      title: `Set car status to ${newStatus} for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
     });
     if (!ok) return;
     setBulkStatusPending(true);
@@ -682,8 +688,13 @@ export default function FleetRegistry() {
   };
 
   const bulkAssignRider = async (riderId: number, riderName: string) => {
-    setBulkRiderPending(true);
     const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Assign ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""} to rider ${riderName}?`,
+      description: "This reassigns the internal rider/schedule bucket. Lessee, Rider, and Lease on the list come from the car record and may not change.",
+    });
+    if (!ok) return;
+    setBulkRiderPending(true);
     try {
       await Promise.all(
         ids.map((id) =>
@@ -796,7 +807,7 @@ export default function FleetRegistry() {
           </div>
           <Select value={fleetActiveFilter} onValueChange={(v) => setFleetActiveFilter(v as "active" | "inactive" | "all")}>
             <SelectTrigger className="w-[150px]" data-testid="filter-fleet-active">
-              <SelectValue placeholder="Fleet status" />
+              <SelectValue placeholder="Active / inactive" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="active">Active cars</SelectItem>
@@ -809,7 +820,7 @@ export default function FleetRegistry() {
               <SelectValue placeholder="Service status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All fleet statuses</SelectItem>
+              <SelectItem value="all">All rental statuses</SelectItem>
               {STATUS_FILTER_OPTIONS.map((s) => (
                 <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
               ))}
@@ -856,7 +867,8 @@ export default function FleetRegistry() {
             <SelectContent>
               <SelectItem value="all">All cars</SelectItem>
               <SelectItem value="leased">Leased</SelectItem>
-              <SelectItem value="offlease">Off-lease (Idle)</SelectItem>
+              <SelectItem value="offlease">Idle</SelectItem>
+              <SelectItem value="abatement">Abatement</SelectItem>
               <SelectItem value="assigned">Assigned only</SelectItem>
               <SelectItem value="unassigned">Unassigned only</SelectItem>
               <SelectItem value="offrent">Off Rent</SelectItem>
@@ -963,15 +975,22 @@ export default function FleetRegistry() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" disabled={bulkFleetStatusPending} data-testid="bulk-fleet-status-dropdown">
-                    Set Fleet Status
+                    Set Rental Status
                     <ChevronDown className="ml-1 h-3.5 w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
-                  <DropdownMenuLabel>Leased / Idle / Sold for selected cars</DropdownMenuLabel>
+                  <DropdownMenuLabel>Leased / Idle / Sold / Abatement for selected cars</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {FLEET_STATUSES.map((s) => (
-                    <DropdownMenuItem key={s} onSelect={() => bulkUpdateFleetStatus(s)}>
+                    <DropdownMenuItem
+                      key={s}
+                      onSelect={() => {
+                        setBulkRentalTarget(s);
+                        setBulkRentalEffectiveDate(todayIsoDateOnly());
+                        setBulkRentalOpen(true);
+                      }}
+                    >
                       {s}
                     </DropdownMenuItem>
                   ))}
@@ -981,12 +1000,12 @@ export default function FleetRegistry() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" disabled={bulkStatusPending} data-testid="bulk-status-dropdown">
-                    Set Status
+                    Set Car Status
                     <ChevronDown className="ml-1 h-3.5 w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
-                  <DropdownMenuLabel>Change status for selected cars</DropdownMenuLabel>
+                  <DropdownMenuLabel>Change car status for selected cars</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {STATUS_EDIT_OPTIONS.map((s) => (
                     <DropdownMenuItem key={s.value} onSelect={() => bulkUpdateStatus(s.value)}>
@@ -1083,7 +1102,7 @@ export default function FleetRegistry() {
                   <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell bg-muted/40">
                     Type
                   </th>
-                  <Th label="Fleet Status" k="status" sort={sort} onClick={toggleSort} />
+                  <Th label="Rental Status" k="status" sort={sort} onClick={toggleSort} />
                   <Th label="Lessee" k="fleet" sort={sort} onClick={toggleSort} />
                   <Th label="Rider" k="rider" sort={sort} onClick={toggleSort} />
                   <Th label="Lease" k="lease" sort={sort} onClick={toggleSort} />
@@ -1193,6 +1212,49 @@ export default function FleetRegistry() {
           </div>
         </div>
       </div>
+
+      {/* Bulk rental status dialog */}
+      <Dialog open={bulkRentalOpen} onOpenChange={setBulkRentalOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Set rental status to {bulkRentalTarget} for {selectedIds.size} selected car{selectedIds.size !== 1 ? "s" : ""}?
+            </DialogTitle>
+            <DialogDescription>
+              {bulkRentalTarget === "Sold"
+                ? "Sold / Transferred To is left blank on a bulk change — fill buyer names per car afterward if needed."
+                : bulkRentalTarget === "Abatement"
+                  ? "Abatement keeps the car leased; rent is paused. Active Assignments / Total Fleet counts do not change."
+                  : `This marks the selected cars as ${bulkRentalTarget}.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <Label htmlFor="bulk-rental-effective-date">Effective date</Label>
+              <Input
+                id="bulk-rental-effective-date"
+                type="date"
+                value={bulkRentalEffectiveDate}
+                onChange={(e) => setBulkRentalEffectiveDate(e.target.value)}
+                data-testid="input-bulk-rental-effective-date"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Defaults to today. A past date is stored on the History log. Does not recalculate this month’s rent or depreciation.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setBulkRentalOpen(false)}>Cancel</Button>
+            <Button
+              disabled={!bulkRentalTarget || bulkFleetStatusPending}
+              onClick={bulkUpdateFleetStatus}
+              data-testid="button-confirm-bulk-rental-status"
+            >
+              {bulkFleetStatusPending ? "Saving…" : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Slide-over */}
       {/* Bulk NBV / OAC dialog */}
@@ -1537,8 +1599,8 @@ function CarDetail({
       </div>
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 mt-5 text-sm">
-        <DetailRow label="Fleet Status" value={displayRailcarStatus(displayStatusInputFromRailcar(r))} />
-        <DetailRow label="Status" value={r.status ?? "—"} />
+        <DetailRow label="Rental Status" value={displayRailcarStatus(displayStatusInputFromRailcar(r))} />
+        <DetailRow label="Car Status" value={r.status ?? "—"} />
         <DetailRow label="Car Type" value={r.car_type ?? "—"} />
         <DetailRow label="Mech. Designation" value={(r as any).mechanical_designation ?? "—"} />
         <DetailRow label="General Desc." value={(r as any).general_description ?? "—"} />
@@ -1774,7 +1836,7 @@ function CarDetail({
       <div className="mt-6 border-t border-border pt-5">
         <div className="flex items-center justify-between mb-3">
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-            Rental Status
+            On / Off Rent
           </div>
           <div className="flex items-center gap-2">
             {rentEvents.length > 0 && (
@@ -2181,9 +2243,9 @@ function RailcarFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Status</Label>
+              <Label>Car Status</Label>
               <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select car status" /></SelectTrigger>
                 <SelectContent>
                   {STATUS_EDIT_OPTIONS.map((s) => (
                     <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
@@ -2197,14 +2259,14 @@ function RailcarFormDialog({
             </div>
           </div>
           <div>
-            <Label>Fleet Status</Label>
-            <p className="text-[11px] text-muted-foreground mb-1.5">Is this car leased out, idle, or sold?</p>
+            <Label>Rental Status</Label>
+            <p className="text-[11px] text-muted-foreground mb-1.5">Is this car leased, idle, sold, or on abatement (still leased, rent paused)?</p>
             <Select
               value={form.fleet_status || "Leased"}
               onValueChange={(v) => setForm({ ...form, fleet_status: v as FleetStatus })}
             >
               <SelectTrigger data-testid="select-fleet-status">
-                <SelectValue placeholder="Select fleet status" />
+                <SelectValue placeholder="Select rental status" />
               </SelectTrigger>
               <SelectContent>
                 {FLEET_STATUSES.map((s) => (

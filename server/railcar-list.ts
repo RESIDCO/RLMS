@@ -114,12 +114,14 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
 
   // Fleet status is the stored railcars.fleet_status column (not text-matching).
   const statusFleet =
-    p.status === "Sold" || p.status === "Idle" || p.status === "Leased" || p.status === "Active/In-Service"
+    p.status === "Sold" || p.status === "Idle" || p.status === "Leased" || p.status === "Abatement" || p.status === "Active/In-Service"
       ? p.status === "Sold"
         ? "sold"
         : p.status === "Idle"
           ? "offlease"
-          : "leased"
+          : p.status === "Abatement"
+            ? "abatement"
+            : "leased"
       : null;
   const assignedMode = statusFleet ?? p.assigned;
 
@@ -129,6 +131,8 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
     query = query.eq("fleet_status", "Idle");
   } else if (assignedMode === "leased") {
     query = query.eq("fleet_status", "Leased");
+  } else if (assignedMode === "abatement") {
+    query = query.eq("fleet_status", "Abatement");
   } else if (p.status) {
     query = query.eq("status", p.status);
   }

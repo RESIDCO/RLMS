@@ -22,6 +22,7 @@ import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fle
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { todayIsoDateOnly } from "@shared/lease-authority";
 import type { RailcarWithAssignment } from "@shared/schema";
 
 function Step({
@@ -65,6 +66,7 @@ export default function MoveCars() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [newFleetName, setNewFleetName] = useState("");
   const [reason, setReason] = useState("");
+  const [effectiveDate, setEffectiveDate] = useState(todayIsoDateOnly);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
 
@@ -125,6 +127,7 @@ export default function MoveCars() {
         new_fleet_name: newFleetName.trim() || null,
         reason: reason.trim() || null,
         moved_by: "rlms-ui",
+        effective_date: effectiveDate || null,
       });
     },
     onSuccess: () => {
@@ -138,6 +141,7 @@ export default function MoveCars() {
       setToRiderLabel("");
       setNewFleetName("");
       setReason("");
+      setEffectiveDate(todayIsoDateOnly());
     },
     onError: (e: Error) =>
       toast({ title: "Move failed", description: e.message, variant: "destructive" }),
@@ -232,7 +236,7 @@ export default function MoveCars() {
                           <th className="w-10 px-3 py-2" />
                           <th className="px-3 py-2 font-medium">Marks / Car Number</th>
                           <th className="px-3 py-2 font-medium">Lessee</th>
-                          <th className="px-3 py-2 font-medium">Status</th>
+                          <th className="px-3 py-2 font-medium">Rental Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -319,6 +323,18 @@ export default function MoveCars() {
                   placeholder="e.g. New Assignment"
                   data-testid="input-reason"
                 />
+              </div>
+              <div>
+                <Label>Effective date</Label>
+                <Input
+                  type="date"
+                  value={effectiveDate}
+                  onChange={(e) => setEffectiveDate(e.target.value)}
+                  data-testid="input-effective-date"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Defaults to today. Set a past date to backdate the History log. Does not recalculate this month’s rent or depreciation.
+                </p>
               </div>
             </div>
           </Step>
@@ -410,6 +426,12 @@ export default function MoveCars() {
                 <div className="text-xs">
                   <span className="text-muted-foreground">Reason: </span>
                   <span className="italic">{reason}</span>
+                </div>
+              )}
+              {effectiveDate && (
+                <div className="text-xs">
+                  <span className="text-muted-foreground">Effective date: </span>
+                  <span className="font-mono-num">{effectiveDate}</span>
                 </div>
               )}
               <Button

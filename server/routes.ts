@@ -51,6 +51,7 @@ import {
   isOperatingFleetCar,
   autoFleetStatusFromLegacyText,
   parseFleetStatus,
+  countsAsLeasedForKpi,
   type FleetStatus,
 } from "@shared/fleet-status";
 import {
@@ -60,6 +61,7 @@ import {
   carOlCode,
   parseIsoDateOnly,
   estimatedExpiryDateFromAssetMonths,
+  effectiveDateToTimestamp,
 } from "@shared/lease-authority";
 import {
   MissingExpiryEstimateColumnsError,
@@ -354,7 +356,8 @@ export async function registerRoutes(
       const operatingCarIds = new Set(railcars.map((r: any) => r.id));
       const soldCars = activeCars.filter((r: any) => r.fleet_status === "Sold");
       const idleCars = activeCars.filter((r: any) => r.fleet_status === "Idle");
-      const leasedCars = activeCars.filter((r: any) => r.fleet_status === "Leased");
+      const leasedCars = activeCars.filter((r: any) => countsAsLeasedForKpi(r.fleet_status));
+      const abatementCars = activeCars.filter((r: any) => r.fleet_status === "Abatement");
 
       const assignments = assignmentsRaw.filter((a: any) =>
         operatingCarIds.has(a.railcar_id)
@@ -375,8 +378,8 @@ export async function registerRoutes(
       const rpsCars = railcars.filter((r: any) => r.entity === "Rail Partners Select");
       const ownedCars = railcars.filter((r: any) => r.entity === "Main");
       const coalCars = railcars.filter((r: any) => r.entity === "Coal");
-      const rpsAssigned = rpsCars.filter((r: any) => r.fleet_status === "Leased").length;
-      const ownedAssigned = ownedCars.filter((r: any) => r.fleet_status === "Leased").length;
+      const rpsAssigned = rpsCars.filter((r: any) => countsAsLeasedForKpi(r.fleet_status)).length;
+      const ownedAssigned = ownedCars.filter((r: any) => countsAsLeasedForKpi(r.fleet_status)).length;
       const rpsUtil = rpsCars.length > 0 ? Math.round((rpsAssigned / rpsCars.length) * 1000) / 10 : 0;
       const ownedUtil = ownedCars.length > 0 ? Math.round((ownedAssigned / ownedCars.length) * 1000) / 10 : 0;
 
@@ -667,6 +670,7 @@ export async function registerRoutes(
             sold_count: Number(sqlKpis.sold) || 0,
             idle_count: Number(sqlKpis.idle) || 0,
             leased_count: Number(sqlKpis.leased) || 0,
+            abatement_count: Number(sqlKpis.abatement) || 0,
             active_cars_including_sold: Number(sqlKpis.active_including_sold) || 0,
             rps_total: Number(sqlKpis.rps_total) || 0,
             rps_assigned: Number(sqlKpis.rps_assigned) || 0,
@@ -693,6 +697,7 @@ export async function registerRoutes(
               sold_count: fleetKpis.sold_count,
               idle_count: fleetKpis.idle_count,
               leased_count: fleetKpis.leased_count,
+              abatement_count: fleetKpis.abatement_count,
               active_cars_including_sold: fleetKpis.active_cars_including_sold,
               rps_total: fleetKpis.rps_total,
               rps_assigned: fleetKpis.rps_assigned,
@@ -719,6 +724,7 @@ export async function registerRoutes(
           sold_count: soldCars.length,
           idle_count: idleCars.length,
           leased_count: leasedCars.length,
+          abatement_count: abatementCars.length,
           active_cars_including_sold: activeCars.length,
           rps_total: rpsCars.length,
           rps_assigned: rpsAssigned,
@@ -896,7 +902,7 @@ export async function registerRoutes(
       const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0) : [];
       const fleet_status = parseFleetStatus(req.body?.fleet_status);
       if (!fleet_status) {
-        return res.status(400).json({ message: "fleet_status must be Leased, Idle, or Sold" });
+        return res.status(400).json({ message: "fleet_status must be Leased, Idle, Sold, or Abatement" });
       }
       if (idsRaw.length === 0) {
         return res.status(400).json({ message: "ids required" });
@@ -906,7 +912,14 @@ export async function registerRoutes(
       }
       const uniqueIds = [...new Set(idsRaw)];
       const CHUNK = 200;
+      const movedAt = effectiveDateToTimestamp(
+        typeof req.body?.effective_date === "string" ? req.body.effective_date : null,
+      );
+      const movedBy = typeof req.body?.moved_by === "string" && req.body.moved_by.trim()
+        ? req.body.moved_by.trim()
+        : "bulk-action";
       let updated = 0;
+      const historyRows: any[] = [];
       for (let i = 0; i < uniqueIds.length; i += CHUNK) {
         const slice = uniqueIds.slice(i, i + CHUNK);
         const { data, error } = await supabase
@@ -916,6 +929,35 @@ export async function registerRoutes(
           .select("id");
         if (error) throw error;
         updated += data?.length ?? 0;
+
+        const { data: assigns, error: aErr } = await supabase
+          .from("railcar_assignments")
+          .select("railcar_id, rider_id, fleet_name")
+          .in("railcar_id", slice);
+        if (aErr) throw aErr;
+        const byCar = new Map<number, any>();
+        for (const a of assigns ?? []) byCar.set(a.railcar_id, a);
+        for (const carId of slice) {
+          const prev = byCar.get(carId);
+          historyRows.push({
+            railcar_id: carId,
+            from_rider_id: prev?.rider_id ?? null,
+            to_rider_id: prev?.rider_id ?? null,
+            from_fleet_name: prev?.fleet_name ?? null,
+            to_fleet_name: prev?.fleet_name ?? null,
+            moved_at: movedAt,
+            moved_by: movedBy,
+            reason: `Rental status set to ${fleet_status}`,
+          });
+        }
+      }
+      if (historyRows.length) {
+        for (let i = 0; i < historyRows.length; i += CHUNK) {
+          const { error: hErr } = await supabase
+            .from("assignment_history")
+            .insert(historyRows.slice(i, i + CHUNK));
+          if (hErr) throw hErr;
+        }
       }
       res.json({ ok: true, updated, fleet_status });
     } catch (err) {
@@ -1351,7 +1393,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const input = moveCarsSchema.parse(req.body);
-      const { car_ids, to_rider_id, new_fleet_name, reason, moved_by } = input;
+      const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date } = input;
 
       // verify destination rider exists
       const { data: toRider, error: rErr } = await supabase
@@ -1373,7 +1415,7 @@ export async function registerRoutes(
       for (const a of currentAssigns ?? []) currentByCar.set(a.railcar_id, a);
 
       const historyRows: any[] = [];
-      const movedAt = new Date().toISOString();
+      const movedAt = effectiveDateToTimestamp(effective_date);
 
       for (const carId of car_ids) {
         const prev = currentByCar.get(carId);

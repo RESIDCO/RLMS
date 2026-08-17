@@ -64,6 +64,18 @@ function formatIsoDateOnly(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+export function todayIsoDateOnly(d = new Date()): string {
+  return formatIsoDateOnly(d);
+}
+
+/** Audit-trail timestamp from a date picker. Today (or blank) keeps the real clock; other dates use noon UTC so the calendar day survives US timezones. */
+export function effectiveDateToTimestamp(isoDate: string | null | undefined, now = new Date()): string {
+  const s = String(isoDate ?? "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return now.toISOString();
+  if (s === formatIsoDateOnly(now)) return now.toISOString();
+  return `${s}T12:00:00.000Z`;
+}
+
 /**
  * Asset Report lease-term date used by Dashboard Lease Expiration Timeline
  * and per-car estimated_lease_expiry.

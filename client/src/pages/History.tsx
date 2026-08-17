@@ -56,7 +56,7 @@ export default function HistoryPage() {
         <div className="flex-1 min-h-[240px] rounded-lg border border-card-border bg-card overflow-hidden flex flex-col">
           <div className="flex-1 min-h-0 overflow-auto">
             <table className="w-full text-sm min-w-[700px]">
-              <thead className="sticky top-0 z-10 text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
+              <thead className="sticky top-0 z-10 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr className="text-left">
                   <th
                     className={cn(

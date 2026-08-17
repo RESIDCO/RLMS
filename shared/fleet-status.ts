@@ -1,19 +1,26 @@
 /**
- * Fleet status (Leased / Idle / Sold) — stored on railcars.fleet_status.
+ * Rental status (stored as railcars.fleet_status): Leased / Idle / Sold / Abatement.
  *
  * Idle = still owned by RESIDCO, not currently on rent.
  * Sold  = no longer owned by RESIDCO, still tracked (active) until remarked.
  * Leased = on rent.
+ * Abatement = still leased (lease has not ended); rent is temporarily paused.
+ *   Counts as Leased for Total Fleet / Active Assignments KPI math.
  *
  * Live KPIs and UI read the stored column. Text-matching of assignment_label /
  * managed_category is ONLY for the one-time backfill and for auto-deriving
  * new/updated import rows where fleet_status_source = 'auto'.
  */
 
-export type FleetStatus = "Sold" | "Idle" | "Leased";
+export type FleetStatus = "Sold" | "Idle" | "Leased" | "Abatement";
 export type FleetStatusSource = "auto" | "manual";
 
-export const FLEET_STATUSES: FleetStatus[] = ["Leased", "Idle", "Sold"];
+export const FLEET_STATUSES: FleetStatus[] = ["Leased", "Idle", "Sold", "Abatement"];
+
+/** Abatement is a flag on an otherwise-leased car — include it in Leased KPI buckets. */
+export function countsAsLeasedForKpi(status: FleetStatus | string | null | undefined): boolean {
+  return status === "Leased" || status === "Abatement";
+}
 
 export type FleetStatusInput = {
   active?: boolean | null;
@@ -26,7 +33,7 @@ export type FleetStatusInput = {
 
 export function parseFleetStatus(raw: unknown): FleetStatus | null {
   const s = String(raw ?? "").trim();
-  if (s === "Sold" || s === "Idle" || s === "Leased") return s;
+  if (s === "Sold" || s === "Idle" || s === "Leased" || s === "Abatement") return s;
   return null;
 }
 
@@ -89,7 +96,7 @@ export type DisplayStatusInput = FleetStatusInput & {
 };
 
 /**
- * Badge / column label: stored fleet_status (Leased / Idle / Sold).
+ * Badge / column label: stored fleet_status (Leased / Idle / Sold / Abatement).
  * Inactive cars still show their stored fleet_status — lifecycle Off-Lease
  * stays on railcars.status, not this column.
  */

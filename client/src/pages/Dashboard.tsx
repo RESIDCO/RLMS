@@ -26,6 +26,7 @@ import {
   CalendarClock,
   PackageMinus,
   PauseCircle,
+  TimerOff,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ type CarRow = {
   status: string | null;
   entity: string | null;
   active?: boolean | null;
-  fleet_status?: "Sold" | "Idle" | "Leased" | null;
+  fleet_status?: "Sold" | "Idle" | "Leased" | "Abatement" | null;
   rider_external_id?: string | null;
   assignment_label?: string | null;
   managed_category?: string | null;
@@ -83,6 +84,7 @@ type DashboardData = {
     sold_count: number;
     idle_count?: number;
     leased_count?: number;
+    abatement_count?: number;
     rps_total: number;
     rps_assigned: number;
     rps_util_pct: number;
@@ -313,8 +315,8 @@ function DrillDownDrawer({
 
   const config: Record<NonNullable<DrillKey>, { title: string; description: string }> = {
     total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold). Equals Idle + Active Assignments (+ Unassigned)." },
-    active_assignments: { title: "Active Assignments",   description: "Leased cars in the operating fleet (fleet_status = Leased)" },
-    unassigned_cars:    { title: "Unassigned Cars",      description: "Operating cars with no railcar_assignments row — distinct from Idle (fleet_status)" },
+    active_assignments: { title: "Active Assignments",   description: "Leased cars in the operating fleet (rental status Leased or Abatement)" },
+    unassigned_cars:    { title: "Unassigned Cars",      description: "Operating cars with no railcar_assignments row — distinct from Idle (rental status)" },
     expiring_12mo:      { title: "Expiring <12 months", description: "Rider deals whose Asset Report Lease Exp falls within the next 12 months (not VCF car-level lease_end_date)." },
     riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
     utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
@@ -559,7 +561,7 @@ export default function Dashboard() {
         {/* KPIs — Total Fleet = Idle + Active Assignments (+ Unassigned); Sold is outside operating fleet */}
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0">
           {isLoading ? (
-            Array.from({ length: 10 }).map((_, i) => (
+            Array.from({ length: 11 }).map((_, i) => (
               <Skeleton key={i} className="h-[110px] rounded-lg" />
             ))
           ) : data ? (
@@ -580,6 +582,14 @@ export default function Dashboard() {
                 subtext="Active cars not currently leased"
                 icon={PauseCircle}
                 onClick={() => navigate("/railcars?filter=offlease")}
+              />
+              <KpiCard
+                testId="kpi-abatement"
+                label="Abatement"
+                value={data.kpis.abatement_count ?? 0}
+                subtext="Still leased; rent paused (counts in Active Assignments)"
+                icon={TimerOff}
+                onClick={() => navigate("/railcars?filter=abatement")}
               />
               <KpiCard
                 testId="kpi-active-assignments"
@@ -628,7 +638,7 @@ export default function Dashboard() {
                 testId="kpi-sold"
                 label="Sold"
                 value={data.kpis.sold_count}
-                subtext="fleet_status = Sold (still tracked until remarked)"
+                subtext="Rental status Sold (still tracked until remarked)"
                 icon={PackageMinus}
                 accent="warning"
                 onClick={() => navigate("/railcars?filter=sold")}

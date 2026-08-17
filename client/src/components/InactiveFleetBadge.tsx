@@ -86,6 +86,7 @@ const STATUS_BADGE_MAP: Record<string, string> = {
   Leased: "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
   Sold: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
   Idle: "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  Abatement: "bg-violet-500/15 text-violet-300 border-violet-500/30",
   Storage: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
   "Bad Order": "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
   "Off-Lease": "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
@@ -93,7 +94,7 @@ const STATUS_BADGE_MAP: Record<string, string> = {
   Scrapped: "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
 };
 
-/** STATUS column badge: Leased / Idle / Sold from stored fleet_status. */
+/** STATUS column badge: Leased / Idle / Sold / Abatement from stored fleet_status. */
 export function FleetAwareStatusBadge({
   car,
   className,
@@ -111,6 +112,8 @@ export function FleetAwareStatusBadge({
       ? "Sold — no longer owned by RESIDCO, still tracked until remarked"
       : label === "Idle"
         ? "Idle — still owned by RESIDCO, not currently on rent"
+        : label === "Abatement"
+          ? "Abatement — still leased; rent is temporarily paused"
         : label === "Leased" || label === "Active/In-Service"
           ? "Leased / in revenue service"
           : undefined;

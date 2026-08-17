@@ -657,7 +657,7 @@ function RiderCars({ riderId }: { riderId: number }) {
                   <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Marks</th>
                   <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Car Number</th>
                   <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Lessee</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Status</th>
+                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Rental Status</th>
                   {RC_OPT_COLS.filter(c => visibleCols.has(c.key)).map(c => (
                     <th key={c.key} className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">{c.label}</th>
                   ))}

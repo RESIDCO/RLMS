@@ -402,7 +402,7 @@ export default function SearchPage() {
                     <div>Rider</div>
                     <div>Master Lease</div>
                   </div>
-                  <div className="w-16 text-right">Status</div>
+                  <div className="w-24 text-right">Rental Status</div>
                 </div>
                 {results.railcars.map((car) => (
                   <RailcarRow key={car.id} car={car} />

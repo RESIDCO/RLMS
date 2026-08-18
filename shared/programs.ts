@@ -112,6 +112,31 @@ export function reportFilename(d = new Date()): string {
   return `RLMS_Program_Status_Report_${y}${m}${day}.xlsx`;
 }
 
+/** Bruce's original workbook: Master_Fleet_Project_Status_Report_8112026.xlsx
+ *  Month unpadded, day always 2 digits, year 4 digits, no separators. */
+export function masterReportFilename(d = new Date()): string {
+  const m = String(d.getMonth() + 1);
+  const day = String(d.getDate()).padStart(2, "0");
+  const y = d.getFullYear();
+  return `Master_Fleet_Project_Status_Report_${m}${day}${y}.xlsx`;
+}
+
+export const FLAG_TAG_HINTS = ["Watch", "Priority", "Issue", "Hold"] as const;
+
+export function parseCarPasteList(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of String(raw ?? "").split(/[\s,;]+/)) {
+    const t = part.trim();
+    if (!t) continue;
+    const key = t.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
 export function programPath(id: number): string {
   return `/programs/${id}`;
 }

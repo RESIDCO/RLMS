@@ -11,6 +11,7 @@ import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import {
   addCarsToProgram,
   buildProgramReport,
+  bulkPatchProgramCars,
   carProgramHistory,
   exitCarFromProgram,
   getProgram,
@@ -18,11 +19,14 @@ import {
   listCategories,
   listProgramCarsWithDocs,
   listPrograms,
+  listStatusOptions,
   olProgramHistory,
   parseStatus,
   patchProgramCar,
+  resolveProgramCars,
   logProgramActivity,
 } from "./programs";
+import { masterReportFilename } from "@shared/programs";
 import {
   getAuthUser,
   getUserRole,
@@ -4076,6 +4080,26 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.get("/api/programs/status-options", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const categoryId = Number(req.query.category_id);
+      if (!Number.isFinite(categoryId) || categoryId <= 0) {
+        return res.status(400).json({ error: "category_id is required" });
+      }
+      res.json(await listStatusOptions(categoryId));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/programs/resolve-cars", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const text = String(req.body.text ?? "");
+      const programId = req.body.program_id != null ? Number(req.body.program_id) : null;
+      res.json(await resolveProgramCars({ text, programId }));
+    } catch (err) { errHandler(res, err); }
+  });
+
   app.get("/api/programs/shops", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
@@ -4090,6 +4114,8 @@ export async function registerRoutes(
       if (!(await requireWrite(req, res))) return;
       const name = String(req.body.name ?? "").trim();
       if (!name) return res.status(400).json({ error: "Shop name is required" });
+      const { data: existing } = await supabaseAdmin.from("shops").select("*").ilike("name", name).limit(1);
+      if (existing && existing.length) return res.json(existing[0]);
       const { data, error } = await supabaseAdmin.from("shops").insert({
         name,
         location: req.body.location || null,
@@ -4135,12 +4161,22 @@ export async function registerRoutes(
   app.get("/api/programs/export", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
-      const ids = String(req.query.ids ?? "")
+      const scopeAll = req.query.scope === "all" || req.query.all === "1" || req.query.all === "true";
+      let ids = String(req.query.ids ?? "")
         .split(",")
         .map((s) => Number(s.trim()))
         .filter((n) => Number.isFinite(n) && n > 0);
-      const includeExited = req.query.include_exited === "1" || req.query.include_exited === "true";
-      const { buffer, filename } = await buildProgramReport({ programIds: ids, includeExited });
+      if (scopeAll) {
+        ids = (await listPrograms()).map((p: any) => Number(p.id));
+      }
+      const includeExited = scopeAll
+        ? req.query.include_exited !== "0" && req.query.include_exited !== "false"
+        : req.query.include_exited === "1" || req.query.include_exited === "true";
+      const { buffer, filename } = await buildProgramReport({
+        programIds: ids,
+        includeExited,
+        filename: scopeAll ? masterReportFilename() : undefined,
+      });
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(buffer);
@@ -4215,7 +4251,7 @@ export async function registerRoutes(
       const userId = await requireWrite(req, res);
       if (!userId) return;
       const id = Number(req.params.id);
-      const { data: before } = await supabase.from("programs").select("status, percent_complete, name").eq("id", id).maybeSingle();
+      const { data: before } = await supabaseAdmin.from("programs").select("status, percent_complete, name").eq("id", id).maybeSingle();
       const updates: any = { updated_at: new Date().toISOString() };
       if (req.body.name !== undefined) updates.name = String(req.body.name).trim();
       if (req.body.description !== undefined) updates.description = req.body.description || null;
@@ -4232,7 +4268,7 @@ export async function registerRoutes(
       if (req.body.target_completion_date !== undefined) updates.target_completion_date = req.body.target_completion_date || null;
       if (req.body.opened_date !== undefined) updates.opened_date = req.body.opened_date || null;
       if (req.body.closed_date !== undefined) updates.closed_date = req.body.closed_date || null;
-      const { data, error } = await supabase.from("programs").update(updates).eq("id", id).select().single();
+      const { data, error } = await supabaseAdmin.from("programs").update(updates).eq("id", id).select().single();
       if (error) throw error;
       if (before && updates.status && updates.status !== before.status) {
         await logProgramActivity({
@@ -4343,10 +4379,24 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.post("/api/programs/:id/cars/bulk", async (req, res) => {
+    try {
+      const userId = await requireWrite(req, res);
+      if (!userId) return;
+      const linkIds = Array.isArray(req.body.link_ids) ? req.body.link_ids : [];
+      const updates = req.body.updates && typeof req.body.updates === "object" ? req.body.updates : null;
+      if (!linkIds.length || !updates) {
+        return res.status(400).json({ error: "link_ids and updates required" });
+      }
+      res.json(await bulkPatchProgramCars(Number(req.params.id), linkIds, updates, userId));
+    } catch (err) { errHandler(res, err); }
+  });
+
   app.patch("/api/programs/:id/cars/:linkId", async (req, res) => {
     try {
-      if (!(await requireWrite(req, res))) return;
-      const row = await patchProgramCar(Number(req.params.id), Number(req.params.linkId), req.body);
+      const userId = await requireWrite(req, res);
+      if (!userId) return;
+      const row = await patchProgramCar(Number(req.params.id), Number(req.params.linkId), req.body, userId);
       if (!row) return res.status(404).json({ error: "Car link not found" });
       res.json(row);
     } catch (err) { errHandler(res, err); }
@@ -4365,7 +4415,8 @@ export async function registerRoutes(
   app.get("/api/programs/:id/activity", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
-      res.json(await listActivity(Number(req.params.id)));
+      const programCarId = req.query.program_car_id != null ? Number(req.query.program_car_id) : undefined;
+      res.json(await listActivity(Number(req.params.id), programCarId));
     } catch (err) { errHandler(res, err); }
   });
 

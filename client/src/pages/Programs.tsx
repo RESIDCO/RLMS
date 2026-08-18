@@ -13,9 +13,10 @@ import { useToast } from "@/hooks/use-toast";
 import { confirmDelete } from "@/components/ConfirmActionDialog";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import PageHeader from "@/components/PageHeader";
-import { FolderOpen, Plus, Download, Trash2 } from "lucide-react";
+import { FolderOpen, Plus, Download, Trash2, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { openAppTab, programPath } from "@/lib/browse-nav";
+import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import {
   CATEGORY_BADGE,
   PROGRAM_ENTITIES,
@@ -138,6 +139,14 @@ export default function ProgramsPage() {
     }
   }
 
+  async function exportMaster() {
+    try {
+      await downloadReport("/api/programs/export?scope=all");
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    }
+  }
+
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
@@ -161,6 +170,17 @@ export default function ProgramsPage() {
       />
 
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4">
+        <div className="rounded-xl border border-card-border bg-card p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium">Reports</div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Every program — open, on hold, and complete — as one workbook. No selection needed.
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={exportMaster} data-testid="button-export-master-fleet-report">
+            <FileSpreadsheet className="h-4 w-4" /> Export Master Fleet Project Status Report
+          </Button>
+        </div>
         <div className="flex items-center gap-2 mb-4 flex-wrap">
           <ClearableSearchInput
             className="relative flex-1 min-w-[200px] max-w-sm"
@@ -340,6 +360,7 @@ function CreateProgramDialog({
   const [description, setDescription] = useState("");
   const [target, setTarget] = useState("");
   const [tags, setTags] = useState("");
+  const [cars, setCars] = useState<PickedCar[]>([]);
   const [pending, setPending] = useState(false);
 
   async function save() {
@@ -359,6 +380,13 @@ function CreateProgramDialog({
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       });
       const row = await res.json();
+      if (cars.length) {
+        try {
+          await apiRequest("POST", `/api/programs/${row.id}/cars`, { railcar_ids: cars.map((c) => c.id) });
+        } catch (e: any) {
+          toast({ title: "Program created, but cars could not be added", description: e.message, variant: "destructive" });
+        }
+      }
       onCreated(row.id);
       setName("");
       setCategoryId("");
@@ -367,6 +395,7 @@ function CreateProgramDialog({
       setDescription("");
       setTarget("");
       setTags("");
+      setCars([]);
     } catch (e: any) {
       toast({ title: "Could not create program", description: e.message, variant: "destructive" });
     } finally {
@@ -376,7 +405,7 @@ function CreateProgramDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New program</DialogTitle>
           <DialogDescription>Category chooses which car-level fields this program uses.</DialogDescription>
@@ -426,6 +455,11 @@ function CreateProgramDialog({
           <div>
             <Label className="text-xs">Description</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          </div>
+          <div className="border-t border-border pt-3">
+            <Label className="text-xs">Add cars now (optional)</Label>
+            <p className="text-[11px] text-muted-foreground mb-2">Skip this if you want to add cars later from Program Detail.</p>
+            <ProgramCarPicker value={cars} onChange={setCars} />
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>

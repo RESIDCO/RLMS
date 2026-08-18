@@ -1,10 +1,12 @@
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
+import { splitCarNumber } from "@shared/residco-import";
 import {
   excelSheetName,
   formatCustomField,
   isCustomFieldPopulated,
   isProgramStatus,
+  parseCarPasteList,
   reportFilename,
   type ProgramFieldDef,
   type ProgramStatus,
@@ -20,7 +22,7 @@ program_documents(id)
 `.replace(/\s+/g, " ").trim();
 
 const CAR_SELECT = `
-id, program_id, railcar_id, status, notes, joined_date, exited_date,
+id, program_id, railcar_id, status, notes, flag_tag, joined_date, exited_date,
 rider_external_id_snapshot, shop_id, scrap_yard_id, repair_cost_total, custom_fields, added_at,
 railcar:railcars(id, car_number, reporting_marks, car_type, status, entity, active, rider_external_id, lessee_name),
 shop:shops(id, name, location),
@@ -226,10 +228,21 @@ export async function exitCarFromProgram(programId: number, linkId: number, acto
   return data;
 }
 
+function mapProgramCarRow(data: any) {
+  return {
+    ...data,
+    railcar: Array.isArray(data.railcar) ? data.railcar[0] ?? null : data.railcar,
+    shop: Array.isArray(data.shop) ? data.shop[0] ?? null : data.shop,
+    scrap_yard: Array.isArray(data.scrap_yard) ? data.scrap_yard[0] ?? null : data.scrap_yard,
+    custom_fields: data.custom_fields && typeof data.custom_fields === "object" ? data.custom_fields : {},
+  };
+}
+
 export async function patchProgramCar(
   programId: number,
   linkId: number,
   body: Record<string, unknown>,
+  actor: string | null = null,
 ) {
   const { data: existing, error: getErr } = await supabaseAdmin
     .from("program_cars")
@@ -240,8 +253,9 @@ export async function patchProgramCar(
   if (getErr) throw getErr;
   if (!existing) return null;
   const updates: Record<string, unknown> = {};
-  if (body.status !== undefined) updates.status = body.status === "" ? null : body.status;
+  if (body.status !== undefined) updates.status = body.status === "" ? null : String(body.status);
   if (body.notes !== undefined) updates.notes = body.notes === "" ? null : body.notes;
+  if (body.flag_tag !== undefined) updates.flag_tag = body.flag_tag === "" ? null : String(body.flag_tag);
   if (body.shop_id !== undefined) updates.shop_id = body.shop_id === "" || body.shop_id == null ? null : Number(body.shop_id);
   if (body.scrap_yard_id !== undefined) {
     updates.scrap_yard_id = body.scrap_yard_id === "" || body.scrap_yard_id == null ? null : Number(body.scrap_yard_id);
@@ -262,22 +276,147 @@ export async function patchProgramCar(
     .select(CAR_SELECT)
     .single();
   if (error) throw error;
+  if (updates.status !== undefined) {
+    const from = existing.status ?? null;
+    const to = updates.status ?? null;
+    if (String(from ?? "") !== String(to ?? "")) {
+      await logProgramActivity({
+        program_id: programId,
+        action: "status_change",
+        actor,
+        program_car_id: linkId,
+        railcar_id: existing.railcar_id,
+        detail: { from, to },
+      });
+    }
+  }
   await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", programId);
-  return {
-    ...data,
-    railcar: Array.isArray((data as any).railcar) ? (data as any).railcar[0] ?? null : (data as any).railcar,
-    shop: Array.isArray((data as any).shop) ? (data as any).shop[0] ?? null : (data as any).shop,
-    scrap_yard: Array.isArray((data as any).scrap_yard) ? (data as any).scrap_yard[0] ?? null : (data as any).scrap_yard,
-  };
+  return mapProgramCarRow(data);
 }
 
-export async function listActivity(programId: number) {
+export async function bulkPatchProgramCars(
+  programId: number,
+  linkIds: number[],
+  body: Record<string, unknown>,
+  actor: string | null,
+) {
+  const ids = [...new Set(linkIds.map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+  let updated = 0;
+  for (const linkId of ids) {
+    const row = await patchProgramCar(programId, linkId, body, actor);
+    if (row) updated += 1;
+  }
+  return { updated };
+}
+
+export async function listStatusOptions(categoryId: number) {
   const { data, error } = await supabaseAdmin
+    .from("program_status_options")
+    .select("id, category_id, value, sort_order")
+    .eq("category_id", categoryId)
+    .eq("active", true)
+    .order("sort_order", { ascending: true })
+    .order("value", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+function normCarNumber(n: string): string {
+  const s = String(n ?? "").replace(/^0+/, "");
+  return s || "0";
+}
+
+function carLabel(c: { reporting_marks?: string | null; car_number?: string | null }): string {
+  return [c.reporting_marks, c.car_number].filter(Boolean).join(" ");
+}
+
+export async function resolveProgramCars(opts: { text: string; programId?: number | null }) {
+  const tokens = parseCarPasteList(opts.text);
+  const matched: { token: string; railcar_id: number; label: string }[] = [];
+  const notFound: { token: string; reason?: string }[] = [];
+  const already: { token: string; railcar_id: number; label: string }[] = [];
+  const ambiguous: { token: string; matches: { railcar_id: number; label: string }[] }[] = [];
+  if (!tokens.length) return { matched, not_found: notFound, already_in_program: already, ambiguous };
+
+  const parsed = tokens.map((token) => {
+    const split = splitCarNumber(token);
+    return { token, marks: split.reporting_marks, number: split.car_number };
+  });
+  const numbers = [...new Set(parsed.map((p) => p.number).filter(Boolean))];
+  const numberVariants = new Set<string>();
+  for (const n of numbers) {
+    numberVariants.add(n);
+    numberVariants.add(normCarNumber(n));
+    if (/^\d+$/.test(n)) numberVariants.add(n.padStart(6, "0"));
+  }
+
+  const byId = new Map<number, any>();
+  const variantList = [...numberVariants];
+  for (let i = 0; i < variantList.length; i += 80) {
+    const slice = variantList.slice(i, i + 80);
+    const { data, error } = await supabaseAdmin
+      .from("railcars")
+      .select("id, car_number, reporting_marks, car_initial")
+      .in("car_number", slice);
+    if (error) throw error;
+    for (const c of data ?? []) byId.set(Number(c.id), c);
+  }
+  const candidates = [...byId.values()];
+
+  const openIds = new Set<number>();
+  if (opts.programId && Number.isFinite(opts.programId)) {
+    const { data: openRows, error: openErr } = await supabaseAdmin
+      .from("program_cars")
+      .select("railcar_id")
+      .eq("program_id", opts.programId)
+      .is("exited_date", null);
+    if (openErr) throw openErr;
+    for (const r of openRows ?? []) openIds.add(Number((r as any).railcar_id));
+  }
+
+  for (const p of parsed) {
+    if (!p.number) {
+      notFound.push({ token: p.token, reason: "no car number" });
+      continue;
+    }
+    const wantNum = normCarNumber(p.number);
+    const wantMark = p.marks ? p.marks.toUpperCase() : null;
+    const hits = candidates.filter((c) => {
+      if (normCarNumber(String(c.car_number ?? "")) !== wantNum) return false;
+      if (!wantMark) return true;
+      const rm = String(c.reporting_marks ?? "").trim().toUpperCase();
+      const ci = String(c.car_initial ?? "").trim().toUpperCase();
+      return rm === wantMark || ci === wantMark;
+    });
+    if (hits.length === 0) {
+      notFound.push({ token: p.token });
+      continue;
+    }
+    if (hits.length > 1) {
+      ambiguous.push({
+        token: p.token,
+        matches: hits.map((c) => ({ railcar_id: Number(c.id), label: carLabel(c) })),
+      });
+      continue;
+    }
+    const car = hits[0];
+    const row = { token: p.token, railcar_id: Number(car.id), label: carLabel(car) };
+    if (openIds.has(row.railcar_id)) already.push(row);
+    else matched.push(row);
+  }
+
+  return { matched, not_found: notFound, already_in_program: already, ambiguous };
+}
+
+export async function listActivity(programId: number, programCarId?: number) {
+  let q = supabaseAdmin
     .from("program_activity")
     .select("*, railcar:railcars(id, car_number, reporting_marks)")
     .eq("program_id", programId)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(500);
+  if (programCarId && Number.isFinite(programCarId)) q = q.eq("program_car_id", programCarId);
+  const { data, error } = await q;
   if (error) throw error;
   return (data ?? []).map((row: any) => ({
     ...row,
@@ -376,13 +515,14 @@ function coreCarColumns() {
     { key: "marks", label: "Reporting marks" },
     { key: "car_number", label: "Car number" },
     { key: "status", label: "Status" },
+    { key: "flag_tag", label: "Flag" },
+    { key: "notes", label: "Notes" },
     { key: "joined_date", label: "Joined" },
     { key: "exited_date", label: "Exited" },
     { key: "ol_snapshot", label: "OL (at entry)" },
     { key: "ol_current", label: "OL (current)" },
     { key: "shop", label: "Shop" },
     { key: "repair_cost_total", label: "Repair cost total" },
-    { key: "notes", label: "Notes" },
   ] as const;
 }
 
@@ -395,6 +535,10 @@ function carExportValue(row: any, key: string): string {
       return r.car_number ?? "";
     case "status":
       return row.status ?? "";
+    case "flag_tag":
+      return row.flag_tag ?? "";
+    case "notes":
+      return row.notes ?? "";
     case "joined_date":
       return row.joined_date ? String(row.joined_date).slice(0, 10) : "";
     case "exited_date":
@@ -407,8 +551,6 @@ function carExportValue(row: any, key: string): string {
       return row.shop?.name ?? "";
     case "repair_cost_total":
       return row.repair_cost_total != null ? String(row.repair_cost_total) : "";
-    case "notes":
-      return row.notes ?? "";
     default:
       return "";
   }
@@ -417,6 +559,7 @@ function carExportValue(row: any, key: string): string {
 export async function buildProgramReport(opts: {
   programIds: number[];
   includeExited: boolean;
+  filename?: string;
 }): Promise<{ buffer: Buffer; filename: string }> {
   const ids = [...new Set(opts.programIds.filter((id) => Number.isFinite(id)))];
   if (!ids.length) throw new Error("Select at least one program");
@@ -480,7 +623,7 @@ export async function buildProgramReport(opts: {
   }
 
   const buffer = Buffer.from(await wb.xlsx.writeBuffer());
-  return { buffer, filename: reportFilename() };
+  return { buffer, filename: opts.filename ?? reportFilename() };
 }
 
 export function parseStatus(raw: unknown, fallback: ProgramStatus = "open"): ProgramStatus {

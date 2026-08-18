@@ -763,7 +763,6 @@ export function financialRowToDbPayload(r: FinancialParsedRow): Record<string, u
     lease_end_residual_total: r.lease_end_residual_total,
     lease_end_residual_per_asset: r.lease_end_residual_per_asset,
     months_until_lease_exp: r.months_until_lease_exp,
-    lease_exp_date: r.lease_exp_date,
     deal_resp: r.deal_resp,
     lender: r.lender,
     liability_insurance_exp: r.liability_insurance_exp,

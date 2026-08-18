@@ -7,7 +7,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { displayLeaseNumber } from "@shared/residco-import";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Columns3 } from "lucide-react";
 import {
   ENTITY_SLUGS,
   entityOlCarPath,
@@ -17,10 +17,23 @@ import {
   lesseeOlPath,
   lesseePath,
   olCarPath,
-  turning50CarPath,
+  turning50OlCarPath,
+  turning50OlPath,
+  turning50Path,
   openAppTab,
   programPath,
 } from "@/lib/browse-nav";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 
 type RiderRow = {
@@ -56,7 +69,8 @@ type GroupPayload = {
 };
 
 type OlPayload = RiderRow & { cars: CarRow[] };
-type TurningPayload = { year: number; build_year: number; car_count: number; cars: CarRow[] };
+type TurningYearPayload = { year: number; build_year: number; car_count: number; riders: RiderRow[] };
+type TurningOlPayload = RiderRow & { year: number; build_year: number; cars: CarRow[] };
 
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
   "Rail Partners Select": { label: "RPS", cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30" },
@@ -100,6 +114,15 @@ function Breadcrumb({ items }: { items: { href?: string; label: string }[] }) {
   );
 }
 
+const BROWSE_CAR_OPT_COLS = [
+  { key: "entity", label: "Entity" },
+  { key: "status", label: "Status" },
+  { key: "type", label: "Type" },
+  { key: "lessee", label: "Lessee" },
+  { key: "ol", label: "OL" },
+] as const;
+const BROWSE_CAR_DEFAULT_COLS = new Set(["entity", "status", "type"]);
+
 function CarTable({
   cars,
   hrefFor,
@@ -107,39 +130,101 @@ function CarTable({
   cars: CarRow[];
   hrefFor: (c: CarRow) => string;
 }) {
+  const { visibleCols, toggleCol, resetCols, prefsLoaded } = useColumnPrefs(
+    "browse_car_list",
+    BROWSE_CAR_DEFAULT_COLS,
+  );
+  const show = (key: string) => visibleCols.has(key);
+
   return (
-    <div className="rounded-xl border border-card-border bg-card overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-muted/40 text-muted-foreground">
-            <tr>
-              <th className="px-4 py-2.5 text-left font-medium">Marks</th>
-              <th className="px-4 py-2.5 text-left font-medium">Car #</th>
-              <th className="px-4 py-2.5 text-left font-medium">Entity</th>
-              <th className="px-4 py-2.5 text-left font-medium">Status</th>
-              <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Type</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cars.map((c) => (
-              <tr key={c.id} className="border-t border-border/50 hover:bg-muted/30">
-                <td className="px-4 py-2.5 font-mono text-muted-foreground">{c.reporting_marks ?? "—"}</td>
-                <td className="px-4 py-2.5 font-mono font-semibold">
-                  <Link href={hrefFor(c)} className="hover:text-primary">
-                    {c.car_number}
-                  </Link>
-                </td>
-                <td className="px-4 py-2.5">
-                  <EntityBadge entity={c.entity} />
-                </td>
-                <td className="px-4 py-2.5">
-                  {displayRailcarStatus(displayStatusInputFromRailcar(c as any))}
-                </td>
-                <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">{c.car_type ?? "—"}</td>
-              </tr>
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+              <Columns3 className="h-3.5 w-3.5" />
+              Columns
+              {!prefsLoaded ? (
+                <span className="h-3.5 w-3.5 rounded-full bg-muted animate-pulse" />
+              ) : visibleCols.size > 0 ? (
+                <span className="ml-0.5 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none">
+                  {visibleCols.size}
+                </span>
+              ) : null}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              Optional columns
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {BROWSE_CAR_OPT_COLS.map(({ key, label }) => (
+              <DropdownMenuCheckboxItem
+                key={key}
+                checked={visibleCols.has(key)}
+                onCheckedChange={() => toggleCol(key)}
+              >
+                {label}
+              </DropdownMenuCheckboxItem>
             ))}
-          </tbody>
-        </table>
+            {visibleCols.size > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-xs text-muted-foreground" onClick={() => resetCols()}>
+                  Reset to default
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="rounded-xl border border-card-border bg-card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/40 text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-medium">Marks</th>
+                <th className="px-4 py-2.5 text-left font-medium">Car #</th>
+                {show("entity") && <th className="px-4 py-2.5 text-left font-medium">Entity</th>}
+                {show("status") && <th className="px-4 py-2.5 text-left font-medium">Status</th>}
+                {show("type") && <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Type</th>}
+                {show("lessee") && <th className="px-4 py-2.5 text-left font-medium">Lessee</th>}
+                {show("ol") && <th className="px-4 py-2.5 text-left font-medium">OL</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {cars.map((c) => (
+                <tr key={c.id} className="border-t border-border/50 hover:bg-muted/30">
+                  <td className="px-4 py-2.5 font-mono text-muted-foreground">{c.reporting_marks ?? "—"}</td>
+                  <td className="px-4 py-2.5 font-mono font-semibold">
+                    <Link href={hrefFor(c)} className="hover:text-primary">
+                      {c.car_number}
+                    </Link>
+                  </td>
+                  {show("entity") && (
+                    <td className="px-4 py-2.5">
+                      <EntityBadge entity={c.entity} />
+                    </td>
+                  )}
+                  {show("status") && (
+                    <td className="px-4 py-2.5">
+                      {displayRailcarStatus(displayStatusInputFromRailcar(c as any))}
+                    </td>
+                  )}
+                  {show("type") && (
+                    <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">{c.car_type ?? "—"}</td>
+                  )}
+                  {show("lessee") && (
+                    <td className="px-4 py-2.5 text-muted-foreground">{c.lessee_name ?? "—"}</td>
+                  )}
+                  {show("ol") && (
+                    <td className="px-4 py-2.5 font-mono">{c.rider_external_id ?? "—"}</td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -316,7 +401,7 @@ function OlView({
 }
 
 function TurningView({ year }: { year: number }) {
-  const { data, isLoading, error } = useQuery<TurningPayload>({
+  const { data, isLoading, error } = useQuery<TurningYearPayload>({
     queryKey: ["/api/browse/turning50", year],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/browse/turning50?year=${year}`);
@@ -327,7 +412,7 @@ function TurningView({ year }: { year: number }) {
     <>
       <PageHeader
         title={`Turning 50 in ${year}`}
-        subtitle={`${(data?.car_count ?? 0).toLocaleString()} active cars · build year ${year - 50}`}
+        subtitle={`${(data?.car_count ?? 0).toLocaleString()} active cars · build year ${year - 50} · ${(data?.riders?.length ?? 0).toLocaleString()} OLs`}
       />
       <div className="px-4 sm:px-8 py-5">
         <Breadcrumb items={[{ href: "/", label: "Dashboard" }, { label: `Turning 50 in ${year}` }]} />
@@ -335,8 +420,85 @@ function TurningView({ year }: { year: number }) {
           <Skeleton className="h-48 rounded-xl" />
         ) : error ? (
           <p className="text-sm text-destructive">{String((error as Error).message)}</p>
+        ) : !data?.riders?.length ? (
+          <p className="text-sm text-muted-foreground">No cars turning 50 in this year.</p>
         ) : (
-          <CarTable cars={data?.cars ?? []} hrefFor={(c) => turning50CarPath(year, c.id)} />
+          <div className="rounded-xl border border-card-border bg-card overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2.5 text-left font-medium">OL / Rider</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Effective</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Expires</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Cars</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.riders.map((r) => (
+                  <tr key={r.ol} className="border-t border-border/50 hover:bg-muted/30">
+                    <td className="px-4 py-2.5">
+                      <Link href={turning50OlPath(year, r.ol)} className="font-medium hover:text-primary">
+                        {r.ol}
+                      </Link>
+                      {r.rider_name && r.rider_name !== r.ol && (
+                        <div className="text-[11px] text-muted-foreground mt-0.5">{r.rider_name}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 capitalize text-muted-foreground">{r.lease_type ?? "—"}</td>
+                    <td className="px-4 py-2.5 font-mono-num">{formatCalendarDate(r.effective_date)}</td>
+                    <td className="px-4 py-2.5 font-mono-num">{formatCalendarDate(r.expiration_date)}</td>
+                    <td className="px-4 py-2.5 text-right font-mono-num">{r.car_count.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function TurningOlView({ year, ol }: { year: number; ol: string }) {
+  const { data, isLoading, error } = useQuery<TurningOlPayload>({
+    queryKey: ["/api/browse/turning50", year, ol],
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/browse/turning50?year=${year}&ol=${encodeURIComponent(ol)}`,
+      );
+      return res.json();
+    },
+  });
+  return (
+    <>
+      <PageHeader
+        title={data?.ol ?? ol}
+        subtitle={`${(data?.car_count ?? 0).toLocaleString()} cars turning 50 in ${year}${data?.lease_type ? ` · ${data.lease_type}` : ""}`}
+      />
+      <div className="px-4 sm:px-8 py-5">
+        <Breadcrumb
+          items={[
+            { href: "/", label: "Dashboard" },
+            { href: turning50Path(year), label: `Turning 50 in ${year}` },
+            { label: data?.ol ?? ol },
+          ]}
+        />
+        {data && (
+          <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <Meta label="Lease type" value={data.lease_type} />
+            <Meta label="Effective" value={formatCalendarDate(data.effective_date)} />
+            <Meta label="Expires" value={formatCalendarDate(data.expiration_date)} />
+            <Meta label="MLA" value={displayLeaseNumber(data.lease_number) || "—"} />
+          </div>
+        )}
+        {isLoading ? (
+          <Skeleton className="h-48 rounded-xl" />
+        ) : error ? (
+          <p className="text-sm text-destructive">{String((error as Error).message)}</p>
+        ) : (
+          <CarTable cars={data?.cars ?? []} hrefFor={(c) => turning50OlCarPath(year, ol, c.id)} />
         )}
       </div>
     </>
@@ -358,6 +520,7 @@ export default function FleetBrowsePage() {
   const [entityOl, entityOlParams] = useRoute("/browse/entity/:entity/ol/:ol");
   const [entityOnly, entityParams] = useRoute("/browse/entity/:entity");
   const [olOnly, olParams] = useRoute("/browse/ol/:ol");
+  const [t50Ol, t50OlParams] = useRoute("/browse/turning50/:year/ol/:ol");
   const [t50, t50Params] = useRoute("/browse/turning50/:year");
 
   if (lesseeOl && lesseeOlParams) {
@@ -374,6 +537,9 @@ export default function FleetBrowsePage() {
   }
   if (olOnly && olParams) {
     return <OlView ol={decodeURIComponent(olParams.ol)} />;
+  }
+  if (t50Ol && t50OlParams) {
+    return <TurningOlView year={Number(t50OlParams.year)} ol={decodeURIComponent(t50OlParams.ol)} />;
   }
   if (t50 && t50Params) {
     return <TurningView year={Number(t50Params.year)} />;

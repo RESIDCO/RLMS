@@ -204,13 +204,35 @@ export async function browseOl(code: string, filter?: { lessee?: string; entity?
   };
 }
 
-export async function browseTurning50(year: number) {
+export async function browseTurning50(year: number, ol?: string) {
   const cars = await fetchOperatingCars({ buildYear: year - 50 });
+  const index = await loadRiderIndex();
+  const base = { year, build_year: year - 50, car_count: cars.length };
+
+  if (!ol) {
+    const buckets = new Map<string, number>();
+    for (const c of cars) {
+      const key = carOlCode(c) || "Unassigned";
+      buckets.set(key, (buckets.get(key) ?? 0) + 1);
+    }
+    const riders = Array.from(buckets.entries())
+      .map(([key, count]) => riderRowForOl(key === "Unassigned" ? null : key, index, count))
+      .sort((a, b) => b.car_count - a.car_count || a.ol.localeCompare(b.ol));
+    return { ...base, riders };
+  }
+
+  const isUnassigned = /^unassigned$/i.test(ol);
+  const filtered = cars.filter((c) => {
+    const code = carOlCode(c);
+    if (isUnassigned) return !code;
+    return code === ol || normalizeOl(code) === normalizeOl(ol);
+  });
+  const summary = riderRowForOl(isUnassigned ? null : ol, index, filtered.length);
   return {
     year,
     build_year: year - 50,
-    car_count: cars.length,
-    cars: cars.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
+    ...summary,
+    cars: filtered.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
   };
 }
 

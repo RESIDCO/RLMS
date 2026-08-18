@@ -102,6 +102,11 @@
   html {
     color-scheme: dark;
   }
+  /* Native <select> popups ignore parent bg-transparent; force dark options. */
+  select option {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
   h1, h2, h3 {
     font-family: var(--font-serif);
   }

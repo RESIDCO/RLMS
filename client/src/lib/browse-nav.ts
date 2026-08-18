@@ -41,6 +41,12 @@ export function olCarPath(ol: string, id: number) {
 export function turning50Path(year: number) {
   return `/browse/turning50/${year}`;
 }
+export function turning50OlPath(year: number, ol: string) {
+  return `${turning50Path(year)}/ol/${encodeURIComponent(ol)}`;
+}
+export function turning50OlCarPath(year: number, ol: string, id: number) {
+  return `${turning50OlPath(year, ol)}/car/${id}`;
+}
 export function turning50CarPath(year: number, id: number) {
   return `${turning50Path(year)}/car/${id}`;
 }

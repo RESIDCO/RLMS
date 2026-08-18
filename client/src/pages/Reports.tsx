@@ -38,6 +38,7 @@ function exportErrorMessage(e: unknown): string {
 export default function Reports() {
   const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
+  const [exportingPrograms, setExportingPrograms] = useState(false);
 
   async function exportVValid() {
     setExporting(true);
@@ -77,6 +78,29 @@ export default function Reports() {
     }
   }
 
+  async function exportProgramReport() {
+    setExportingPrograms(true);
+    try {
+      const res = await apiRequest("GET", "/api/programs/export?scope=all");
+      const blob = await res.blob();
+      const disp = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disp);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = match?.[1] ?? "Master_Fleet_Project_Status_Report.xlsx";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e: unknown) {
+      toast({
+        title: "Export failed",
+        description: exportErrorMessage(e) || "Could not build the Program Report.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPrograms(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -110,6 +134,35 @@ export default function Reports() {
                 Builds in the background so the download is not cut off by a proxy timeout. OLD_CAR_INITIAL
                 / OLD_CAR_NUMBER are matched when a remark’s date equals that period’s start date — a
                 best-effort reconstruction, not a guaranteed row-level link.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card data-testid="card-program-report-export">
+          <CardContent className="pt-6 flex gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-umler-panel2">
+              <FileSpreadsheet className="h-5 w-5 text-umler-steel" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="font-serif text-base font-semibold tracking-tight text-foreground">
+                Program Report Export
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+                Every program — open, on hold, and complete — as one workbook. Same Master Fleet
+                Project Status Report already available from Programs.
+              </p>
+              <Button
+                className="mt-4"
+                onClick={exportProgramReport}
+                disabled={exportingPrograms}
+                data-testid="button-export-program-report"
+              >
+                <Download className="h-4 w-4" />
+                {exportingPrograms ? "Building export…" : "Export Master Fleet Project Status Report (.xlsx)"}
+              </Button>
+              <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+                Uses the live Programs export. No selection needed — every program is included.
               </p>
             </div>
           </CardContent>

@@ -169,8 +169,8 @@ export default function ProgramsPage() {
         }
       />
 
-      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4">
-        <div className="rounded-xl border border-card-border bg-card p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-4 sm:px-8 py-4 gap-4">
+        <div className="shrink-0 rounded-xl border border-card-border bg-card p-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-sm font-medium">Reports</div>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -181,7 +181,7 @@ export default function ProgramsPage() {
             <FileSpreadsheet className="h-4 w-4" /> Export Master Fleet Project Status Report
           </Button>
         </div>
-        <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <div className="shrink-0 flex items-center gap-2 flex-wrap">
           <ClearableSearchInput
             className="relative flex-1 min-w-[200px] max-w-sm"
             inputClassName="h-9"
@@ -239,9 +239,10 @@ export default function ProgramsPage() {
             </p>
           </div>
         ) : (
-          <div className="rounded-xl border border-card-border bg-card overflow-hidden">
+          <div className="flex-1 min-h-[240px] rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
+            <div className="flex-1 min-h-0 overflow-auto">
             <table className="w-full text-sm">
-              <thead className="text-[11px] uppercase tracking-wider text-muted-foreground bg-muted/40">
+              <thead className="sticky top-0 z-10 bg-card text-[11px] uppercase tracking-wider text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))] [&>tr>th]:bg-card">
                 <tr>
                   <th className="w-10 px-3 py-2" />
                   <th className="text-left px-3 py-2 font-medium">Program</th>
@@ -323,6 +324,7 @@ export default function ProgramsPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

@@ -67,12 +67,14 @@ function AppRouter() {
       <Route path="/browse/lessee/:lessee/ol/:ol/car/:id" component={CarDetailPage} />
       <Route path="/browse/entity/:entity/ol/:ol/car/:id" component={CarDetailPage} />
       <Route path="/browse/ol/:ol/car/:id" component={CarDetailPage} />
+      <Route path="/browse/turning50/:year/ol/:ol/car/:id" component={CarDetailPage} />
       <Route path="/browse/turning50/:year/car/:id" component={CarDetailPage} />
       <Route path="/browse/lessee/:lessee/ol/:ol" component={FleetBrowsePage} />
       <Route path="/browse/entity/:entity/ol/:ol" component={FleetBrowsePage} />
       <Route path="/browse/lessee/:lessee" component={FleetBrowsePage} />
       <Route path="/browse/entity/:entity" component={FleetBrowsePage} />
       <Route path="/browse/ol/:ol" component={FleetBrowsePage} />
+      <Route path="/browse/turning50/:year/ol/:ol" component={FleetBrowsePage} />
       <Route path="/browse/turning50/:year" component={FleetBrowsePage} />
       <Route path="/cars/:id" component={CarDetailPage} />
       <Route path="/fleet" component={FleetRegistry} />

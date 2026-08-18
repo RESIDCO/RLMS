@@ -958,7 +958,8 @@ export async function registerRoutes(
       if (!Number.isFinite(year) || year < 1900 || year > 2100) {
         return res.status(400).json({ message: "year is required" });
       }
-      res.json(await browseTurning50(year));
+      const ol = String(req.query.ol ?? "").trim() || undefined;
+      res.json(await browseTurning50(year, ol));
     } catch (err) {
       errHandler(res, err);
     }

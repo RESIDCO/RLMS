@@ -280,7 +280,8 @@ export default function ProgramDetailPage() {
           </div>
         }
       />
-      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-4">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-4 sm:px-8 py-4 gap-4">
+        <div className="shrink-0 space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", CATEGORY_BADGE[catName] ?? "bg-muted border-border")}>
             {catName || "Uncategorized"}
@@ -365,15 +366,16 @@ export default function ProgramDetailPage() {
             <span className="text-xs text-muted-foreground">Unsaved header changes</span>
           </div>
         )}
+        </div>
 
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
+        <Tabs value={tab} onValueChange={setTab} className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="shrink-0 self-start">
             <TabsTrigger value="cars">Cars in Program</TabsTrigger>
             <TabsTrigger value="docs">Documents</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
           </TabsList>
-          <TabsContent value="cars" className="mt-4">
-            <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <TabsContent value="cars" className="mt-4 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden overflow-hidden">
+            <div className="shrink-0 flex items-center gap-3 mb-3 flex-wrap">
               {canEdit && (
                 <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> Add cars</Button>
               )}
@@ -384,6 +386,7 @@ export default function ProgramDetailPage() {
               <span className="text-xs text-muted-foreground ml-auto">{cars.length} rows</span>
             </div>
             {canEdit && selected.size > 0 && (
+              <div className="shrink-0">
               <BulkEditBar
                 count={selected.size}
                 shops={shops}
@@ -405,10 +408,12 @@ export default function ProgramDetailPage() {
                   toast({ title: `Updated ${selected.size} car${selected.size === 1 ? "" : "s"}` });
                 }}
               />
+              </div>
             )}
-            <div className="rounded-xl border border-card-border bg-card overflow-auto">
+            <div className="flex-1 min-h-[240px] rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
+              <div className="flex-1 min-h-0 overflow-auto">
               <table className="w-full text-xs min-w-[1100px]">
-                <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/40 sticky top-0">
+                <thead className="sticky top-0 z-10 bg-card text-[10px] uppercase tracking-wider text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))] [&>tr>th]:bg-card">
                   <tr>
                     {canEdit && (
                       <th className="w-8 px-2 py-2">
@@ -557,9 +562,10 @@ export default function ProgramDetailPage() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </TabsContent>
-          <TabsContent value="docs" className="mt-4">
+          <TabsContent value="docs" className="mt-4 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             <ProgramDocsPanel
               listUrl={`/api/programs/${id}/documents`}
               uploadUrl={`/api/programs/${id}/documents`}
@@ -567,7 +573,7 @@ export default function ProgramDetailPage() {
               categories={[...PROGRAM_DOC_CATEGORIES]}
             />
           </TabsContent>
-          <TabsContent value="activity" className="mt-4">
+          <TabsContent value="activity" className="mt-4 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             <ActivityList rows={activity} />
           </TabsContent>
         </Tabs>
@@ -716,7 +722,7 @@ function StatusCell({
   }
   return (
     <select
-      className="h-7 bg-transparent border border-border rounded px-1 max-w-[200px]"
+      className="h-7 bg-transparent border border-border rounded px-1 max-w-[200px] [color-scheme:dark]"
       value={selectValue}
       onChange={(e) => {
         const v = e.target.value;
@@ -762,7 +768,7 @@ function CustomCell({
   if (def.field_type === "select") {
     return (
       <select
-        className="h-7 bg-transparent border border-border rounded px-1"
+        className="h-7 bg-transparent border border-border rounded px-1 [color-scheme:dark]"
         value={value == null ? "" : String(value)}
         disabled={readOnly}
         onChange={(e) => onSave(e.target.value || null)}
@@ -860,7 +866,7 @@ function BulkEditBar({
         <ShopCombobox shops={shops} value={shopId} onChange={setShopId} compact />
       ) : field === "status" ? (
         <select
-          className="h-8 bg-background border border-border rounded px-2 text-xs max-w-[220px]"
+          className="h-8 bg-background border border-border rounded px-2 text-xs max-w-[220px] [color-scheme:dark]"
           value={text}
           onChange={(e) => setText(e.target.value)}
         >

@@ -21,6 +21,7 @@ import {
   olPath,
   openAppTab,
   programPath,
+  turning50OlPath,
   turning50Path,
 } from "@/lib/browse-nav";
 
@@ -55,8 +56,9 @@ export default function CarDetailPage() {
   const [fromLessee, lesseeP] = useRoute("/browse/lessee/:lessee/ol/:ol/car/:id");
   const [fromEntity, entityP] = useRoute("/browse/entity/:entity/ol/:ol/car/:id");
   const [fromOl, olP] = useRoute("/browse/ol/:ol/car/:id");
+  const [fromT50Ol, t50OlP] = useRoute("/browse/turning50/:year/ol/:ol/car/:id");
   const [fromT50, t50P] = useRoute("/browse/turning50/:year/car/:id");
-  const id = Number((lesseeP || entityP || olP || t50P || directP)?.id);
+  const id = Number((lesseeP || entityP || olP || t50OlP || t50P || directP)?.id);
   const { data, isLoading, error } = useQuery<DetailPayload>({
     queryKey: ["/api/railcars", id],
     queryFn: async () => {
@@ -89,6 +91,12 @@ export default function CarDetailPage() {
     crumbs.push({ href: entityPath(E), label: ENTITY_SLUGS[E]?.label ?? E }, { href: entityOlPath(E, O), label: O });
   } else if (fromOl && olP) {
     crumbs.push({ href: olPath(decodeURIComponent(olP.ol)), label: decodeURIComponent(olP.ol) });
+  } else if (fromT50Ol && t50OlP) {
+    const O = decodeURIComponent(t50OlP.ol);
+    crumbs.push(
+      { href: turning50Path(Number(t50OlP.year)), label: `Turning 50 in ${t50OlP.year}` },
+      { href: turning50OlPath(Number(t50OlP.year), O), label: O },
+    );
   } else if (fromT50 && t50P) {
     crumbs.push({ href: turning50Path(Number(t50P.year)), label: `Turning 50 in ${t50P.year}` });
   } else if (direct && lessee && ol) {

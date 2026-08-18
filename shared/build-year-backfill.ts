@@ -26,15 +26,14 @@ export function padCarNumber(raw: string): string {
 }
 
 export function parseEquipmentId(raw: string): { mark: string; car_number: string } | null {
-  const parts = String(raw ?? "")
+  const compact = String(raw ?? "")
+    .replace(/\s+/g, "")
     .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (parts.length < 2) return null;
-  const mark = parts[0];
-  const num = parts[parts.length - 1];
-  if (!/^\d+$/.test(num)) return null;
-  return { mark, car_number: padCarNumber(num) };
+    .toUpperCase();
+  const m = compact.match(/^([A-Z]{2,4})(\d+)$/);
+  if (!m) return null;
+  const last6 = m[2].slice(-6);
+  return { mark: m[1], car_number: padCarNumber(last6) };
 }
 
 export function parseBuiltDate(

@@ -27,6 +27,7 @@ import {
   parseBuildYearCsv,
   matchKey,
 } from "../shared/build-year-backfill";
+import { parseTareWeight, parseTareWeightCsv } from "../shared/tare-weight-backfill";
 import {
   normalizeSnapshotMonth,
   buildCarFinancialUpdates,
@@ -379,6 +380,23 @@ eq(padCarNumber("22766"), "022766", "padCarNumber 5 digits");
 eq(padCarNumber("494311"), "494311", "padCarNumber already 6");
 eq(parseEquipmentId("AOKX 40015"), { mark: "AOKX", car_number: "040015" }, "parseEquipmentId pads number");
 eq(parseEquipmentId("AEX 22766"), { mark: "AEX", car_number: "022766" }, "parseEquipmentId AEX");
+eq(parseEquipmentId("AOKX0000040015"), { mark: "AOKX", car_number: "040015" }, "parseEquipmentId no-space 10-digit");
+eq(parseEquipmentId("AEX 0000022766"), { mark: "AEX", car_number: "022766" }, "parseEquipmentId spaced 10-digit last-6");
+eq(parseEquipmentId("CKIX0000016011"), { mark: "CKIX", car_number: "016011" }, "parseEquipmentId CKIX 016011");
+eq(parseTareWeight(""), null, "blank tare is null not zero");
+eq(parseTareWeight("66100"), 66100, "tare integer");
+{
+  const csv = parseTareWeightCsv(
+    `"Equipment Id","Tare Weight"\n"AOKX0000040015","66100"\n"AEX 0000022766","53300"\n"BNSF0000007505",""\n`,
+  );
+  eq(csv.totalDataRows, 3, "tare csv data rows exclude header");
+  eq(csv.rows.length, 2, "tare csv skips blank weight");
+  eq(csv.blankTare, 1, "tare csv blank count");
+  eq(csv.rows[0].car_number, "040015", "tare csv last-6 pad");
+  eq(csv.rows[0].tare_weight_lbs, 66100, "tare csv AOKX 040015");
+  eq(csv.rows[1].mark, "AEX", "tare csv spaced Equipment Id");
+  eq(csv.rows[1].car_number, "022766", "tare csv AEX last-6");
+}
 eq(parseBuiltDate("CONFIDENTIAL"), { kind: "confidential" }, "CONFIDENTIAL skipped");
 eq(parseBuiltDate(" confidential "), { kind: "confidential" }, "CONFIDENTIAL trim+case");
 eq(parseBuiltDate("05/01/1992"), { kind: "dated", year: 1992, date: "1992-05-01" }, "MM/DD/YYYY date");

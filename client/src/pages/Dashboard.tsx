@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,14 +21,12 @@ import {
   FileText,
   Gauge,
   ChevronRight,
-  X,
-  Building2,
-  CalendarClock,
   PackageMinus,
   PauseCircle,
   TimerOff,
-  Wrench,
+  FolderOpen,
 } from "lucide-react";
+import { openAppTab, lesseePath, olPath, entityPath, turning50Path, olKeyFromLabel } from "@/lib/browse-nav";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type CarRow = {
@@ -86,6 +84,7 @@ type DashboardData = {
     idle_count?: number;
     leased_count?: number;
     abatement_count?: number;
+    in_program_count?: number;
     in_transit_leased_count?: number;
     rps_total: number;
     rps_assigned: number;
@@ -185,119 +184,6 @@ function StatusPill({ car }: { car: CarRow }) {
     <span className={cn("text-[9px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded-full border whitespace-nowrap", cls)}>
       {status}
     </span>
-  );
-}
-
-// ── Fleet drill-down drawer ───────────────────────────────────────────────────
-function FleetDrawer({ fleet, onClose }: { fleet: FleetDetail | null; onClose: () => void }) {
-  const { data: loaded, isLoading: carsLoading } = useQuery<FleetDetail>({
-    queryKey: fleet?.fleet_name
-      ? [`/api/dashboard/lessee?name=${encodeURIComponent(fleet.fleet_name)}`]
-      : ["/api/dashboard/lessee"],
-    enabled: !!fleet?.fleet_name,
-    staleTime: 0,
-  });
-  if (!fleet) return null;
-  const cars = loaded?.cars?.length ? loaded.cars : fleet.cars ?? [];
-  const count = loaded?.count ?? fleet.count;
-  const months = monthsUntil(fleet.expiration_date);
-  const tone = expiryTone(months);
-
-  // Download fleet car list as CSV
-  const downloadCsv = () => {
-    const rows = [
-      ["reporting_marks", "car_number", "car_type", "status", "entity", "lessee_name", "rider", "lease", "lessee"],
-      ...cars.map(c => [
-        c.reporting_marks ?? "", c.car_number, c.car_type ?? "", displayRailcarStatus(displayStatusInputFromRailcar(c)), c.entity ?? "",
-        fleet.fleet_name, fleet.rider_name ?? "", fleet.lease_number ?? "", fleet.lessee ?? "",
-      ]),
-    ];
-    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `lessee_${fleet.fleet_name.replace(/\s+/g, "_")}.csv`;
-    a.click(); URL.revokeObjectURL(url);
-  };
-
-  return (
-    <Sheet open={!!fleet} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-full sm:w-[560px] sm:max-w-[560px] flex flex-col overflow-hidden p-0">
-        {/* Header */}
-        <SheetHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
-          <SheetTitle className="text-base">{fleet.fleet_name}</SheetTitle>
-          <SheetDescription className="text-xs">{count.toLocaleString()} car{count !== 1 ? "s" : ""} in this lessee</SheetDescription>
-
-          {/* MLA + Rider summary cards */}
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {/* MLA card */}
-            <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
-              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
-                <FileText className="h-3 w-3" /> Master Lease
-              </div>
-              <div className="font-mono font-semibold text-sm text-foreground">{fleet.lease_number ?? "—"}</div>
-              {fleet.lessor && <div className="text-[11px] text-muted-foreground mt-0.5">{fleet.lessor} <span className="opacity-60">(lessor)</span></div>}
-              {fleet.lessee && <div className="text-[11px] text-muted-foreground">{fleet.lessee} <span className="opacity-60">(lessee)</span></div>}
-            </div>
-            {/* Rider card */}
-            <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
-              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
-                <Building2 className="h-3 w-3" /> Rider
-              </div>
-              <div className="font-medium text-sm text-foreground truncate">{fleet.rider_name ?? "—"}</div>
-              {fleet.schedule_number && <div className="text-[11px] text-muted-foreground mt-0.5">Schedule {fleet.schedule_number}</div>}
-              {fleet.expiration_date && (
-                <div className={cn("text-[11px] font-mono-num mt-0.5 flex items-center gap-1", tone.cls)}>
-                  <CalendarClock className="h-2.5 w-2.5" />
-                  {formatDate(fleet.expiration_date)} · {tone.label}
-                </div>
-              )}
-            </div>
-          </div>
-        </SheetHeader>
-
-        {/* Car list */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="px-6 py-3 text-[10px] uppercase tracking-wider text-muted-foreground font-medium border-b border-border/50 flex items-center justify-between">
-            <span><span className="font-mono-num">{count.toLocaleString()}</span> cars</span>
-            <button
-              onClick={downloadCsv}
-              className="text-primary hover:underline text-[10px] uppercase tracking-wider font-medium"
-            >
-              ↓ Download CSV
-            </button>
-          </div>
-          {carsLoading ? (
-            <div className="px-6 py-16"><Skeleton className="h-40" /></div>
-          ) : cars.length === 0 ? (
-            <div className="px-6 py-16 text-center text-muted-foreground text-sm">No cars.</div>
-          ) : (
-            <table className="w-full text-xs">
-              <thead className="bg-muted/30 text-muted-foreground sticky top-0">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium">Marks</th>
-                  <th className="px-4 py-2 text-left font-medium">Car #</th>
-                  <th className="px-4 py-2 text-left font-medium">Type</th>
-                  <th className="px-4 py-2 text-left font-medium">Entity</th>
-                  <th className="px-4 py-2 text-left font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cars.map((c) => (
-                  <tr key={c.id} className="border-t border-border/40 hover:bg-muted/20">
-                    <td className="px-4 py-2.5 text-muted-foreground font-mono">{c.reporting_marks ?? "—"}</td>
-                    <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{c.car_type ?? "—"}</td>
-                    <td className="px-4 py-2.5"><EntityBadge entity={c.entity} /></td>
-                    <td className="px-4 py-2.5"><StatusPill car={c} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
   );
 }
 
@@ -546,7 +432,6 @@ export default function Dashboard() {
   });
 
   const [drillKey, setDrillKey] = useState<DrillKey>(null);
-  const [selectedFleet, setSelectedFleet] = useState<FleetDetail | null>(null);
 
   const maxFleet = Math.max(1, ...(data?.cars_by_fleet.map((f) => f.count) ?? [0]));
   const utilPct = data?.kpis.utilization_pct ?? 0;
@@ -610,12 +495,12 @@ export default function Dashboard() {
                 onClick={() => navigate("/railcars?filter=unassigned")}
               />
               <KpiCard
-                testId="kpi-in-transit-leased"
-                label="In Transit (Not Yet Earning)"
-                value={data.kpis.in_transit_leased_count ?? 0}
-                subtext="Leased cars flagged at shop / in transit / cleaning / bad order"
-                icon={Wrench}
-                onClick={() => navigate("/railcars?filter=intransit")}
+                testId="kpi-in-program"
+                label="In Program"
+                value={data.kpis.in_program_count ?? data.kpis.in_transit_leased_count ?? 0}
+                subtext="Leased cars currently in an open Program (shop work, inspection, etc.)."
+                icon={FolderOpen}
+                onClick={() => navigate("/programs")}
               />
               {/* Utilization — special card with ring */}
               <button
@@ -697,8 +582,12 @@ export default function Dashboard() {
               <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">RPS vs MAIN</span>
             </header>
             <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* RPS — muted steel (UMLER chart-1 / underline tone) */}
-              <div className="rounded-md border border-umler-steel/25 bg-umler-steel/5 p-4">
+              <button
+                type="button"
+                className="rounded-md border border-umler-steel/25 bg-umler-steel/5 p-4 text-left hover:border-umler-steel/50 transition-colors"
+                onClick={() => openAppTab(entityPath("rps"))}
+                data-testid="tile-entity-rps"
+              >
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-steel/15 text-umler-steel border-umler-steel/30">RPS</span>
@@ -710,17 +599,17 @@ export default function Dashboard() {
                   <div className="h-full bg-umler-steel transition-all" style={{ width: `${data.kpis.rps_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
-                  <Link href="/railcars?entity=RPS&filter=leased" className="hover:text-foreground hover:underline">
-                    {data.kpis.rps_assigned} assigned
-                  </Link>
-                  <Link href="/railcars?entity=RPS&filter=offlease" className="hover:text-foreground hover:underline">
-                    {data.kpis.rps_total - data.kpis.rps_assigned} off-lease
-                  </Link>
+                  <span>{data.kpis.rps_assigned} assigned</span>
+                  <span>{data.kpis.rps_total - data.kpis.rps_assigned} off-lease</span>
                   <span className="font-mono-num">{data.kpis.rps_total} total</span>
                 </div>
-              </div>
-              {/* Owned — muted teal (UMLER chart-2 / underline tone) */}
-              <div className="rounded-md border border-umler-teal/25 bg-umler-teal/5 p-4">
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-umler-teal/25 bg-umler-teal/5 p-4 text-left hover:border-umler-teal/50 transition-colors"
+                onClick={() => openAppTab(entityPath("main"))}
+                data-testid="tile-entity-main"
+              >
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-teal/15 text-umler-teal border-umler-teal/30">MAIN</span>
@@ -732,15 +621,11 @@ export default function Dashboard() {
                   <div className="h-full bg-umler-teal transition-all" style={{ width: `${data.kpis.owned_util_pct}%` }} />
                 </div>
                 <div className="flex justify-between text-[11px] text-muted-foreground">
-                  <Link href="/railcars?entity=Main&filter=leased" className="hover:text-foreground hover:underline">
-                    {data.kpis.owned_assigned} assigned
-                  </Link>
-                  <Link href="/railcars?entity=Main&filter=offlease" className="hover:text-foreground hover:underline">
-                    {data.kpis.owned_total - data.kpis.owned_assigned} off-lease
-                  </Link>
+                  <span>{data.kpis.owned_assigned} assigned</span>
+                  <span>{data.kpis.owned_total - data.kpis.owned_assigned} off-lease</span>
                   <span className="font-mono-num">{data.kpis.owned_total} total</span>
                 </div>
-              </div>
+              </button>
             </div>
           </section>
         )}
@@ -769,7 +654,7 @@ export default function Dashboard() {
                   subtext="cars turning 50"
                   accent={i === 0 ? "warning" : i === 1 ? "warning" : "muted"}
                   marker="dot"
-                  onClick={() => navigate(`/railcars?turning50=${t.year}`)}
+                  onClick={() => openAppTab(turning50Path(t.year))}
                 />
               ))}
             </div>
@@ -796,7 +681,7 @@ export default function Dashboard() {
                   <button
                     key={f.fleet_name}
                     className="w-full text-left space-y-1 group cursor-pointer"
-                    onClick={() => setSelectedFleet(f)}
+                    onClick={() => openAppTab(lesseePath(f.fleet_name))}
                     data-testid={`fleet-name-${f.fleet_name}`}
                   >
                     <div className="flex items-center justify-between text-xs">
@@ -857,12 +742,14 @@ export default function Dashboard() {
                 const renderRow = (r: TimelineItem, opts?: { supplemental?: boolean }) => {
                   const months = monthsUntil(r.expiration_date);
                   const tone = expiryTone(months);
+                  const ol = olKeyFromLabel(r.rider_name) ?? r.rider_name;
                   return (
-                    <Link
+                    <button
+                      type="button"
                       key={String(r.rider_id)}
-                      href={`/railcars?rider=${encodeURIComponent(r.rider_name)}`}
+                      onClick={() => openAppTab(olPath(ol))}
                       className={cn(
-                        "px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group",
+                        "w-full text-left px-5 py-4 flex items-center justify-between gap-4 hover:bg-muted/40 transition-colors cursor-pointer group",
                         opts?.supplemental && "py-3 opacity-70"
                       )}
                       data-testid={opts?.supplemental ? `rider-timeline-vcf-${r.rider_id}` : `rider-timeline-${r.rider_id}`}
@@ -880,7 +767,7 @@ export default function Dashboard() {
                         <div className="text-sm font-mono-num">{formatDate(r.expiration_date)}</div>
                         <div className={cn("text-[11px] font-mono-num", tone.cls)}>{tone.label}</div>
                       </div>
-                    </Link>
+                    </button>
                   );
                 };
 
@@ -924,9 +811,6 @@ export default function Dashboard() {
 
       {/* KPI drill-down drawer */}
       <DrillDownDrawer drillKey={drillKey} data={data} onClose={() => setDrillKey(null)} />
-
-      {/* Fleet drill-down drawer */}
-      <FleetDrawer fleet={selectedFleet} onClose={() => setSelectedFleet(null)} />
     </div>
   );
 }

@@ -72,6 +72,8 @@ import {
   refreshEstimatedLeaseExpiry,
 } from "./refresh-estimated-lease-expiry";
 import { carBuildYear, turning50ByYear } from "@shared/build-year";
+import { browseGroup, browseOl, browseTurning50, countInProgram } from "./browse";
+import { syncRiderExpirationsFromCars } from "./sync-rider-expirations";
 import {
   buildFinancialReview,
   financialRowToDbPayload,
@@ -691,13 +693,13 @@ export async function registerRoutes(
       }
       const fleet_age = turning50ByYear(ageCars);
 
-      const { count: inTransitLeasedCount } = await db
-        .from("railcars")
-        .select("id", { count: "exact", head: true })
-        .eq("active", true)
-        .eq("fleet_status", "Leased")
-        .not("transit_status", "is", null);
-      const in_transit_leased_count = Number(inTransitLeasedCount) || 0;
+      let in_program_count = 0;
+      try {
+        in_program_count = await countInProgram();
+      } catch (e: any) {
+        console.warn("[dashboard] in_program_count unavailable:", e?.message ?? e);
+      }
+      const in_transit_leased_count = in_program_count;
 
       let fleetKpis = sqlKpis
         ? {
@@ -735,6 +737,7 @@ export async function registerRoutes(
               idle_count: fleetKpis.idle_count,
               leased_count: fleetKpis.leased_count,
               abatement_count: fleetKpis.abatement_count,
+              in_program_count,
               in_transit_leased_count,
               active_cars_including_sold: fleetKpis.active_cars_including_sold,
               rps_total: fleetKpis.rps_total,
@@ -763,6 +766,7 @@ export async function registerRoutes(
           idle_count: idleCars.length,
           leased_count: leasedCars.length,
           abatement_count: abatementCars.length,
+          in_program_count,
           in_transit_leased_count,
           active_cars_including_sold: activeCars.length,
           rps_total: rpsCars.length,
@@ -892,6 +896,50 @@ export async function registerRoutes(
           }))
           .sort((a: any, b: any) => String(a.car_number).localeCompare(String(b.car_number))),
       });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/browse/group", async (req: Request, res: Response) => {
+    try {
+      const userId = await requireUser(req, res);
+      if (!userId) return;
+      const kind = String(req.query.kind ?? "").trim();
+      const key = String(req.query.key ?? "").trim();
+      if (kind !== "lessee" && kind !== "entity") {
+        return res.status(400).json({ message: "kind must be lessee or entity" });
+      }
+      if (!key) return res.status(400).json({ message: "key is required" });
+      res.json(await browseGroup(kind, key));
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/browse/ol", async (req: Request, res: Response) => {
+    try {
+      const userId = await requireUser(req, res);
+      if (!userId) return;
+      const code = String(req.query.code ?? "").trim();
+      if (!code) return res.status(400).json({ message: "code is required" });
+      const lessee = String(req.query.lessee ?? "").trim() || undefined;
+      const entity = String(req.query.entity ?? "").trim() || undefined;
+      res.json(await browseOl(code, { lessee, entity }));
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/browse/turning50", async (req: Request, res: Response) => {
+    try {
+      const userId = await requireUser(req, res);
+      if (!userId) return;
+      const year = Number(req.query.year);
+      if (!Number.isFinite(year) || year < 1900 || year > 2100) {
+        return res.status(400).json({ message: "year is required" });
+      }
+      res.json(await browseTurning50(year));
     } catch (err) {
       errHandler(res, err);
     }
@@ -1146,7 +1194,7 @@ export async function registerRoutes(
         .maybeSingle();
       if (error) throw error;
 
-      const [histRes, numHistRes] = await Promise.all([
+      const [histRes, numHistRes, abRes] = await Promise.all([
         supabase
           .from("assignment_history")
           .select(
@@ -1161,6 +1209,11 @@ export async function registerRoutes(
           .select("*")
           .eq("railcar_id", id)
           .order("changed_at", { ascending: false }),
+        supabase
+          .from("railcar_ab_items")
+          .select("seq, code, amount, sign, signed_amount, application_date")
+          .eq("railcar_id", id)
+          .order("seq", { ascending: true }),
       ]);
       if (histRes.error) throw histRes.error;
       if (numHistRes.error) throw numHistRes.error;
@@ -1171,6 +1224,7 @@ export async function registerRoutes(
         assignment: Array.isArray(car.assignment)
           ? car.assignment[0] ?? null
           : car.assignment,
+        railcar_ab_items: abRes.error ? [] : (abRes.data ?? []),
       };
       res.json({ railcar: normalized, history: histRes.data ?? [], number_history: numHistRes.data ?? [] });
     } catch (err) {

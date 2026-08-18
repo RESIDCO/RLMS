@@ -34,10 +34,11 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList } from "lucide-react";
+import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList, ExternalLink } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { openAppTab, carPath } from "@/lib/browse-nav";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1294,7 +1295,17 @@ export default function FleetRegistry() {
                       </td>
                       <td className="px-4 py-3 font-mono-num font-medium">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span>{r.car_number}</span>
+                          <button
+                            type="button"
+                            className="hover:text-primary hover:underline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAppTab(carPath(r.id));
+                            }}
+                            data-testid={`link-car-detail-${r.id}`}
+                          >
+                            {r.car_number}
+                          </button>
                           <InactiveFleetBadge active={(r as any).active} />
                         </div>
                       </td>
@@ -1701,7 +1712,11 @@ function CarDetail({
         </div>
       )}
 
-      <div className="flex gap-2 mt-4">
+      <div className="flex gap-2 mt-4 flex-wrap">
+        <Button size="sm" variant="outline" onClick={() => openAppTab(carPath(r.id))} data-testid="button-open-car-page">
+          <ExternalLink className="h-3.5 w-3.5" />
+          Car page
+        </Button>
         {canEdit && (
           <Button size="sm" variant="secondary" onClick={onEdit} data-testid="button-edit-car">
             <Pencil className="h-4 w-4" />

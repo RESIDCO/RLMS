@@ -21,6 +21,8 @@ import APTracker from "@/pages/APTracker";
 import Programs from "@/pages/Programs";
 import Reports from "@/pages/Reports";
 import PhotoSearch from "@/pages/PhotoSearch";
+import FleetBrowsePage from "@/pages/FleetBrowse";
+import CarDetailPage from "@/pages/CarDetail";
 import Login from "@/pages/Login";
 import SetPassword from "@/pages/SetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
@@ -60,6 +62,17 @@ function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/browse/lessee/:lessee/ol/:ol/car/:id" component={CarDetailPage} />
+      <Route path="/browse/entity/:entity/ol/:ol/car/:id" component={CarDetailPage} />
+      <Route path="/browse/ol/:ol/car/:id" component={CarDetailPage} />
+      <Route path="/browse/turning50/:year/car/:id" component={CarDetailPage} />
+      <Route path="/browse/lessee/:lessee/ol/:ol" component={FleetBrowsePage} />
+      <Route path="/browse/entity/:entity/ol/:ol" component={FleetBrowsePage} />
+      <Route path="/browse/lessee/:lessee" component={FleetBrowsePage} />
+      <Route path="/browse/entity/:entity" component={FleetBrowsePage} />
+      <Route path="/browse/ol/:ol" component={FleetBrowsePage} />
+      <Route path="/browse/turning50/:year" component={FleetBrowsePage} />
+      <Route path="/cars/:id" component={CarDetailPage} />
       <Route path="/fleet" component={FleetRegistry} />
       <Route path="/railcars" component={FleetRegistry} />
       <Route path="/all-cars" component={RedirectAllCars} />

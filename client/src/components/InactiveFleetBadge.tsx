@@ -32,6 +32,29 @@ export function InactiveFleetBadge({
   );
 }
 
+/** Always-visible Active/Inactive pill — used on search results so status is never inferred from a missing badge. */
+export function FleetMembershipBadge({
+  active,
+  className,
+}: {
+  active: boolean | null | undefined;
+  className?: string;
+}) {
+  if (active === false) return <InactiveFleetBadge active={false} className={className} />;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border border-umler-teal/30 bg-umler-teal/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-umler-teal",
+        className
+      )}
+      data-testid="badge-active-fleet"
+      title="Active in fleet"
+    >
+      Active
+    </span>
+  );
+}
+
 /**
  * Sold-but-still-tracked (fleet_status=Sold).
  * Prefer FleetAwareStatusBadge in the STATUS column; this pill is for compact layouts.

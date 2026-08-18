@@ -1,22 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Search as SearchIcon, Train, FileText, BookOpen, Building2, Loader2, X } from "lucide-react";
+import { Search as SearchIcon, Train, FileText, BookOpen, Building2, Loader2, X, Pencil, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate } from "@shared/lease-authority";
-import { InactiveFleetBadge, FleetAwareStatusBadge } from "@/components/InactiveFleetBadge";
+import { FleetMembershipBadge, FleetAwareStatusBadge } from "@/components/InactiveFleetBadge";
 import { displayStatusInputFromRailcar } from "@shared/fleet-status";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { carPath, lesseePath, olPath, olKeyFromLabel } from "@/lib/browse-nav";
+import { carPath, lesseePath, olPath, olKeyFromLabel, historyPath, openAppTab } from "@/lib/browse-nav";
 import { hashSearchParams } from "@/lib/hash-location";
+import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 
 interface MasterLease {
   id: number;
@@ -110,48 +104,89 @@ function SectionHeader({ icon: Icon, label, count }: { icon: any; label: string;
   );
 }
 
-function RailcarRow({ car, onOpen }: { car: RailcarResult; onOpen: () => void }) {
+function carLabel(car: RailcarResult) {
+  return [car.reporting_marks, car.car_number].filter(Boolean).join(" ");
+}
+
+function RailcarRow({
+  car,
+  onOpen,
+  onEdit,
+  onHistory,
+}: {
+  car: RailcarResult;
+  onOpen: () => void;
+  onEdit: () => void;
+  onHistory: () => void;
+}) {
   const rider = car.assignment?.rider;
   const lease = rider?.master_lease;
+  const label = carLabel(car);
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="w-full flex items-start gap-4 py-3 border-b border-border/40 last:border-0 text-left hover:bg-muted/30"
-    >
-      <div className="min-w-[140px]">
-        <div className="flex items-center gap-1.5 mb-0.5">
-          <EntityBadge entity={car.entity} />
-          <InactiveFleetBadge active={car.active} />
-        </div>
-        <div className="font-mono text-sm font-semibold text-foreground">
-          {[car.reporting_marks, car.car_number].filter(Boolean).join(" ")}
-        </div>
-        <div className="text-[11px] text-muted-foreground mt-0.5">
-          {car.car_type ?? "—"}
-          {car.mechanical_designation ? ` · ${car.mechanical_designation}` : ""}
-        </div>
-      </div>
-      <div className="flex-1 grid grid-cols-3 gap-3 text-xs">
-        <div>
-          <div className="text-muted-foreground mb-0.5">Fleet / Lessee</div>
-          <div className="text-foreground font-medium">
-            {car.assignment?.fleet_name ?? car.lessee_name ?? <span className="text-muted-foreground italic">Unassigned</span>}
+    <div className="flex items-start gap-3 py-3 border-b border-border/40 last:border-0 hover:bg-muted/30">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex-1 min-w-0 flex items-start gap-4 text-left"
+      >
+        <div className="min-w-[140px]">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <EntityBadge entity={car.entity} />
+            <FleetMembershipBadge active={car.active} />
+          </div>
+          <div className="font-mono text-sm font-semibold text-foreground">
+            {label}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            {car.car_type ?? "—"}
+            {car.mechanical_designation ? ` · ${car.mechanical_designation}` : ""}
           </div>
         </div>
-        <div>
-          <div className="text-muted-foreground mb-0.5">Rider</div>
-          <div className="text-foreground">{rider?.rider_name ?? car.rider_external_id ?? "—"}</div>
+        <div className="flex-1 grid grid-cols-3 gap-3 text-xs">
+          <div>
+            <div className="text-muted-foreground mb-0.5">Fleet / Lessee</div>
+            <div className="text-foreground font-medium">
+              {car.assignment?.fleet_name ?? car.lessee_name ?? <span className="text-muted-foreground italic">Unassigned</span>}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground mb-0.5">Rider</div>
+            <div className="text-foreground">{rider?.rider_name ?? car.rider_external_id ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground mb-0.5">Master Lease</div>
+            <div className="text-foreground">{displayLeaseNumber(lease?.lease_number) || "—"}</div>
+          </div>
         </div>
-        <div>
-          <div className="text-muted-foreground mb-0.5">Master Lease</div>
-          <div className="text-foreground">{displayLeaseNumber(lease?.lease_number) || "—"}</div>
+        <div className="shrink-0">
+          <FleetAwareStatusBadge car={displayStatusInputFromRailcar(car as any)} />
         </div>
+      </button>
+      <div className="shrink-0 flex items-center gap-0.5 pt-0.5">
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8"
+          aria-label={`Edit ${label}`}
+          data-testid={`button-search-edit-${car.id}`}
+          onClick={onEdit}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8"
+          aria-label={`View history for ${label}`}
+          data-testid={`button-search-history-${car.id}`}
+          onClick={onHistory}
+        >
+          <History className="h-3.5 w-3.5" />
+        </Button>
       </div>
-      <div className="shrink-0">
-        <FleetAwareStatusBadge car={displayStatusInputFromRailcar(car as any)} />
-      </div>
-    </button>
+    </div>
   );
 }
 
@@ -229,7 +264,7 @@ export default function SearchPage() {
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fleetActiveFilter, setFleetActiveFilter] = useState<"active" | "inactive" | "all">("active");
+  const [editCarId, setEditCarId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -240,12 +275,12 @@ export default function SearchPage() {
     const q = hashSearchParams().get("q");
     if (q) {
       setQuery(q);
-      runSearch(q, fleetActiveFilter);
+      runSearch(q);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function runSearch(q: string, fleetActive: typeof fleetActiveFilter = fleetActiveFilter) {
+  async function runSearch(q: string) {
     const trimmed = q.trim();
     if (!trimmed) {
       setResults(null);
@@ -257,7 +292,7 @@ export default function SearchPage() {
     try {
       const res = await apiRequest(
         "GET",
-        `/api/search?q=${encodeURIComponent(trimmed)}&fleet_active=${encodeURIComponent(fleetActive)}`,
+        `/api/search?q=${encodeURIComponent(trimmed)}`,
       );
       const data: SearchResults = await res.json();
       setResults(data);
@@ -273,12 +308,7 @@ export default function SearchPage() {
     const trimmed = query.trim();
     if (!trimmed) return;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/search?q=${encodeURIComponent(trimmed)}`);
-    runSearch(trimmed, fleetActiveFilter);
-  }
-
-  function onFleetActiveChange(v: "active" | "inactive" | "all") {
-    setFleetActiveFilter(v);
-    if (committed.trim()) runSearch(committed, v);
+    runSearch(trimmed);
   }
 
   function clear() {
@@ -315,7 +345,7 @@ export default function SearchPage() {
         </p>
       </div>
 
-      <div className="relative mb-2 flex gap-2">
+      <div className="relative mb-6 flex gap-2">
         <div className="relative flex-1">
           <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <input
@@ -347,20 +377,6 @@ export default function SearchPage() {
         </Button>
       </div>
 
-      <div className="mb-4 flex items-center gap-2">
-        <Select value={fleetActiveFilter} onValueChange={(v) => onFleetActiveChange(v as "active" | "inactive" | "all")}>
-          <SelectTrigger className="w-[150px]" data-testid="filter-fleet-active-search">
-            <SelectValue placeholder="Fleet status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active cars</SelectItem>
-            <SelectItem value="inactive">Inactive cars</SelectItem>
-            <SelectItem value="all">All cars</SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="text-[11px] text-muted-foreground">Fleet membership (defaults to Active)</span>
-      </div>
-
       {!results && !loading && (
         <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
           {[
@@ -379,7 +395,7 @@ export default function SearchPage() {
                   "",
                   `${window.location.pathname}${window.location.search}#/search?q=${encodeURIComponent(tip.example)}`,
                 );
-                runSearch(tip.example, fleetActiveFilter);
+                runSearch(tip.example);
               }}
               className="text-left p-3 rounded-lg border border-border bg-card hover:bg-card/80 hover:border-primary/30 transition-all group"
             >
@@ -420,7 +436,13 @@ export default function SearchPage() {
               <SectionHeader icon={Train} label="Railcars" count={results.railcars.length} />
               <div className="rounded-lg border border-border bg-card px-4">
                 {results.railcars.map((car) => (
-                  <RailcarRow key={car.id} car={car} onOpen={() => navigate(carPath(car.id))} />
+                  <RailcarRow
+                    key={car.id}
+                    car={car}
+                    onOpen={() => navigate(carPath(car.id))}
+                    onEdit={() => setEditCarId(car.id)}
+                    onHistory={() => openAppTab(historyPath(carLabel(car)))}
+                  />
                 ))}
               </div>
             </section>
@@ -477,6 +499,7 @@ export default function SearchPage() {
           )}
         </div>
       )}
+      <RailcarDetailSheet carId={editCarId} onClose={() => setEditCarId(null)} />
     </div>
   );
 }

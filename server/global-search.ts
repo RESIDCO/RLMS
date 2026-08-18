@@ -1,10 +1,4 @@
 import { displayLeaseNumber } from "@shared/residco-import";
-import {
-  compactCarNumberLookupVariants,
-  carNumberLookupVariants,
-  isExactCarRow,
-  parseExactCarIdentifier,
-} from "@shared/exact-car-search";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { applySearchFilter } from "./railcar-list";
@@ -54,12 +48,6 @@ function bestScore(blob: string, groups: string[]): number | null {
     best = best == null ? s : Math.min(best, s);
   }
   return best;
-}
-
-function applyFleetActive(q: any, fleetActive: string) {
-  if (fleetActive === "inactive") return q.eq("active", false);
-  if (fleetActive !== "all") return q.neq("active", false);
-  return q;
 }
 
 function mapCar(r: any) {
@@ -120,11 +108,10 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function fetchCarsByText(groups: string[], fleetActive: string): Promise<any[]> {
+async function fetchCarsByText(groups: string[]): Promise<any[]> {
   const pages = await Promise.all(
     groups.map(async (group) => {
       let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT);
-      q = applyFleetActive(q, fleetActive);
       q = applySearchFilter(q, group);
       const { data, error } = await q.order("id", { ascending: true }).limit(CAR_LIMIT);
       if (error) throw error;
@@ -134,53 +121,12 @@ async function fetchCarsByText(groups: string[], fleetActive: string): Promise<a
   return dedupeCars(pages.flat());
 }
 
-/**
- * Exact mark+number lookups skip fleet_active so typing OFCX075192 still
- * returns that car when it is inactive. Partial / lessee / OL queries do not
- * use this path.
- */
-async function fetchExactCars(groups: string[]): Promise<any[]> {
-  const ids = groups.map(parseExactCarIdentifier).filter((x): x is NonNullable<typeof x> => x != null);
-  if (!ids.length) return [];
-  const pages = await Promise.all(
-    ids.map(async (id) => {
-      const numberVars = carNumberLookupVariants(id.number);
-      const compactVars = compactCarNumberLookupVariants(id.marks, id.number);
-      const [bySplit, byCompact] = await Promise.all([
-        supabaseAdmin
-          .from("railcars")
-          .select(SEARCH_CAR_SELECT)
-          .ilike("reporting_marks", id.marks)
-          .in("car_number", numberVars)
-          .limit(20),
-        supabaseAdmin
-          .from("railcars")
-          .select(SEARCH_CAR_SELECT)
-          .in("car_number", compactVars)
-          .limit(20),
-      ]);
-      if (bySplit.error) {
-        console.log(`[search] exact-car-id skipped: ${bySplit.error.message}`);
-      }
-      if (byCompact.error) {
-        console.log(`[search] exact-car-id compact skipped: ${byCompact.error.message}`);
-      }
-      return [...(bySplit.data ?? []), ...(byCompact.data ?? [])]
-        .map(mapCar)
-        .filter((c) => isExactCarRow(c, id));
-    }),
-  );
-  return dedupeCars(pages.flat());
-}
-
 async function fetchCarsByFk(
   column: "railcar_assignments.rider_id" | "railcar_assignments.rider.master_lease_id",
   ids: number[],
-  fleetActive: string,
 ): Promise<any[]> {
   if (!ids.length) return [];
   let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT_INNER);
-  q = applyFleetActive(q, fleetActive);
   q = q.in(column, ids.slice(0, 80));
   const { data, error } = await q.limit(CAR_LIMIT);
   if (error) {
@@ -254,14 +200,13 @@ async function activeCarCountsByRider(riderIds: number[]): Promise<Map<number, n
   }
 }
 
-export async function runGlobalSearch(raw: string, fleetActive: string): Promise<GlobalSearchResult> {
+export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> {
   const tAll = Date.now();
   const groups = raw.split(",").map((g) => g.trim()).filter(Boolean);
   const terms = groups.flatMap((g) => g.split(/\s+/).filter(Boolean));
 
-  const [textCars, exactCars, allRiders, allLeases] = await Promise.all([
-    timed("railcars-text-query", () => fetchCarsByText(groups, fleetActive)),
-    timed("railcars-exact-id", () => fetchExactCars(groups)),
+  const [textCars, allRiders, allLeases] = await Promise.all([
+    timed("railcars-text-query", () => fetchCarsByText(groups)),
     timed("riders-fetch", fetchRiders),
     timed("leases-fetch", fetchLeases),
   ]);
@@ -289,14 +234,14 @@ export async function runGlobalSearch(raw: string, fleetActive: string): Promise
 
   const extraCars = await timed("railcars-via-rider-lease", async () => {
     const [byRider, byLease] = await Promise.all([
-      fetchCarsByFk("railcar_assignments.rider_id", riderIds, fleetActive),
-      fetchCarsByFk("railcar_assignments.rider.master_lease_id", leaseIds, fleetActive),
+      fetchCarsByFk("railcar_assignments.rider_id", riderIds),
+      fetchCarsByFk("railcar_assignments.rider.master_lease_id", leaseIds),
     ]);
     return dedupeCars([...byRider, ...byLease].filter((c) => !have.has(c.id)));
   });
 
   const tCarScore = Date.now();
-  const scoredCars = dedupeCars([...textCars, ...extraCars])
+  const matchedCars = dedupeCars([...textCars, ...extraCars])
     .map((c) => ({ c, score: bestScore(carBlob(c), groups) }))
     .filter((x) => x.score != null)
     .sort(
@@ -305,7 +250,6 @@ export async function runGlobalSearch(raw: string, fleetActive: string): Promise
     )
     .map((x) => x.c)
     .slice(0, CAR_LIMIT);
-  const matchedCars = dedupeCars([...exactCars, ...scoredCars]).slice(0, CAR_LIMIT);
   console.log(`[search] score-railcars ${Date.now() - tCarScore}ms rows=${matchedCars.length}`);
 
   const countByRider = await timed("rider-car-counts", () =>

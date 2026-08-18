@@ -6,9 +6,20 @@ import { ArrowUpDown } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { hashSearchParams } from "@/lib/hash-location";
+
+function historyCarMatches(h: any, q: string): boolean {
+  if (!q) return true;
+  const marks = String(h.railcar?.reporting_marks ?? "");
+  const num = String(h.railcar?.car_number ?? "");
+  const blob = [num, marks, `${marks} ${num}`, `${marks}${num}`, String(h.railcar_id ?? "")]
+    .join(" ")
+    .toLowerCase();
+  return blob.includes(q);
+}
 
 export default function HistoryPage() {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => hashSearchParams().get("q") ?? "");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
 
   const { data, isLoading } = useQuery<any[]>({
@@ -19,7 +30,7 @@ export default function HistoryPage() {
     let r = data ?? [];
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      r = r.filter((h: any) => h.railcar?.car_number?.toLowerCase().includes(q));
+      r = r.filter((h: any) => historyCarMatches(h, q));
     }
     r = [...r].sort((a: any, b: any) => {
       const av = new Date(a.moved_at).getTime();

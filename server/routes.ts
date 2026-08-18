@@ -3043,8 +3043,7 @@ export async function registerRoutes(
     try {
       const raw = (req.query.q as string | undefined)?.trim() ?? "";
       if (!raw) return res.json({ railcars: [], riders: [], leases: [] });
-      const fleetActive = String(req.query.fleet_active ?? "active").toLowerCase();
-      res.json(await runGlobalSearch(raw, fleetActive));
+      res.json(await runGlobalSearch(raw));
     } catch (err) {
       errHandler(res, err);
     }

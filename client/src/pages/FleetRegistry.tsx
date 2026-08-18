@@ -428,7 +428,6 @@ export default function FleetRegistry() {
     dir: "asc",
   });
   const [openCarId, setOpenCarId] = useState<number | null>(null);
-  const [editCar, setEditCar] = useState<Row | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [transitFilter, setTransitFilter] = useState<string>(initQ.transit);
   const [entityFilter, setEntityFilter] = useState<string>(initQ.entity);
@@ -816,22 +815,6 @@ export default function FleetRegistry() {
         ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
         : { key, dir: "asc" }
     );
-
-  const openCar = filtered.find((r) => r.id === openCarId) ?? null;
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/railcars/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({ title: "Railcar deleted" });
-      setOpenCarId(null);
-    },
-    onError: (e: Error) =>
-      toast({ title: "Cannot delete", description: e.message, variant: "destructive" }),
-  });
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -1481,18 +1464,8 @@ export default function FleetRegistry() {
         </DialogContent>
       </Dialog>
 
-      <Sheet open={!!openCarId} onOpenChange={(o) => !o && setOpenCarId(null)}>
-        <SheetContent side="right" className="w-full sm:w-[480px] sm:max-w-[480px] overflow-y-auto">
-          {openCar && <CarDetail carId={openCar.id} onEdit={() => setEditCar(openCar)} onDelete={() => deleteMutation.mutate(openCar.id)} canEdit={canEdit} />}
-        </SheetContent>
-      </Sheet>
+      <RailcarDetailSheet carId={openCarId} onClose={() => setOpenCarId(null)} />
 
-      {/* Edit dialog */}
-      <RailcarFormDialog
-        open={!!editCar}
-        onClose={() => setEditCar(null)}
-        car={editCar}
-      />
       <RailcarFormDialog
         open={addOpen}
         onClose={() => setAddOpen(false)}
@@ -1555,6 +1528,54 @@ function downloadRentEventsCsv(events: any[], carNumber: string) {
   URL.revokeObjectURL(url);
 }
 
+export function RailcarDetailSheet({
+  carId,
+  onClose,
+}: {
+  carId: number | null;
+  onClose: () => void;
+}) {
+  const canEdit = useCanEdit();
+  const { toast } = useToast();
+  const [editCar, setEditCar] = useState<Row | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/railcars/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Railcar deleted" });
+      onClose();
+    },
+    onError: (e: Error) =>
+      toast({ title: "Cannot delete", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <>
+      <Sheet open={carId != null} onOpenChange={(o) => !o && onClose()}>
+        <SheetContent side="right" className="w-full sm:w-[480px] sm:max-w-[480px] overflow-y-auto">
+          {carId != null && (
+            <CarDetail
+              carId={carId}
+              onEdit={(car) => setEditCar(car)}
+              onDelete={() => deleteMutation.mutate(carId)}
+              canEdit={canEdit}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+      <RailcarFormDialog
+        open={!!editCar}
+        onClose={() => setEditCar(null)}
+        car={editCar}
+      />
+    </>
+  );
+}
+
 function CarDetail({
   carId,
   onEdit,
@@ -1562,7 +1583,7 @@ function CarDetail({
   canEdit,
 }: {
   carId: number;
-  onEdit: () => void;
+  onEdit: (car: RailcarWithAssignment) => void;
   onDelete: () => void;
   canEdit: boolean;
 }) {
@@ -1718,7 +1739,7 @@ function CarDetail({
           Car page
         </Button>
         {canEdit && (
-          <Button size="sm" variant="secondary" onClick={onEdit} data-testid="button-edit-car">
+          <Button size="sm" variant="secondary" onClick={() => onEdit(data.railcar)} data-testid="button-edit-car">
             <Pencil className="h-4 w-4" />
             Edit
           </Button>

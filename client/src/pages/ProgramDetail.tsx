@@ -256,7 +256,7 @@ export default function ProgramDetailPage() {
   }
 
   return (
-    <div className="h-full min-h-0 flex flex-col overflow-hidden">
+    <div className="h-full min-h-[36rem] flex flex-col overflow-hidden">
       <PageHeader
         title={program.name}
         subtitle={catName}
@@ -280,8 +280,8 @@ export default function ProgramDetailPage() {
           </div>
         }
       />
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-4 sm:px-8 py-4 gap-4">
-        <div className="shrink-0 space-y-4">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-4 sm:px-8 py-3 gap-2">
+        <div className="shrink-0 min-h-0 max-h-[min(28%,15rem)] overflow-y-auto space-y-2 pr-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", CATEGORY_BADGE[catName] ?? "bg-muted border-border")}>
             {catName || "Uncategorized"}
@@ -303,15 +303,15 @@ export default function ProgramDetailPage() {
         </div>
 
         <Textarea
-          className="text-sm"
-          rows={3}
+          className="text-sm min-h-[52px]"
+          rows={2}
           value={header.status_narrative}
           readOnly={!canEdit}
           placeholder="Status narrative — the rolled-up note from the SUMMARY tab"
           onChange={(e) => setHeader({ ...header, status_narrative: e.target.value })}
         />
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
           <HeaderField label="Category">
             <Select value={header.category_id || "none"} onValueChange={(v) => setHeader({ ...header, category_id: v === "none" ? "" : v })}>
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -351,8 +351,8 @@ export default function ProgramDetailPage() {
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Description</div>
           <Textarea
-            className="text-xs"
-            rows={2}
+            className="text-xs min-h-[36px]"
+            rows={1}
             value={header.description}
             readOnly={!canEdit}
             onChange={(e) => setHeader({ ...header, description: e.target.value })}
@@ -374,8 +374,8 @@ export default function ProgramDetailPage() {
             <TabsTrigger value="docs">Documents</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
           </TabsList>
-          <TabsContent value="cars" className="mt-4 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden overflow-hidden">
-            <div className="shrink-0 flex items-center gap-3 mb-3 flex-wrap">
+          <TabsContent value="cars" className="mt-2 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden overflow-hidden">
+            <div className="shrink-0 flex items-center gap-3 mb-2 flex-wrap">
               {canEdit && (
                 <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> Add cars</Button>
               )}
@@ -410,7 +410,7 @@ export default function ProgramDetailPage() {
               />
               </div>
             )}
-            <div className="flex-1 min-h-[240px] rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
+            <div className="flex-1 min-h-0 rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
               <div className="flex-1 min-h-0 overflow-auto">
               <table className="w-full text-xs min-w-[1100px]">
                 <thead className="sticky top-0 z-10 bg-card text-[10px] uppercase tracking-wider text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))] [&>tr>th]:bg-card">
@@ -565,7 +565,7 @@ export default function ProgramDetailPage() {
               </div>
             </div>
           </TabsContent>
-          <TabsContent value="docs" className="mt-4 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
+          <TabsContent value="docs" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             <ProgramDocsPanel
               listUrl={`/api/programs/${id}/documents`}
               uploadUrl={`/api/programs/${id}/documents`}
@@ -573,7 +573,7 @@ export default function ProgramDetailPage() {
               categories={[...PROGRAM_DOC_CATEGORIES]}
             />
           </TabsContent>
-          <TabsContent value="activity" className="mt-4 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
+          <TabsContent value="activity" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             <ActivityList rows={activity} />
           </TabsContent>
         </Tabs>

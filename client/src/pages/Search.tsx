@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { carPath, lesseePath, olPath, olKeyFromLabel } from "@/lib/browse-nav";
+import { hashSearchParams } from "@/lib/hash-location";
 
 interface MasterLease {
   id: number;
@@ -236,15 +237,10 @@ export default function SearchPage() {
   }, []);
 
   useEffect(() => {
-    const hash = window.location.hash;
-    const qIndex = hash.indexOf("?");
-    if (qIndex !== -1) {
-      const params = new URLSearchParams(hash.slice(qIndex + 1));
-      const q = params.get("q");
-      if (q) {
-        setQuery(q);
-        runSearch(q, fleetActiveFilter);
-      }
+    const q = hashSearchParams().get("q");
+    if (q) {
+      setQuery(q);
+      runSearch(q, fleetActiveFilter);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

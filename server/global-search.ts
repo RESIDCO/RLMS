@@ -174,26 +174,39 @@ async function fetchLeases(): Promise<any[]> {
 
 async function activeCarCountsByRider(riderIds: number[]): Promise<Map<number, number>> {
   const counts = new Map<number, number>();
-  if (!riderIds.length) return counts;
-  const { data, error } = await supabaseAdmin
-    .from("railcar_assignments")
-    .select("rider_id, railcars!inner(id, active)")
-    .in("rider_id", riderIds.slice(0, 80))
-    .eq("railcars.active", true);
-  if (error) {
-    const fallback = await supabaseAdmin.from("railcar_assignments").select("rider_id").in("rider_id", riderIds.slice(0, 80));
-    if (fallback.error) throw fallback.error;
-    for (const row of fallback.data ?? []) {
-      const id = Number((row as { rider_id?: number }).rider_id);
+  const ids = riderIds.filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) return counts;
+  try {
+    const rows = await fetchAllRows<{ rider_id: number }>((from, to) =>
+      supabaseAdmin
+        .from("railcar_assignments")
+        .select("id, rider_id, railcars!inner(id, active)")
+        .in("rider_id", ids)
+        .eq("railcars.active", true)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    for (const row of rows) {
+      const id = Number(row.rider_id);
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
+  } catch (err) {
+    console.log(`[search] rider-car-counts inner join failed, using assignments only: ${String((err as any)?.message ?? err)}`);
+    const rows = await fetchAllRows<{ rider_id: number }>((from, to) =>
+      supabaseAdmin
+        .from("railcar_assignments")
+        .select("id, rider_id")
+        .in("rider_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    for (const row of rows) {
+      const id = Number(row.rider_id);
       if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
     }
     return counts;
   }
-  for (const row of data ?? []) {
-    const id = Number((row as { rider_id?: number }).rider_id);
-    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
-  }
-  return counts;
 }
 
 export async function runGlobalSearch(raw: string, fleetActive: string): Promise<GlobalSearchResult> {

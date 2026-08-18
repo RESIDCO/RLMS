@@ -5,7 +5,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
-import { createServer } from "http";
+import { createServer, type IncomingMessage } from "http";
 
 const app = express();
 const httpServer = createServer(app);
@@ -33,11 +33,22 @@ app.use(
   })
 );
 
+function attachRawBody(req: IncomingMessage, _res: unknown, buf: Buffer) {
+  req.rawBody = buf;
+}
+
+// Bulk Import posts parsed workbooks as JSON (financial sheet matrices, VCF rows,
+// acquisitions, master car list). Express's default 100kb ceiling 413s a real Asset Report.
+app.use(
+  "/api/import",
+  express.json({
+    limit: "20mb",
+    verify: attachRawBody,
+  }),
+);
 app.use(
   express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
+    verify: attachRawBody,
   }),
 );
 

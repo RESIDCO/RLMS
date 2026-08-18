@@ -10,6 +10,8 @@ import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fle
 import { displayLeaseNumber } from "@shared/residco-import";
 import { fmtUsd, fmtInt } from "@/lib/dv/format";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
+import { asOne } from "@shared/lease-type";
 import { ChevronRight, Calculator } from "lucide-react";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import {
@@ -74,9 +76,9 @@ export default function CarDetailPage() {
   });
 
   const r = data?.railcar;
-  const assignment = r?.assignment;
-  const rider = assignment?.rider;
-  const lease = rider?.master_lease;
+  const assignment = asOne(r?.assignment);
+  const rider = asOne(assignment?.rider);
+  const lease = asOne(rider?.master_lease);
   const mark = r ? [r.reporting_marks, r.car_number].filter(Boolean).join(" ") : "Car";
   const ol = r?.rider_external_id || (olP?.ol ? decodeURIComponent(olP.ol) : null) || (lesseeP?.ol ? decodeURIComponent(lesseeP.ol) : null) || (entityP?.ol ? decodeURIComponent(entityP.ol) : null);
   const lessee = r?.lessee_name || (lesseeP?.lessee ? decodeURIComponent(lesseeP.lessee) : null);
@@ -177,7 +179,9 @@ export default function CarDetailPage() {
                 <Field label="Master lease">{displayLeaseNumber(lease?.lease_number) || "—"}</Field>
                 <Field label="Agreement">{dash(lease?.agreement_number)}</Field>
                 <Field label="Lessor">{dash(lease?.lessor)}</Field>
-                <Field label="Lease type">{dash(lease?.lease_type)}</Field>
+                <Field label="Lease type">
+                  <LeaseTypeBadge carType={r.lease_type} mlaType={lease?.lease_type} />
+                </Field>
                 <Field label="Effective">{formatCalendarDate(rider?.effective_date)}</Field>
                 <Field label="Expiration / termination">{formatCalendarDate(rider?.expiration_date || r.lease_end_date || r.lease_expiry)}</Field>
                 <Field label="Rate">{rider?.monthly_rate_pct != null ? `${Number(rider.monthly_rate_pct)}%` : "—"}</Field>

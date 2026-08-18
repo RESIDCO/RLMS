@@ -14,7 +14,7 @@ export const ENTITY_DB: Record<string, string> = {
 };
 
 const CAR_LIST_SELECT =
-  "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, lessee_name, rider_external_id, assignment_label, managed_category, sold_to";
+  "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, lessee_name, rider_external_id, assignment_label, managed_category, sold_to, lease_type";
 
 export function normalizeOl(raw: string | null | undefined): string {
   return String(raw ?? "")
@@ -70,6 +70,7 @@ function mapCarListRow(c: any) {
     fleet_status,
     lessee_name: carLesseeName(c),
     rider_external_id: carOlCode(c),
+    lease_type: c.lease_type ?? null,
   };
 }
 

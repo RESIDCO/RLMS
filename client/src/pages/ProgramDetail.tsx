@@ -19,6 +19,9 @@ import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker"
 import ShopCombobox, { type ShopOption } from "@/components/ShopCombobox";
 import { cn } from "@/lib/utils";
 import { Download, History, Plus, Paperclip, UserMinus } from "lucide-react";
+import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { GridColumnTh } from "@/components/GridColumnTh";
+import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import {
   CATEGORY_BADGE,
   PROGRAM_CAR_DOC_CATEGORIES,
@@ -107,6 +110,31 @@ function headerFrom(p: Program): HeaderDraft {
 function carLabelOf(c: ProgramCar): string {
   return [c.railcar?.reporting_marks, c.railcar?.car_number].filter(Boolean).join(" ") || `#${c.railcar_id}`;
 }
+
+const PD_EMPTY_COLS = new Set<string>();
+const PD_CORE = ["status", "flag", "comment", "ol_entry", "ol_now", "shop", "repair"] as const;
+const PD_LABELS: Record<string, string> = {
+  car: "Car",
+  status: "Status",
+  flag: "Flag",
+  comment: "Comment",
+  ol_entry: "OL at entry",
+  ol_now: "OL now",
+  shop: "Shop",
+  repair: "Repair $",
+};
+const PD_WIDTHS: Record<string, number> = {
+  _select: 36,
+  car: 140,
+  status: 170,
+  flag: 120,
+  comment: 160,
+  ol_entry: 110,
+  ol_now: 110,
+  shop: 150,
+  repair: 90,
+  _actions: 88,
+};
 
 function formatActivity(a: any): string {
   const car = a.railcar ? [a.railcar.reporting_marks, a.railcar.car_number].filter(Boolean).join(" ") : "";
@@ -211,6 +239,195 @@ export default function ProgramDetailPage() {
 
   const defs = program?.field_defs ?? [];
   const catName = program?.category?.name ?? "";
+  const {
+    colOrder,
+    setColOrder,
+    colWidths,
+    setColWidth,
+  } = useColumnPrefs(`program_cars_${Number.isFinite(id) ? id : 0}`, PD_EMPTY_COLS);
+  const displayKeys = useMemo(() => {
+    const pinnedStart = canEdit ? ["_select", "car"] : ["car"];
+    const movable = [...PD_CORE, ...defs.map((d) => `cf:${d.field_key}`)];
+    return [...pinnedStart, ...mergeColOrder(movable, colOrder), "_actions"];
+  }, [canEdit, defs, colOrder]);
+  const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "_actions");
+  const tableW = tableWidthFor(displayKeys, colWidths, PD_WIDTHS, 120);
+
+  function pdHeader(key: string) {
+    const pinned = key === "_select" || key === "car" || key === "_actions";
+    const cf = key.startsWith("cf:") ? defs.find((d) => `cf:${d.field_key}` === key) : null;
+    const w = colWidth(colWidths, key, PD_WIDTHS[key] ?? 120);
+    return (
+      <GridColumnTh
+        key={key}
+        colKey={key}
+        width={w}
+        pinned={pinned}
+        className={cn(
+          "px-2 py-2 font-medium bg-card",
+          key === "repair" ? "text-right" : "text-left",
+          key === "_select" && "w-8",
+          key === "_actions" && "w-24",
+        )}
+        onResize={setColWidth}
+        onMove={(from, to) => setColOrder(moveCol(movableKeys, from, to))}
+      >
+        {key === "_select" ? (
+          <Checkbox
+            checked={cars.filter((c) => !c.exited_date).length > 0 && cars.filter((c) => !c.exited_date).every((c) => selected.has(c.id))}
+            onCheckedChange={toggleAll}
+            aria-label="Select all cars"
+          />
+        ) : key === "_actions" ? null : (
+          PD_LABELS[key] ?? cf?.label ?? key
+        )}
+      </GridColumnTh>
+    );
+  }
+
+  function pdCell(key: string, c: ProgramCar, label: string, exited: boolean) {
+    const def = key.startsWith("cf:") ? defs.find((d) => `cf:${d.field_key}` === key) : null;
+    if (def) {
+      return (
+        <td key={key} className="px-2 py-1">
+          <CustomCell
+            def={def}
+            value={c.custom_fields?.[def.field_key]}
+            readOnly={!canEdit || exited}
+            onSave={(v) => patchCar.mutate({ linkId: c.id, body: { custom_fields: { [def.field_key]: v } } })}
+          />
+        </td>
+      );
+    }
+    switch (key) {
+      case "_select":
+        return (
+          <td key={key} className="px-2 py-1">
+            {!exited && (
+              <Checkbox checked={selected.has(c.id)} onCheckedChange={() => toggle(c.id)} aria-label={`Select ${label}`} />
+            )}
+          </td>
+        );
+      case "car":
+        return (
+          <td key={key} className="px-2 py-1.5 font-mono whitespace-nowrap">
+            {label}
+            {exited && <div className="text-[10px] text-muted-foreground">Exited {String(c.exited_date).slice(0, 10)}</div>}
+          </td>
+        );
+      case "status":
+        return (
+          <td key={key} className="px-2 py-1">
+            <div className="flex items-center gap-1">
+              <StatusCell
+                value={c.status ?? ""}
+                options={statusOptions}
+                readOnly={!canEdit || exited}
+                onSave={(v) => patchCar.mutate({ linkId: c.id, body: { status: v } })}
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0"
+                aria-label={`Status history for ${label}`}
+                onClick={() => setHistoryFor(c)}
+              >
+                <History className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </td>
+        );
+      case "flag":
+        return (
+          <td key={key} className="px-2 py-1">
+            <CellInput
+              readOnly={!canEdit || exited}
+              value={c.flag_tag ?? ""}
+              placeholder="Watch, Priority…"
+              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { flag_tag: v } })}
+            />
+          </td>
+        );
+      case "comment":
+        return (
+          <td key={key} className="px-2 py-1 min-w-[140px]">
+            <CellInput
+              readOnly={!canEdit || exited}
+              value={c.notes ?? ""}
+              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { notes: v } })}
+            />
+          </td>
+        );
+      case "ol_entry":
+        return <td key={key} className="px-2 py-1.5 font-mono">{c.rider_external_id_snapshot ?? "—"}</td>;
+      case "ol_now":
+        return <td key={key} className="px-2 py-1.5 font-mono">{c.railcar?.rider_external_id ?? "—"}</td>;
+      case "shop":
+        return (
+          <td key={key} className="px-2 py-1">
+            {canEdit && !exited ? (
+              <ShopCombobox
+                compact
+                shops={shops}
+                value={c.shop_id}
+                onChange={(shopId) => patchCar.mutate({ linkId: c.id, body: { shop_id: shopId } })}
+              />
+            ) : (
+              c.shop?.name ?? "—"
+            )}
+          </td>
+        );
+      case "repair":
+        return (
+          <td key={key} className="px-2 py-1">
+            <CellInput
+              readOnly={!canEdit || exited}
+              className="text-right"
+              value={c.repair_cost_total != null ? String(c.repair_cost_total) : ""}
+              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { repair_cost_total: v } })}
+            />
+          </td>
+        );
+      case "_actions":
+        return (
+          <td key={key} className="px-1 py-1 whitespace-nowrap">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              aria-label={`Attachments for ${label}`}
+              onClick={() => setDocsFor(c)}
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+              {c.doc_count > 0 && <span className="text-[9px] ml-0.5">{c.doc_count}</span>}
+            </Button>
+            {canEdit && !exited && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                aria-label={`Remove ${label} from program`}
+                onClick={async () => {
+                  const ok = await confirmDelete({
+                    title: `Remove ${label} from ${program?.name}?`,
+                    description: "The car stays in program history with an exit date. It is not deleted.",
+                    confirmLabel: "Remove from program",
+                  });
+                  if (!ok) return;
+                  await apiRequest("DELETE", `/api/programs/${id}/cars/${c.id}`);
+                  qc.invalidateQueries({ queryKey: carsKey });
+                  qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
+                }}
+              >
+                <UserMinus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </td>
+        );
+      default:
+        return <td key={key} className="px-2 py-1">—</td>;
+    }
+  }
 
   async function saveHeader() {
     if (!header || !canEdit) return;
@@ -412,30 +629,15 @@ export default function ProgramDetailPage() {
             )}
             <div className="flex-1 min-h-0 rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
               <div className="flex-1 min-h-0 overflow-auto">
-              <table className="w-full text-xs min-w-[1100px]">
+              <table className="text-xs" style={{ tableLayout: "fixed", width: Math.max(1100, tableW) }}>
+                <colgroup>
+                  {displayKeys.map((k) => (
+                    <col key={k} style={{ width: colWidth(colWidths, k, PD_WIDTHS[k] ?? 120) }} />
+                  ))}
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-card text-[10px] uppercase tracking-wider text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))] [&>tr>th]:bg-card">
                   <tr>
-                    {canEdit && (
-                      <th className="w-8 px-2 py-2">
-                        <Checkbox
-                          checked={cars.filter((c) => !c.exited_date).length > 0 && cars.filter((c) => !c.exited_date).every((c) => selected.has(c.id))}
-                          onCheckedChange={toggleAll}
-                          aria-label="Select all cars"
-                        />
-                      </th>
-                    )}
-                    <th className="text-left px-2 py-2">Car</th>
-                    <th className="text-left px-2 py-2">Status</th>
-                    <th className="text-left px-2 py-2">Flag</th>
-                    <th className="text-left px-2 py-2">Comment</th>
-                    <th className="text-left px-2 py-2">OL at entry</th>
-                    <th className="text-left px-2 py-2">OL now</th>
-                    <th className="text-left px-2 py-2">Shop</th>
-                    <th className="text-right px-2 py-2">Repair $</th>
-                    {defs.map((d) => (
-                      <th key={d.field_key} className="text-left px-2 py-2 whitespace-nowrap">{d.label}</th>
-                    ))}
-                    <th className="w-24" />
+                    {displayKeys.map((k) => pdHeader(k))}
                   </tr>
                 </thead>
                 <tbody>
@@ -444,121 +646,12 @@ export default function ProgramDetailPage() {
                     const exited = Boolean(c.exited_date);
                     return (
                       <tr key={c.id} className={cn("border-t border-border/50", exited && "opacity-60")}>
-                        {canEdit && (
-                          <td className="px-2 py-1">
-                            {!exited && (
-                              <Checkbox checked={selected.has(c.id)} onCheckedChange={() => toggle(c.id)} aria-label={`Select ${label}`} />
-                            )}
-                          </td>
-                        )}
-                        <td className="px-2 py-1.5 font-mono whitespace-nowrap">
-                          {label}
-                          {exited && <div className="text-[10px] text-muted-foreground">Exited {String(c.exited_date).slice(0, 10)}</div>}
-                        </td>
-                        <td className="px-2 py-1">
-                          <div className="flex items-center gap-1">
-                            <StatusCell
-                              value={c.status ?? ""}
-                              options={statusOptions}
-                              readOnly={!canEdit || exited}
-                              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { status: v } })}
-                            />
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 shrink-0"
-                              aria-label={`Status history for ${label}`}
-                              onClick={() => setHistoryFor(c)}
-                            >
-                              <History className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                        <td className="px-2 py-1">
-                          <CellInput
-                            readOnly={!canEdit || exited}
-                            value={c.flag_tag ?? ""}
-                            placeholder="Watch, Priority…"
-                            onSave={(v) => patchCar.mutate({ linkId: c.id, body: { flag_tag: v } })}
-                          />
-                        </td>
-                        <td className="px-2 py-1 min-w-[140px]">
-                          <CellInput
-                            readOnly={!canEdit || exited}
-                            value={c.notes ?? ""}
-                            onSave={(v) => patchCar.mutate({ linkId: c.id, body: { notes: v } })}
-                          />
-                        </td>
-                        <td className="px-2 py-1.5 font-mono">{c.rider_external_id_snapshot ?? "—"}</td>
-                        <td className="px-2 py-1.5 font-mono">{c.railcar?.rider_external_id ?? "—"}</td>
-                        <td className="px-2 py-1">
-                          {canEdit && !exited ? (
-                            <ShopCombobox
-                              compact
-                              shops={shops}
-                              value={c.shop_id}
-                              onChange={(shopId) => patchCar.mutate({ linkId: c.id, body: { shop_id: shopId } })}
-                            />
-                          ) : (
-                            c.shop?.name ?? "—"
-                          )}
-                        </td>
-                        <td className="px-2 py-1">
-                          <CellInput
-                            readOnly={!canEdit || exited}
-                            className="text-right"
-                            value={c.repair_cost_total != null ? String(c.repair_cost_total) : ""}
-                            onSave={(v) => patchCar.mutate({ linkId: c.id, body: { repair_cost_total: v } })}
-                          />
-                        </td>
-                        {defs.map((d) => (
-                          <td key={d.field_key} className="px-2 py-1">
-                            <CustomCell
-                              def={d}
-                              value={c.custom_fields?.[d.field_key]}
-                              readOnly={!canEdit || exited}
-                              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { custom_fields: { [d.field_key]: v } } })}
-                            />
-                          </td>
-                        ))}
-                        <td className="px-1 py-1 whitespace-nowrap">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7"
-                            aria-label={`Attachments for ${label}`}
-                            onClick={() => setDocsFor(c)}
-                          >
-                            <Paperclip className="h-3.5 w-3.5" />
-                            {c.doc_count > 0 && <span className="text-[9px] ml-0.5">{c.doc_count}</span>}
-                          </Button>
-                          {canEdit && !exited && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7"
-                              aria-label={`Remove ${label} from program`}
-                              onClick={async () => {
-                                const ok = await confirmDelete({
-                                  title: `Remove ${label} from ${program.name}?`,
-                                  description: "The car stays in program history with an exit date. It is not deleted.",
-                                  confirmLabel: "Remove from program",
-                                });
-                                if (!ok) return;
-                                await apiRequest("DELETE", `/api/programs/${id}/cars/${c.id}`);
-                                qc.invalidateQueries({ queryKey: carsKey });
-                                qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
-                              }}
-                            >
-                              <UserMinus className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </td>
+                        {displayKeys.map((k) => pdCell(k, c, label, exited))}
                       </tr>
                     );
                   })}
                   {cars.length === 0 && (
-                    <tr><td colSpan={10 + defs.length} className="px-3 py-10 text-center text-muted-foreground italic">No cars in this program yet.</td></tr>
+                    <tr><td colSpan={displayKeys.length} className="px-3 py-10 text-center text-muted-foreground italic">No cars in this program yet.</td></tr>
                   )}
                 </tbody>
               </table>

@@ -602,6 +602,7 @@ export default function LeaseWizard() {
                       <SelectItem value="Railcar Lease">Railcar Lease</SelectItem>
                       <SelectItem value="Net Lease">Net Lease</SelectItem>
                       <SelectItem value="Full Service Lease">Full Service Lease</SelectItem>
+                      <SelectItem value="Modified Lease">Modified Lease</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import { parseFleetStatus } from "@shared/fleet-status";
 import { splitCarNumber } from "@shared/residco-import";
+import { asOne } from "@shared/lease-type";
 import { fetchAllRows } from "./fetch-all";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
@@ -18,7 +19,7 @@ assignment:railcar_assignments(
   id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
     id, rider_name, schedule_number, expiration_date, master_lease_id,
-    master_lease:master_leases(id, lease_number, lessor)
+    master_lease:master_leases(id, lease_number, lessor, lease_type)
   )
 )
 `.replace(/\s+/g, " ").trim();
@@ -220,7 +221,11 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
 }
 
 function mapRow(r: any) {
-  const assignment = Array.isArray(r.assignment) ? r.assignment[0] ?? null : r.assignment;
+  const assignmentRaw = asOne(r.assignment);
+  const rider = asOne(assignmentRaw?.rider);
+  const assignment = assignmentRaw
+    ? { ...assignmentRaw, rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null }
+    : null;
   return { ...r, assignment, fleet_status: parseFleetStatus(r.fleet_status) ?? r.fleet_status ?? null };
 }
 

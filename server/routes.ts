@@ -5,6 +5,7 @@ import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railcar-list";
+import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
 import { countCarsByRiderId } from "./rider-car-counts";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
@@ -27,6 +28,7 @@ import {
   logProgramActivity,
 } from "./programs";
 import { masterReportFilename } from "@shared/programs";
+import { asOne } from "@shared/lease-type";
 import {
   getAuthUser,
   getUserRole,
@@ -1240,11 +1242,13 @@ export async function registerRoutes(
       if (numHistRes.error) throw numHistRes.error;
 
       if (!car) return res.status(404).json({ message: "Railcar not found" });
+      const assignmentRaw = asOne(car.assignment);
+      const rider = asOne(assignmentRaw?.rider);
       const normalized = {
         ...car,
-        assignment: Array.isArray(car.assignment)
-          ? car.assignment[0] ?? null
-          : car.assignment,
+        assignment: assignmentRaw
+          ? { ...assignmentRaw, rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null }
+          : null,
         railcar_ab_items: abRes.error ? [] : (abRes.data ?? []),
       };
       res.json({ railcar: normalized, history: histRes.data ?? [], number_history: numHistRes.data ?? [] });
@@ -1392,6 +1396,28 @@ export async function registerRoutes(
       });
 
       res.json(result);
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/leases/export", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const scopeAll = req.query.scope === "all" || req.query.all === "1" || req.query.all === "true";
+      let ids = String(req.query.ids ?? "")
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (scopeAll) {
+        const { data, error } = await supabase.from("master_leases").select("id").order("lease_number");
+        if (error) throw error;
+        ids = (data ?? []).map((r: any) => Number(r.id)).filter((n) => n > 0);
+      }
+      const { buffer, filename } = await buildLeaseReport({ leaseIds: ids });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buffer);
     } catch (err) {
       errHandler(res, err);
     }
@@ -3200,9 +3226,14 @@ export async function registerRoutes(
     try {
       const user = req.authUser ?? (await getAuthUser(req));
       if (!user) return res.status(401).json({ error: "Unauthorized" });
-      const { page, visible_cols } = req.body as { page: string; visible_cols: string[] };
+      const { page, visible_cols } = req.body as { page: string; visible_cols: unknown };
       if (!page) return res.status(400).json({ error: "page required" });
-      if (!Array.isArray(visible_cols)) return res.status(400).json({ error: "visible_cols must be an array" });
+      const prefsOk =
+        Array.isArray(visible_cols) ||
+        (visible_cols != null &&
+          typeof visible_cols === "object" &&
+          Array.isArray((visible_cols as { cols?: unknown }).cols));
+      if (!prefsOk) return res.status(400).json({ error: "visible_cols must be an array or { cols, order, widths }" });
 
       const { error } = await supabase
         .from("user_column_prefs")

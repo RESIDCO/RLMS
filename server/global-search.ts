@@ -1,4 +1,5 @@
 import { displayLeaseNumber } from "@shared/residco-import";
+import { asOne } from "@shared/lease-type";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { applySearchFilter } from "./railcar-list";
@@ -8,12 +9,12 @@ const SIDE_LIMIT = 100;
 
 const SEARCH_CAR_SELECT = `
 id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation,
-lessee_name, rider_external_id, assignment_label, managed_category,
+lessee_name, rider_external_id, assignment_label, managed_category, lease_type,
 assignment:railcar_assignments(
   id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
     id, rider_name, schedule_number, expiration_date,
-    master_lease:master_leases(id, lease_number, lessor, lessee)
+    master_lease:master_leases(id, lease_number, lessor, lessee, lease_type)
   )
 )
 `.replace(/\s+/g, " ").trim();
@@ -51,9 +52,14 @@ function bestScore(blob: string, groups: string[]): number | null {
 }
 
 function mapCar(r: any) {
+  const assignment = asOne(r.assignment);
+  const rider = asOne(assignment?.rider);
+  const master_lease = asOne(rider?.master_lease);
   return {
     ...r,
-    assignment: Array.isArray(r.assignment) ? r.assignment[0] ?? null : r.assignment,
+    assignment: assignment
+      ? { ...assignment, rider: rider ? { ...rider, master_lease } : null }
+      : null,
   };
 }
 
@@ -148,13 +154,14 @@ function dedupeCars(rows: any[]): any[] {
 }
 
 async function fetchRiders(): Promise<any[]> {
-  return fetchAllRows((from, to) =>
+  const rows = await fetchAllRows((from, to) =>
     supabaseAdmin
       .from("riders")
-      .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(id, lease_number, lessor, lessee)")
+      .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(id, lease_number, lessor, lessee, lease_type)")
       .order("id", { ascending: true })
       .range(from, to),
   );
+  return rows.map((r: any) => ({ ...r, master_lease: asOne(r.master_lease) }));
 }
 
 async function fetchLeases(): Promise<any[]> {

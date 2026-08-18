@@ -4,6 +4,7 @@ import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
+import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, FLEET_STATUSES, type FleetStatus } from "@shared/fleet-status";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList, ExternalLink } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { GridColumnTh } from "@/components/GridColumnTh";
+import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { Checkbox } from "@/components/ui/checkbox";
 import { openAppTab, carPath } from "@/lib/browse-nav";
 import {
@@ -147,6 +150,44 @@ type SortKey =
   | "rider"
   | "lease"
   | "expiration";
+
+const FR_PINNED_START = ["_select", "marks", "car_number", "lease_type"] as const;
+const FR_PINNED_END = ["_actions"] as const;
+const FR_CORE_MOVABLE = ["entity", "type", "status", "lessee", "rider", "lease", "expires"] as const;
+const FR_SORT: Record<string, SortKey> = {
+  car_number: "car_number",
+  status: "status",
+  lessee: "fleet",
+  rider: "rider",
+  lease: "lease",
+  expires: "expiration",
+};
+const FR_LABELS: Record<string, string> = {
+  entity: "Entity",
+  marks: "Marks",
+  car_number: "Car Number",
+  lease_type: "Lease Type",
+  type: "Type",
+  status: "Rental Status",
+  lessee: "Lessee",
+  rider: "Rider",
+  lease: "Lease",
+  expires: "Expires",
+};
+const FR_WIDTHS: Record<string, number> = {
+  _select: 40,
+  entity: 88,
+  marks: 88,
+  car_number: 140,
+  lease_type: 130,
+  type: 80,
+  status: 150,
+  lessee: 140,
+  rider: 130,
+  lease: 110,
+  expires: 110,
+  _actions: 40,
+};
 
 function fmtDate(d: string | null | undefined) {
   return formatCalendarDate(d);
@@ -474,7 +515,7 @@ export default function FleetRegistry() {
     | "description" | "mech_designation"
     | "monthly_rent_per_car" | "monthly_depr_per_car"
     | "commodity" | "commodity_family"
-    | "dot_code" | "lease_type" | "lease_expiry" | "lease_start_date" | "lease_end_date"
+    | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
     | "data_source" | "active" | "comment_event_note" | "rider_external_id";
   const OPT_COLS: { key: OptCol; label: string }[] = [
     { key: "nbv",                 label: "NBV" },
@@ -490,7 +531,6 @@ export default function FleetRegistry() {
     { key: "commodity",           label: "Commodity" },
     { key: "commodity_family",    label: "Commodity Family" },
     { key: "dot_code",            label: "DOT Code" },
-    { key: "lease_type",          label: "Lease Type" },
     { key: "lease_start_date",    label: "Lease Start" },
     { key: "lease_end_date",      label: "Lease End" },
     { key: "lease_expiry",        label: "Lease Expiry" },
@@ -500,7 +540,16 @@ export default function FleetRegistry() {
     { key: "comment_event_note",  label: "Comment / Event Note" },
   ];
   const FR_DEFAULT_COLS = new Set<string>([]);
-  const { visibleCols: visibleColsRaw, toggleCol, resetCols: resetVisibleCols, prefsLoaded: colPrefsLoaded } =
+  const {
+    visibleCols: visibleColsRaw,
+    toggleCol,
+    resetCols: resetVisibleCols,
+    prefsLoaded: colPrefsLoaded,
+    colOrder,
+    setColOrder,
+    colWidths,
+    setColWidth,
+  } =
     useColumnPrefs("fleet_registry", FR_DEFAULT_COLS);
   // Cast for backwards compat with existing Set<OptCol> usage in JSX
   const visibleCols = visibleColsRaw as Set<OptCol>;
@@ -815,6 +864,166 @@ export default function FleetRegistry() {
         ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
         : { key, dir: "asc" }
     );
+
+  const displayKeys = useMemo(() => {
+    const movable = [
+      ...FR_CORE_MOVABLE,
+      ...OPT_COLS.filter((c) => tableCols.has(c.key)).map((c) => c.key),
+    ];
+    return [...FR_PINNED_START, ...mergeColOrder(movable, colOrder), ...FR_PINNED_END];
+  }, [tableCols, colOrder]);
+  const movableKeys = displayKeys.filter(
+    (k) => !(FR_PINNED_START as readonly string[]).includes(k) && !(FR_PINNED_END as readonly string[]).includes(k),
+  );
+  const tableW = tableWidthFor(displayKeys, colWidths, FR_WIDTHS, 110);
+
+  function frHeader(key: string) {
+    const pinned =
+      (FR_PINNED_START as readonly string[]).includes(key) ||
+      (FR_PINNED_END as readonly string[]).includes(key);
+    const w = colWidth(colWidths, key, FR_WIDTHS[key] ?? 110);
+    const sortKey = FR_SORT[key];
+    return (
+      <GridColumnTh
+        key={key}
+        colKey={key}
+        width={w}
+        pinned={pinned}
+        className={cn(
+          "px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40",
+          key === "_select" && "pl-4 pr-2 py-3 w-10",
+          key === "marks" && "hidden sm:table-cell",
+          key === "type" && "hidden sm:table-cell",
+          key === "_actions" && "w-10",
+        )}
+        onResize={setColWidth}
+        onMove={(from, to) => setColOrder(moveCol(movableKeys, from, to))}
+      >
+        {key === "_select" ? (
+          <Checkbox
+            checked={allSelected}
+            data-state={someSelected ? "indeterminate" : allSelected ? "checked" : "unchecked"}
+            onCheckedChange={toggleAll}
+            aria-label="Select all visible cars"
+            data-testid="checkbox-select-all"
+          />
+        ) : key === "_actions" ? null : sortKey ? (
+          <SortLabel label={FR_LABELS[key] ?? key} k={sortKey} sort={sort} onClick={toggleSort} />
+        ) : (
+          FR_LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key
+        )}
+      </GridColumnTh>
+    );
+  }
+
+  function frCell(key: string, r: any) {
+    if (OPT_COLS.some((c) => c.key === key) && tableCols.has(key as OptCol)) {
+      return renderOptTd(key, r);
+    }
+    switch (key) {
+      case "_select":
+        return (
+          <td key={key} className="pl-4 pr-2 py-3" onClick={(e) => toggleOne(r.id, e)}>
+            <Checkbox
+              checked={selectedIds.has(r.id)}
+              onCheckedChange={() => {/* handled by td onClick */}}
+              aria-label={`Select car ${r.car_number}`}
+              data-testid={`checkbox-car-${r.id}`}
+            />
+          </td>
+        );
+      case "entity":
+        return (
+          <td key={key} className="px-4 py-3">
+            <EntityBadge entity={r.entity} />
+          </td>
+        );
+      case "marks":
+        return (
+          <td key={key} className="px-4 py-3 font-mono-num text-muted-foreground hidden sm:table-cell">
+            {r.reporting_marks ?? "—"}
+          </td>
+        );
+      case "car_number":
+        return (
+          <td key={key} className="px-4 py-3 font-mono-num font-medium">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                className="hover:text-primary hover:underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openAppTab(carPath(r.id));
+                }}
+                data-testid={`link-car-detail-${r.id}`}
+              >
+                {r.car_number}
+              </button>
+              <InactiveFleetBadge active={r.active} />
+            </div>
+          </td>
+        );
+      case "lease_type":
+        return (
+          <td key={key} className="px-4 py-3">
+            <LeaseTypeBadge
+              carType={r.lease_type}
+              mlaType={r.assignment?.rider?.master_lease?.lease_type}
+            />
+          </td>
+        );
+      case "type":
+        return (
+          <td key={key} className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+            {r.car_type ?? "—"}
+          </td>
+        );
+      case "status":
+        return (
+          <td key={key} className="px-4 py-3">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
+              {r.transit_status && (
+                <TransitBadge status={r.transit_status} label={r.transit_label} />
+              )}
+              {r.needs_completion && <NeedsCompletionBadge />}
+            </div>
+          </td>
+        );
+      case "lessee":
+        return (
+          <td key={key} className="px-4 py-3">
+            <div>{r.assignment?.fleet_name ?? <span className="text-muted-foreground">Unassigned</span>}</div>
+          </td>
+        );
+      case "rider":
+        return (
+          <td key={key} className="px-4 py-3 text-muted-foreground">
+            {r.assignment?.rider?.rider_name ?? "—"}
+          </td>
+        );
+      case "lease":
+        return (
+          <td key={key} className="px-4 py-3 font-mono-num text-muted-foreground">
+            {displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}
+          </td>
+        );
+      case "expires":
+        return (
+          <td key={key} className="px-4 py-3 font-mono-num text-muted-foreground">
+            <ExpiresDisplay r={r} />
+          </td>
+        );
+      case "_actions":
+        return (
+          <td key={key} className="px-4 py-3 text-muted-foreground">
+            <ChevronRight className="h-4 w-4" />
+          </td>
+        );
+      default:
+        return renderOptTd(key, r);
+    }
+  }
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -1203,43 +1412,23 @@ export default function FleetRegistry() {
         {/* Table — bounded panel: both scrollbars stay on-screen; header sticky */}
         <div className="flex-1 min-h-[240px] rounded-lg border border-card-border bg-card overflow-hidden flex flex-col">
           <div className="flex-1 min-h-0 overflow-auto">
-            <table className="w-full text-sm min-w-[700px]">
+            <table className="text-sm" style={{ tableLayout: "fixed", width: Math.max(700, tableW) }}>
+              <colgroup>
+                {displayKeys.map((k) => (
+                  <col key={k} style={{ width: colWidth(colWidths, k, FR_WIDTHS[k] ?? 110) }} />
+                ))}
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr className="text-left">
-                  <th className="pl-4 pr-2 py-3 w-10 bg-muted/40">
-                    <Checkbox
-                      checked={allSelected}
-                      data-state={someSelected ? "indeterminate" : allSelected ? "checked" : "unchecked"}
-                      onCheckedChange={toggleAll}
-                      aria-label="Select all visible cars"
-                      data-testid="checkbox-select-all"
-                    />
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">Entity</th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell bg-muted/40">
-                    Marks
-                  </th>
-                  <Th label="Car Number" k="car_number" sort={sort} onClick={toggleSort} />
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider hidden sm:table-cell bg-muted/40">
-                    Type
-                  </th>
-                  <Th label="Rental Status" k="status" sort={sort} onClick={toggleSort} />
-                  <Th label="Lessee" k="fleet" sort={sort} onClick={toggleSort} />
-                  <Th label="Rider" k="rider" sort={sort} onClick={toggleSort} />
-                  <Th label="Lease" k="lease" sort={sort} onClick={toggleSort} />
-                  <Th label="Expires" k="expiration" sort={sort} onClick={toggleSort} />
-                  {OPT_COLS.filter(c => tableCols.has(c.key)).map(c => (
-                    <th key={c.key} className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider whitespace-nowrap bg-muted/40">{c.label}</th>
-                  ))}
-                  <th className="w-10 bg-muted/40" />
+                  {displayKeys.map((k) => frHeader(k))}
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="border-t border-border">
-                      {Array.from({ length: 10 + tableCols.size }).map((__, j) => (
-                        <td key={j} className="px-4 py-3">
+                      {displayKeys.map((k) => (
+                        <td key={k} className="px-4 py-3">
                           <Skeleton className="h-4 w-full" />
                         </td>
                       ))}
@@ -1247,7 +1436,7 @@ export default function FleetRegistry() {
                   ))
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={10 + tableCols.size} className="px-4 py-16 text-center text-muted-foreground">
+                    <td colSpan={displayKeys.length} className="px-4 py-16 text-center text-muted-foreground">
                       No railcars match these filters.
                     </td>
                   </tr>
@@ -1262,64 +1451,7 @@ export default function FleetRegistry() {
                       onClick={() => setOpenCarId(r.id)}
                       data-testid={`row-railcar-${r.id}`}
                     >
-                      <td className="pl-4 pr-2 py-3" onClick={(e) => toggleOne(r.id, e)}>
-                        <Checkbox
-                          checked={selectedIds.has(r.id)}
-                          onCheckedChange={() => {/* handled by td onClick */}}
-                          aria-label={`Select car ${r.car_number}`}
-                          data-testid={`checkbox-car-${r.id}`}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <EntityBadge entity={(r as any).entity} />
-                      </td>
-                      <td className="px-4 py-3 font-mono-num text-muted-foreground hidden sm:table-cell">
-                        {r.reporting_marks ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 font-mono-num font-medium">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button
-                            type="button"
-                            className="hover:text-primary hover:underline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openAppTab(carPath(r.id));
-                            }}
-                            data-testid={`link-car-detail-${r.id}`}
-                          >
-                            {r.car_number}
-                          </button>
-                          <InactiveFleetBadge active={(r as any).active} />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                        {r.car_type ?? "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
-                          {r.transit_status && (
-                            <TransitBadge status={r.transit_status} label={r.transit_label} />
-                          )}
-                          {(r as any).needs_completion && <NeedsCompletionBadge />}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div>{r.assignment?.fleet_name ?? <span className="text-muted-foreground">Unassigned</span>}</div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {r.assignment?.rider?.rider_name ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 font-mono-num text-muted-foreground">
-                        {displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}
-                      </td>
-                      <td className="px-4 py-3 font-mono-num text-muted-foreground">
-                        <ExpiresDisplay r={r} />
-                      </td>
-                      {OPT_COLS.filter((c) => tableCols.has(c.key)).map((c) => renderOptTd(c.key, r))}
-                      <td className="px-4 py-3 text-muted-foreground">
-                        <ChevronRight className="h-4 w-4" />
-                      </td>
+                      {displayKeys.map((k) => frCell(k, r))}
                     </tr>
                   ))
                 )}
@@ -1475,7 +1607,7 @@ export default function FleetRegistry() {
   );
 }
 
-function Th({
+function SortLabel({
   label,
   k,
   sort,
@@ -1488,18 +1620,17 @@ function Th({
 }) {
   const active = sort.key === k;
   return (
-    <th
+    <button
+      type="button"
       onClick={() => onClick(k)}
       className={cn(
-        "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none hover:text-foreground bg-muted/40",
+        "inline-flex items-center gap-1 font-medium text-[11px] uppercase tracking-wider hover:text-foreground",
         active && "text-foreground"
       )}
     >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <ArrowUpDown className={cn("h-3 w-3", active ? "opacity-100" : "opacity-40")} />
-      </span>
-    </th>
+      {label}
+      <ArrowUpDown className={cn("h-3 w-3", active ? "opacity-100" : "opacity-40")} />
+    </button>
   );
 }
 

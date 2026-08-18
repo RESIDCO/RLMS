@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +48,8 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { GridColumnTh } from "@/components/GridColumnTh";
+import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -56,44 +59,24 @@ import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
+import { carPath } from "@/lib/browse-nav";
+import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import type {
   MasterLeaseWithRiders,
   RailcarWithAssignment,
   RiderContact,
 } from "@shared/schema";
 
-// ── CSV export ────────────────────────────────────────────────────────────────
-function toCsvRow(cells: (string | number | null | undefined)[]) {
-  return cells.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",");
-}
-
-function downloadLeasesCsv(leases: MasterLeaseWithRiders[]) {
-  const rows: string[] = [];
-
-  // MLA sheet header
-  rows.push("=== MASTER LEASE AGREEMENTS ===");
-  rows.push(toCsvRow(["Lease Number","Agreement Number","Lessor","Lessee","Type","Effective Date","Rider Count","Car Count","Notes"]));
-  for (const l of leases) {
-    rows.push(toCsvRow([displayLeaseNumber(l.lease_number), l.agreement_number, l.lessor, l.lessee, l.lease_type, l.effective_date, l.riders.length, (l as any).car_count, l.notes]));
-  }
-
-  rows.push("");
-  rows.push("=== RIDERS ===");
-  rows.push(toCsvRow(["Lease Number","Rider Name","Schedule Number","Effective Date","Expiration Date","Commodity","Monthly Rate %","Lessor Cost","Base Term (mo)","Monthly Rent/Car","Sold To","Car Count","Notes"]));
-  for (const l of leases) {
-    for (const r of l.riders) {
-      rows.push(toCsvRow([l.lease_number, r.rider_name, r.schedule_number, r.effective_date, r.expiration_date, r.permissible_commodity, r.monthly_rate_pct, r.lessors_cost, r.base_term_months, (r as any).monthly_rent_per_car, (r as any).sold_to, (r as any).car_count, r.notes]));
-    }
-  }
-
-  const csv = rows.join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
+async function downloadLeaseReport(url: string) {
+  const res = await apiRequest("GET", url);
+  const blob = await res.blob();
+  const disp = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="([^"]+)"/.exec(disp);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = `RLMS_Leases_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.download = match?.[1] ?? "RLMS_Leases.xlsx";
   a.click();
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(a.href);
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -134,6 +117,7 @@ export default function LeaseManagement() {
   const [addRiderFor, setAddRiderFor] = useState<number | null>(null);
   const [editRider, setEditRider] = useState<any | null>(null);
   const [sortBy, setSortBy] = useState<"lessee" | "ol">("lessee");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const { toast } = useToast();
 
   // Parse deep-link params
@@ -268,6 +252,36 @@ export default function LeaseManagement() {
       toast({ title: "Cannot delete", description: e.message, variant: "destructive" }),
   });
 
+  function toggleSelected(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function exportSelected() {
+    const ids = [...selected];
+    if (!ids.length) {
+      toast({ title: "Select at least one master lease", variant: "destructive" });
+      return;
+    }
+    try {
+      await downloadLeaseReport(`/api/leases/export?ids=${ids.join(",")}`);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function exportAll() {
+    try {
+      await downloadLeaseReport("/api/leases/export?scope=all");
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    }
+  }
+
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
@@ -287,12 +301,22 @@ export default function LeaseManagement() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => downloadLeasesCsv(leases ?? [])}
-              data-testid="button-download-leases"
+              onClick={exportSelected}
+              data-testid="button-export-selected-leases"
+              disabled={!selected.size}
+            >
+              <Download className="h-4 w-4" />
+              Export selected
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={exportAll}
+              data-testid="button-export-all-leases"
               disabled={!leases || leases.length === 0}
             >
               <Download className="h-4 w-4" />
-              Export
+              Export all
             </Button>
             {canEdit && (
               <Button
@@ -352,6 +376,14 @@ export default function LeaseManagement() {
                   onClick={() => toggleLease(lease.id)}
                   data-testid={`lease-row-${lease.id}`}
                 >
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selected.has(lease.id)}
+                      onCheckedChange={() => toggleSelected(lease.id)}
+                      aria-label={`Select ${displayLeaseNumber(lease.lease_number)}`}
+                      data-testid={`checkbox-lease-${lease.id}`}
+                    />
+                  </div>
                   {open ? (
                     <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
                   ) : (
@@ -359,10 +391,11 @@ export default function LeaseManagement() {
                   )}
                   <FileText className="h-4 w-4 text-primary shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-3">
+                    <div className="flex items-baseline gap-3 flex-wrap">
                       <span className="font-mono-num text-base font-semibold">
                         {displayLeaseNumber(lease.lease_number)}
                       </span>
+                      <LeaseTypeBadge mlaType={lease.lease_type} />
                       <span className="text-xs text-muted-foreground">
                         {lease.agreement_number ?? "—"}
                       </span>
@@ -468,10 +501,11 @@ export default function LeaseManagement() {
                                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                               )}
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-baseline gap-3">
+                                <div className="flex items-baseline gap-3 flex-wrap">
                                   <span className="text-sm font-medium">
                                     {rider.rider_name}
                                   </span>
+                                  <LeaseTypeBadge mlaType={lease.lease_type} />
                                   <span className="text-xs text-muted-foreground">
                                     {rider.schedule_number ?? "—"}
                                   </span>
@@ -538,7 +572,7 @@ export default function LeaseManagement() {
                             </div>
                             {open && (
                               <>
-                                <RiderCars riderId={rider.id} />
+                                <RiderCars riderId={rider.id} leaseType={lease.lease_type} />
                                 <RiderContactsPanel riderId={rider.id} />
                                 <div className="px-5 py-4 border-t border-border/50">
                                   <AttachmentsPanel entityType="rider" entityId={rider.id} compact />
@@ -593,21 +627,108 @@ const RC_OPT_COLS: { key: RCOptCol; label: string }[] = [
   { key: "lining",      label: "Lining" },
   { key: "build_year",  label: "Build Year" },
 ];
+const LC_DEFAULT_COLS = new Set<string>([]);
+const RC_PINNED = ["marks", "car_number", "lease_type"] as const;
+const RC_CORE_MOVABLE = ["lessee", "rental_status"] as const;
+const RC_LABELS: Record<string, string> = {
+  marks: "Marks",
+  car_number: "Car Number",
+  lessee: "Lessee",
+  rental_status: "Rental Status",
+  lease_type: "Lease Type",
+  entity: "Entity",
+  nbv: "NBV",
+  oac: "OAC",
+  oec: "OEC",
+  capacity_cf: "Capacity (cf)",
+  lining: "Lining",
+  build_year: "Build Year",
+};
+const RC_WIDTHS: Record<string, number> = {
+  marks: 80,
+  car_number: 110,
+  lessee: 140,
+  rental_status: 120,
+  lease_type: 150,
+  entity: 90,
+  nbv: 100,
+  oac: 100,
+  oec: 100,
+  capacity_cf: 100,
+  lining: 110,
+  build_year: 90,
+};
 
-function RiderCars({ riderId }: { riderId: number }) {
-  const { data: cars, isLoading } = useQuery<RailcarWithAssignment[]>({
-    queryKey: ["/api/railcars", { all: "1", rider_id: riderId, active: "all" }],
+function fmtUsdCell(v: unknown) {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function renderRcTd(key: string, c: any, leaseType: string | null | undefined) {
+  const money = "px-3 py-1.5 font-mono-num text-muted-foreground whitespace-nowrap";
+  const text = "px-3 py-1.5 text-muted-foreground";
+  switch (key) {
+    case "marks":
+      return <td key={key} className="px-3 py-1.5 font-mono-num text-muted-foreground">{c.reporting_marks ?? "—"}</td>;
+    case "car_number":
+      return <td key={key} className="px-3 py-1.5 font-mono-num">{c.car_number}</td>;
+    case "lessee":
+      return <td key={key} className="px-3 py-1.5">{c.assignment?.fleet_name ?? "—"}</td>;
+    case "rental_status":
+      return <td key={key} className={text}>{displayRailcarStatus(displayStatusInputFromRailcar(c))}</td>;
+    case "lease_type":
+      return (
+        <td key={key} className="px-3 py-1.5">
+          <LeaseTypeBadge
+            carType={c.lease_type}
+            mlaType={c.assignment?.rider?.master_lease?.lease_type ?? leaseType}
+          />
+        </td>
+      );
+    case "entity":
+      return <td key={key} className={text}>{c.entity ?? "—"}</td>;
+    case "nbv":
+      return <td key={key} className={money}>{fmtUsdCell(c.nbv)}</td>;
+    case "oac":
+      return <td key={key} className={money}>{fmtUsdCell(c.oac)}</td>;
+    case "oec":
+      return <td key={key} className={money}>{fmtUsdCell(c.oec)}</td>;
+    case "capacity_cf":
+      return <td key={key} className="px-3 py-1.5 font-mono-num text-muted-foreground">{c.capacity_cf != null ? Number(c.capacity_cf).toLocaleString() : "—"}</td>;
+    case "lining":
+      return <td key={key} className={text}>{c.lining_material || c.lining || c.coating || "—"}</td>;
+    case "build_year":
+      return <td key={key} className="px-3 py-1.5 font-mono-num text-muted-foreground">{carBuildYear(c) ?? "—"}</td>;
+    default:
+      return <td key={key} className={text}>—</td>;
+  }
+}
+
+function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string | null }) {
+  const [, navigate] = useLocation();
+  const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
+  const [page, setPage] = useState(0);
+  const pageSize = 25;
+  const { data: cars, isLoading } = useQuery<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>({
+    queryKey: ["/api/railcars", { all: "1", rider_id: riderId, active: activeFilter }],
     queryFn: () =>
-      apiGet<RailcarWithAssignment[]>(
-        railcarsQs({ all: "1", rider_id: riderId, active: "all" })
+      apiGet<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>(
+        railcarsQs({ all: "1", rider_id: riderId, active: activeFilter })
       ),
     staleTime: 45_000,
   });
-  const [page, setPage] = useState(0);
-  const pageSize = 25;
-  const LC_DEFAULT_COLS = new Set<string>([]);
-  const { visibleCols: visibleColsRaw, toggleCol, resetCols: resetVisibleCols, prefsLoaded: colPrefsLoaded } =
-    useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
+  const {
+    visibleCols: visibleColsRaw,
+    toggleCol,
+    resetCols: resetVisibleCols,
+    prefsLoaded: colPrefsLoaded,
+    colOrder,
+    setColOrder,
+    colWidths,
+    setColWidth,
+  } = useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
   const visibleCols = visibleColsRaw as Set<RCOptCol>;
 
   const filtered = asRailcarList(cars).filter((c) => c.assignment?.rider_id === riderId);
@@ -615,100 +736,111 @@ function RiderCars({ riderId }: { riderId: number }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const slice = filtered.slice(page * pageSize, (page + 1) * pageSize);
 
+  const displayKeys = useMemo(() => {
+    const movable = [
+      ...RC_CORE_MOVABLE,
+      ...RC_OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => c.key),
+    ];
+    return [...RC_PINNED, ...mergeColOrder(movable, colOrder)];
+  }, [visibleCols, colOrder]);
+  const tableW = tableWidthFor(displayKeys, colWidths, RC_WIDTHS, 110);
+
   return (
     <div className="px-5 pb-5 bg-muted/20 border-t border-border/60">
       {isLoading ? (
         <Skeleton className="h-10 mt-3 rounded" />
-      ) : total === 0 ? (
-        <div className="py-6 text-xs text-muted-foreground italic text-center">
-          No cars assigned to this rider.
-        </div>
       ) : (
         <>
-          <div className="pt-3 flex items-center justify-between mb-2">
+          <div className="pt-3 flex items-center justify-between mb-2 gap-2 flex-wrap">
             <span className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
               Assigned cars · {total}
             </span>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors">
-                  <Columns3 className="h-3 w-3" />
-                  Columns
-                  {!colPrefsLoaded ? (
-                    <span className="h-2.5 w-2.5 rounded-full bg-muted animate-pulse" />
-                  ) : visibleCols.size > 0 ? (
-                    <span className="bg-primary text-primary-foreground rounded-full px-1 text-[9px] font-bold">{visibleCols.size}</span>
-                  ) : null}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Show columns</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {RC_OPT_COLS.map(({ key, label }) => (
-                  <DropdownMenuCheckboxItem key={key} checked={visibleCols.has(key)} onCheckedChange={() => toggleCol(key)}>
-                    {label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-                {visibleCols.size > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-xs text-muted-foreground" onClick={() => resetVisibleCols()}>Reset</DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-2">
+              <Select
+                value={activeFilter}
+                onValueChange={(v) => {
+                  setActiveFilter(v as "active" | "inactive" | "all");
+                  setPage(0);
+                }}
+              >
+                <SelectTrigger className="h-7 w-[140px] text-[11px]" data-testid={`filter-rider-active-${riderId}`}>
+                  <SelectValue placeholder="Active / inactive" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active cars</SelectItem>
+                  <SelectItem value="inactive">Inactive cars</SelectItem>
+                  <SelectItem value="all">All cars</SelectItem>
+                </SelectContent>
+              </Select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+                    <Columns3 className="h-3 w-3" />
+                    Columns
+                    {!colPrefsLoaded ? (
+                      <span className="h-2.5 w-2.5 rounded-full bg-muted animate-pulse" />
+                    ) : visibleCols.size > 0 ? (
+                      <span className="bg-primary text-primary-foreground rounded-full px-1 text-[9px] font-bold">{visibleCols.size}</span>
+                    ) : null}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Show columns</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {RC_OPT_COLS.map(({ key, label }) => (
+                    <DropdownMenuCheckboxItem key={key} checked={visibleCols.has(key)} onCheckedChange={() => toggleCol(key)}>
+                      {label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                  {(visibleCols.size > 0 || colOrder.length > 0) && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-xs text-muted-foreground" onClick={() => resetVisibleCols()}>Reset</DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
+          {total === 0 ? (
+            <div className="py-6 text-xs text-muted-foreground italic text-center">
+              {activeFilter === "all" ? "No cars assigned to this rider." : `No ${activeFilter} cars assigned to this rider.`}
+            </div>
+          ) : (
+            <>
           <div className="rounded-md border border-border bg-card overflow-auto max-h-[360px]">
-            <table className="w-full text-xs min-w-[480px]">
+            <table className="text-xs" style={{ tableLayout: "fixed", width: Math.max(480, tableW) }}>
+              <colgroup>
+                {displayKeys.map((k) => (
+                  <col key={k} style={{ width: colWidth(colWidths, k, RC_WIDTHS[k] ?? 110) }} />
+                ))}
+              </colgroup>
               <thead className="sticky top-0 z-10 text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Marks</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Car Number</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Lessee</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">Rental Status</th>
-                  {RC_OPT_COLS.filter(c => visibleCols.has(c.key)).map(c => (
-                    <th key={c.key} className="text-left px-3 py-2 font-medium whitespace-nowrap bg-muted/40">{c.label}</th>
+                  {displayKeys.map((k) => (
+                    <GridColumnTh
+                      key={k}
+                      colKey={k}
+                      width={colWidth(colWidths, k, RC_WIDTHS[k] ?? 110)}
+                      pinned={RC_PINNED.includes(k as (typeof RC_PINNED)[number])}
+                      className="text-left px-3 py-2 font-medium bg-muted/40"
+                      onResize={setColWidth}
+                      onMove={(from, to) => setColOrder(moveCol(displayKeys.filter((x) => !RC_PINNED.includes(x as (typeof RC_PINNED)[number])), from, to))}
+                    >
+                      {RC_LABELS[k] ?? k}
+                    </GridColumnTh>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {slice.map((c) => (
-                  <tr key={c.id} className="border-t border-border">
-                    <td className="px-3 py-1.5 font-mono-num text-muted-foreground">{(c as any).reporting_marks ?? "—"}</td>
-                    <td className="px-3 py-1.5 font-mono-num">{c.car_number}</td>
-                    <td className="px-3 py-1.5">{c.assignment?.fleet_name ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground">{displayRailcarStatus(displayStatusInputFromRailcar(c as any))}</td>
-                    {visibleCols.has("entity") && (
-                      <td className="px-3 py-1.5 text-muted-foreground">{(c as any).entity ?? "—"}</td>
-                    )}
-                    {visibleCols.has("nbv") && (
-                      <td className="px-3 py-1.5 font-mono-num text-muted-foreground whitespace-nowrap">
-                        {(c as any).nbv != null ? `$${Number((c as any).nbv).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "—"}
-                      </td>
-                    )}
-                    {visibleCols.has("oac") && (
-                      <td className="px-3 py-1.5 font-mono-num text-muted-foreground whitespace-nowrap">
-                        {(c as any).oac != null ? `$${Number((c as any).oac).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "—"}
-                      </td>
-                    )}
-                    {visibleCols.has("oec") && (
-                      <td className="px-3 py-1.5 font-mono-num text-muted-foreground whitespace-nowrap">
-                        {(c as any).oec != null ? `$${Number((c as any).oec).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "—"}
-                      </td>
-                    )}
-                    {visibleCols.has("capacity_cf") && (
-                      <td className="px-3 py-1.5 font-mono-num text-muted-foreground">
-                        {(c as any).capacity_cf != null ? Number((c as any).capacity_cf).toLocaleString() : "—"}
-                      </td>
-                    )}
-                    {visibleCols.has("lining") && (
-                      <td className="px-3 py-1.5 text-muted-foreground">
-                        {(c as any).lining_material || (c as any).lining || (c as any).coating || "—"}
-                      </td>
-                    )}
-                    {visibleCols.has("build_year") && (
-                      <td className="px-3 py-1.5 font-mono-num text-muted-foreground">{carBuildYear(c) ?? "—"}</td>
-                    )}
+                  <tr
+                    key={c.id}
+                    className="border-t border-border hover-elevate cursor-pointer"
+                    onClick={() => navigate(carPath(c.id))}
+                    data-testid={`row-lease-car-${c.id}`}
+                  >
+                    {displayKeys.map((k) => renderRcTd(k, c, leaseType))}
                   </tr>
                 ))}
               </tbody>
@@ -736,6 +868,8 @@ function RiderCars({ riderId }: { riderId: number }) {
                 Next
               </Button>
             </div>
+          )}
+            </>
           )}
         </>
       )}
@@ -1034,10 +1168,24 @@ function MasterLeaseForm({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Type</Label>
-              <Input
-                value={form.lease_type ?? ""}
-                onChange={(e) => setForm({ ...form, lease_type: e.target.value })}
-              />
+              <Select
+                value={form.lease_type || "Net Lease"}
+                onValueChange={(v) => setForm({ ...form, lease_type: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Net Lease">Net Lease</SelectItem>
+                  <SelectItem value="Full Service Lease">Full Service Lease</SelectItem>
+                  <SelectItem value="Modified Lease">Modified Lease</SelectItem>
+                  <SelectItem value="Railcar Lease">Railcar Lease</SelectItem>
+                  {form.lease_type &&
+                    !["Net Lease", "Full Service Lease", "Modified Lease", "Railcar Lease"].includes(form.lease_type) && (
+                      <SelectItem value={form.lease_type}>{form.lease_type}</SelectItem>
+                    )}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label>Effective Date</Label>

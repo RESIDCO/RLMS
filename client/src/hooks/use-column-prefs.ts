@@ -1,21 +1,15 @@
 /**
  * useColumnPrefs
  *
- * Persists a user's optional-column visibility set to Supabase via the
- * /api/prefs/columns endpoint.
+ * Persists a user's optional-column visibility, plus optional reorder/resize
+ * layout, to /api/prefs/columns.
  *
  * Usage:
- *   const { visibleCols, toggleCol, resetCols, prefsLoaded } =
+ *   const { visibleCols, toggleCol, resetCols, prefsLoaded, colOrder, setColOrder, colWidths, setColWidth } =
  *     useColumnPrefs("fleet_registry", DEFAULT_COLS);
  *
- * - `page`         — unique key per view (e.g. "fleet_registry", "all_cars", "lease_rider_cars")
- * - `defaultCols`  — Set<string> of keys that should be on when no saved pref exists
- * - `prefsLoaded`  — true once the initial fetch has resolved (prevents flicker)
- *
- * Save behaviour:
- *   Writes are debounced 800 ms so rapid toggles don't spam the API.
- *   The UI updates instantly (optimistic); the network call happens in the background.
- *   If the user is not logged in or the fetch fails, the local state still works normally.
+ * `visible_cols` in the database is jsonb. Older rows are a string array of
+ * visible keys. Newer rows are `{ cols, order, widths }`. Both are accepted.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -23,29 +17,73 @@ import { useAuth } from "@/lib/AuthContext";
 
 const DEBOUNCE_MS = 800;
 
-// Shared in-memory cache so multiple component instances on the same page
-// don't each make their own fetch (e.g. multiple RiderCars in LeaseManagement).
-const memCache = new Map<string, Set<string>>();
+type Cached = {
+  cols: Set<string>;
+  order: string[];
+  widths: Record<string, number>;
+};
+
+type PrefsObject = {
+  cols: string[];
+  order?: string[];
+  widths?: Record<string, number>;
+};
+
+const memCache = new Map<string, Cached>();
+
+function parseStored(raw: unknown): Cached | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) {
+    return {
+      cols: new Set(raw.filter((x): x is string => typeof x === "string")),
+      order: [],
+      widths: {},
+    };
+  }
+  if (typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const colsSrc = Array.isArray(o.cols)
+    ? o.cols
+    : Array.isArray(o.visible_cols)
+      ? o.visible_cols
+      : null;
+  if (!colsSrc) return null;
+  const cols = new Set(colsSrc.filter((x): x is string => typeof x === "string"));
+  const order = Array.isArray(o.order)
+    ? o.order.filter((x): x is string => typeof x === "string")
+    : [];
+  const widths: Record<string, number> = {};
+  if (o.widths && typeof o.widths === "object" && !Array.isArray(o.widths)) {
+    for (const [k, v] of Object.entries(o.widths as Record<string, unknown>)) {
+      if (typeof v === "number" && Number.isFinite(v)) widths[k] = v;
+    }
+  }
+  return { cols, order, widths };
+}
 
 export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   const { session } = useAuth();
   const [visibleCols, setVisibleCols] = useState<Set<string>>(defaultCols);
+  const [colOrder, setColOrderState] = useState<string[]>([]);
+  const [colWidths, setColWidthsState] = useState<Record<string, number>>({});
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Track whether we've already fetched for this page+user combo
   const fetchedRef = useRef(false);
+  const latest = useRef<Cached>({ cols: defaultCols, order: [], widths: {} });
+  latest.current = { cols: visibleCols, order: colOrder, widths: colWidths };
 
-  // ── Load from API on mount (once per page+session) ──────────────────────────
   useEffect(() => {
     if (!session?.access_token || fetchedRef.current) {
       setPrefsLoaded(true);
       return;
     }
 
-    // Check in-memory cache first (handles multi-instance case)
     const cacheKey = `${session.user.id}:${page}`;
     if (memCache.has(cacheKey)) {
-      setVisibleCols(memCache.get(cacheKey)!);
+      const cached = memCache.get(cacheKey)!;
+      setVisibleCols(cached.cols);
+      setColOrderState(cached.order);
+      setColWidthsState(cached.widths);
       setPrefsLoaded(true);
       fetchedRef.current = true;
       return;
@@ -58,12 +96,13 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.visible_cols != null && Array.isArray(data.visible_cols)) {
-          const loaded = new Set<string>(data.visible_cols);
-          memCache.set(cacheKey, loaded);
-          setVisibleCols(loaded);
+        const parsed = parseStored(data?.visible_cols);
+        if (parsed) {
+          memCache.set(cacheKey, parsed);
+          setVisibleCols(parsed.cols);
+          setColOrderState(parsed.order);
+          setColWidthsState(parsed.widths);
         }
-        // If null (no saved pref yet), keep the defaultCols
       })
       .catch(() => {
         // Silently fall back to defaults if API is unreachable
@@ -74,21 +113,25 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token]);
 
-  // ── Debounced save to API ──────────────────────────────────────────────────
-  const persistCols = useCallback(
-    (cols: Set<string>) => {
+  const persist = useCallback(
+    (next: Cached) => {
       if (!session?.access_token) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         const cacheKey = `${session.user.id}:${page}`;
-        memCache.set(cacheKey, cols);
+        memCache.set(cacheKey, next);
+        const body: PrefsObject = {
+          cols: Array.from(next.cols),
+          order: next.order,
+          widths: next.widths,
+        };
         fetch("/api/prefs/columns", {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ page, visible_cols: Array.from(cols) }),
+          body: JSON.stringify({ page, visible_cols: body }),
         }).catch(() => {
           // Silently ignore save failures — local state is still correct
         });
@@ -97,28 +140,55 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
     [session?.access_token, page]
   );
 
-  // ── Toggle a single column ─────────────────────────────────────────────────
   const toggleCol = useCallback(
     (key: string) => {
-      setVisibleCols((prev) => {
-        const next = new Set(prev);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        persistCols(next);
-        return next;
-      });
+      const nextCols = new Set(latest.current.cols);
+      if (nextCols.has(key)) nextCols.delete(key);
+      else nextCols.add(key);
+      const next = { ...latest.current, cols: nextCols };
+      setVisibleCols(nextCols);
+      persist(next);
     },
-    [persistCols]
+    [persist]
   );
 
-  // ── Reset to defaults ──────────────────────────────────────────────────────
   const resetCols = useCallback(() => {
+    const next = { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number> };
     setVisibleCols(defaultCols);
-    persistCols(defaultCols);
-  }, [defaultCols, persistCols]);
+    setColOrderState([]);
+    setColWidthsState({});
+    persist(next);
+  }, [defaultCols, persist]);
 
-  // Cleanup debounce timer on unmount
+  const setColOrder = useCallback(
+    (order: string[]) => {
+      const next = { ...latest.current, order };
+      setColOrderState(order);
+      persist(next);
+    },
+    [persist]
+  );
+
+  const setColWidth = useCallback(
+    (key: string, width: number) => {
+      const widths = { ...latest.current.widths, [key]: width };
+      const next = { ...latest.current, widths };
+      setColWidthsState(widths);
+      persist(next);
+    },
+    [persist]
+  );
+
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
-  return { visibleCols, toggleCol, resetCols, prefsLoaded };
+  return {
+    visibleCols,
+    toggleCol,
+    resetCols,
+    prefsLoaded,
+    colOrder,
+    setColOrder,
+    colWidths,
+    setColWidth,
+  };
 }

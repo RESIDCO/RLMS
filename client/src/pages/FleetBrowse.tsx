@@ -7,6 +7,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { ChevronRight, Columns3 } from "lucide-react";
 import {
   ENTITY_SLUGS,
@@ -58,6 +59,7 @@ type CarRow = {
   fleet_status?: string | null;
   lessee_name?: string | null;
   rider_external_id?: string | null;
+  lease_type?: string | null;
 };
 
 type GroupPayload = {
@@ -126,9 +128,11 @@ const BROWSE_CAR_DEFAULT_COLS = new Set(["entity", "status", "type"]);
 function CarTable({
   cars,
   hrefFor,
+  mlaType,
 }: {
   cars: CarRow[];
   hrefFor: (c: CarRow) => string;
+  mlaType?: string | null;
 }) {
   const { visibleCols, toggleCol, resetCols, prefsLoaded } = useColumnPrefs(
     "browse_car_list",
@@ -185,6 +189,7 @@ function CarTable({
               <tr>
                 <th className="px-4 py-2.5 text-left font-medium">Marks</th>
                 <th className="px-4 py-2.5 text-left font-medium">Car #</th>
+                <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
                 {show("entity") && <th className="px-4 py-2.5 text-left font-medium">Entity</th>}
                 {show("status") && <th className="px-4 py-2.5 text-left font-medium">Status</th>}
                 {show("type") && <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Type</th>}
@@ -200,6 +205,9 @@ function CarTable({
                     <Link href={hrefFor(c)} className="hover:text-primary">
                       {c.car_number}
                     </Link>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <LeaseTypeBadge carType={c.lease_type} mlaType={mlaType} />
                   </td>
                   {show("entity") && (
                     <td className="px-4 py-2.5">
@@ -279,7 +287,9 @@ function GroupView({ kind, keyName }: { kind: "lessee" | "entity"; keyName: stri
                         <div className="text-[11px] text-muted-foreground mt-0.5">{r.rider_name}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 capitalize text-muted-foreground">{r.lease_type ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <LeaseTypeBadge mlaType={r.lease_type} />
+                    </td>
                     <td className="px-4 py-2.5 font-mono-num">{formatCalendarDate(r.effective_date)}</td>
                     <td className="px-4 py-2.5 font-mono-num">{formatCalendarDate(r.expiration_date)}</td>
                     <td className="px-4 py-2.5 text-right font-mono-num">{r.car_count.toLocaleString()}</td>
@@ -351,7 +361,7 @@ function OlView({
         ) : error ? (
           <p className="text-sm text-destructive">{String((error as Error).message)}</p>
         ) : (
-          <CarTable cars={data?.cars ?? []} hrefFor={carHref} />
+          <CarTable cars={data?.cars ?? []} hrefFor={carHref} mlaType={data?.lease_type} />
         )}
         <section className="mt-6 rounded-xl border border-card-border bg-card p-5">
           <h2 className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold mb-3">Program History</h2>
@@ -445,7 +455,9 @@ function TurningView({ year }: { year: number }) {
                         <div className="text-[11px] text-muted-foreground mt-0.5">{r.rider_name}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 capitalize text-muted-foreground">{r.lease_type ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <LeaseTypeBadge mlaType={r.lease_type} />
+                    </td>
                     <td className="px-4 py-2.5 font-mono-num">{formatCalendarDate(r.effective_date)}</td>
                     <td className="px-4 py-2.5 font-mono-num">{formatCalendarDate(r.expiration_date)}</td>
                     <td className="px-4 py-2.5 text-right font-mono-num">{r.car_count.toLocaleString()}</td>
@@ -498,7 +510,7 @@ function TurningOlView({ year, ol }: { year: number; ol: string }) {
         ) : error ? (
           <p className="text-sm text-destructive">{String((error as Error).message)}</p>
         ) : (
-          <CarTable cars={data?.cars ?? []} hrefFor={(c) => turning50OlCarPath(year, ol, c.id)} />
+          <CarTable cars={data?.cars ?? []} hrefFor={(c) => turning50OlCarPath(year, ol, c.id)} mlaType={data?.lease_type} />
         )}
       </div>
     </>

@@ -6,6 +6,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { FleetMembershipBadge, FleetAwareStatusBadge } from "@/components/InactiveFleetBadge";
+import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
+import { asOne, resolveLeaseType } from "@shared/lease-type";
 import { displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
 import { carPath, lesseePath, olPath, olKeyFromLabel, historyPath, openAppTab } from "@/lib/browse-nav";
@@ -28,7 +30,7 @@ interface Rider {
   schedule_number: string | null;
   expiration_date: string | null;
   car_count: number;
-  master_lease: { id: number; lease_number: string; lessee: string | null } | null;
+  master_lease: { id: number; lease_number: string; lessee: string | null; lease_type?: string | null } | null;
 }
 
 interface RailcarResult {
@@ -42,6 +44,7 @@ interface RailcarResult {
   mechanical_designation: string | null;
   lessee_name?: string | null;
   rider_external_id?: string | null;
+  lease_type?: string | null;
   assignment: {
     id: number;
     fleet_name: string | null;
@@ -58,6 +61,7 @@ interface RailcarResult {
         lease_number: string;
         lessor: string | null;
         lessee: string | null;
+        lease_type?: string | null;
       } | null;
     } | null;
   } | null;
@@ -119,8 +123,9 @@ function RailcarRow({
   onEdit: () => void;
   onHistory: () => void;
 }) {
-  const rider = car.assignment?.rider;
-  const lease = rider?.master_lease;
+  const rider = asOne(car.assignment?.rider);
+  const lease = asOne(rider?.master_lease);
+  const leaseType = resolveLeaseType(car.lease_type, lease?.lease_type);
   const label = carLabel(car);
   return (
     <div className="flex items-start gap-3 py-3 border-b border-border/40 last:border-0 hover:bg-muted/30">
@@ -130,9 +135,10 @@ function RailcarRow({
         className="flex-1 min-w-0 flex items-start gap-4 text-left"
       >
         <div className="min-w-[140px]">
-          <div className="flex items-center gap-1.5 mb-0.5">
+          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
             <EntityBadge entity={car.entity} />
             <FleetMembershipBadge active={car.active} />
+            <LeaseTypeBadge carType={car.lease_type} mlaType={lease?.lease_type} />
           </div>
           <div className="font-mono text-sm font-semibold text-foreground">
             {label}
@@ -142,7 +148,7 @@ function RailcarRow({
             {car.mechanical_designation ? ` · ${car.mechanical_designation}` : ""}
           </div>
         </div>
-        <div className="flex-1 grid grid-cols-3 gap-3 text-xs">
+        <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>
             <div className="text-muted-foreground mb-0.5">Fleet / Lessee</div>
             <div className="text-foreground font-medium">
@@ -156,6 +162,10 @@ function RailcarRow({
           <div>
             <div className="text-muted-foreground mb-0.5">Master Lease</div>
             <div className="text-foreground">{displayLeaseNumber(lease?.lease_number) || "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground mb-0.5">Lease Type</div>
+            <div className="text-foreground">{leaseType ?? "—"}</div>
           </div>
         </div>
         <div className="shrink-0">
@@ -199,10 +209,13 @@ function RiderRow({ rider, onOpen }: { rider: Rider; onOpen: () => void }) {
       className="w-full flex items-center gap-4 py-3 border-b border-border/40 last:border-0 text-xs text-left hover:bg-muted/30"
     >
       <div className="min-w-[120px]">
-        <div className="text-sm font-semibold text-foreground">{rider.rider_name}</div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="text-sm font-semibold text-foreground">{rider.rider_name}</div>
+          <LeaseTypeBadge mlaType={asOne(rider.master_lease)?.lease_type} />
+        </div>
         {rider.schedule_number && <div className="text-muted-foreground mt-0.5">Sch {rider.schedule_number}</div>}
       </div>
-      <div className="flex-1 grid grid-cols-3 gap-3">
+      <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div>
           <div className="text-muted-foreground mb-0.5">Master Lease</div>
           <div className="text-foreground">{displayLeaseNumber(rider.master_lease?.lease_number) || "—"}</div>
@@ -210,6 +223,10 @@ function RiderRow({ rider, onOpen }: { rider: Rider; onOpen: () => void }) {
         <div>
           <div className="text-muted-foreground mb-0.5">Lessee</div>
           <div className="text-foreground">{rider.master_lease?.lessee ?? "—"}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground mb-0.5">Lease Type</div>
+          <div className="text-foreground">{asOne(rider.master_lease)?.lease_type ?? "—"}</div>
         </div>
         <div>
           <div className="text-muted-foreground mb-0.5">Expiration</div>
@@ -232,7 +249,10 @@ function LeaseRow({ lease, onOpen }: { lease: MasterLease; onOpen: () => void })
       className="w-full flex items-center gap-4 py-3 border-b border-border/40 last:border-0 text-xs text-left hover:bg-muted/30"
     >
       <div className="min-w-[120px]">
-        <div className="text-sm font-semibold text-foreground">{displayLeaseNumber(lease.lease_number)}</div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="text-sm font-semibold text-foreground">{displayLeaseNumber(lease.lease_number)}</div>
+          <LeaseTypeBadge mlaType={lease.lease_type} />
+        </div>
         {lease.agreement_number && <div className="text-muted-foreground mt-0.5">Agmt {lease.agreement_number}</div>}
       </div>
       <div className="flex-1 grid grid-cols-3 gap-3">

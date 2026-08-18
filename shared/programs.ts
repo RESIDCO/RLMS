@@ -126,13 +126,32 @@ export const FLAG_TAG_HINTS = ["Watch", "Priority", "Issue", "Hold"] as const;
 export function parseCarPasteList(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const part of String(raw ?? "").split(/[\s,;]+/)) {
-    const t = part.trim();
-    if (!t) continue;
-    const key = t.toUpperCase();
-    if (seen.has(key)) continue;
+
+  function push(token: string) {
+    const t = token.trim();
+    if (!t) return;
+    const key = t.replace(/\s+/g, "").toUpperCase();
+    if (seen.has(key)) return;
     seen.add(key);
     out.push(t);
+  }
+
+  // Comma / semicolon / newline separate cars. Spaces inside a record pair
+  // MARK + NUMBER (e.g. "TFOX 901745") into one unit before a bare-number fallback.
+  for (const record of String(raw ?? "").split(/[\n,;]+/)) {
+    const words = record.trim().split(/\s+/).filter(Boolean);
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      const next = words[i + 1];
+      const isMark = /^[A-Za-z]{2,8}$/.test(w);
+      const nextIsNum = next != null && /^\d/.test(next);
+      if (isMark && nextIsNum) {
+        push(`${w} ${next}`);
+        i += 1;
+        continue;
+      }
+      push(w);
+    }
   }
   return out;
 }

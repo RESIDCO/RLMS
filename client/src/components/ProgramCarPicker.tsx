@@ -161,7 +161,7 @@ export default function ProgramCarPicker({
                 setPaste(e.target.value);
                 setPreview(null);
               }}
-              placeholder={"CP 475000\nCP475001\n475002"}
+              placeholder={"TFOX 901745\nKCS 310100\n475002"}
             />
           </div>
           <Button type="button" size="sm" variant="outline" onClick={resolvePaste} disabled={!paste.trim() || resolving}>

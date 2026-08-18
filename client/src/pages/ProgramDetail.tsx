@@ -21,7 +21,6 @@ import { cn } from "@/lib/utils";
 import { Download, History, Plus, Paperclip, UserMinus } from "lucide-react";
 import {
   CATEGORY_BADGE,
-  FLAG_TAG_HINTS,
   PROGRAM_CAR_DOC_CATEGORIES,
   PROGRAM_DOC_CATEGORIES,
   PROGRAM_ENTITIES,
@@ -471,9 +470,10 @@ export default function ProgramDetailPage() {
                           </div>
                         </td>
                         <td className="px-2 py-1">
-                          <FlagCell
-                            value={c.flag_tag ?? ""}
+                          <CellInput
                             readOnly={!canEdit || exited}
+                            value={c.flag_tag ?? ""}
+                            placeholder="Watch, Priority…"
                             onSave={(v) => patchCar.mutate({ linkId: c.id, body: { flag_tag: v } })}
                           />
                         </td>
@@ -573,9 +573,6 @@ export default function ProgramDetailPage() {
         </Tabs>
       </div>
 
-      <datalist id="program-flag-hints">
-        {FLAG_TAG_HINTS.map((h) => <option key={h} value={h} />)}
-      </datalist>
       <AddCarsDialog
         open={addOpen}
         programId={id}
@@ -653,37 +650,33 @@ function CellInput({
   onSave,
   readOnly,
   className,
+  placeholder,
 }: {
   value: string;
   onSave: (v: string) => void;
   readOnly?: boolean;
   className?: string;
+  placeholder?: string;
 }) {
   const [v, setV] = useState(value);
   useEffect(() => { setV(value); }, [value]);
+
+  function commit(next: string) {
+    if (next !== value) onSave(next);
+  }
+
   return (
     <input
       className={cn("h-7 w-full bg-transparent border border-transparent hover:border-border rounded px-1", className)}
       value={v}
       readOnly={readOnly}
+      placeholder={placeholder}
       onChange={(e) => setV(e.target.value)}
-      onBlur={() => v !== value && onSave(v)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === "Tab") commit((e.target as HTMLInputElement).value);
+      }}
     />
-  );
-}
-
-function FlagCell({ value, onSave, readOnly }: { value: string; onSave: (v: string) => void; readOnly?: boolean }) {
-  const [v, setV] = useState(value);
-  useEffect(() => { setV(value); }, [value]);
-  return (
-    <input
-        className="h-7 w-full bg-transparent border border-transparent hover:border-border rounded px-1"
-        list="program-flag-hints"
-        value={v}
-        readOnly={readOnly}
-        onChange={(e) => setV(e.target.value)}
-        onBlur={() => v !== value && onSave(v)}
-      />
   );
 }
 
@@ -879,7 +872,6 @@ function BulkEditBar({
       ) : field === "flag_tag" ? (
         <input
           className="h-8 border border-border rounded px-2 text-xs bg-background"
-          list="program-flag-hints"
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Watch, Priority…"

@@ -96,6 +96,7 @@ import { syncRiderExpirationsFromCars } from "./sync-rider-expirations";
 import {
   buildFinancialReview,
   financialRowToDbPayload,
+  mergeFinancialRowsByUniqueKey,
   buildCarFinancialUpdates,
   normalizeSnapshotMonth,
   carFinancialFingerprint,
@@ -2698,7 +2699,7 @@ export async function registerRoutes(
         .eq("snapshot_month", month);
       if (delErr) throw delErr;
 
-      const allRows = [...review.main.rows, ...review.rps.rows];
+      const allRows = mergeFinancialRowsByUniqueKey([...review.main.rows, ...review.rps.rows]);
       const BATCH = 100;
       let inserted = 0;
       for (let i = 0; i < allRows.length; i += BATCH) {

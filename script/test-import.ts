@@ -32,9 +32,11 @@ import {
   normalizeSnapshotMonth,
   buildCarFinancialUpdates,
   carFinancialFingerprint,
+  mergeFinancialRowsByUniqueKey,
   RAILCAR_FINANCIAL_REFRESH_FIELDS,
   type ActiveCarForJoin,
   type SummaryRowForRefresh,
+  type FinancialParsedRow,
 } from "../shared/financial-import";
 
 let passed = 0;
@@ -484,6 +486,55 @@ eq(
     carFinancialFingerprint({ nbv: 24008.06, oec: 25282.7, monthly_rent_per_car: 400, monthly_depr_per_car: 424.88 }),
     "fingerprint treats float noise as the same cents"
   );
+}
+
+{
+  const base: FinancialParsedRow = {
+    entity: "Main",
+    snapshot_month: "2026-08-01",
+    rider_id: "OL1942",
+    car_type: "COV HOPPER",
+    count_cars: 1,
+    lessee: "Westlake",
+    former_deal: null,
+    legal_owner: "ALF P-I",
+    net_equipment_cost_total: 8416.59,
+    net_equipment_cost_per_car: 8416.59,
+    total_book_value: 6624.78,
+    book_value_per_asset: 6624.78,
+    total_monthly_depreciation: 41.67,
+    monthly_depreciation_per_asset: 41.67,
+    monthly_rent_per_car: null,
+    monthly_rent_total: null,
+    lease_end_residual_total: null,
+    lease_end_residual_per_asset: null,
+    months_until_lease_exp: 5,
+    lease_exp_date: "2025-12-31",
+    deal_resp: null,
+    lender: null,
+    liability_insurance_exp: null,
+    property_insurance_exp: null,
+    raw_air_rail_power: null,
+  };
+  const other: FinancialParsedRow = {
+    ...base,
+    count_cars: 20,
+    net_equipment_cost_total: 168331.8,
+    total_book_value: 132495.6,
+    total_monthly_depreciation: 833.4,
+    monthly_depreciation_per_asset: 41.67,
+    months_until_lease_exp: 17,
+    lease_exp_date: "2026-12-31",
+  };
+  const merged = mergeFinancialRowsByUniqueKey([base, other, { ...base, rider_id: "OL1", count_cars: 3 }]);
+  eq(merged.length, 2, "OL1942 same OEC collapses to one row; other rider stays");
+  const ol = merged.find((r) => r.rider_id === "OL1942")!;
+  eq(ol.count_cars, 21, "OL1942 counts sum to 21");
+  eq(ol.total_book_value, 139120.38, "OL1942 book values sum");
+  eq(ol.book_value_per_asset, 6624.78, "OL1942 per-car NBV stays 6624.78");
+  eq(ol.lease_exp_date, "2025-12-31", "OL1942 keeps the earlier lease exp");
+  eq(ol.months_until_lease_exp, 5, "OL1942 months follow the earlier lease exp");
+  eq(ol.net_equipment_cost_per_car, 8416.59, "OL1942 OEC per car unchanged");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

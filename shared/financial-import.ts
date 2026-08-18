@@ -571,6 +571,8 @@ export function buildFinancialReview(
 ): FinancialReview {
   const main = parseAssetSheet("Main", mainMatrix, snapshotMonthOverride);
   const rps = parseAssetSheet("RPS", rpsMatrix, snapshotMonthOverride);
+  main.rows = mergeFinancialRowsByUniqueKey(main.rows);
+  rps.rows = mergeFinancialRowsByUniqueKey(rps.rows);
   const allRows = [...main.rows, ...rps.rows];
   const flagged = [...main.flagged, ...rps.flagged];
   const snapshotMonth =
@@ -740,6 +742,101 @@ export function buildFinancialReview(
     },
     unmatchedRiders,
   };
+}
+
+function roundCents(v: number | null | undefined): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  return Math.round(v * 100) / 100;
+}
+
+function financialUniqKey(r: FinancialParsedRow): string {
+  const oec = roundCents(r.net_equipment_cost_per_car);
+  return `${r.snapshot_month}|${r.rider_id}|${r.car_type}|${r.entity}|${oec == null ? "" : oec.toFixed(2)}`;
+}
+
+function addMoney(a: number | null, b: number | null): number | null {
+  if (a == null && b == null) return null;
+  return roundCents((a ?? 0) + (b ?? 0));
+}
+
+function firstText(a: string | null, b: string | null): string | null {
+  const x = String(a ?? "").trim();
+  if (x) return a;
+  const y = String(b ?? "").trim();
+  return y ? b : a ?? b;
+}
+
+function earlierIso(a: string | null, b: string | null): string | null {
+  if (a && b) return a <= b ? a : b;
+  return a ?? b;
+}
+
+/** Same grain as rider_financial_summary_uniq — merge source lines that would collide. */
+export function mergeFinancialRowsByUniqueKey(rows: FinancialParsedRow[]): FinancialParsedRow[] {
+  const order: string[] = [];
+  const byKey = new Map<string, FinancialParsedRow>();
+  for (const r of rows) {
+    const k = financialUniqKey(r);
+    const prev = byKey.get(k);
+    if (!prev) {
+      byKey.set(k, { ...r });
+      order.push(k);
+      continue;
+    }
+    const ca = Math.max(prev.count_cars || 0, 0);
+    const cb = Math.max(r.count_cars || 0, 0);
+    const count = ca + cb;
+    const earlierDate = earlierIso(prev.lease_exp_date, r.lease_exp_date);
+    const monthsFromEarlierDate =
+      earlierDate && earlierDate === prev.lease_exp_date
+        ? prev.months_until_lease_exp
+        : earlierDate && earlierDate === r.lease_exp_date
+          ? r.months_until_lease_exp
+          : null;
+    const months =
+      monthsFromEarlierDate != null
+        ? monthsFromEarlierDate
+        : prev.months_until_lease_exp != null && r.months_until_lease_exp != null
+          ? Math.min(prev.months_until_lease_exp, r.months_until_lease_exp)
+          : prev.months_until_lease_exp ?? r.months_until_lease_exp;
+    byKey.set(k, {
+      ...prev,
+      count_cars: count,
+      lessee: firstText(prev.lessee, r.lessee),
+      former_deal: firstText(prev.former_deal, r.former_deal),
+      legal_owner: firstText(prev.legal_owner, r.legal_owner),
+      net_equipment_cost_total: addMoney(prev.net_equipment_cost_total, r.net_equipment_cost_total),
+      net_equipment_cost_per_car: prev.net_equipment_cost_per_car ?? r.net_equipment_cost_per_car,
+      total_book_value: addMoney(prev.total_book_value, r.total_book_value),
+      book_value_per_asset:
+        count > 0 && addMoney(prev.total_book_value, r.total_book_value) != null
+          ? roundCents((addMoney(prev.total_book_value, r.total_book_value) as number) / count)
+          : prev.book_value_per_asset ?? r.book_value_per_asset,
+      total_monthly_depreciation: addMoney(prev.total_monthly_depreciation, r.total_monthly_depreciation),
+      monthly_depreciation_per_asset:
+        count > 0 && addMoney(prev.total_monthly_depreciation, r.total_monthly_depreciation) != null
+          ? roundCents((addMoney(prev.total_monthly_depreciation, r.total_monthly_depreciation) as number) / count)
+          : prev.monthly_depreciation_per_asset ?? r.monthly_depreciation_per_asset,
+      monthly_rent_total: addMoney(prev.monthly_rent_total, r.monthly_rent_total),
+      monthly_rent_per_car:
+        count > 0 && addMoney(prev.monthly_rent_total, r.monthly_rent_total) != null
+          ? roundCents((addMoney(prev.monthly_rent_total, r.monthly_rent_total) as number) / count)
+          : prev.monthly_rent_per_car ?? r.monthly_rent_per_car,
+      lease_end_residual_total: addMoney(prev.lease_end_residual_total, r.lease_end_residual_total),
+      lease_end_residual_per_asset:
+        count > 0 && addMoney(prev.lease_end_residual_total, r.lease_end_residual_total) != null
+          ? roundCents((addMoney(prev.lease_end_residual_total, r.lease_end_residual_total) as number) / count)
+          : prev.lease_end_residual_per_asset ?? r.lease_end_residual_per_asset,
+      months_until_lease_exp: months,
+      lease_exp_date: earlierDate,
+      deal_resp: firstText(prev.deal_resp, r.deal_resp),
+      lender: firstText(prev.lender, r.lender),
+      liability_insurance_exp: earlierIso(prev.liability_insurance_exp, r.liability_insurance_exp),
+      property_insurance_exp: earlierIso(prev.property_insurance_exp, r.property_insurance_exp),
+      raw_air_rail_power: firstText(prev.raw_air_rail_power, r.raw_air_rail_power),
+    });
+  }
+  return order.map((k) => byKey.get(k)!);
 }
 
 export function financialRowToDbPayload(r: FinancialParsedRow): Record<string, unknown> {

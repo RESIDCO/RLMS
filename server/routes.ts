@@ -98,6 +98,7 @@ import {
   type AbRateBasis,
   type AbItemInput,
 } from "@shared/rule107";
+import { enrichDvResultWarnings, validateMaterialCompositionForSave } from "@shared/dv-material-guardrails";
 
 // Multer: store uploads in memory (files go straight to Supabase Storage)
 const upload = multer({
@@ -136,6 +137,20 @@ async function dvLoadReferenceData(): Promise<DvReferenceData> {
       ageCutoffYears: r.age_cutoff_years,
     })),
   };
+}
+
+function dvMaterialWeights(inputs: DvInputs) {
+  return {
+    tareWeightLb: inputs.tareWeightLb,
+    steelWeightLb: inputs.steelWeightLb,
+    aluminumWeightLb: inputs.aluminumWeightLb,
+    stainlessWeightLb: inputs.stainlessWeightLb ?? 0,
+    nonMetallicWeightLb: inputs.nonMetallicWeightLb,
+  };
+}
+
+function dvCalculateWithGuardrails(inputs: DvInputs, ref: DvReferenceData) {
+  return enrichDvResultWarnings(calculateDv(inputs, ref), dvMaterialWeights(inputs));
 }
 
 function dvParseInputs(body: any, abCodes: Map<string, { rate_basis: AbRateBasis; rate: number; max_depreciation: number }>): DvInputs {
@@ -3665,7 +3680,7 @@ export async function registerRoutes(
       const abMap = new Map<string, { rate_basis: AbRateBasis; rate: number; max_depreciation: number }>();
       for (const r of abData || []) abMap.set(r.code, { rate_basis: r.rate_basis, rate: Number(r.rate), max_depreciation: Number(r.max_depreciation) });
       const inputs = dvParseInputs(req.body, abMap);
-      const result = calculateDv(inputs, ref);
+      const result = dvCalculateWithGuardrails(inputs, ref);
       res.json({ result, inputsEcho: req.body });
     } catch (err) { errHandler(res, err); }
   });
@@ -3699,7 +3714,9 @@ export async function registerRoutes(
       const abMap = new Map<string, { rate_basis: AbRateBasis; rate: number; max_depreciation: number }>();
       for (const r of abData || []) abMap.set(r.code, { rate_basis: r.rate_basis, rate: Number(r.rate), max_depreciation: Number(r.max_depreciation) });
       const inputs = dvParseInputs(req.body, abMap);
-      const result = calculateDv(inputs, ref);
+      const materialErr = validateMaterialCompositionForSave(dvMaterialWeights(inputs));
+      if (materialErr) return res.status(400).json({ error: materialErr });
+      const result = dvCalculateWithGuardrails(inputs, ref);
       const row = {
         visitor_id: writerId,
         railcar_id: req.body.railcarId ?? null,

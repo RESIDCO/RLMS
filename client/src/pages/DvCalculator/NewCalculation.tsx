@@ -19,6 +19,13 @@ import type { AbCodeRow, CarDepRateRow, DvResult, EquipmentType, RailcarRow, Cal
 import { fmtUsd, fmtPct, fmtDate, quarterLabel, fmtInt } from "@/lib/dv/format";
 import { shareCalculationPdf, canNativeShareFiles } from "@/lib/dv/pdf";
 import {
+  isMaterialCompositionMissing,
+  materialSumMismatchWarning,
+  validateMaterialCompositionForSave,
+  type MaterialWeights,
+} from "@shared/dv-material-guardrails";
+import { cn } from "@/lib/utils";
+import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -127,8 +134,25 @@ export default function NewCalculationPage() {
 
   const resetForm = () => { setForm(INITIAL); setPreview(null); setPreviewError(null); };
 
-  const canSave = !!preview && !previewError && !saveMut.isPending;
+  const materialWeights = useMemo(() => materialWeightsFromForm(form), [form]);
+  const materialSaveError = validateMaterialCompositionForSave(materialWeights);
+  const materialMissing = isMaterialCompositionMissing(materialWeights);
+  const materialMismatch = materialSumMismatchWarning(materialWeights);
+
+  const canSave = !!preview && !previewError && !saveMut.isPending && !materialSaveError;
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+  const applyStandardSteelTare = () => {
+    const tare = form.tareWeightLb.trim();
+    if (!tare || !(Number(tare) > 0)) return;
+    setForm((f) => ({
+      ...f,
+      steelWeightLb: tare,
+      aluminumWeightLb: "0",
+      stainlessWeightLb: "0",
+      nonMetallicWeightLb: "0",
+    }));
+  };
 
   /* ---------- A&B row helpers ---------- */
   const addAb = () => setForm((f) => ({ ...f, abItems: [...f.abItems, { code: abCodes[0]?.code || "GNRL", value: "", installDate: TODAY }] }));
@@ -245,8 +269,30 @@ export default function NewCalculationPage() {
               <Field className="col-span-12 sm:col-span-4" label="Tare Weight (lb)*">
                 <Input inputMode="numeric" data-testid="input-tare" value={form.tareWeightLb} onChange={(e) => set("tareWeightLb", e.target.value)} />
               </Field>
-              <Field className="col-span-12 sm:col-span-4" label="Steel Weight (lb)">
-                <Input inputMode="numeric" data-testid="input-steel" value={form.steelWeightLb} onChange={(e) => set("steelWeightLb", e.target.value)} />
+              <Field
+                className="col-span-12 sm:col-span-4"
+                label="Steel Weight (lb)*"
+                helperText="Enter the actual steel weight, or click Same as Tare Weight for a standard carbon steel car."
+                error={materialMissing ? "Required when Tare Weight is entered." : undefined}
+              >
+                <Input
+                  inputMode="numeric"
+                  data-testid="input-steel"
+                  className={cn(materialMissing && "border-destructive focus-visible:ring-destructive")}
+                  value={form.steelWeightLb}
+                  onChange={(e) => set("steelWeightLb", e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-xs justify-start"
+                  disabled={!(Number(form.tareWeightLb) > 0)}
+                  onClick={applyStandardSteelTare}
+                  data-testid="button-same-as-tare"
+                >
+                  Same as Tare Weight (standard steel car)
+                </Button>
               </Field>
               <Field className="col-span-12 sm:col-span-4" label="Aluminum Weight (lb)">
                 <Input inputMode="numeric" data-testid="input-aluminum" value={form.aluminumWeightLb} onChange={(e) => set("aluminumWeightLb", e.target.value)} />
@@ -260,6 +306,12 @@ export default function NewCalculationPage() {
               <Field className="col-span-12 sm:col-span-4" label="Residual" hint="Auto">
                 <Input disabled value={residualWeight(form)} />
               </Field>
+              {materialMismatch && (
+                <div className="col-span-12 flex gap-2 items-start text-xs text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>{materialMismatch}</span>
+                </div>
+              )}
             </div>
           </Section>
 
@@ -348,6 +400,16 @@ function guessEquipmentType(r: RailcarRow): EquipmentType | null {
   return null;
 }
 
+function materialWeightsFromForm(f: FormState): MaterialWeights {
+  return {
+    tareWeightLb: Number(f.tareWeightLb) || 0,
+    steelWeightLb: Number(f.steelWeightLb) || 0,
+    aluminumWeightLb: Number(f.aluminumWeightLb) || 0,
+    stainlessWeightLb: Number(f.stainlessWeightLb) || 0,
+    nonMetallicWeightLb: Number(f.nonMetallicWeightLb) || 0,
+  };
+}
+
 function toPayload(f: FormState): CalculationPayload {
   return {
     railcarId: f.railcarId,
@@ -393,7 +455,21 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
   );
 }
 
-function Field({ label, children, hint, className = "" }: { label: string; children: React.ReactNode; hint?: string; className?: string }) {
+function Field({
+  label,
+  children,
+  hint,
+  helperText,
+  error,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+  helperText?: string;
+  error?: string;
+  className?: string;
+}) {
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
@@ -401,6 +477,8 @@ function Field({ label, children, hint, className = "" }: { label: string; child
         {hint && <span className="text-[10px] uppercase text-muted-foreground/60">{hint}</span>}
       </Label>
       {children}
+      {helperText && <p className="text-[11px] text-muted-foreground leading-snug">{helperText}</p>}
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
     </div>
   );
 }

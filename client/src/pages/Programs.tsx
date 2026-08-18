@@ -1,881 +1,436 @@
-import { useState, useRef } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, apiGet, railcarsQs } from "@/lib/queryClient";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { apiRequest } from "@/lib/queryClient";
+import { useCanEdit } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
+import { confirmDelete } from "@/components/ConfirmActionDialog";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
+import PageHeader from "@/components/PageHeader";
+import { FolderOpen, Plus, Download, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { openAppTab, programPath } from "@/lib/browse-nav";
 import {
-  FolderOpen, Plus, Upload, Trash2, FileText, Image, File,
-  ChevronRight, Link2, X, ExternalLink, Pencil,
-  CheckCircle2, Archive, FileEdit, Car, MoreHorizontal,
-  Paperclip, Download
-} from "lucide-react";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
-} from "@/components/ui/dropdown-menu";
+  CATEGORY_BADGE,
+  PROGRAM_ENTITIES,
+  STATUS_BADGE,
+  STATUS_LABEL,
+  type ProgramStatus,
+} from "@shared/programs";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface Program {
+type Category = { id: number; name: string };
+type ProgramRow = {
   id: number;
   name: string;
   description: string | null;
-  status: "active" | "draft" | "archived";
-  created_at: string;
-  updated_at: string;
-  doc_count: number;
-  car_count: number;
-}
-
-interface ProgramDoc {
-  id: number;
-  program_id: number;
-  file_name: string;
-  file_url: string;
-  storage_path: string;
-  doc_type: string;
-  file_size_bytes: number | null;
-  uploaded_at: string;
-}
-
-interface ProgramCar {
-  id: number;
-  notes: string | null;
-  added_at: string;
-  railcar: {
-    id: number;
-    car_number: string;
-    reporting_marks: string | null;
-    car_type: string | null;
-    status: string | null;
-    entity: string | null;
-    fleet_name: string | null;
-  };
-}
-
-interface Railcar {
-  id: number;
-  car_number: string;
-  reporting_marks: string | null;
-  car_type: string | null;
-  status: string | null;
+  status: ProgramStatus;
+  category_id: number | null;
+  tags: string[] | null;
   entity: string | null;
-  fleet_name: string | null;
-}
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const DOC_TYPES = ["SOW", "Car List", "Inspection Report", "Photo", "Other"] as const;
-type DocType = typeof DOC_TYPES[number];
-
-const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "outline"; icon: any }> = {
-  active:   { label: "Active",   variant: "default",   icon: CheckCircle2 },
-  draft:    { label: "Draft",    variant: "secondary", icon: FileEdit },
-  archived: { label: "Archived", variant: "outline",   icon: Archive },
+  account_manager: string | null;
+  status_narrative: string | null;
+  percent_complete: number | null;
+  updated_at: string;
+  category: { id: number; name: string } | null;
+  car_count: number;
+  active_car_count: number;
+  doc_count: number;
 };
 
-const DOC_TYPE_COLORS: Record<string, string> = {
-  "SOW":               "bg-umler-steel/10 text-umler-steel border-umler-steel/20",
-  "Car List":          "bg-umler-teal/10 text-umler-teal border-umler-teal/20",
-  "Inspection Report": "bg-umler-amber/10 text-umler-amber border-umler-amber/20",
-  "Photo":             "bg-umler-faint/10 text-umler-faint border-umler-faint/20",
-  "Other":             "bg-muted text-muted-foreground border-border",
-};
-
-function fmtBytes(n: number | null): string {
-  if (!n) return "";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+async function downloadReport(url: string) {
+  const res = await apiRequest("GET", url);
+  const blob = await res.blob();
+  const disp = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="([^"]+)"/.exec(disp);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = match?.[1] ?? "RLMS_Program_Status_Report.xlsx";
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
-
-function fmtDate(s: string): string {
-  return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-function fileIcon(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase();
-  if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext ?? "")) return <Image className="h-4 w-4 text-green-400" />;
-  if (ext === "pdf") return <FileText className="h-4 w-4 text-red-400" />;
-  return <File className="h-4 w-4 text-muted-foreground" />;
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ProgramsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
-
+  const canEdit = useCanEdit();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
-
-  // Dialogs
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [entityFilter, setEntityFilter] = useState("all");
+  const [managerFilter, setManagerFilter] = useState("all");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
-  const [editProgram, setEditProgram] = useState<Program | null>(null);
-  const [linkCarsOpen, setLinkCarsOpen] = useState(false);
 
-  // ── Data queries ─────────────────────────────────────────────────────────────
-
-  const { data: programs = [], isLoading } = useQuery<Program[]>({
+  const { data: programs = [], isLoading } = useQuery<ProgramRow[]>({
     queryKey: ["/api/programs"],
   });
-
-  const { data: docs = [] } = useQuery<ProgramDoc[]>({
-    queryKey: ["/api/programs", selectedProgram?.id, "documents"],
-    queryFn: () => selectedProgram
-      ? apiRequest("GET", `/api/programs/${selectedProgram.id}/documents`).then(r => r.json())
-      : Promise.resolve([]),
-    enabled: !!selectedProgram,
+  const { data: categories = [] } = useQuery<Category[]>({
+    queryKey: ["/api/programs/categories"],
+    queryFn: () => apiRequest("GET", "/api/programs/categories").then((r) => r.json()),
   });
 
-  const { data: linkedCars = [] } = useQuery<ProgramCar[]>({
-    queryKey: ["/api/programs", selectedProgram?.id, "cars"],
-    queryFn: () => selectedProgram
-      ? apiRequest("GET", `/api/programs/${selectedProgram.id}/cars`).then(r => r.json())
-      : Promise.resolve([]),
-    enabled: !!selectedProgram,
+  const managers = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of programs) {
+      const m = String(p.account_manager ?? "").trim();
+      if (m) s.add(m);
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [programs]);
+
+  const filtered = programs.filter((p) => {
+    const q = search.trim().toLowerCase();
+    const blob = `${p.name} ${p.status_narrative ?? ""} ${p.description ?? ""}`.toLowerCase();
+    if (q && !blob.includes(q)) return false;
+    if (statusFilter !== "all" && p.status !== statusFilter) return false;
+    if (categoryFilter !== "all" && String(p.category_id) !== categoryFilter) return false;
+    if (entityFilter !== "all" && p.entity !== entityFilter) return false;
+    if (managerFilter !== "all" && (p.account_manager ?? "") !== managerFilter) return false;
+    return true;
   });
 
-  // ── Mutations ─────────────────────────────────────────────────────────────────
-
-  const deleteProgramMut = useMutation({
+  const deleteMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/programs/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/programs"] });
-      setSelectedProgram(null);
       toast({ title: "Program deleted" });
     },
   });
 
-  const deleteDocMut = useMutation({
-    mutationFn: ({ programId, docId }: { programId: number; docId: number }) =>
-      apiRequest("DELETE", `/api/programs/${programId}/documents/${docId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/programs", selectedProgram?.id, "documents"] });
-      qc.invalidateQueries({ queryKey: ["/api/programs"] });
-      toast({ title: "Document removed" });
-    },
-  });
+  function toggle(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
-  const unlinkCarMut = useMutation({
-    mutationFn: ({ programId, linkId }: { programId: number; linkId: number }) =>
-      apiRequest("DELETE", `/api/programs/${programId}/cars/${linkId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/programs", selectedProgram?.id, "cars"] });
-      qc.invalidateQueries({ queryKey: ["/api/programs"] });
-      toast({ title: "Car unlinked" });
-    },
-  });
+  async function exportSelected() {
+    const ids = [...selected];
+    if (!ids.length) {
+      toast({ title: "Select at least one program", variant: "destructive" });
+      return;
+    }
+    try {
+      await downloadReport(`/api/programs/export?ids=${ids.join(",")}`);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    }
+  }
 
-  // ── Filtering ─────────────────────────────────────────────────────────────────
-
-  const filtered = programs.filter(p => {
-    const matchSearch = !search.trim() ||
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.description ?? "").toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === "all" || p.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
-  // Keep selectedProgram in sync with fresh data
-  const freshSelected = selectedProgram
-    ? programs.find(p => p.id === selectedProgram.id) ?? selectedProgram
-    : null;
+  async function exportOpen() {
+    const ids = programs.filter((p) => p.status === "open").map((p) => p.id);
+    if (!ids.length) {
+      toast({ title: "No open programs to export", variant: "destructive" });
+      return;
+    }
+    try {
+      await downloadReport(`/api/programs/export?ids=${ids.join(",")}`);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    }
+  }
 
   return (
-    <div className="h-full min-h-0 overflow-auto px-4 md:px-8 py-5 md:py-8 max-w-[1600px]">
-      {/* Header */}
-      <header className="mb-5 md:mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="font-eyebrow mb-1.5">RLMS</div>
-          <h1 className="font-serif text-lg md:text-xl font-semibold tracking-tight">Programs</h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-0.5">
-            Scopes of work, car lists, inspection reports and supporting documents
-          </p>
-          <p className="text-[11px] text-muted-foreground italic mt-1.5">
-            Additional features and functionality coming soon — this page is under active development and will change.
-          </p>
-        </div>
-        <Button size="sm" className="gap-1.5 self-start sm:self-auto" onClick={() => setCreateOpen(true)}
-          data-testid="button-create-program">
-          <Plus className="h-4 w-4" /> New Program
-        </Button>
-      </header>
-
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 mb-5 flex-wrap">
-        <ClearableSearchInput
-          className="relative flex-1 min-w-[200px] max-w-sm"
-          inputClassName="h-9"
-          placeholder="Search programs…"
-          value={search}
-          onChange={setSearch}
-        />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-36 text-sm">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="archived">Archived</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-6">
-        {/* Left: Program list */}
-        <div className="space-y-2">
-          {isLoading ? (
-            <div className="text-sm text-muted-foreground p-4">Loading…</div>
-          ) : filtered.length === 0 ? (
-            <Card>
-              <CardContent className="p-10 text-center">
-                <FolderOpen className="h-8 w-8 mx-auto mb-3 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground italic">
-                  {programs.length === 0 ? "No programs yet — create one to get started." : "No programs match your filter."}
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            filtered.map(p => {
-              const cfg = STATUS_CONFIG[p.status];
-              const active = freshSelected?.id === p.id;
-              return (
-                <Card
-                  key={p.id}
-                  className={`cursor-pointer transition-all hover:border-primary/40 ${active ? "border-primary/60 bg-accent/40" : ""}`}
-                  onClick={() => setSelectedProgram(p)}
-                  data-testid={`card-program-${p.id}`}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm truncate">{p.name}</span>
-                          <Badge variant={cfg.variant} className="text-[10px] h-4 px-1.5">{cfg.label}</Badge>
-                        </div>
-                        {p.description && (
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{p.description}</p>
-                        )}
-                        <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Paperclip className="h-3 w-3" />{p.doc_count} doc{p.doc_count !== 1 ? "s" : ""}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Car className="h-3 w-3" />{p.car_count} car{p.car_count !== 1 ? "s" : ""}
-                          </span>
-                          <span>{fmtDate(p.created_at)}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 flex-none" onClick={e => e.stopPropagation()}>
-                        <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${active ? "rotate-90 text-primary" : ""}`} />
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" data-testid={`button-menu-${p.id}`}>
-                              <MoreHorizontal className="h-3.5 w-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setEditProgram(p)}>
-                              <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={async () => {
-                                const ok = await confirmDelete({
-                                  title: `Delete "${p.name}" and all its documents?`,
-                                  description: "This can't be undone.",
-                                });
-                                if (ok) deleteProgramMut.mutate(p.id);
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </div>
-
-        {/* Right: Program detail */}
-        <div>
-          {freshSelected ? (
-            <ProgramDetail
-              program={freshSelected}
-              docs={docs}
-              linkedCars={linkedCars}
-              onDeleteDoc={(docId) => deleteDocMut.mutate({ programId: freshSelected.id, docId })}
-              onUnlinkCar={(linkId) => unlinkCarMut.mutate({ programId: freshSelected.id, linkId })}
-              onUploadDone={() => {
-                qc.invalidateQueries({ queryKey: ["/api/programs", freshSelected.id, "documents"] });
-                qc.invalidateQueries({ queryKey: ["/api/programs"] });
-              }}
-              onCarLinked={() => {
-                qc.invalidateQueries({ queryKey: ["/api/programs", freshSelected.id, "cars"] });
-                qc.invalidateQueries({ queryKey: ["/api/programs"] });
-              }}
-            />
-          ) : (
-            <Card>
-              <CardContent className="p-10 text-center">
-                <FolderOpen className="h-8 w-8 mx-auto mb-3 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground italic">Select a program to view its documents and linked cars.</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
-
-      {/* Create Program Dialog */}
-      <ProgramFormDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onSaved={(p) => {
-          qc.invalidateQueries({ queryKey: ["/api/programs"] });
-          setCreateOpen(false);
-          setSelectedProgram(p);
-          toast({ title: "Program created" });
-        }}
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
+      <PageHeader
+        title="Programs"
+        subtitle="Open work across the fleet — returns, remarks, acquisitions, qualifications, inspections"
+        actions={
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" variant="outline" onClick={exportOpen} data-testid="button-export-open-programs">
+              <Download className="h-4 w-4" /> Export open
+            </Button>
+            <Button size="sm" variant="outline" onClick={exportSelected} disabled={!selected.size} data-testid="button-export-selected-programs">
+              <Download className="h-4 w-4" /> Export selected
+            </Button>
+            {canEdit && (
+              <Button size="sm" onClick={() => setCreateOpen(true)} data-testid="button-create-program">
+                <Plus className="h-4 w-4" /> New Program
+              </Button>
+            )}
+          </div>
+        }
       />
 
-      {/* Edit Program Dialog */}
-      {editProgram && (
-        <ProgramFormDialog
-          open={!!editProgram}
-          initial={editProgram}
-          onClose={() => setEditProgram(null)}
-          onSaved={() => {
-            qc.invalidateQueries({ queryKey: ["/api/programs"] });
-            setEditProgram(null);
-            toast({ title: "Program updated" });
-          }}
-        />
-      )}
+      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <ClearableSearchInput
+            className="relative flex-1 min-w-[200px] max-w-sm"
+            inputClassName="h-9"
+            placeholder="Search name or status narrative…"
+            value={search}
+            onChange={setSearch}
+          />
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="h-9 w-36 text-sm"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="open">Open</SelectItem>
+              <SelectItem value="on_hold">On Hold</SelectItem>
+              <SelectItem value="complete">Complete</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Category" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All categories</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={entityFilter} onValueChange={setEntityFilter}>
+            <SelectTrigger className="h-9 w-44 text-sm"><SelectValue placeholder="Entity" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All entities</SelectItem>
+              {PROGRAM_ENTITIES.map((e) => (
+                <SelectItem key={e} value={e}>{e}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {managers.length > 0 && (
+            <Select value={managerFilter} onValueChange={setManagerFilter}>
+              <SelectTrigger className="h-9 w-44 text-sm"><SelectValue placeholder="Manager" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All managers</SelectItem>
+                {managers.map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground p-4">Loading…</p>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-xl border border-card-border bg-card p-10 text-center">
+            <FolderOpen className="h-8 w-8 mx-auto mb-3 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground italic">
+              {programs.length === 0 ? "No programs yet — create one to get started." : "No programs match your filter."}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-card-border bg-card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-muted-foreground bg-muted/40">
+                <tr>
+                  <th className="w-10 px-3 py-2" />
+                  <th className="text-left px-3 py-2 font-medium">Program</th>
+                  <th className="text-left px-3 py-2 font-medium">Category</th>
+                  <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Entity</th>
+                  <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Account manager</th>
+                  <th className="text-left px-3 py-2 font-medium">Status</th>
+                  <th className="text-right px-3 py-2 font-medium">% Complete</th>
+                  <th className="text-right px-3 py-2 font-medium">Cars</th>
+                  <th className="text-left px-3 py-2 font-medium hidden xl:table-cell">Updated</th>
+                  <th className="w-10" />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((p) => {
+                  const cat = p.category?.name ?? "";
+                  const cars =
+                    p.active_car_count !== p.car_count && p.car_count
+                      ? `${p.active_car_count} of ${p.car_count}`
+                      : String(p.active_car_count ?? p.car_count ?? 0);
+                  return (
+                    <tr
+                      key={p.id}
+                      className="border-t border-border/50 hover:bg-muted/30 cursor-pointer"
+                      onClick={() => openAppTab(programPath(p.id))}
+                    >
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={selected.has(p.id)} onCheckedChange={() => toggle(p.id)} aria-label={`Select ${p.name}`} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{p.name}</div>
+                        {p.status_narrative && (
+                          <div className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{p.status_narrative}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {cat && (
+                          <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", CATEGORY_BADGE[cat] ?? "bg-muted border-border")}>
+                            {cat}
+                          </span>
+                        )}
+                        {(p.tags ?? []).length > 0 && (
+                          <div className="text-[10px] text-muted-foreground mt-1">{(p.tags ?? []).join(", ")}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{p.entity ?? "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground hidden lg:table-cell">{p.account_manager ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", STATUS_BADGE[p.status])}>
+                          {STATUS_LABEL[p.status]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono-num">{p.percent_complete != null ? `${p.percent_complete}%` : "—"}</td>
+                      <td className="px-3 py-2 text-right font-mono-num">{cars}</td>
+                      <td className="px-3 py-2 text-muted-foreground text-xs hidden xl:table-cell">
+                        {new Date(p.updated_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                        {canEdit && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            aria-label={`Delete ${p.name}`}
+                            onClick={async () => {
+                              const ok = await confirmDelete({
+                                title: `Delete program ${p.name}?`,
+                                description: "This removes the program, its car links, and documents. This cannot be undone.",
+                              });
+                              if (ok) deleteMut.mutate(p.id);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <CreateProgramDialog
+        open={createOpen}
+        categories={categories}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(id) => {
+          setCreateOpen(false);
+          qc.invalidateQueries({ queryKey: ["/api/programs"] });
+          openAppTab(programPath(id));
+        }}
+      />
     </div>
   );
 }
 
-// ─── Program Detail Panel ────────────────────────────────────────────────────
-
-function ProgramDetail({
-  program, docs, linkedCars,
-  onDeleteDoc, onUnlinkCar, onUploadDone, onCarLinked,
-}: {
-  program: Program;
-  docs: ProgramDoc[];
-  linkedCars: ProgramCar[];
-  onDeleteDoc: (docId: number) => void;
-  onUnlinkCar: (linkId: number) => void;
-  onUploadDone: () => void;
-  onCarLinked: () => void;
-}) {
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [linkCarsOpen, setLinkCarsOpen] = useState(false);
-  const cfg = STATUS_CONFIG[program.status];
-
-  return (
-    <Card className="overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="font-semibold text-base truncate">{program.name}</h2>
-            <Badge variant={cfg.variant} className="text-[10px]">{cfg.label}</Badge>
-          </div>
-          {program.description && (
-            <p className="text-xs text-muted-foreground mt-1">{program.description}</p>
-          )}
-          <p className="text-[11px] text-muted-foreground mt-1">Created {fmtDate(program.created_at)}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap flex-none">
-          <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => setLinkCarsOpen(true)}>
-            <Link2 className="h-3.5 w-3.5" /> Link Cars
-          </Button>
-          <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setUploadOpen(true)}>
-            <Upload className="h-3.5 w-3.5" /> Upload Document
-          </Button>
-        </div>
-      </div>
-
-      <CardContent className="p-0 divide-y divide-border">
-        {/* Documents section */}
-        <div className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-3">
-            Documents ({docs.length})
-          </div>
-          {docs.length === 0 ? (
-            <div className="text-sm text-muted-foreground italic text-center py-6 border border-dashed border-border rounded-md">
-              No documents yet — upload a SOW, car list, or inspection report.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {docs.map(doc => (
-                <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-md border border-border hover:bg-muted/40 transition-colors group"
-                  data-testid={`doc-${doc.id}`}>
-                  <div className="flex-none">{fileIcon(doc.file_name)}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-medium truncate max-w-[240px]">{doc.file_name}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${DOC_TYPE_COLORS[doc.doc_type] ?? DOC_TYPE_COLORS["Other"]}`}>
-                        {doc.doc_type}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">
-                      {fmtDate(doc.uploaded_at)}{doc.file_size_bytes ? ` · ${fmtBytes(doc.file_size_bytes)}` : ""}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 flex-none opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button size="icon" variant="ghost" className="h-7 w-7" asChild title="Open">
-                      <a href={doc.file_url} target="_blank" rel="noreferrer">
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    </Button>
-                    <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
-                      title="Remove"
-                      onClick={async () => {
-                        const ok = await confirmDelete({
-                          title: `Remove "${doc.file_name}"?`,
-                          description: "This can't be undone.",
-                          confirmLabel: "Remove",
-                        });
-                        if (ok) onDeleteDoc(doc.id);
-                      }}
-                      data-testid={`button-delete-doc-${doc.id}`}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Linked Cars section */}
-        <div className="p-5">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-3">
-            Linked Railcars ({linkedCars.length})
-          </div>
-          {linkedCars.length === 0 ? (
-            <div className="text-sm text-muted-foreground italic text-center py-6 border border-dashed border-border rounded-md">
-              No cars linked — use "Link Cars" to associate railcars with this program.
-            </div>
-          ) : (
-            <div className="-mx-5 px-5 overflow-x-auto">
-              <Table className="min-w-[420px]">
-                <TableHeader>
-                  <TableRow className="text-[11px]">
-                    <TableHead>Marks</TableHead>
-                    <TableHead>Car #</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Lessee</TableHead>
-                    <TableHead>Entity</TableHead>
-                    <TableHead className="w-8"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {linkedCars.map(lc => (
-                    <TableRow key={lc.id} className="text-xs" data-testid={`row-linked-car-${lc.id}`}>
-                      <TableCell className="font-mono text-muted-foreground">{lc.railcar.reporting_marks || "—"}</TableCell>
-                      <TableCell className="font-mono">{lc.railcar.car_number}</TableCell>
-                      <TableCell>{lc.railcar.car_type || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{lc.railcar.fleet_name || "—"}</TableCell>
-                      <TableCell>
-                        {lc.railcar.entity === "Main"
-                          ? <Badge variant="outline" className="text-[10px] border-umler-teal/40 text-umler-teal">MAIN</Badge>
-                          : lc.railcar.entity === "Rail Partners Select"
-                          ? <Badge variant="outline" className="text-[10px] border-umler-steel/40 text-umler-steel">RPS</Badge>
-                          : <span className="text-muted-foreground">—</span>
-                        }
-                      </TableCell>
-                      <TableCell>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={async () => {
-                            const mark = [lc.railcar?.reporting_marks, lc.railcar?.car_number].filter(Boolean).join(" ") || "this car";
-                            const ok = await confirmDelete({
-                              title: `Unlink ${mark} from this program?`,
-                              description: "The railcar itself is not deleted.",
-                              confirmLabel: "Unlink",
-                            });
-                            if (ok) onUnlinkCar(lc.id);
-                          }}
-                          title="Unlink"
-                          data-testid={`button-unlink-car-${lc.id}`}>
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </div>
-      </CardContent>
-
-      {/* Upload Document Dialog */}
-      <UploadDocDialog
-        open={uploadOpen}
-        program={program}
-        onClose={() => setUploadOpen(false)}
-        onUploaded={onUploadDone}
-      />
-
-      {/* Link Cars Dialog */}
-      <LinkCarsDialog
-        open={linkCarsOpen}
-        program={program}
-        linkedCars={linkedCars}
-        onClose={() => setLinkCarsOpen(false)}
-        onLinked={onCarLinked}
-      />
-    </Card>
-  );
-}
-
-// ─── Program Form Dialog (create + edit) ─────────────────────────────────────
-
-function ProgramFormDialog({
-  open, initial, onClose, onSaved,
+function CreateProgramDialog({
+  open,
+  categories,
+  onClose,
+  onCreated,
 }: {
   open: boolean;
-  initial?: Program;
+  categories: Category[];
   onClose: () => void;
-  onSaved: (p: Program) => void;
+  onCreated: (id: number) => void;
 }) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [description, setDescription] = useState(initial?.description ?? "");
-  const [status, setStatus] = useState<string>(initial?.status ?? "active");
-  const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const [name, setName] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [entity, setEntity] = useState("");
+  const [manager, setManager] = useState("");
+  const [description, setDescription] = useState("");
+  const [target, setTarget] = useState("");
+  const [tags, setTags] = useState("");
+  const [pending, setPending] = useState(false);
 
-  const isEdit = !!initial;
-
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    if (isEdit) {
-      const ok = await confirmSave({
-        title: `Save changes to ${name.trim()}?`,
-        description: "Program details will be updated.",
+  async function save() {
+    if (!name.trim() || !categoryId) {
+      toast({ title: "Name and category are required", variant: "destructive" });
+      return;
+    }
+    setPending(true);
+    try {
+      const res = await apiRequest("POST", "/api/programs", {
+        name: name.trim(),
+        category_id: Number(categoryId),
+        entity: entity || null,
+        account_manager: manager.trim() || null,
+        description: description.trim() || null,
+        target_completion_date: target || null,
+        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       });
-      if (!ok) return;
-    }
-    setSaving(true);
-    try {
-      const method = isEdit ? "PATCH" : "POST";
-      const url = isEdit ? `/api/programs/${initial!.id}` : "/api/programs";
-      const result = await apiRequest(method, url, { name, description, status }).then(r => r.json());
-      onSaved(result);
-    } catch {
-      toast({ title: "Failed to save program", variant: "destructive" });
+      const row = await res.json();
+      onCreated(row.id);
+      setName("");
+      setCategoryId("");
+      setEntity("");
+      setManager("");
+      setDescription("");
+      setTarget("");
+      setTags("");
+    } catch (e: any) {
+      toast({ title: "Could not create program", description: e.message, variant: "destructive" });
     } finally {
-      setSaving(false);
+      setPending(false);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-md">
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Program" : "New Program"}</DialogTitle>
-          <DialogDescription>
-            {isEdit ? "Update the program details." : "Create a new program to organize SOW and supporting documents."}
-          </DialogDescription>
+          <DialogTitle>New program</DialogTitle>
+          <DialogDescription>Category chooses which car-level fields this program uses.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSave} className="space-y-4 pt-1">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Program Name *</label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Tank Car Lining Program 2026" className="h-9" />
+        <div className="grid gap-3 py-2">
+          <div>
+            <Label className="text-xs">Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. OL2526 — Solvay Return" />
           </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Description</label>
-            <Textarea value={description} onChange={e => setDescription(e.target.value)}
-              placeholder="Scope, purpose, timeline…" className="text-sm min-h-[80px] resize-none" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Status</label>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+          <div>
+            <Label className="text-xs">Category</Label>
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="archived">Archived</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button type="submit" size="sm" disabled={saving || !name.trim()}>
-              {saving ? "Saving…" : isEdit ? "Update" : "Create Program"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Upload Document Dialog ───────────────────────────────────────────────────
-
-function UploadDocDialog({ open, program, onClose, onUploaded }: {
-  open: boolean;
-  program: Program;
-  onClose: () => void;
-  onUploaded: () => void;
-}) {
-  const [files, setFiles] = useState<File[]>([]);
-  const [docType, setDocType] = useState<DocType>("SOW");
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState<string[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { toast } = useToast();
-
-  function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const selected = Array.from(e.target.files ?? []);
-    setFiles(prev => [...prev, ...selected]);
-    if (inputRef.current) inputRef.current.value = "";
-  }
-
-  async function handleUpload() {
-    if (files.length === 0) return;
-    setUploading(true);
-    setProgress([]);
-    const msgs: string[] = [];
-    const base = ("__PORT_5000__").startsWith("__") ? "" : "__PORT_5000__";
-
-    for (const file of files) {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("doc_type", docType);
-      try {
-        const r = await fetch(`${base}/api/programs/${program.id}/documents`, { method: "POST", body: fd });
-        if (!r.ok) throw new Error(await r.text());
-        msgs.push(`✓ ${file.name}`);
-      } catch {
-        msgs.push(`✗ ${file.name} — upload failed`);
-      }
-      setProgress([...msgs]);
-    }
-
-    const allOk = msgs.every(m => m.startsWith("✓"));
-    if (allOk) {
-      toast({ title: `${files.length} document${files.length > 1 ? "s" : ""} uploaded` });
-      setFiles([]);
-      setProgress([]);
-      onUploaded();
-      onClose();
-    } else {
-      toast({ title: "Some files failed to upload", variant: "destructive" });
-      onUploaded();
-    }
-    setUploading(false);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={o => { if (!o && !uploading) { onClose(); setFiles([]); setProgress([]); } }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Upload Documents</DialogTitle>
-          <DialogDescription>Add files to <strong>{program.name}</strong></DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 pt-1">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Document Type</label>
-            <Select value={docType} onValueChange={v => setDocType(v as DocType)}>
-              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {DOC_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div
-            className="border-2 border-dashed border-border rounded-md p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-colors"
-            onClick={() => inputRef.current?.click()}
-          >
-            <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Click to select files</p>
-            <p className="text-[11px] text-muted-foreground mt-1">PDF, images, or any document type</p>
-            <input ref={inputRef} type="file" multiple className="hidden"
-              accept=".pdf,.png,.jpg,.jpeg,.gif,.doc,.docx,.xls,.xlsx,.csv"
-              onChange={handleFiles} />
-          </div>
-
-          {files.length > 0 && (
-            <div className="space-y-1.5">
-              <p className="text-xs text-muted-foreground font-medium">{files.length} file{files.length > 1 ? "s" : ""} selected:</p>
-              {files.map((f, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  {fileIcon(f.name)}
-                  <span className="flex-1 truncate">{f.name}</span>
-                  <span className="text-muted-foreground">{fmtBytes(f.size)}</span>
-                  <Button size="icon" variant="ghost" className="h-6 w-6"
-                    onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}>
-                    <X className="h-3 w-3" />
-                  </Button>
-                </div>
-              ))}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Entity</Label>
+              <Select value={entity || "none"} onValueChange={(v) => setEntity(v === "none" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="Entity" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">—</SelectItem>
+                  {PROGRAM_ENTITIES.map((e) => (
+                    <SelectItem key={e} value={e}>{e}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          )}
-
-          {progress.length > 0 && (
-            <div className="space-y-1 text-xs font-mono">
-              {progress.map((m, i) => (
-                <p key={i} className={m.startsWith("✓") ? "text-green-400" : "text-destructive"}>{m}</p>
-              ))}
+            <div>
+              <Label className="text-xs">Account manager</Label>
+              <Input value={manager} onChange={(e) => setManager(e.target.value)} placeholder="Bahnline" />
             </div>
-          )}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={uploading}>Cancel</Button>
-            <Button size="sm" disabled={files.length === 0 || uploading} onClick={handleUpload}>
-              {uploading ? "Uploading…" : `Upload ${files.length > 0 ? files.length : ""} File${files.length !== 1 ? "s" : ""}`}
-            </Button>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Link Cars Dialog ─────────────────────────────────────────────────────────
-
-function LinkCarsDialog({ open, program, linkedCars, onClose, onLinked }: {
-  open: boolean;
-  program: Program;
-  linkedCars: ProgramCar[];
-  onClose: () => void;
-  onLinked: () => void;
-}) {
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [saving, setSaving] = useState(false);
-  const { toast } = useToast();
-  const { data: allCars = [], isLoading: carsLoading } = useQuery<Railcar[]>({
-    queryKey: ["/api/railcars", { all: "1" }],
-    queryFn: () => apiGet<Railcar[]>(railcarsQs({ all: "1" })),
-    enabled: open,
-    staleTime: 45_000,
-  });
-
-  const linkedIds = new Set(linkedCars.map(lc => lc.railcar.id));
-
-  const filteredCars = allCars.filter(c => {
-    if (linkedIds.has(c.id)) return false;
-    if (!search.trim()) return true;
-    const s = search.toLowerCase();
-    return c.car_number.toLowerCase().includes(s) ||
-      (c.reporting_marks ?? "").toLowerCase().includes(s) ||
-      (c.fleet_name ?? "").toLowerCase().includes(s);
-  });
-
-  function toggle(id: number) {
-    setSelected(prev => {
-      const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-  }
-
-  async function handleLink() {
-    if (selected.size === 0) return;
-    setSaving(true);
-    try {
-      await apiRequest("POST", `/api/programs/${program.id}/cars`, { railcar_ids: Array.from(selected) });
-      toast({ title: `${selected.size} car${selected.size > 1 ? "s" : ""} linked` });
-      setSelected(new Set());
-      setSearch("");
-      onLinked();
-      onClose();
-    } catch {
-      toast({ title: "Failed to link cars", variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={o => { if (!o) { onClose(); setSelected(new Set()); setSearch(""); } }}>
-      <DialogContent className="max-w-lg max-h-[80vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
-          <DialogTitle>Link Railcars</DialogTitle>
-          <DialogDescription>Associate cars from the fleet with <strong>{program.name}</strong></DialogDescription>
-        </DialogHeader>
-        <div className="px-4 py-3 border-b border-border">
-          <ClearableSearchInput
-            className="relative max-w-none"
-            inputClassName="h-9 text-sm"
-            placeholder="Filter by car number, marks, lessee…"
-            value={search}
-            onChange={setSearch}
-          />
-          {selected.size > 0 && (
-            <p className="text-xs text-primary mt-2">{selected.size} car{selected.size > 1 ? "s" : ""} selected</p>
-          )}
-        </div>
-        <div className="flex-1 overflow-y-auto min-h-0">
-          {filteredCars.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center italic p-6">
-              {carsLoading ? "Loading fleet…" : allCars.length === 0 ? "No railcars in the fleet yet." : "All cars are already linked, or no matches."}
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="text-[11px]">
-                  <TableHead className="w-8"></TableHead>
-                  <TableHead>Marks</TableHead>
-                  <TableHead>Car #</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Lessee</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCars.map(c => {
-                  const checked = selected.has(c.id);
-                  return (
-                    <TableRow key={c.id}
-                      className={`cursor-pointer text-xs ${checked ? "bg-accent/40" : ""}`}
-                      onClick={() => toggle(c.id)}
-                      data-testid={`row-car-select-${c.id}`}
-                    >
-                      <TableCell>
-                        <input type="checkbox" checked={checked} onChange={() => toggle(c.id)}
-                          className="h-3.5 w-3.5 accent-primary" onClick={e => e.stopPropagation()} />
-                      </TableCell>
-                      <TableCell className="font-mono text-muted-foreground">{c.reporting_marks || "—"}</TableCell>
-                      <TableCell className="font-mono">{c.car_number}</TableCell>
-                      <TableCell>{c.car_type || "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{c.fleet_name || "—"}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </div>
-        <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" disabled={selected.size === 0 || saving} onClick={handleLink}>
-            {saving ? "Linking…" : `Link ${selected.size > 0 ? selected.size : ""} Car${selected.size !== 1 ? "s" : ""}`}
-          </Button>
+          <div>
+            <Label className="text-xs">Target completion</Label>
+            <Input type="date" value={target} onChange={(e) => setTarget(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs">Tags (comma-separated, for hybrids like NLD, Sale)</Label>
+            <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="NLD, Sale" />
+          </div>
+          <div>
+            <Label className="text-xs">Description</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={save} disabled={pending}>{pending ? "Creating…" : "Create"}</Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

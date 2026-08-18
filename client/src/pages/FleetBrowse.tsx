@@ -18,7 +18,10 @@ import {
   lesseePath,
   olCarPath,
   turning50CarPath,
+  openAppTab,
+  programPath,
 } from "@/lib/browse-nav";
+import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 
 type RiderRow = {
   ol: string;
@@ -223,6 +226,10 @@ function OlView({
       return res.json();
     },
   });
+  const { data: olPrograms = [] } = useQuery<any[]>({
+    queryKey: ["/api/programs/history", ol],
+    queryFn: () => apiRequest("GET", `/api/programs/history?ol=${encodeURIComponent(ol)}`).then((r) => r.json()),
+  });
   const carHref = (c: CarRow) => {
     if (parent?.kind === "lessee") return lesseeOlCarPath(parent.lessee, ol, c.id);
     if (parent?.kind === "entity") return entityOlCarPath(parent.entity, ol, c.id);
@@ -261,6 +268,48 @@ function OlView({
         ) : (
           <CarTable cars={data?.cars ?? []} hrefFor={carHref} />
         )}
+        <section className="mt-6 rounded-xl border border-card-border bg-card p-5">
+          <h2 className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold mb-3">Program History</h2>
+          {olPrograms.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic">No programs recorded for this OL.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="text-muted-foreground">
+                <tr>
+                  <th className="text-left py-1.5 font-medium">Program</th>
+                  <th className="text-left py-1.5 font-medium">Category</th>
+                  <th className="text-left py-1.5 font-medium">Status</th>
+                  <th className="text-right py-1.5 font-medium">Cars from this OL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {olPrograms.map((row: any) => {
+                  const cat = row.program?.category?.name ?? "";
+                  return (
+                    <tr key={row.program?.id} className="border-t border-border/50">
+                      <td className="py-2">
+                        <button
+                          type="button"
+                          className="text-left hover:underline font-medium"
+                          onClick={() => openAppTab(programPath(row.program.id))}
+                        >
+                          {row.program?.name}
+                        </button>
+                      </td>
+                      <td className="py-2">
+                        {cat && (
+                          <span className={cn("text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border", CATEGORY_BADGE[cat] ?? "bg-muted border-border")}>{cat}</span>
+                        )}
+                      </td>
+                      <td className="py-2">{STATUS_LABEL[(row.program?.status as ProgramStatus) ?? "open"]}</td>
+                      <td className="py-2 text-right font-mono">{row.car_count}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
       </div>
     </>
   );

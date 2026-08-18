@@ -47,6 +47,9 @@ export function turning50CarPath(year: number, id: number) {
 export function carPath(id: number) {
   return `/cars/${id}`;
 }
+export function programPath(id: number) {
+  return `/programs/${id}`;
+}
 export function historyPath(carQuery: string) {
   return `/history?q=${encodeURIComponent(carQuery)}`;
 }

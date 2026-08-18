@@ -214,12 +214,12 @@ export async function browseTurning50(year: number) {
   };
 }
 
-/** Leased (assigned) active cars that sit on an open/active Program. Zero today is correct. */
+/** Leased (assigned) active cars that sit on an open Program. Zero is correct until programs have cars. */
 export async function countInProgram(): Promise<number> {
   const { data: programs, error: pErr } = await supabaseAdmin
     .from("programs")
     .select("id")
-    .eq("status", "active");
+    .eq("status", "open");
   if (pErr) throw pErr;
   const programIds = (programs ?? []).map((p: any) => p.id).filter((id: number) => Number.isFinite(id));
   if (!programIds.length) return 0;
@@ -229,6 +229,7 @@ export async function countInProgram(): Promise<number> {
       .from("program_cars")
       .select("railcar_id")
       .in("program_id", programIds)
+      .is("exited_date", null)
       .order("id", { ascending: true })
       .range(from, to),
   );

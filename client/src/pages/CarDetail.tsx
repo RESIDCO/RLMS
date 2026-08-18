@@ -11,6 +11,7 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { fmtUsd, fmtInt } from "@/lib/dv/format";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { ChevronRight, Calculator } from "lucide-react";
+import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import {
   ENTITY_SLUGS,
   entityOlPath,
@@ -18,6 +19,8 @@ import {
   lesseeOlPath,
   lesseePath,
   olPath,
+  openAppTab,
+  programPath,
   turning50Path,
 } from "@/lib/browse-nav";
 
@@ -60,6 +63,11 @@ export default function CarDetailPage() {
       const res = await apiRequest("GET", `/api/railcars/${id}`);
       return res.json();
     },
+    enabled: Number.isFinite(id) && id > 0,
+  });
+  const { data: programHistory = [] } = useQuery<any[]>({
+    queryKey: ["/api/railcars", id, "programs"],
+    queryFn: () => apiRequest("GET", `/api/railcars/${id}/programs`).then((r) => r.json()),
     enabled: Number.isFinite(id) && id > 0,
   });
 
@@ -204,6 +212,56 @@ export default function CarDetailPage() {
                 </table>
               </section>
             )}
+
+            <section className="rounded-xl border border-card-border bg-card p-5">
+              <h2 className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold mb-3">Program History</h2>
+              {programHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground italic">This car has not been part of a program.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="text-muted-foreground">
+                    <tr>
+                      <th className="text-left py-1.5 font-medium">Program</th>
+                      <th className="text-left py-1.5 font-medium">Category</th>
+                      <th className="text-left py-1.5 font-medium">Status</th>
+                      <th className="text-left py-1.5 font-medium">Joined</th>
+                      <th className="text-left py-1.5 font-medium">Exited</th>
+                      <th className="text-right py-1.5 font-medium">BRC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {programHistory.map((row: any) => {
+                      const cat = row.program?.category?.name ?? "";
+                      const brc = row.repair_cost_total ?? row.custom_fields?.final_brc_total ?? row.custom_fields?.original_brc_total;
+                      return (
+                        <tr key={row.id} className="border-t border-border/50">
+                          <td className="py-2">
+                            {row.program?.id ? (
+                              <button
+                                type="button"
+                                className="text-left hover:underline font-medium"
+                                onClick={() => openAppTab(programPath(row.program.id))}
+                              >
+                                {row.program.name}
+                              </button>
+                            ) : "—"}
+                          </td>
+                          <td className="py-2">
+                            {cat && (
+                              <span className={cn("text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border", CATEGORY_BADGE[cat] ?? "bg-muted border-border")}>{cat}</span>
+                            )}
+                          </td>
+                          <td className="py-2">{row.status || (row.exited_date ? "Exited" : STATUS_LABEL[(row.program?.status as ProgramStatus) ?? "open"])}</td>
+                          <td className="py-2">{formatCalendarDate(row.joined_date)}</td>
+                          <td className="py-2">{formatCalendarDate(row.exited_date) || "—"}</td>
+                          <td className="py-2 text-right font-mono">{brc != null && brc !== "" ? fmtUsd(brc) : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </section>
           </div>
         )}
       </div>

@@ -8,11 +8,36 @@ const RENDER_API = import.meta.env.VITE_API_BASE as string | undefined;
 const PROXY_API = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 const API_BASE = RENDER_API || PROXY_API;
 
+function parseErrorBody(status: number, text: string): string {
+  const body = (text || "").trim();
+  try {
+    const parsed = JSON.parse(body) as { message?: string; error?: string };
+    const msg = parsed?.message || parsed?.error;
+    if (msg) return msg;
+  } catch {
+    /* not JSON */
+  }
+  return body || `Request failed (${status})`;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    throw new Error(parseErrorBody(res.status, text));
   }
+}
+
+/** Download an Excel attachment. Throws with the server message if the request failed. */
+export async function downloadXlsx(url: string, fallbackName: string) {
+  const res = await apiRequest("GET", url);
+  const blob = await res.blob();
+  const disp = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="([^"]+)"/.exec(disp);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = match?.[1] ?? fallbackName;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 export async function apiGet<T>(url: string): Promise<T> {

@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -191,19 +191,19 @@ function ContactFormDialog({
             <label className="text-xs font-medium text-muted-foreground">
               Master Lease Agreement <span className="text-muted-foreground/60">(filters riders below)</span>
             </label>
-            <Select value={selectedLeaseId} onValueChange={handleLeaseChange}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Select an MLA…" />
-              </SelectTrigger>
-              <SelectContent>
-                {leases.map(l => (
-                  <SelectItem key={l.id} value={String(l.id)}>
-                    <span className="font-mono text-xs">{l.lease_number}</span>
-                    {l.lessee && <span className="ml-2 text-muted-foreground">{l.lessee}</span>}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={selectedLeaseId}
+              onChange={handleLeaseChange}
+              options={leases.map((l) => ({
+                value: String(l.id),
+                label: l.lease_number,
+                hint: l.lessee ?? undefined,
+                keywords: [l.lease_number, l.lessee].filter(Boolean).join(" "),
+              }))}
+              placeholder="Select an MLA…"
+              searchPlaceholder="Type lessee or lease…"
+              emptyText="No master leases match."
+            />
           </div>
 
           {/* Rider selector */}
@@ -211,29 +211,19 @@ function ContactFormDialog({
             <label className="text-xs font-medium text-muted-foreground">
               Rider <span className="text-destructive">*</span>
             </label>
-            <Select
+            <SearchableSelect
               value={selectedRiderId}
-              onValueChange={setSelectedRiderId}
+              onChange={setSelectedRiderId}
               disabled={ridersForLease.length === 0}
-            >
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder={
-                  ridersForLease.length === 0
-                    ? (selectedLeaseId ? "No riders under this MLA" : "Select a rider…")
-                    : "Select a rider…"
-                } />
-              </SelectTrigger>
-              <SelectContent>
-                {ridersForLease.map(r => (
-                  <SelectItem key={r.id} value={String(r.id)}>
-                    {r.rider_name}
-                    {r.schedule_number && (
-                      <span className="ml-2 text-muted-foreground font-mono text-xs">#{r.schedule_number}</span>
-                    )}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={ridersForLease.map(riderToOption)}
+              placeholder={
+                ridersForLease.length === 0
+                  ? (selectedLeaseId ? "No riders under this MLA" : "Select a rider…")
+                  : "Select a rider…"
+              }
+              searchPlaceholder="Type OL number or rider…"
+              emptyText="No riders match."
+            />
             {!selectedRiderId && (
               <p className="text-[11px] text-muted-foreground">
                 Every contact must be linked to a rider. Select an MLA above to filter the list.

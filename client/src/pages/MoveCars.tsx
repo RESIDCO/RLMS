@@ -8,14 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
+import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import { ArrowRight } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
@@ -82,6 +76,11 @@ export default function MoveCars() {
     staleTime: 45_000,
   });
   const { data: history } = useQuery<any[]>({ queryKey: ["/api/history"] });
+
+  const sourceRiderOptions = useMemo(
+    () => (riders ?? []).map(riderToOption),
+    [riders],
+  );
 
   const fromRider = riders?.find((r) => String(r.id) === fromRiderId);
   const toRiderMatch = riders?.find(
@@ -164,25 +163,18 @@ export default function MoveCars() {
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 sm:py-6 grid grid-cols-1 xl:grid-cols-3 gap-5 content-start">
         <div className="xl:col-span-2 space-y-4">
           <Step n={1} title="Select source rider" done={!!fromRiderId}>
-            <Select
+            <SearchableSelect
               value={fromRiderId}
-              onValueChange={(v) => {
+              onChange={(v) => {
                 setFromRiderId(v);
                 setSelected(new Set());
               }}
-            >
-              <SelectTrigger data-testid="select-from-rider">
-                <SelectValue placeholder="Choose a rider…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(riders ?? []).map((r: any) => (
-                  <SelectItem key={r.id} value={String(r.id)}>
-                    {r.rider_name} —{" "}
-                    {displayLeaseNumber(r.master_lease?.lease_number) || "—"} · {r.car_count ?? 0} cars
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={sourceRiderOptions}
+              placeholder="Choose a rider…"
+              searchPlaceholder="Type OL number, lessee, or rider…"
+              emptyText="No riders match."
+              testId="select-from-rider"
+            />
           </Step>
 
           <Step

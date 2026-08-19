@@ -51,13 +51,14 @@ import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { cn } from "@/lib/utils";
-import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
+import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList, downloadXlsx } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import { carPath } from "@/lib/browse-nav";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
@@ -67,16 +68,26 @@ import type {
   RiderContact,
 } from "@shared/schema";
 
-async function downloadLeaseReport(url: string) {
-  const res = await apiRequest("GET", url);
-  const blob = await res.blob();
-  const disp = res.headers.get("Content-Disposition") ?? "";
-  const match = /filename="([^"]+)"/.exec(disp);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = match?.[1] ?? "RLMS_Leases.xlsx";
-  a.click();
-  URL.revokeObjectURL(a.href);
+import { matchesSearchQuery } from "@/lib/search-match";
+
+function leaseMatchesSearch(lease: MasterLeaseWithRiders, qRaw: string): boolean {
+  const q = qRaw.trim().toLowerCase();
+  if (!q) return true;
+  return matchesSearchQuery(
+    [
+      lease.lessee,
+      lease.lessor,
+      displayLeaseNumber(lease.lease_number),
+      lease.agreement_number,
+      lease.lease_type,
+      ...(lease.riders ?? []).flatMap((r: any) => [r.rider_name, r.schedule_number]),
+    ],
+    q,
+  );
+}
+
+function riderMatchesSearch(rider: { rider_name?: string | null; schedule_number?: string | null }, qRaw: string): boolean {
+  return matchesSearchQuery([rider.rider_name, rider.schedule_number], qRaw);
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -117,7 +128,9 @@ export default function LeaseManagement() {
   const [addRiderFor, setAddRiderFor] = useState<number | null>(null);
   const [editRider, setEditRider] = useState<any | null>(null);
   const [sortBy, setSortBy] = useState<"lessee" | "ol">("lessee");
+  const [leaseSearch, setLeaseSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [exporting, setExporting] = useState(false);
   const { toast } = useToast();
 
   // Parse deep-link params
@@ -159,6 +172,27 @@ export default function LeaseManagement() {
     }
     return list;
   }, [leases, sortBy]);
+
+  const filteredLeases = useMemo(() => {
+    const q = leaseSearch.trim();
+    if (!q) return sortedLeases;
+    return sortedLeases.filter((l) => leaseMatchesSearch(l, q));
+  }, [sortedLeases, leaseSearch]);
+
+  useEffect(() => {
+    const q = leaseSearch.trim();
+    if (!q) return;
+    const matched = sortedLeases.filter((l) => leaseMatchesSearch(l, q));
+    if (!matched.length) return;
+    setExpandedLeases(new Set(matched.map((l) => l.id)));
+    const rids = new Set<number>();
+    for (const l of matched) {
+      for (const r of l.riders ?? []) {
+        if (riderMatchesSearch(r, q)) rids.add(r.id);
+      }
+    }
+    setExpandedRiders(rids);
+  }, [leaseSearch, sortedLeases]);
 
   // Auto-expand: deep-link rider > ?filter=riders (all) > default first lease
   useEffect(() => {
@@ -267,18 +301,24 @@ export default function LeaseManagement() {
       toast({ title: "Select at least one master lease", variant: "destructive" });
       return;
     }
+    setExporting(true);
     try {
-      await downloadLeaseReport(`/api/leases/export?ids=${ids.join(",")}`);
+      await downloadXlsx(`/api/leases/export?ids=${ids.join(",")}`, "RLMS_Leases.xlsx");
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
     }
   }
 
   async function exportAll() {
+    setExporting(true);
     try {
-      await downloadLeaseReport("/api/leases/export?scope=all");
+      await downloadXlsx("/api/leases/export?scope=all", "RLMS_Leases.xlsx");
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -288,7 +328,15 @@ export default function LeaseManagement() {
         title="Lease Management"
         subtitle="Master lease agreements, rider schedules, and assigned cars"
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap items-center">
+            <ClearableSearchInput
+              className="relative w-[220px] sm:w-[280px] max-w-md flex-none"
+              inputClassName="h-8"
+              placeholder="Search OL number, lessee…"
+              value={leaseSearch}
+              onChange={setLeaseSearch}
+              testId="input-lease-search"
+            />
             <Select value={sortBy} onValueChange={(v) => setSortBy(v as "lessee" | "ol")}>
               <SelectTrigger className="h-8 w-[170px]" data-testid="sort-leases">
                 <SelectValue placeholder="Sort by" />
@@ -303,20 +351,20 @@ export default function LeaseManagement() {
               variant="outline"
               onClick={exportSelected}
               data-testid="button-export-selected-leases"
-              disabled={!selected.size}
+              disabled={!selected.size || exporting}
             >
               <Download className="h-4 w-4" />
-              Export selected
+              {exporting ? "Exporting…" : "Export selected"}
             </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={exportAll}
               data-testid="button-export-all-leases"
-              disabled={!leases || leases.length === 0}
+              disabled={!leases || leases.length === 0 || exporting}
             >
               <Download className="h-4 w-4" />
-              Export all
+              {exporting ? "Exporting…" : "Export all"}
             </Button>
             {canEdit && (
               <Button
@@ -361,8 +409,14 @@ export default function LeaseManagement() {
           Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-lg" />
           ))
+        ) : filteredLeases.length === 0 ? (
+          <div className="rounded-lg border border-card-border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
+            {leaseSearch.trim()
+              ? `No deals match “${leaseSearch.trim()}”. Try an OL number or lessee name.`
+              : "No master leases yet."}
+          </div>
         ) : (
-          sortedLeases.map((lease) => {
+          filteredLeases.map((lease) => {
             const open = expandedLeases.has(lease.id);
             const ols = olCodesForLease(lease);
             const olLine = formatOlSummary(ols);

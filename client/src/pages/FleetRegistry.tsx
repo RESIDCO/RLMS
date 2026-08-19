@@ -7,6 +7,7 @@ import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRai
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, FLEET_STATUSES, type FleetStatus } from "@shared/fleet-status";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
+import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -586,12 +587,23 @@ export default function FleetRegistry() {
     placeholderData: debouncedSearch ? undefined : keepPreviousData,
   });
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
+  const riderOptions = useMemo(() => (riders ?? []).map(riderToOption), [riders]);
   type AcqBatch = { id: number; label: string; acquisition_date: string; entity: string; car_count: number };
   const { data: acquisitionBatches } = useQuery<AcqBatch[]>({
     queryKey: ["/api/acquisition-batches"],
     queryFn: () => apiGet<AcqBatch[]>("/api/acquisition-batches"),
     staleTime: 60_000,
   });
+  const batchOptions = useMemo(
+    () =>
+      (acquisitionBatches ?? []).map((b) => ({
+        value: String(b.id),
+        label: b.label,
+        hint: `${b.acquisition_date} · ${b.car_count}`,
+        keywords: `${b.label} ${b.acquisition_date} ${b.entity}`,
+      })),
+    [acquisitionBatches],
+  );
   const railcars = pageData?.rows ?? [];
   const totalCount = pageData?.total_count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -1106,19 +1118,17 @@ export default function FleetRegistry() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={riderFilter} onValueChange={setRiderFilter}>
-            <SelectTrigger className="w-[200px]" data-testid="filter-rider">
-              <SelectValue placeholder="Rider" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All riders</SelectItem>
-              {(riders ?? []).map((r: any) => (
-                <SelectItem key={r.id} value={String(r.id)}>
-                  {r.rider_name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={riderFilter}
+            onChange={setRiderFilter}
+            options={riderOptions}
+            noneOption={{ value: "all", label: "All riders" }}
+            placeholder="Rider"
+            searchPlaceholder="Type OL number or lessee…"
+            emptyText="No riders match."
+            testId="filter-rider"
+            triggerClassName="w-[220px]"
+          />
           <Select value={entityFilter} onValueChange={setEntityFilter}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Ownership" />
@@ -1150,19 +1160,17 @@ export default function FleetRegistry() {
               <SelectItem value="no">Complete</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={batchFilter} onValueChange={setBatchFilter}>
-            <SelectTrigger className="w-[220px]" data-testid="filter-acquisition-batch">
-              <SelectValue placeholder="Acquisition batch" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All acquisition batches</SelectItem>
-              {(acquisitionBatches ?? []).map((b) => (
-                <SelectItem key={b.id} value={String(b.id)}>
-                  {b.label} ({b.acquisition_date}) · {b.car_count}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={batchFilter}
+            onChange={setBatchFilter}
+            options={batchOptions}
+            noneOption={{ value: "all", label: "All acquisition batches" }}
+            placeholder="Acquisition batch"
+            searchPlaceholder="Type batch name or date…"
+            emptyText="No batches match."
+            testId="filter-acquisition-batch"
+            triggerClassName="w-[240px]"
+          />
           <Select value={assignedFilter} onValueChange={setAssignedFilter}>
             <SelectTrigger className="w-[170px]" data-testid="filter-assigned">
               <SelectValue placeholder="Assignment" />
@@ -1365,27 +1373,21 @@ export default function FleetRegistry() {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              {/* Bulk rider assignment */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={bulkRiderPending} data-testid="bulk-assign-dropdown">
-                    Assign to Rider
-                    <ChevronDown className="ml-1 h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuLabel>Move selected cars to rider</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {(riders ?? []).length === 0 && (
-                    <DropdownMenuItem disabled>No riders available</DropdownMenuItem>
-                  )}
-                  {(riders ?? []).map((r: any) => (
-                    <DropdownMenuItem key={r.id} onSelect={() => bulkAssignRider(r.id, r.rider_name)}>
-                      {r.rider_name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <SearchableSelect
+                value=""
+                actionMode
+                disabled={bulkRiderPending}
+                onChange={(v) => {
+                  const r = (riders ?? []).find((x: any) => String(x.id) === v);
+                  if (r) bulkAssignRider(r.id, r.rider_name);
+                }}
+                options={riderOptions}
+                placeholder="Assign to Rider"
+                searchPlaceholder="Type OL number or lessee…"
+                emptyText="No riders match."
+                testId="bulk-assign-dropdown"
+                triggerClassName="h-8 w-auto min-w-[160px]"
+              />
               {/* Bulk NBV / OAC */}
               <Button
                 variant="outline"

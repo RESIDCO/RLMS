@@ -3,7 +3,7 @@ import PageHeader from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ClipboardList, Download, FileSpreadsheet } from "lucide-react";
-import { apiRequest, apiGet } from "@/lib/queryClient";
+import { apiRequest, apiGet, downloadXlsx } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 type ExportJob = {
@@ -81,15 +81,7 @@ export default function Reports() {
   async function exportProgramReport() {
     setExportingPrograms(true);
     try {
-      const res = await apiRequest("GET", "/api/programs/export?scope=all");
-      const blob = await res.blob();
-      const disp = res.headers.get("Content-Disposition") ?? "";
-      const match = /filename="([^"]+)"/.exec(disp);
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = match?.[1] ?? "Master_Fleet_Project_Status_Report.xlsx";
-      a.click();
-      URL.revokeObjectURL(a.href);
+      await downloadXlsx("/api/programs/export?scope=all", "Master_Fleet_Project_Status_Report.xlsx");
     } catch (e: unknown) {
       toast({
         title: "Export failed",

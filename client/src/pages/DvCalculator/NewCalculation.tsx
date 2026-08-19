@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import SearchableSelect from "@/components/SearchableSelect";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -330,16 +331,20 @@ export default function NewCalculationPage() {
                   return (
                     <div key={i} className="grid grid-cols-12 gap-3 items-end p-3 rounded-md border border-card-border bg-card">
                       <Field className="col-span-12 sm:col-span-3" label="Code">
-                        <Select value={row.code} onValueChange={(v) => setAb(i, { code: v })}>
-                          <SelectTrigger data-testid={`select-ab-code-${i}`}><SelectValue /></SelectTrigger>
-                          <SelectContent className="max-h-64">
-                            {abCodes.map((c) => (
-                              <SelectItem key={c.code} value={c.code}>
-                                {c.code} · {c.rate_basis === "MONTHLY" ? `${fmtPct(c.rate)}/mo` : c.rate_basis === "SAME_AS_CAR" ? "same as car" : `${fmtPct(c.rate)}/yr`}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <SearchableSelect
+                          value={row.code}
+                          onChange={(v) => setAb(i, { code: v })}
+                          options={abCodes.map((c) => ({
+                            value: c.code,
+                            label: c.code,
+                            hint: c.rate_basis === "MONTHLY" ? `${fmtPct(c.rate)}/mo` : c.rate_basis === "SAME_AS_CAR" ? "same as car" : `${fmtPct(c.rate)}/yr`,
+                            keywords: `${c.code} ${c.description ?? ""}`,
+                          }))}
+                          placeholder="Select code…"
+                          searchPlaceholder="Type A&B code…"
+                          emptyText="No codes match."
+                          testId={`select-ab-code-${i}`}
+                        />
                       </Field>
                       <Field className="col-span-12 sm:col-span-3" label="Value ($)">
                         <Input inputMode="decimal" data-testid={`input-ab-value-${i}`} value={row.value} onChange={(e) => setAb(i, { value: e.target.value })} />

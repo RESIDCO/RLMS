@@ -232,7 +232,12 @@ function mapRow(r: any) {
 function assignmentEmbed(p: RailcarListParams, select = RAILCAR_LIST_SELECT) {
   const inner = p.assigned === "assigned" || p.rider_id || p.lease_id;
   const rel = inner ? "railcar_assignments!inner" : "railcar_assignments";
-  return select.replace("assignment:railcar_assignments(", `assignment:${rel}(`);
+  let out = select.replace("assignment:railcar_assignments(", `assignment:${rel}(`);
+  // Nested filter on rider.master_lease_id 500s unless riders is an inner embed.
+  if (p.lease_id) {
+    out = out.replace("rider:riders(", "rider:riders!inner(");
+  }
+  return out;
 }
 
 function selectWithoutOptionalDateCols(select: string) {

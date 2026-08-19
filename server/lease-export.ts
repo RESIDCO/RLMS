@@ -3,8 +3,8 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { excelSheetName } from "@shared/programs";
-import { resolveLeaseType } from "@shared/lease-type";
-import { queryRailcars } from "./railcar-list";
+import { asOne, resolveLeaseType } from "@shared/lease-type";
+import { fetchAllRows } from "./fetch-all";
 import { supabaseAdmin } from "./supabase";
 
 type LeaseRow = {
@@ -50,6 +50,16 @@ const CAR_HEADERS = [
   "Lease Type",
 ] as const;
 
+const EXPORT_CAR_SELECT = `
+id, car_number, reporting_marks, entity, active, status, fleet_status, lease_type,
+lessee_name, rider_external_id, nbv, oac, oec, capacity_cf,
+lining_material, lining, coating, build_year, built_year,
+assignment:railcar_assignments!inner(
+  id, rider_id, fleet_name,
+  rider:riders(id, rider_name, master_lease_id)
+)
+`.replace(/\s+/g, " ").trim();
+
 function money(v: unknown): number | string {
   if (v == null || v === "") return "";
   const n = Number(v);
@@ -78,6 +88,61 @@ function carRow(c: any, leaseType: string | null | undefined): (string | number)
   ];
 }
 
+function mapExportCar(r: any) {
+  const assignmentRaw = asOne(r.assignment);
+  const rider = asOne(assignmentRaw?.rider);
+  const assignment = assignmentRaw ? { ...assignmentRaw, rider } : null;
+  return { ...r, assignment };
+}
+
+async function fetchCarsForRiders(riderIds: number[]): Promise<any[]> {
+  const ids = [...new Set(riderIds.filter((n) => Number.isFinite(n) && n > 0))];
+  if (!ids.length) return [];
+  const chunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += 80) chunks.push(ids.slice(i, i + 80));
+  const pages = await Promise.all(
+    chunks.map((chunk) =>
+      fetchAllRows((from, to) =>
+        supabaseAdmin
+          .from("railcars")
+          .select(EXPORT_CAR_SELECT)
+          .in("railcar_assignments.rider_id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+    ),
+  );
+  const seen = new Set<number>();
+  const out: any[] = [];
+  for (const row of pages.flat().map(mapExportCar)) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
+
+function sheetNameForLease(lease: LeaseRow, ridersFor: RiderRow[], usedNames: Set<string>): string {
+  const ols = [
+    ...new Set(
+      ridersFor
+        .map((r) => String(r.schedule_number || r.rider_name || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  let raw = "";
+  if (ols.length === 1) raw = ols[0];
+  else if (ols.length === 2) {
+    raw = ols.join(", ");
+    if (raw.length > 31) raw = `${ols[0]} +1`;
+  } else if (ols.length > 2) {
+    raw = `${ols[0]} +${ols.length - 1}`;
+  } else {
+    raw = displayLeaseNumber(lease.lease_number) || `MLA ${lease.id}`;
+  }
+  return excelSheetName(raw, usedNames);
+}
+
 export async function buildLeaseReport(opts: { leaseIds: number[] }): Promise<{ buffer: Buffer; filename: string }> {
   const ids = opts.leaseIds.filter((n) => Number.isFinite(n) && n > 0);
   if (!ids.length) throw new Error("Select at least one master lease");
@@ -92,24 +157,22 @@ export async function buildLeaseReport(opts: { leaseIds: number[] }): Promise<{ 
   const leaseList = (leases ?? []) as LeaseRow[];
   const riderList = (riders ?? []) as RiderRow[];
   const ridersByLease = new Map<number, RiderRow[]>();
+  const riderIdToLease = new Map<number, number>();
   for (const r of riderList) {
     const list = ridersByLease.get(r.master_lease_id) ?? [];
     list.push(r);
     ridersByLease.set(r.master_lease_id, list);
+    riderIdToLease.set(r.id, r.master_lease_id);
   }
 
+  const allCars = await fetchCarsForRiders(riderList.map((r) => r.id));
   const carsByLease = new Map<number, any[]>();
-  for (const lease of leaseList) {
-    const { rows } = await queryRailcars({
-      lease_id: lease.id,
-      all: true,
-      active: "all",
-      sort: "car_number",
-      dir: "asc",
-      page: 1,
-      pageSize: 1,
-    });
-    carsByLease.set(lease.id, rows);
+  for (const lease of leaseList) carsByLease.set(lease.id, []);
+  for (const c of allCars) {
+    const riderId = c.assignment?.rider_id ?? c.assignment?.rider?.id;
+    const leaseId = riderIdToLease.get(riderId) ?? c.assignment?.rider?.master_lease_id;
+    const bucket = leaseId != null ? carsByLease.get(leaseId) : undefined;
+    if (bucket) bucket.push(c);
   }
 
   const wb = new ExcelJS.Workbook();
@@ -189,7 +252,8 @@ export async function buildLeaseReport(opts: { leaseIds: number[] }): Promise<{ 
   }
 
   for (const lease of leaseList) {
-    const name = excelSheetName(displayLeaseNumber(lease.lease_number) || `MLA ${lease.id}`, usedNames);
+    const ridersFor = ridersByLease.get(lease.id) ?? [];
+    const name = sheetNameForLease(lease, ridersFor, usedNames);
     const sheet = wb.addWorksheet(name);
     sheet.addRow([...CAR_HEADERS]);
     sheet.getRow(1).font = { bold: true };

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -146,15 +146,7 @@ function formatActivity(a: any): string {
 }
 
 async function downloadReport(url: string) {
-  const res = await apiRequest("GET", url);
-  const blob = await res.blob();
-  const disp = res.headers.get("Content-Disposition") ?? "";
-  const match = /filename="([^"]+)"/.exec(disp);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = match?.[1] ?? "RLMS_Program_Status_Report.xlsx";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  await downloadXlsx(url, "RLMS_Program_Status_Report.xlsx");
 }
 
 export default function ProgramDetailPage() {
@@ -490,7 +482,13 @@ export default function ProgramDetailPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => downloadReport(`/api/programs/${id}/export?include_exited=${includeExited ? "1" : "0"}`)}
+              onClick={async () => {
+                try {
+                  await downloadReport(`/api/programs/${id}/export?include_exited=${includeExited ? "1" : "0"}`);
+                } catch (e: any) {
+                  toast({ title: "Export failed", description: e.message, variant: "destructive" });
+                }
+              }}
             >
               <Download className="h-4 w-4" /> Export Report
             </Button>

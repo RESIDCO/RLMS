@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,15 +45,7 @@ type ProgramRow = {
 };
 
 async function downloadReport(url: string) {
-  const res = await apiRequest("GET", url);
-  const blob = await res.blob();
-  const disp = res.headers.get("Content-Disposition") ?? "";
-  const match = /filename="([^"]+)"/.exec(disp);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = match?.[1] ?? "RLMS_Program_Status_Report.xlsx";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  await downloadXlsx(url, "RLMS_Program_Status_Report.xlsx");
 }
 
 export default function ProgramsPage() {

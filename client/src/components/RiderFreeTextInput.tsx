@@ -3,13 +3,15 @@ import { ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { compactSearch, matchesSearchQuery } from "@/lib/search-match";
 
 export type RiderSuggestion = {
   id: number;
   rider_name: string;
   schedule_number?: string | null;
-  master_lease?: { lease_number?: string | null } | null;
+  master_lease?: { lease_number?: string | null; lessee?: string | null } | null;
   car_count?: number;
+  lessee?: string | null;
 };
 
 type Props = {
@@ -51,13 +53,30 @@ export function RiderFreeTextInput({
   const filtered = useMemo(() => {
     const list = !q
       ? options
-      : options.filter((r) => {
-          const name = (r.rider_name ?? "").toLowerCase();
-          const sched = (r.schedule_number ?? "").toLowerCase();
-          const lease = displayLeaseNumber(r.master_lease?.lease_number).toLowerCase();
-          return name.includes(q) || sched.includes(q) || lease.includes(q);
+      : options.filter((r) =>
+          matchesSearchQuery(
+            [
+              r.rider_name,
+              r.schedule_number,
+              displayLeaseNumber(r.master_lease?.lease_number),
+              r.master_lease?.lessee,
+              r.lessee,
+            ],
+            q,
+          ),
+        );
+    const qc = compactSearch(q);
+    const ranked = !qc
+      ? list
+      : [...list].sort((a, b) => {
+          const ac = compactSearch(`${a.rider_name ?? ""} ${a.schedule_number ?? ""}`);
+          const bc = compactSearch(`${b.rider_name ?? ""} ${b.schedule_number ?? ""}`);
+          const ap = ac.startsWith(qc) ? 0 : 1;
+          const bp = bc.startsWith(qc) ? 0 : 1;
+          return ap - bp;
         });
-    return list.slice(0, 40);
+    // Unfiltered list can be huge — keep the first page; typing searches the full set.
+    return q ? ranked : ranked.slice(0, 80);
   }, [options, q]);
 
   useEffect(() => {
@@ -106,6 +125,7 @@ export function RiderFreeTextInput({
             ) : (
               filtered.map((r) => {
                 const lease = displayLeaseNumber(r.master_lease?.lease_number);
+                const lessee = r.master_lease?.lessee || r.lessee || lease;
                 return (
                   <li key={r.id} role="option">
                     <button
@@ -118,8 +138,8 @@ export function RiderFreeTextInput({
                       }}
                     >
                       <span className="font-mono font-medium">{r.rider_name}</span>
-                      {lease && (
-                        <span className="truncate text-xs text-muted-foreground">{lease}</span>
+                      {lessee && (
+                        <span className="truncate text-xs text-muted-foreground">{lessee}</span>
                       )}
                       {typeof r.car_count === "number" && (
                         <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
@@ -130,6 +150,11 @@ export function RiderFreeTextInput({
                   </li>
                 );
               })
+            )}
+            {!q && options.length > filtered.length && (
+              <li className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                Type an OL number or lessee to filter {options.length} riders.
+              </li>
             )}
           </ul>
         )}

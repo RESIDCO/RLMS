@@ -69,7 +69,10 @@ export async function listPrograms() {
     .select(PROGRAM_LIST_SELECT)
     .order("updated_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map(mapProgramList);
+  // Keep recently updated work on top; completed programs still show, but after active ones.
+  return (data ?? [])
+    .map(mapProgramList)
+    .sort((a, b) => Number(a.status === "complete") - Number(b.status === "complete"));
 }
 
 export async function listCategories() {

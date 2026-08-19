@@ -77,16 +77,19 @@ export default function ProgramsPage() {
     return [...s].sort((a, b) => a.localeCompare(b));
   }, [programs]);
 
-  const filtered = programs.filter((p) => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const blob = `${p.name} ${p.status_narrative ?? ""} ${p.description ?? ""}`.toLowerCase();
-    if (q && !blob.includes(q)) return false;
-    if (statusFilter !== "all" && p.status !== statusFilter) return false;
-    if (categoryFilter !== "all" && String(p.category_id) !== categoryFilter) return false;
-    if (entityFilter !== "all" && p.entity !== entityFilter) return false;
-    if (managerFilter !== "all" && (p.account_manager ?? "") !== managerFilter) return false;
-    return true;
-  });
+    const rows = programs.filter((p) => {
+      const blob = `${p.name} ${p.status_narrative ?? ""} ${p.description ?? ""}`.toLowerCase();
+      if (q && !blob.includes(q)) return false;
+      if (statusFilter !== "all" && p.status !== statusFilter) return false;
+      if (categoryFilter !== "all" && String(p.category_id) !== categoryFilter) return false;
+      if (entityFilter !== "all" && p.entity !== entityFilter) return false;
+      if (managerFilter !== "all" && (p.account_manager ?? "") !== managerFilter) return false;
+      return true;
+    });
+    return [...rows].sort((a, b) => Number(a.status === "complete") - Number(b.status === "complete"));
+  }, [programs, search, statusFilter, categoryFilter, entityFilter, managerFilter]);
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/programs/${id}`),

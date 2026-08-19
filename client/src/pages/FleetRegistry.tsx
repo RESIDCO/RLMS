@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
-import { useSearch, Link } from "wouter";
+import { useSearch, Link, useLocation } from "wouter";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -456,6 +456,7 @@ function parseFleetQuery(searchStr: string): {
 export default function FleetRegistry() {
   const canEdit = useCanEdit();
   const wouterSearch = useSearch();
+  const [location, setLocation] = useLocation();
   const initQ = parseFleetQuery(wouterSearch);
 
   const [search, setSearch] = useState(initQ.search);
@@ -504,6 +505,22 @@ export default function FleetRegistry() {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
+
+  // Dashboard tiles land on ?filter=sold (etc.). A car-number search should look up
+  // that car, not stay trapped in Sold / Idle / Leased.
+  useEffect(() => {
+    if (!debouncedSearch || !/\d/.test(debouncedSearch)) return;
+    setAssignedFilter("all");
+    setStatusFilter("all");
+    const qIndex = location.indexOf("?");
+    if (qIndex < 0) return;
+    const params = new URLSearchParams(location.slice(qIndex + 1));
+    if (!params.has("filter")) return;
+    params.delete("filter");
+    const next = params.toString();
+    const path = location.slice(0, qIndex) || "/railcars";
+    setLocation(next ? `${path}?${next}` : path, { replace: true } as any);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     setPage(1);
@@ -561,14 +578,15 @@ export default function FleetRegistry() {
     return next;
   }, [turning50Year, visibleCols]);
 
+  const carLookup = Boolean(debouncedSearch && /\d/.test(debouncedSearch));
   const listParams = {
     page,
     pageSize,
     search: debouncedSearch || undefined,
-    status: turning50Year || statusFilter === "all" ? undefined : statusFilter,
+    status: turning50Year || carLookup || statusFilter === "all" ? undefined : statusFilter,
     entity: turning50Year || entityFilter === "all" ? undefined : entityFilter,
     active: turning50Year ? "active" : fleetActiveFilter,
-    assigned: turning50Year || assignedFilter === "all" ? undefined : assignedFilter,
+    assigned: turning50Year || carLookup || assignedFilter === "all" ? undefined : assignedFilter,
     rider: turning50Year ? undefined : (olCodeFilter || undefined),
     rider_id: turning50Year ? undefined : (riderFilter !== "all" ? riderFilter : undefined),
     transit: turning50Year || transitFilter === "all" ? undefined : transitFilter,
@@ -1439,7 +1457,13 @@ export default function FleetRegistry() {
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={displayKeys.length} className="px-4 py-16 text-center text-muted-foreground">
-                      No railcars match these filters.
+                      {search.trim()
+                        ? `No railcars match “${search.trim()}”${
+                            assignedFilter !== "all" || statusFilter !== "all" || fleetActiveFilter !== "all"
+                              ? " with the current filters. Try All cars / All rental statuses."
+                              : "."
+                          }`
+                        : "No railcars match these filters."}
                     </td>
                   </tr>
                 ) : (

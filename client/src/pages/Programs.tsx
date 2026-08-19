@@ -22,6 +22,7 @@ import {
   PROGRAM_ENTITIES,
   STATUS_BADGE,
   STATUS_LABEL,
+  categoryShortName,
   type ProgramStatus,
 } from "@shared/programs";
 
@@ -273,14 +274,17 @@ export default function ProgramsPage() {
                           <div className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{p.status_narrative}</div>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 align-middle">
                         {cat && (
-                          <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", CATEGORY_BADGE[cat] ?? "bg-muted border-border")}>
-                            {cat}
+                          <span
+                            title={cat}
+                            className={cn(
+                              "inline-flex items-center max-w-[11rem] text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap",
+                              CATEGORY_BADGE[cat] ?? "bg-muted border-border",
+                            )}
+                          >
+                            {categoryShortName(cat)}
                           </span>
-                        )}
-                        {(p.tags ?? []).length > 0 && (
-                          <div className="text-[10px] text-muted-foreground mt-1">{(p.tags ?? []).join(", ")}</div>
                         )}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{p.entity ?? "—"}</td>

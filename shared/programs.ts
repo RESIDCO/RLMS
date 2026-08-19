@@ -45,6 +45,16 @@ export const CATEGORY_BADGE: Record<string, string> = {
   Other: "bg-muted text-muted-foreground border-border",
 };
 
+export const CATEGORY_SHORT: Record<string, string> = {
+  "EOLR (End-of-Lease Return)": "EOLR",
+  "NLD (New Lessee Delivery)": "NLD",
+  "Sale / Partial Sale": "Sale",
+};
+
+export function categoryShortName(name: string): string {
+  return CATEGORY_SHORT[name] ?? name;
+}
+
 export const STATUS_BADGE: Record<ProgramStatus, string> = {
   open: "bg-umler-teal/15 text-umler-teal border-umler-teal/30",
   on_hold: "bg-umler-amber/15 text-umler-amber border-umler-amber/30",

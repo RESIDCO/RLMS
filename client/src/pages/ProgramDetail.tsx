@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
@@ -29,6 +29,7 @@ import {
   PROGRAM_ENTITIES,
   STATUS_BADGE,
   STATUS_LABEL,
+  categoryShortName,
   formatCustomField,
   type ProgramFieldDef,
   type ProgramStatus,
@@ -126,14 +127,14 @@ const PD_LABELS: Record<string, string> = {
 const PD_WIDTHS: Record<string, number> = {
   _select: 36,
   car: 140,
-  status: 170,
-  flag: 120,
-  comment: 160,
+  status: 220,
+  flag: 140,
+  comment: 180,
   ol_entry: 110,
   ol_now: 110,
-  shop: 150,
+  shop: 160,
   repair: 90,
-  _actions: 88,
+  _actions: 120,
 };
 
 function formatActivity(a: any): string {
@@ -244,6 +245,16 @@ export default function ProgramDetailPage() {
   }, [canEdit, defs, colOrder]);
   const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "_actions");
   const tableW = tableWidthFor(displayKeys, colWidths, PD_WIDTHS, 120);
+  const gridW = Math.max(1100, tableW);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+  function syncGridScroll(from: "top" | "body") {
+    const top = topScrollRef.current;
+    const body = bodyScrollRef.current;
+    if (!top || !body) return;
+    if (from === "top") body.scrollLeft = top.scrollLeft;
+    else top.scrollLeft = body.scrollLeft;
+  }
 
   function pdHeader(key: string) {
     const pinned = key === "_select" || key === "car" || key === "_actions";
@@ -309,29 +320,18 @@ export default function ProgramDetailPage() {
         );
       case "status":
         return (
-          <td key={key} className="px-2 py-1">
-            <div className="flex items-center gap-1">
-              <StatusCell
-                value={c.status ?? ""}
-                options={statusOptions}
-                readOnly={!canEdit || exited}
-                onSave={(v) => patchCar.mutate({ linkId: c.id, body: { status: v } })}
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7 shrink-0"
-                aria-label={`Status history for ${label}`}
-                onClick={() => setHistoryFor(c)}
-              >
-                <History className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+          <td key={key} className="px-2 py-1 overflow-hidden">
+            <StatusCell
+              value={c.status ?? ""}
+              options={statusOptions}
+              readOnly={!canEdit || exited}
+              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { status: v } })}
+            />
           </td>
         );
       case "flag":
         return (
-          <td key={key} className="px-2 py-1">
+          <td key={key} className="px-2 py-1 overflow-hidden">
             <CellInput
               readOnly={!canEdit || exited}
               value={c.flag_tag ?? ""}
@@ -342,7 +342,7 @@ export default function ProgramDetailPage() {
         );
       case "comment":
         return (
-          <td key={key} className="px-2 py-1 min-w-[140px]">
+          <td key={key} className="px-2 py-1 overflow-hidden">
             <CellInput
               readOnly={!canEdit || exited}
               value={c.notes ?? ""}
@@ -356,7 +356,7 @@ export default function ProgramDetailPage() {
         return <td key={key} className="px-2 py-1.5 font-mono">{c.railcar?.rider_external_id ?? "—"}</td>;
       case "shop":
         return (
-          <td key={key} className="px-2 py-1">
+          <td key={key} className="px-2 py-1 overflow-hidden">
             {canEdit && !exited ? (
               <ShopCombobox
                 compact
@@ -383,6 +383,15 @@ export default function ProgramDetailPage() {
       case "_actions":
         return (
           <td key={key} className="px-1 py-1 whitespace-nowrap">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              aria-label={`Status history for ${label}`}
+              onClick={() => setHistoryFor(c)}
+            >
+              <History className="h-3.5 w-3.5" />
+            </Button>
             <Button
               size="icon"
               variant="ghost"
@@ -496,10 +505,13 @@ export default function ProgramDetailPage() {
         }
       />
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-4 sm:px-8 py-3 gap-2">
-        <div className="shrink-0 min-h-0 max-h-[min(28%,15rem)] overflow-y-auto space-y-2 pr-1">
+        <div className="shrink-0 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", CATEGORY_BADGE[catName] ?? "bg-muted border-border")}>
-            {catName || "Uncategorized"}
+          <span
+            title={catName || undefined}
+            className={cn("inline-flex items-center text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap", CATEGORY_BADGE[catName] ?? "bg-muted border-border")}
+          >
+            {categoryShortName(catName) || "Uncategorized"}
           </span>
           {canEdit ? (
             <Select value={program.status} onValueChange={(v) => patchProgram.mutate({ status: v }, { onSuccess: () => toast({ title: "Saved" }) })}>
@@ -518,7 +530,7 @@ export default function ProgramDetailPage() {
         </div>
 
         <Textarea
-          className="text-sm min-h-[52px]"
+          className="text-sm min-h-[52px] max-h-28 overflow-y-auto"
           rows={2}
           value={header.status_narrative}
           readOnly={!canEdit}
@@ -566,7 +578,7 @@ export default function ProgramDetailPage() {
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Description</div>
           <Textarea
-            className="text-xs min-h-[36px]"
+            className="text-xs min-h-[36px] max-h-16 overflow-y-auto"
             rows={1}
             value={header.description}
             readOnly={!canEdit}
@@ -626,8 +638,20 @@ export default function ProgramDetailPage() {
               </div>
             )}
             <div className="flex-1 min-h-0 rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
-              <div className="flex-1 min-h-0 overflow-auto">
-              <table className="text-xs" style={{ tableLayout: "fixed", width: Math.max(1100, tableW) }}>
+              <div
+                ref={topScrollRef}
+                className="shrink-0 h-3 overflow-x-auto overflow-y-hidden border-b border-border"
+                onScroll={() => syncGridScroll("top")}
+                aria-hidden
+              >
+                <div style={{ width: gridW, height: 1 }} />
+              </div>
+              <div
+                ref={bodyScrollRef}
+                className="flex-1 min-h-0 overflow-auto"
+                onScroll={() => syncGridScroll("body")}
+              >
+              <table className="text-xs" style={{ tableLayout: "fixed", width: gridW }}>
                 <colgroup>
                   {displayKeys.map((k) => (
                     <col key={k} style={{ width: colWidth(colWidths, k, PD_WIDTHS[k] ?? 120) }} />
@@ -813,7 +837,7 @@ function StatusCell({
   }
   return (
     <select
-      className="h-7 bg-transparent border border-border rounded px-1 max-w-[200px] [color-scheme:dark]"
+      className="h-7 w-full min-w-0 max-w-full bg-transparent border border-border rounded px-1 [color-scheme:dark]"
       value={selectValue}
       onChange={(e) => {
         const v = e.target.value;

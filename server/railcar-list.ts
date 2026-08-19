@@ -2,6 +2,7 @@ import { supabaseAdmin } from "./supabase";
 import { parseFleetStatus } from "@shared/fleet-status";
 import { splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
+import { hydrateOpsFlag, OPS_FLAG_FALLBACK_PREFIX } from "@shared/ops-flag";
 import { fetchAllRows } from "./fetch-all";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
@@ -44,6 +45,8 @@ export type RailcarListParams = {
   acquisition_batch_id?: number;
   needs_completion?: "yes" | "no";
   flag?: string;
+  /** Filter/store flags in comment_event_note because ops_flag is not on the table yet. */
+  opsFlagFallback?: boolean;
 };
 
 export function parseRailcarListParams(query: Record<string, unknown>): RailcarListParams {
@@ -218,13 +221,27 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
   }
 
   query = applySearchFilter(query, p.search);
-
-  if (p.flag === "none") query = query.is("ops_flag", null);
-  else if (p.flag === "any") query = query.not("ops_flag", "is", null);
-  else if (p.flag && p.flag.toLowerCase() === "interchange") query = query.ilike("ops_flag", "Interchange%");
-  else if (p.flag) query = query.ilike("ops_flag", p.flag);
-
+  query = applyOpsFlagFilter(query, p.flag, p.opsFlagFallback);
   return query;
+}
+
+function applyOpsFlagFilter(query: any, flag: string | undefined, fallback?: boolean) {
+  if (!flag) return query;
+  if (fallback) {
+    const prefix = OPS_FLAG_FALLBACK_PREFIX;
+    if (flag === "none") {
+      return query.or(`comment_event_note.is.null,comment_event_note.not.ilike."${prefix}%"`);
+    }
+    if (flag === "any") return query.ilike("comment_event_note", `${prefix}%`);
+    if (flag.toLowerCase() === "interchange") {
+      return query.ilike("comment_event_note", `${prefix}Interchange%`);
+    }
+    return query.ilike("comment_event_note", `${prefix}${flag}#%`);
+  }
+  if (flag === "none") return query.is("ops_flag", null);
+  if (flag === "any") return query.not("ops_flag", "is", null);
+  if (flag.toLowerCase() === "interchange") return query.ilike("ops_flag", "Interchange%");
+  return query.ilike("ops_flag", flag);
 }
 
 function mapRow(r: any) {
@@ -233,7 +250,11 @@ function mapRow(r: any) {
   const assignment = assignmentRaw
     ? { ...assignmentRaw, rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null }
     : null;
-  return { ...r, assignment, fleet_status: parseFleetStatus(r.fleet_status) ?? r.fleet_status ?? null };
+  return hydrateOpsFlag({
+    ...r,
+    assignment,
+    fleet_status: parseFleetStatus(r.fleet_status) ?? r.fleet_status ?? null,
+  });
 }
 
 function assignmentEmbed(p: RailcarListParams, select = RAILCAR_LIST_SELECT) {
@@ -271,7 +292,7 @@ export async function queryRailcars(p: RailcarListParams) {
   } catch (err) {
     if (!isMissingOptionalDateColumn(err)) throw err;
     return await queryRailcarsWithSelect(
-      { ...p, flag: undefined },
+      { ...p, opsFlagFallback: true },
       assignmentEmbed(p, selectWithoutOptionalDateCols(RAILCAR_LIST_SELECT)),
     );
   }
@@ -279,6 +300,15 @@ export async function queryRailcars(p: RailcarListParams) {
 
 /** IDs matching the current filter (all pages) — for select-all-matching bulk actions. */
 export async function queryRailcarIds(p: RailcarListParams): Promise<number[]> {
+  try {
+    return await queryRailcarIdsWithParams(p);
+  } catch (err) {
+    if (!isMissingOptionalDateColumn(err)) throw err;
+    return await queryRailcarIdsWithParams({ ...p, opsFlagFallback: true });
+  }
+}
+
+async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]> {
   const slim = assignmentEmbed(p, "id, assignment:railcar_assignments(id)");
   if (p.assigned === "unassigned") {
     const result = await queryRailcarsWithSelect({ ...p, all: true, page: 1, pageSize: 1 }, slim);

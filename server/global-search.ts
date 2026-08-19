@@ -1,5 +1,6 @@
 import { displayLeaseNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
+import { hydrateOpsFlag } from "@shared/ops-flag";
 import { carListSearchTokens } from "@shared/programs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
@@ -11,7 +12,7 @@ const SIDE_LIMIT = 100;
 
 const SEARCH_CAR_SELECT = `
 id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation,
-lessee_name, rider_external_id, assignment_label, managed_category, lease_type,
+lessee_name, rider_external_id, assignment_label, managed_category, lease_type, comment_event_note,
 assignment:railcar_assignments(
   id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
@@ -58,12 +59,12 @@ function mapCar(r: any) {
   const assignment = asOne(r.assignment);
   const rider = asOne(assignment?.rider);
   const master_lease = asOne(rider?.master_lease);
-  return {
+  return hydrateOpsFlag({
     ...r,
     assignment: assignment
       ? { ...assignment, rider: rider ? { ...rider, master_lease } : null }
       : null,
-  };
+  });
 }
 
 function carBlob(c: any) {

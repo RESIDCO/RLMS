@@ -5,6 +5,7 @@ import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railcar-list";
+import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
 import { countCarsByRiderId } from "./rider-car-counts";
@@ -29,6 +30,7 @@ import {
 } from "./programs";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
+import { hydrateOpsFlag } from "@shared/ops-flag";
 import {
   getAuthUser,
   getUserRole,
@@ -1190,20 +1192,8 @@ export async function registerRoutes(
       }
       const raw = req.body?.ops_flag;
       const ops_flag = raw == null || String(raw).trim() === "" ? null : String(raw).trim().slice(0, 80);
-      const ops_flag_set_at = ops_flag ? new Date().toISOString() : null;
       const uniqueIds = [...new Set(idsRaw)];
-      const CHUNK = 200;
-      let updated = 0;
-      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
-        const slice = uniqueIds.slice(i, i + CHUNK);
-        const { data, error } = await supabase
-          .from("railcars")
-          .update({ ops_flag, ops_flag_set_at })
-          .in("id", slice)
-          .select("id");
-        if (error) throw error;
-        updated += data?.length ?? 0;
-      }
+      const updated = await persistOpsFlag(uniqueIds, ops_flag);
       res.json({ ok: true, updated, ops_flag });
     } catch (err) {
       errHandler(res, err);
@@ -1306,13 +1296,13 @@ export async function registerRoutes(
       if (!car) return res.status(404).json({ message: "Railcar not found" });
       const assignmentRaw = asOne(car.assignment);
       const rider = asOne(assignmentRaw?.rider);
-      const normalized = {
+      const normalized = hydrateOpsFlag({
         ...car,
         assignment: assignmentRaw
           ? { ...assignmentRaw, rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null }
           : null,
         railcar_ab_items: abRes.error ? [] : (abRes.data ?? []),
-      };
+      });
       res.json({ railcar: normalized, history: histRes.data ?? [], number_history: numHistRes.data ?? [] });
     } catch (err) {
       errHandler(res, err);
@@ -1324,7 +1314,8 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertRailcarSchema.parse(req.body);
-      const insertRow: Record<string, unknown> = { ...parsed };
+      const flag = parsed.ops_flag;
+      const insertRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
       if (parsed.fleet_status) {
         insertRow.fleet_status = parsed.fleet_status;
         insertRow.fleet_status_source = "manual";
@@ -1338,7 +1329,8 @@ export async function registerRoutes(
         .select()
         .single();
       if (error) throw error;
-      res.json(data);
+      if (flag) await persistOpsFlag([data.id], flag);
+      res.json(hydrateOpsFlag({ ...data, ops_flag: flag ?? null }));
     } catch (err) {
       errHandler(res, err);
     }
@@ -1350,14 +1342,11 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRailcarSchema.partial().parse(req.body);
-      const updateRow: Record<string, unknown> = { ...parsed };
+      const flag = parsed.ops_flag;
+      const updateRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
       if (parsed.fleet_status) {
         updateRow.fleet_status = parsed.fleet_status;
         updateRow.fleet_status_source = "manual";
-      }
-      if (parsed.ops_flag !== undefined) {
-        updateRow.ops_flag = parsed.ops_flag;
-        updateRow.ops_flag_set_at = parsed.ops_flag ? new Date().toISOString() : null;
       }
       const { data, error } = await supabase
         .from("railcars")
@@ -1366,7 +1355,8 @@ export async function registerRoutes(
         .select()
         .single();
       if (error) throw error;
-      res.json(data);
+      if (flag !== undefined) await persistOpsFlag([id], flag);
+      res.json(hydrateOpsFlag({ ...data, ops_flag: flag !== undefined ? flag : (data as any).ops_flag }));
     } catch (err) {
       errHandler(res, err);
     }

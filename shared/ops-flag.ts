@@ -45,6 +45,39 @@ export function composeOpsFlag(preset: string, extra?: string): string | null {
   return p;
 }
 
+/** Stored in comment_event_note until railcars.ops_flag exists. */
+export const OPS_FLAG_FALLBACK_PREFIX = "#RLMSFLAG ";
+export const OPS_FLAG_FALLBACK_SUFFIX = "#";
+
+export function parseOpsFlagFallback(comment: string | null | undefined): { flag: string | null; rest: string } {
+  const s = String(comment ?? "");
+  if (!s.startsWith(OPS_FLAG_FALLBACK_PREFIX)) return { flag: null, rest: s };
+  const end = s.indexOf(OPS_FLAG_FALLBACK_SUFFIX, OPS_FLAG_FALLBACK_PREFIX.length);
+  if (end < 0) return { flag: null, rest: s };
+  const flag = s.slice(OPS_FLAG_FALLBACK_PREFIX.length, end).trim() || null;
+  let rest = s.slice(end + OPS_FLAG_FALLBACK_SUFFIX.length);
+  if (rest.startsWith("\n")) rest = rest.slice(1);
+  return { flag, rest };
+}
+
+export function encodeOpsFlagFallback(comment: string | null | undefined, flag: string | null | undefined): string | null {
+  const rest = parseOpsFlagFallback(comment).rest;
+  const formatted = formatOpsFlag(flag);
+  if (!formatted) return rest.trim() ? rest : null;
+  const line = `${OPS_FLAG_FALLBACK_PREFIX}${formatted}${OPS_FLAG_FALLBACK_SUFFIX}`;
+  return rest.trim() ? `${line}\n${rest}` : line;
+}
+
+export function hydrateOpsFlag<T extends Record<string, unknown>>(row: T): T & { ops_flag: string | null } {
+  const parsed = parseOpsFlagFallback(row.comment_event_note as string | null | undefined);
+  const ops_flag = formatOpsFlag(row.ops_flag as string | null | undefined) ?? parsed.flag;
+  return {
+    ...row,
+    ops_flag,
+    comment_event_note: parsed.rest || null,
+  };
+}
+
 export function opsFlagMatchesFilter(value: string | null | undefined, filter: string | undefined): boolean {
   if (!filter || filter === "all") return true;
   const formatted = formatOpsFlag(value);

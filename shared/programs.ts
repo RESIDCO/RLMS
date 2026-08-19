@@ -1,3 +1,5 @@
+import { splitCarNumber } from "./residco-import";
+
 export const PROGRAM_STATUSES = ["open", "on_hold", "complete"] as const;
 export type ProgramStatus = (typeof PROGRAM_STATUSES)[number];
 
@@ -146,9 +148,9 @@ export function parseCarPasteList(raw: string): string[] {
     out.push(t);
   }
 
-  // Comma / semicolon / newline separate cars. Spaces inside a record pair
+  // Comma / semicolon / newline / tab separate cars. Spaces inside a record pair
   // MARK + NUMBER (e.g. "TFOX 901745") into one unit before a bare-number fallback.
-  for (const record of String(raw ?? "").split(/[\n,;]+/)) {
+  for (const record of String(raw ?? "").split(/[\n\r,;\t]+/)) {
     const words = record.trim().split(/\s+/).filter(Boolean);
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
@@ -164,6 +166,21 @@ export function parseCarPasteList(raw: string): string[] {
     }
   }
   return out;
+}
+
+export function looksLikeCarToken(token: string): boolean {
+  const s = splitCarNumber(token);
+  return Boolean(s.car_number && /^\d/.test(s.car_number));
+}
+
+/** Two or more car-like tokens (Excel column, commas, MARK NUMBER pairs). */
+export function carListSearchTokens(raw: string): string[] | null {
+  const tokens = parseCarPasteList(raw);
+  if (tokens.length < 2) return null;
+  const cars = tokens.filter(looksLikeCarToken);
+  if (cars.length < 2) return null;
+  if (cars.length < tokens.length * 0.5) return null;
+  return cars;
 }
 
 export function programPath(id: number): string {

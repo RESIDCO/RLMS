@@ -3089,7 +3089,17 @@ export async function registerRoutes(
   app.get("/api/search", async (req: Request, res: Response) => {
     try {
       const raw = (req.query.q as string | undefined)?.trim() ?? "";
-      if (!raw) return res.json({ railcars: [], riders: [], leases: [] });
+      if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], terms: [], counts: { railcars: 0, riders: 0, leases: 0, total: 0 } });
+      res.json(await runGlobalSearch(raw));
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/search", async (req: Request, res: Response) => {
+    try {
+      const raw = String((req.body as any)?.q ?? "").trim();
+      if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], terms: [], counts: { railcars: 0, riders: 0, leases: 0, total: 0 } });
       res.json(await runGlobalSearch(raw));
     } catch (err) {
       errHandler(res, err);

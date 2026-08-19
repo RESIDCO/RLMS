@@ -9,6 +9,7 @@ type Props = {
   className?: string;
   inputClassName?: string;
   testId?: string;
+  onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void;
 };
 
 /** Magnifying-glass search field with an in-input × that clears and re-runs the filter. */
@@ -19,6 +20,7 @@ export default function ClearableSearchInput({
   className,
   inputClassName,
   testId,
+  onPaste,
 }: Props) {
   return (
     <div className={cn("relative flex-1 min-w-[180px] max-w-md", className)}>
@@ -26,6 +28,7 @@ export default function ClearableSearchInput({
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onPaste={onPaste}
         placeholder={placeholder}
         className={cn("pl-9 pr-8", inputClassName)}
         data-testid={testId}

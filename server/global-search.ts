@@ -1,8 +1,10 @@
 import { displayLeaseNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
+import { carListSearchTokens } from "@shared/programs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { applySearchFilter } from "./railcar-list";
+import { resolveProgramCars } from "./programs";
 
 const CAR_LIMIT = 500;
 const SIDE_LIMIT = 100;
@@ -30,6 +32,7 @@ export type GlobalSearchResult = {
   railcars: any[];
   riders: any[];
   leases: any[];
+  not_found: string[];
   counts: { railcars: number; riders: number; leases: number; total: number };
 };
 
@@ -207,9 +210,69 @@ async function activeCarCountsByRider(riderIds: number[]): Promise<Map<number, n
   }
 }
 
+async function fetchCarsByIds(ids: number[]): Promise<any[]> {
+  const uniq = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!uniq.length) return [];
+  const pages: any[] = [];
+  for (let i = 0; i < uniq.length; i += 80) {
+    const slice = uniq.slice(i, i + 80);
+    const { data, error } = await supabaseAdmin
+      .from("railcars")
+      .select(SEARCH_CAR_SELECT)
+      .in("id", slice);
+    if (error) throw error;
+    pages.push(...(data ?? []).map(mapCar));
+  }
+  const byId = new Map(pages.map((c) => [Number(c.id), c]));
+  return uniq.map((id) => byId.get(id)).filter(Boolean);
+}
+
+async function runCarListSearch(raw: string, tokens: string[]): Promise<GlobalSearchResult> {
+  const capped = tokens.slice(0, CAR_LIMIT);
+  const resolved = await timed("railcars-paste-resolve", () =>
+    resolveProgramCars({ text: capped.join("\n") }),
+  );
+  const orderedIds: number[] = [];
+  const seen = new Set<number>();
+  const pushId = (id: number) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    orderedIds.push(id);
+  };
+  for (const m of resolved.matched) pushId(m.railcar_id);
+  for (const a of resolved.ambiguous) {
+    for (const m of a.matches) pushId(m.railcar_id);
+  }
+  const railcars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds));
+  const not_found = resolved.not_found.map((n) => n.token);
+  return {
+    query: raw,
+    terms: capped,
+    railcars,
+    riders: [],
+    leases: [],
+    not_found,
+    counts: {
+      railcars: railcars.length,
+      riders: 0,
+      leases: 0,
+      total: railcars.length,
+    },
+  };
+}
+
 export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> {
   const tAll = Date.now();
-  const groups = raw.split(",").map((g) => g.trim()).filter(Boolean);
+  const pasteCars = carListSearchTokens(raw);
+  if (pasteCars) {
+    const out = await runCarListSearch(raw, pasteCars);
+    console.log(
+      `[search] total ${Date.now() - tAll}ms paste-cars=${pasteCars.length} found=${out.railcars.length} missing=${out.not_found.length}`,
+    );
+    return out;
+  }
+
+  const groups = raw.split(/[\n\r,;]+/).map((g) => g.trim()).filter(Boolean);
   const terms = groups.flatMap((g) => g.split(/\s+/).filter(Boolean));
 
   const [textCars, allRiders, allLeases] = await Promise.all([
@@ -277,6 +340,7 @@ export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> 
     railcars: matchedCars,
     riders: ridersOut,
     leases: matchedLeases,
+    not_found: [],
     counts: {
       railcars: matchedCars.length,
       riders: ridersOut.length,

@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect, KeyboardEvent } from "react";
+import { useState, useRef, useEffect, KeyboardEvent, ClipboardEvent } from "react";
 import { Search, X } from "lucide-react";
+import { carListSearchTokens } from "@shared/programs";
 import { openAppTab } from "@/lib/browse-nav";
+import { searchPagePath } from "@/lib/search-query";
 
 export default function GlobalSearch() {
   const [query, setQuery] = useState("");
@@ -9,7 +11,17 @@ export default function GlobalSearch() {
   function submit() {
     const trimmed = query.trim();
     if (!trimmed) return;
-    openAppTab(`/search?q=${encodeURIComponent(trimmed)}`);
+    openAppTab(searchPagePath(trimmed));
+    setQuery("");
+    inputRef.current?.blur();
+  }
+
+  function handlePaste(e: ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text");
+    const cars = carListSearchTokens(text);
+    if (!cars || cars.length < 2) return;
+    e.preventDefault();
+    openAppTab(searchPagePath(text.trim()));
     setQuery("");
     inputRef.current?.blur();
   }
@@ -44,8 +56,9 @@ export default function GlobalSearch() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onPaste={handlePaste}
           onKeyDown={handleKeyDown}
-          placeholder="Search cars, lessees, lease numbers… (Enter)"
+          placeholder="Search or paste a list of cars… (Enter)"
           autoComplete="off"
           data-testid="input-global-search"
           className="w-full bg-sidebar-accent/40 border border-sidebar-border rounded-md pl-8 pr-20 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"

@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Search as SearchIcon, Train, FileText, BookOpen, Building2, Loader2, X, Pencil, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
+import { carListSearchTokens } from "@shared/programs";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { FleetMembershipBadge, FleetAwareStatusBadge } from "@/components/InactiveFleetBadge";
@@ -11,7 +12,7 @@ import { asOne, resolveLeaseType } from "@shared/lease-type";
 import { displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
 import { carPath, lesseePath, olPath, olKeyFromLabel, historyPath, openAppTab } from "@/lib/browse-nav";
-import { hashSearchParams } from "@/lib/hash-location";
+import { persistSearchQuery, readInitialSearchQuery } from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 
 interface MasterLease {
@@ -73,6 +74,7 @@ interface SearchResults {
   railcars: RailcarResult[];
   riders: Rider[];
   leases: MasterLease[];
+  not_found?: string[];
   counts: { railcars: number; riders: number; leases: number; total: number };
 }
 
@@ -285,14 +287,14 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editCarId, setEditCarId] = useState<number | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
   useEffect(() => {
-    const q = hashSearchParams().get("q");
+    const q = readInitialSearchQuery();
     if (q) {
       setQuery(q);
       runSearch(q);
@@ -310,10 +312,10 @@ export default function SearchPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiRequest(
-        "GET",
-        `/api/search?q=${encodeURIComponent(trimmed)}`,
-      );
+      const usePost = trimmed.length > 1400 || /[\n\r]/.test(trimmed) || Boolean(carListSearchTokens(trimmed));
+      const res = usePost
+        ? await apiRequest("POST", "/api/search", { q: trimmed })
+        : await apiRequest("GET", `/api/search?q=${encodeURIComponent(trimmed)}`);
       const data: SearchResults = await res.json();
       setResults(data);
       setCommitted(trimmed);
@@ -327,7 +329,7 @@ export default function SearchPage() {
   function submit() {
     const trimmed = query.trim();
     if (!trimmed) return;
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/search?q=${encodeURIComponent(trimmed)}`);
+    persistSearchQuery(trimmed);
     runSearch(trimmed);
   }
 
@@ -339,6 +341,7 @@ export default function SearchPage() {
     inputRef.current?.focus();
   }
 
+  const parsedCars = carListSearchTokens(query);
   const lesseeNames: string[] = [];
   const seenLessee: Record<string, true> = {};
   const addLessee = (name: string | null | undefined) => {
@@ -352,8 +355,11 @@ export default function SearchPage() {
     addLessee(c.lessee_name || c.assignment?.fleet_name || c.assignment?.rider?.master_lease?.lessee);
   }
 
-  const hasResults = results && results.counts.total > 0;
-  const noResults = results && results.counts.total === 0;
+  const missing = results?.not_found ?? [];
+  const pasteCount = committed ? carListSearchTokens(committed)?.length ?? 0 : 0;
+  const committedLabel = pasteCount > 1 ? `${pasteCount} cars` : `"${committed}"`;
+  const hasResults = results && (results.counts.total > 0 || missing.length > 0);
+  const noResults = results && results.counts.total === 0 && missing.length === 0;
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -361,46 +367,52 @@ export default function SearchPage() {
         <div className="font-eyebrow mb-1.5">RLMS</div>
         <h1 className="font-serif text-2xl font-semibold tracking-tight">Search</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Press Enter or Search. Results drill into the same Lessee → OL → Car views as the Dashboard.
+          Press Enter or Search. Paste a column of cars from Excel — one per line, commas, or MARK + number.
         </p>
       </div>
 
-      <div className="relative mb-6 flex gap-2">
+      <div className="relative mb-6 flex gap-2 items-start">
         <div className="relative flex-1">
-          <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <input
+          <SearchIcon className="absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <textarea
             ref={inputRef}
-            type="text"
             value={query}
+            rows={query.includes("\n") || query.length > 60 ? 6 : 2}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey || !query.includes("\n"))) {
                 e.preventDefault();
                 submit();
               }
             }}
-            placeholder="e.g. HWCX10823, BNSF, OL2341, H07-099"
-            className="w-full bg-card border border-border rounded-lg pl-10 pr-10 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
+            placeholder={"HWCX 10823\nHWCX 10841\nor a lessee / OL"}
+            className="w-full min-h-[2.75rem] resize-y bg-card border border-border rounded-lg pl-10 pr-10 py-3 text-sm font-mono text-foreground placeholder:text-muted-foreground/60 placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
           />
           {query && (
             <button
               type="button"
               onClick={clear}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              className="absolute right-3 top-3.5 text-muted-foreground hover:text-foreground transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
           )}
         </div>
-        <Button type="button" onClick={submit} className="shrink-0" data-testid="button-search-submit">
+        <Button type="button" onClick={submit} className="shrink-0 h-[2.75rem]" data-testid="button-search-submit">
           Search
         </Button>
       </div>
+      {parsedCars && (
+        <div className="-mt-4 mb-4 text-xs text-muted-foreground">
+          {parsedCars.length} cars in this list
+          {query.includes("\n") ? " · Ctrl+Enter to search" : ""}
+        </div>
+      )}
 
       {!results && !loading && (
         <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
           {[
-            { label: "Car number(s)", example: "HWCX10823", sub: "or HWCX10823, HWCX10841" },
+            { label: "Paste a car list", example: "HWCX10823\nHWCX10841", sub: "Excel column, commas, or MARK + number" },
             { label: "Lessee name", example: "BNSF", sub: "opens lessee → OL list" },
             { label: "Rider / OL", example: "OL2341", sub: "or schedule number" },
             { label: "Lease number", example: "H07-099", sub: "or agreement number" },
@@ -410,17 +422,13 @@ export default function SearchPage() {
               type="button"
               onClick={() => {
                 setQuery(tip.example);
-                window.history.replaceState(
-                  null,
-                  "",
-                  `${window.location.pathname}${window.location.search}#/search?q=${encodeURIComponent(tip.example)}`,
-                );
+                persistSearchQuery(tip.example);
                 runSearch(tip.example);
               }}
               className="text-left p-3 rounded-lg border border-border bg-card hover:bg-card/80 hover:border-primary/30 transition-all group"
             >
               <div className="text-[11px] text-muted-foreground uppercase tracking-wider mb-1">{tip.label}</div>
-              <div className="text-sm font-mono font-medium text-foreground group-hover:text-primary transition-colors">{tip.example}</div>
+              <div className="text-sm font-mono font-medium text-foreground group-hover:text-primary transition-colors whitespace-pre-line">{tip.example}</div>
               <div className="text-[10px] text-muted-foreground mt-0.5">{tip.sub}</div>
             </button>
           ))}
@@ -440,16 +448,25 @@ export default function SearchPage() {
 
       {noResults && !loading && (
         <div className="mt-8 text-center text-muted-foreground text-sm">
-          No results for <span className="text-foreground font-medium">"{committed}"</span>.
+          No results for <span className="text-foreground font-medium">{committedLabel}</span>.
         </div>
       )}
 
       {hasResults && !loading && (
         <div className="mt-6 space-y-8">
           <div className="text-xs text-muted-foreground">
-            {results.counts.total} result{results.counts.total !== 1 ? "s" : ""} for{" "}
-            <span className="text-foreground font-medium">"{committed}"</span>
+            {results.railcars.length} car{results.railcars.length !== 1 ? "s" : ""}
+            {missing.length > 0 ? ` · ${missing.length} not in fleet` : ""}
+            {" for "}
+            <span className="text-foreground font-medium">{committedLabel}</span>
           </div>
+
+          {missing.length > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+              <div className="text-amber-400 font-medium mb-1">Not in fleet</div>
+              <div className="font-mono text-xs text-foreground whitespace-pre-wrap">{missing.join(", ")}</div>
+            </div>
+          )}
 
           {results.railcars.length > 0 && (
             <section>

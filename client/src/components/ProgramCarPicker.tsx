@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { carListSearchTokens } from "@shared/programs";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -54,11 +55,13 @@ export default function ProgramCarPicker({
     onChange(value.filter((c) => c.id !== id));
   }
 
-  async function resolvePaste() {
+  async function resolvePaste(text = paste) {
+    const body = text.trim();
+    if (!body) return;
     setResolving(true);
     try {
       const res = await apiRequest("POST", "/api/programs/resolve-cars", {
-        text: paste,
+        text: body,
         program_id: programId ?? null,
       });
       const out = (await res.json()) as ResolveResult;
@@ -109,10 +112,19 @@ export default function ProgramCarPicker({
       {mode === "search" ? (
         <>
           <ClearableSearchInput
-            placeholder="Type a car number — pick to add, keep typing for the next…"
+            placeholder="Type a car number, or paste a list…"
             value={q}
             onChange={setQ}
             inputClassName="h-9"
+            onPaste={(e) => {
+              const text = e.clipboardData.getData("text");
+              if (!carListSearchTokens(text)) return;
+              e.preventDefault();
+              const list = text.trim();
+              setMode("paste");
+              setPaste(list);
+              void resolvePaste(list);
+            }}
           />
           <div className="max-h-56 overflow-auto border rounded-md">
             <table className="w-full text-xs">

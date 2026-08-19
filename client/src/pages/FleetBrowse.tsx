@@ -1,14 +1,15 @@
+import { useState } from "react";
 import { Link, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
-import { ChevronRight, Columns3 } from "lucide-react";
+import { ChevronRight, Columns3, Download } from "lucide-react";
 import {
   ENTITY_SLUGS,
   entityOlCarPath,
@@ -25,6 +26,8 @@ import {
   programPath,
 } from "@/lib/browse-nav";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -125,20 +128,35 @@ const BROWSE_CAR_OPT_COLS = [
 ] as const;
 const BROWSE_CAR_DEFAULT_COLS = new Set(["entity", "status", "type"]);
 
+function turning50ExportUrl(year: number, opts?: { ols?: string[]; ids?: number[] }) {
+  const sp = new URLSearchParams({ year: String(year) });
+  if (opts?.ols?.length) sp.set("ols", opts.ols.join(","));
+  if (opts?.ids?.length) sp.set("ids", opts.ids.join(","));
+  return `/api/browse/turning50/export?${sp.toString()}`;
+}
+
 function CarTable({
   cars,
   hrefFor,
   mlaType,
+  selection,
 }: {
   cars: CarRow[];
   hrefFor: (c: CarRow) => string;
   mlaType?: string | null;
+  selection?: {
+    selected: Set<number>;
+    onToggle: (id: number) => void;
+    onToggleAll: () => void;
+  };
 }) {
   const { visibleCols, toggleCol, resetCols, prefsLoaded } = useColumnPrefs(
     "browse_car_list",
     BROWSE_CAR_DEFAULT_COLS,
   );
   const show = (key: string) => visibleCols.has(key);
+  const ids = cars.map((c) => c.id);
+  const allOn = Boolean(selection && ids.length > 0 && ids.every((id) => selection.selected.has(id)));
 
   return (
     <div className="space-y-2">
@@ -187,6 +205,15 @@ function CarTable({
           <table className="w-full text-xs">
             <thead className="bg-muted/40 text-muted-foreground">
               <tr>
+                {selection && (
+                  <th className="px-3 py-2.5 w-8">
+                    <Checkbox
+                      checked={allOn}
+                      onCheckedChange={() => selection.onToggleAll()}
+                      aria-label="Select all cars"
+                    />
+                  </th>
+                )}
                 <th className="px-4 py-2.5 text-left font-medium">Marks</th>
                 <th className="px-4 py-2.5 text-left font-medium">Car #</th>
                 <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
@@ -200,6 +227,15 @@ function CarTable({
             <tbody>
               {cars.map((c) => (
                 <tr key={c.id} className="border-t border-border/50 hover:bg-muted/30">
+                  {selection && (
+                    <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selection.selected.has(c.id)}
+                        onCheckedChange={() => selection.onToggle(c.id)}
+                        aria-label={`Select ${c.reporting_marks ?? ""} ${c.car_number}`}
+                      />
+                    </td>
+                  )}
                   <td className="px-4 py-2.5 font-mono text-muted-foreground">{c.reporting_marks ?? "—"}</td>
                   <td className="px-4 py-2.5 font-mono font-semibold">
                     <Link href={hrefFor(c)} className="hover:text-primary">
@@ -411,6 +447,9 @@ function OlView({
 }
 
 function TurningView({ year }: { year: number }) {
+  const { toast } = useToast();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
   const { data, isLoading, error } = useQuery<TurningYearPayload>({
     queryKey: ["/api/browse/turning50", year],
     queryFn: async () => {
@@ -418,11 +457,60 @@ function TurningView({ year }: { year: number }) {
       return res.json();
     },
   });
+  const riders = data?.riders ?? [];
+  const allOn = riders.length > 0 && riders.every((r) => selected.has(r.ol));
+
+  function toggleOl(ol: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(ol)) next.delete(ol);
+      else next.add(ol);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(allOn ? new Set() : new Set(riders.map((r) => r.ol)));
+  }
+
+  async function runExport(url: string) {
+    setExporting(true);
+    try {
+      await downloadXlsx(url, `RLMS_Turning50_${year}.xlsx`);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
         title={`Turning 50 in ${year}`}
         subtitle={`${(data?.car_count ?? 0).toLocaleString()} active cars · build year ${year - 50} · ${(data?.riders?.length ?? 0).toLocaleString()} OLs`}
+        actions={
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!selected.size || exporting}
+              onClick={() => runExport(turning50ExportUrl(year, { ols: [...selected] }))}
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Exporting…" : "Export selected"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!riders.length || exporting}
+              onClick={() => runExport(turning50ExportUrl(year))}
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Exporting…" : "Export all"}
+            </Button>
+          </div>
+        }
       />
       <div className="px-4 sm:px-8 py-5">
         <Breadcrumb items={[{ href: "/", label: "Dashboard" }, { label: `Turning 50 in ${year}` }]} />
@@ -437,6 +525,9 @@ function TurningView({ year }: { year: number }) {
             <table className="w-full text-xs">
               <thead className="bg-muted/40 text-muted-foreground">
                 <tr>
+                  <th className="px-3 py-2.5 w-8">
+                    <Checkbox checked={allOn} onCheckedChange={toggleAll} aria-label="Select all OLs" />
+                  </th>
                   <th className="px-4 py-2.5 text-left font-medium">OL / Rider</th>
                   <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
                   <th className="px-4 py-2.5 text-left font-medium">Effective</th>
@@ -447,6 +538,13 @@ function TurningView({ year }: { year: number }) {
               <tbody>
                 {data.riders.map((r) => (
                   <tr key={r.ol} className="border-t border-border/50 hover:bg-muted/30">
+                    <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selected.has(r.ol)}
+                        onCheckedChange={() => toggleOl(r.ol)}
+                        aria-label={`Select ${r.ol}`}
+                      />
+                    </td>
                     <td className="px-4 py-2.5">
                       <Link href={turning50OlPath(year, r.ol)} className="font-medium hover:text-primary">
                         {r.ol}
@@ -473,6 +571,9 @@ function TurningView({ year }: { year: number }) {
 }
 
 function TurningOlView({ year, ol }: { year: number; ol: string }) {
+  const { toast } = useToast();
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [exporting, setExporting] = useState(false);
   const { data, isLoading, error } = useQuery<TurningOlPayload>({
     queryKey: ["/api/browse/turning50", year, ol],
     queryFn: async () => {
@@ -483,11 +584,61 @@ function TurningOlView({ year, ol }: { year: number; ol: string }) {
       return res.json();
     },
   });
+  const cars = data?.cars ?? [];
+
+  function toggleCar(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllCars() {
+    const ids = cars.map((c) => c.id);
+    const allOn = ids.length > 0 && ids.every((id) => selected.has(id));
+    setSelected(allOn ? new Set() : new Set(ids));
+  }
+
+  async function runExport(url: string) {
+    setExporting(true);
+    try {
+      await downloadXlsx(url, `RLMS_Turning50_${year}.xlsx`);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
         title={data?.ol ?? ol}
         subtitle={`${(data?.car_count ?? 0).toLocaleString()} cars turning 50 in ${year}${data?.lease_type ? ` · ${data.lease_type}` : ""}`}
+        actions={
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!selected.size || exporting}
+              onClick={() => runExport(turning50ExportUrl(year, { ids: [...selected] }))}
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Exporting…" : "Export selected"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!cars.length || exporting}
+              onClick={() => runExport(turning50ExportUrl(year, { ols: [ol] }))}
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Exporting…" : "Export all"}
+            </Button>
+          </div>
+        }
       />
       <div className="px-4 sm:px-8 py-5">
         <Breadcrumb
@@ -510,7 +661,16 @@ function TurningOlView({ year, ol }: { year: number; ol: string }) {
         ) : error ? (
           <p className="text-sm text-destructive">{String((error as Error).message)}</p>
         ) : (
-          <CarTable cars={data?.cars ?? []} hrefFor={(c) => turning50OlCarPath(year, ol, c.id)} mlaType={data?.lease_type} />
+          <CarTable
+            cars={cars}
+            hrefFor={(c) => turning50OlCarPath(year, ol, c.id)}
+            mlaType={data?.lease_type}
+            selection={{
+              selected,
+              onToggle: toggleCar,
+              onToggleAll: toggleAllCars,
+            }}
+          />
         )}
       </div>
     </>

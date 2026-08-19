@@ -94,6 +94,7 @@ import {
 } from "./refresh-estimated-lease-expiry";
 import { carBuildYear, turning50ByYear } from "@shared/build-year";
 import { browseGroup, browseOl, browseTurning50, countInProgram } from "./browse";
+import { buildTurning50Report } from "./turning50-export";
 import { syncRiderExpirationsFromCars } from "./sync-rider-expirations";
 import {
   buildFinancialReview,
@@ -963,6 +964,34 @@ export async function registerRoutes(
       }
       const ol = String(req.query.ol ?? "").trim() || undefined;
       res.json(await browseTurning50(year, ol));
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/browse/turning50/export", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const year = Number(req.query.year);
+      if (!Number.isFinite(year) || year < 1900 || year > 2100) {
+        return res.status(400).json({ message: "year is required" });
+      }
+      const ols = String(req.query.ols ?? req.query.ol ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const carIds = String(req.query.ids ?? "")
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      const { buffer, filename } = await buildTurning50Report({
+        year,
+        ols: ols.length ? ols : undefined,
+        carIds: carIds.length ? carIds : undefined,
+      });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buffer);
     } catch (err) {
       errHandler(res, err);
     }

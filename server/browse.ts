@@ -16,6 +16,9 @@ export const ENTITY_DB: Record<string, string> = {
 const CAR_LIST_SELECT =
   "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, lessee_name, rider_external_id, assignment_label, managed_category, sold_to, lease_type";
 
+const CAR_EXPORT_SELECT =
+  `${CAR_LIST_SELECT}, nbv, oac, oec, capacity_cf, lining_material, lining, coating, build_year, built_year`;
+
 export function normalizeOl(raw: string | null | undefined): string {
   return String(raw ?? "")
     .trim()
@@ -128,11 +131,14 @@ async function loadRiderIndex(): Promise<Map<string, RiderMeta>> {
   return byKey;
 }
 
-async function fetchOperatingCars(filter: { lessee?: string; entity?: string; ol?: string; buildYear?: number }) {
+async function fetchOperatingCars(
+  filter: { lessee?: string; entity?: string; ol?: string; buildYear?: number },
+  opts?: { extra?: boolean },
+) {
   const cars = await fetchAllRows<any>((from, to) => {
     let q = supabaseAdmin
       .from("railcars")
-      .select(CAR_LIST_SELECT)
+      .select(opts?.extra ? CAR_EXPORT_SELECT : CAR_LIST_SELECT)
       .eq("active", true)
       .order("id", { ascending: true })
       .range(from, to);
@@ -235,6 +241,74 @@ export async function browseTurning50(year: number, ol?: string) {
     ...summary,
     cars: filtered.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
   };
+}
+
+export type Turning50ExportCar = ReturnType<typeof mapCarListRow> & {
+  nbv: number | null;
+  oac: number | null;
+  oec: number | null;
+  capacity_cf: number | null;
+  lining: string;
+  build_year: number | null;
+};
+
+export type Turning50ExportOl = ReturnType<typeof riderRowForOl> & {
+  cars: Turning50ExportCar[];
+};
+
+function liningOf(c: any): string {
+  return c.lining_material || c.lining || c.coating || "";
+}
+
+function mapExportCar(c: any): Turning50ExportCar {
+  const n = (v: unknown) => {
+    if (v == null || v === "") return null;
+    const x = Number(v);
+    return Number.isFinite(x) ? x : null;
+  };
+  return {
+    ...mapCarListRow(c),
+    nbv: n(c.nbv),
+    oac: n(c.oac),
+    oec: n(c.oec),
+    capacity_cf: n(c.capacity_cf),
+    lining: liningOf(c),
+    build_year: n(c.build_year) ?? n(c.built_year),
+  };
+}
+
+export async function loadTurning50Export(
+  year: number,
+  opts?: { ols?: string[]; carIds?: number[] },
+): Promise<{ year: number; build_year: number; riders: Turning50ExportOl[] }> {
+  const cars = await fetchOperatingCars({ buildYear: year - 50 }, { extra: true });
+  const wantOls = (opts?.ols ?? []).map((s) => normalizeOl(s)).filter(Boolean);
+  const wantOlSet = new Set(wantOls);
+  const wantIds = new Set((opts?.carIds ?? []).filter((n) => Number.isFinite(n) && n > 0));
+  const filtered = cars.filter((c) => {
+    if (wantIds.size && !wantIds.has(Number(c.id))) return false;
+    if (!wantOlSet.size) return true;
+    const code = normalizeOl(carOlCode(c) || "Unassigned");
+    return wantOlSet.has(code) || wantOlSet.has(normalizeOl(olKeyFromLabel(carOlCode(c)) ?? ""));
+  });
+  const index = await loadRiderIndex();
+  const buckets = new Map<string, any[]>();
+  for (const c of filtered) {
+    const key = carOlCode(c) || "Unassigned";
+    const list = buckets.get(key) ?? [];
+    list.push(c);
+    buckets.set(key, list);
+  }
+  const riders = Array.from(buckets.entries())
+    .map(([key, list]) => {
+      const row = riderRowForOl(key === "Unassigned" ? null : key, index, list.length);
+      const mapped = list
+        .map(mapExportCar)
+        .sort((a, b) => String(a.car_number).localeCompare(String(b.car_number)));
+      return { ...row, cars: mapped };
+    })
+    .sort((a, b) => b.car_count - a.car_count || a.ol.localeCompare(b.ol));
+  return { year, build_year: year - 50, riders };
 }
 
 /** Leased (assigned) active cars that sit on an open Program. Zero is correct until programs have cars. */

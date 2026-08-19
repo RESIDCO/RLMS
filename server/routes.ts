@@ -1177,6 +1177,39 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/railcars/bulk-ops-flag", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0) : [];
+      if (idsRaw.length === 0) {
+        return res.status(400).json({ message: "ids required" });
+      }
+      if (idsRaw.length > 20_000) {
+        return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
+      }
+      const raw = req.body?.ops_flag;
+      const ops_flag = raw == null || String(raw).trim() === "" ? null : String(raw).trim().slice(0, 80);
+      const ops_flag_set_at = ops_flag ? new Date().toISOString() : null;
+      const uniqueIds = [...new Set(idsRaw)];
+      const CHUNK = 200;
+      let updated = 0;
+      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+        const slice = uniqueIds.slice(i, i + CHUNK);
+        const { data, error } = await supabase
+          .from("railcars")
+          .update({ ops_flag, ops_flag_set_at })
+          .in("id", slice)
+          .select("id");
+        if (error) throw error;
+        updated += data?.length ?? 0;
+      }
+      res.json({ ok: true, updated, ops_flag });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
   app.get("/api/acquisition-batches", async (_req, res) => {
     try {
       const { data, error } = await supabaseAdmin
@@ -1321,6 +1354,10 @@ export async function registerRoutes(
       if (parsed.fleet_status) {
         updateRow.fleet_status = parsed.fleet_status;
         updateRow.fleet_status_source = "manual";
+      }
+      if (parsed.ops_flag !== undefined) {
+        updateRow.ops_flag = parsed.ops_flag;
+        updateRow.ops_flag_set_at = parsed.ops_flag ? new Date().toISOString() : null;
       }
       const { data, error } = await supabase
         .from("railcars")

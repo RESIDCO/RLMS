@@ -96,6 +96,8 @@ export type Railcar = {
   acquisition_date?: string | null;
   purchase_price?: number | null;
   needs_completion?: boolean | null;
+  ops_flag?: string | null;
+  ops_flag_set_at?: string | null;
   // ── V_Valid / 3rd-party reference (bulk import §1.1) ──
   legacy_valid_car_id: string | null;
   client_id: string | null;
@@ -273,6 +275,14 @@ export const insertRailcarSchema = z.object({
   nbv: z.coerce.number().nullable().optional(),
   oec: z.coerce.number().nullable().optional(),
   oac: z.coerce.number().nullable().optional(),
+  ops_flag: z
+    .union([z.string(), z.null()])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      const s = String(v ?? "").trim();
+      return s ? s.slice(0, 80) : null;
+    }),
 });
 export type InsertRailcar = z.infer<typeof insertRailcarSchema>;
 

@@ -11,6 +11,7 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { fmtUsd, fmtInt } from "@/lib/dv/format";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
+import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { asOne } from "@shared/lease-type";
 import { ChevronRight, Calculator } from "lucide-react";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
@@ -168,6 +169,9 @@ export default function CarDetailPage() {
                   {dash(r.fleet_status)}
                   <InactiveFleetBadge active={r.active} />
                 </span>
+              </Field>
+              <Field label="Flag">
+                {r.ops_flag ? <OpsFlagBadge flag={r.ops_flag} /> : "—"}
               </Field>
             </section>
 

@@ -14,7 +14,7 @@ capacity_cf, lining_material, lining, coating, mechanical_designation,
 general_description, commodity, notes, data_source, lease_type, managed,
 total_bv_rider, cars_on_rider_ar, commodity_family, comment_event_note,
 car_initial, description, active_status, built_year, dot_code, dot_specification,
-acquisition_batch_id, acquisition_date, purchase_price, needs_completion,
+acquisition_batch_id, acquisition_date, purchase_price, needs_completion, ops_flag, ops_flag_set_at,
 assignment:railcar_assignments(
   id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
@@ -43,6 +43,7 @@ export type RailcarListParams = {
   all?: boolean;
   acquisition_batch_id?: number;
   needs_completion?: "yes" | "no";
+  flag?: string;
 };
 
 export function parseRailcarListParams(query: Record<string, unknown>): RailcarListParams {
@@ -91,6 +92,7 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
         : query.needs_completion === "no" || query.needs_completion === "0" || query.needs_completion === "false"
           ? "no"
           : undefined,
+    flag: str(query.flag) ?? str(query.ops_flag),
   };
 }
 
@@ -217,6 +219,11 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
 
   query = applySearchFilter(query, p.search);
 
+  if (p.flag === "none") query = query.is("ops_flag", null);
+  else if (p.flag === "any") query = query.not("ops_flag", "is", null);
+  else if (p.flag && p.flag.toLowerCase() === "interchange") query = query.ilike("ops_flag", "Interchange%");
+  else if (p.flag) query = query.ilike("ops_flag", p.flag);
+
   return query;
 }
 
@@ -248,12 +255,14 @@ function selectWithoutOptionalDateCols(select: string) {
     .replace(/\s*acquisition_batch_id,?\s*/g, " ")
     .replace(/\s*acquisition_date,?\s*/g, " ")
     .replace(/\s*purchase_price,?\s*/g, " ")
-    .replace(/\s*needs_completion,?\s*/g, " ");
+    .replace(/\s*needs_completion,?\s*/g, " ")
+    .replace(/\s*ops_flag_set_at,?\s*/g, " ")
+    .replace(/\s*ops_flag,?\s*/g, " ");
 }
 
 function isMissingOptionalDateColumn(err: unknown) {
   const msg = String((err as any)?.message ?? err ?? "");
-  return /estimated_lease_expiry|lease_expiry_snapshot_month|build_date|acquisition_batch_id|acquisition_date|purchase_price|needs_completion/i.test(msg);
+  return /estimated_lease_expiry|lease_expiry_snapshot_month|build_date|acquisition_batch_id|acquisition_date|purchase_price|needs_completion|ops_flag/i.test(msg);
 }
 
 export async function queryRailcars(p: RailcarListParams) {
@@ -261,7 +270,10 @@ export async function queryRailcars(p: RailcarListParams) {
     return await queryRailcarsWithSelect(p, assignmentEmbed(p));
   } catch (err) {
     if (!isMissingOptionalDateColumn(err)) throw err;
-    return await queryRailcarsWithSelect(p, assignmentEmbed(p, selectWithoutOptionalDateCols(RAILCAR_LIST_SELECT)));
+    return await queryRailcarsWithSelect(
+      { ...p, flag: undefined },
+      assignmentEmbed(p, selectWithoutOptionalDateCols(RAILCAR_LIST_SELECT)),
+    );
   }
 }
 

@@ -38,6 +38,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList, ExternalLink } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
+import { OpsFlagBadge } from "@/components/OpsFlagBadge";
+import { OpsFlagPicker } from "@/components/OpsFlagPicker";
+import { OPS_FLAG_PRESETS, composeOpsFlag } from "@shared/ops-flag";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
@@ -154,7 +157,7 @@ type SortKey =
 
 const FR_PINNED_START = ["_select", "marks", "car_number", "lease_type"] as const;
 const FR_PINNED_END = ["_actions"] as const;
-const FR_CORE_MOVABLE = ["entity", "type", "status", "lessee", "rider", "lease", "expires"] as const;
+const FR_CORE_MOVABLE = ["entity", "type", "status", "flag", "lessee", "rider", "lease", "expires"] as const;
 const FR_SORT: Record<string, SortKey> = {
   car_number: "car_number",
   status: "status",
@@ -170,6 +173,7 @@ const FR_LABELS: Record<string, string> = {
   lease_type: "Lease Type",
   type: "Type",
   status: "Rental Status",
+  flag: "Flag",
   lessee: "Lessee",
   rider: "Rider",
   lease: "Lease",
@@ -183,6 +187,7 @@ const FR_WIDTHS: Record<string, number> = {
   lease_type: 130,
   type: 80,
   status: 150,
+  flag: 120,
   lessee: 140,
   rider: 130,
   lease: 110,
@@ -325,7 +330,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     "Build Year", "Lining", "Mech Desig.", "DOT Code",
     "Comment / Event Note",
     // Internal columns (post-workbook)
-    "Managed Category", "Reporting Marks", "Car Status", "Rental Status", "Transit Status", "Transit Label",
+    "Managed Category", "Reporting Marks", "Car Status", "Rental Status", "Flag", "Transit Status", "Transit Label",
     "Rider Name", "Schedule #", "MLA Lease #", "Lessor", "Expiration Date",
     "OAC",
   ];
@@ -369,6 +374,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     r.reporting_marks ?? "",
     r.status ?? "",
     displayRailcarStatus(displayStatusInputFromRailcar(r)),
+    r.ops_flag ?? "",
     r.transit_status ?? "",
     r.transit_label ?? "",
     r.assignment?.rider?.rider_name ?? "",
@@ -477,6 +483,7 @@ export default function FleetRegistry() {
   const [turning50Year, setTurning50Year] = useState<number | null>(initQ.turning50);
   const [batchFilter, setBatchFilter] = useState<string>(initQ.batch || "all");
   const [needsCompletionFilter, setNeedsCompletionFilter] = useState<string>(initQ.needsCompletion);
+  const [flagFilter, setFlagFilter] = useState<string>("all");
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -496,6 +503,7 @@ export default function FleetRegistry() {
   const [bulkRentalEffectiveDate, setBulkRentalEffectiveDate] = useState(todayIsoDateOnly);
   const [bulkNeedsCompletionPending, setBulkNeedsCompletionPending] = useState(false);
   const [bulkEntityPending, setBulkEntityPending] = useState(false);
+  const [bulkFlagPending, setBulkFlagPending] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 75;
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -525,7 +533,7 @@ export default function FleetRegistry() {
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter, turning50Year, batchFilter, needsCompletionFilter]);
+  }, [debouncedSearch, assignedFilter, riderFilter, olCodeFilter, statusFilter, transitFilter, entityFilter, fleetActiveFilter, turning50Year, batchFilter, needsCompletionFilter, flagFilter]);
 
   // ── Optional column visibility ─────────────────────────────────────────────
   type OptCol =
@@ -593,6 +601,7 @@ export default function FleetRegistry() {
     turning50: turning50Year || undefined,
     batch: turning50Year || batchFilter === "all" ? undefined : batchFilter,
     needs_completion: turning50Year || needsCompletionFilter === "all" ? undefined : needsCompletionFilter,
+    flag: turning50Year || carLookup || flagFilter === "all" ? undefined : flagFilter,
   };
 
   type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
@@ -732,6 +741,21 @@ export default function FleetRegistry() {
       toast({ title: "Bulk rental status update failed", description: e.message, variant: "destructive" });
     } finally {
       setBulkFleetStatusPending(false);
+    }
+  };
+
+  const bulkUpdateOpsFlag = async (ops_flag: string | null, label: string) => {
+    const ids = Array.from(selectedIds);
+    setBulkFlagPending(true);
+    try {
+      await apiRequest("POST", "/api/railcars/bulk-ops-flag", { ids, ops_flag });
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${label}` });
+      clearSelection();
+    } catch (e: any) {
+      toast({ title: "Could not set flag", description: e.message, variant: "destructive" });
+    } finally {
+      setBulkFlagPending(false);
     }
   };
 
@@ -1016,8 +1040,15 @@ export default function FleetRegistry() {
               {r.transit_status && (
                 <TransitBadge status={r.transit_status} label={r.transit_label} />
               )}
-              {r.needs_completion && <NeedsCompletionBadge />}
+                  {r.needs_completion && <NeedsCompletionBadge />}
+              {r.ops_flag && <OpsFlagBadge flag={r.ops_flag} />}
             </div>
+          </td>
+        );
+      case "flag":
+        return (
+          <td key={key} className="px-4 py-3">
+            <OpsFlagBadge flag={r.ops_flag} />
           </td>
         );
       case "lessee":
@@ -1133,6 +1164,19 @@ export default function FleetRegistry() {
               <SelectItem value="all">All rental statuses</SelectItem>
               {STATUS_FILTER_OPTIONS.map((s) => (
                 <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={flagFilter} onValueChange={setFlagFilter}>
+            <SelectTrigger className="w-[170px]" data-testid="filter-ops-flag">
+              <SelectValue placeholder="Flag" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All flags</SelectItem>
+              <SelectItem value="any">Any flag</SelectItem>
+              <SelectItem value="none">No flag</SelectItem>
+              {OPS_FLAG_PRESETS.map((p) => (
+                <SelectItem key={p} value={p}>{p}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -1362,6 +1406,47 @@ export default function FleetRegistry() {
                       {t.label}
                     </DropdownMenuItem>
                   ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={bulkFlagPending} data-testid="bulk-ops-flag-dropdown">
+                    Set Flag
+                    <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>Exception flag (does not change rental status)</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => bulkUpdateOpsFlag(null, "cleared")}>
+                    Clear flag
+                  </DropdownMenuItem>
+                  {OPS_FLAG_PRESETS.map((p) => (
+                    <DropdownMenuItem
+                      key={p}
+                      onSelect={() => {
+                        if (p === "Interchange") {
+                          const road = window.prompt("Interchange with which road? (e.g. BNSF, UP)");
+                          if (road == null) return;
+                          const value = composeOpsFlag("Interchange", road) ?? "Interchange";
+                          void bulkUpdateOpsFlag(value, `flagged ${value}`);
+                          return;
+                        }
+                        void bulkUpdateOpsFlag(p, `flagged ${p}`);
+                      }}
+                    >
+                      {p === "Interchange" ? "Interchange…" : p}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      const name = window.prompt("Custom flag name");
+                      if (!name?.trim()) return;
+                      void bulkUpdateOpsFlag(name.trim(), `flagged ${name.trim()}`);
+                    }}
+                  >
+                    Custom…
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button
@@ -1867,6 +1952,13 @@ function CarDetail({
         <div className="mt-4 rounded-md border border-zinc-500/30 bg-zinc-500/10 px-4 py-3 flex items-center gap-2">
           <InactiveFleetBadge active={false} />
           <span className="text-xs text-zinc-400">Inactive in fleet (not currently counted in Dashboard KPIs)</span>
+        </div>
+      )}
+
+      {(r as any).ops_flag && (
+        <div className="mt-4 rounded-md border border-border bg-muted/20 px-4 py-3 flex items-center gap-2">
+          <OpsFlagBadge flag={(r as any).ops_flag} />
+          <span className="text-xs text-muted-foreground">Exception flag — rental status is unchanged</span>
         </div>
       )}
 
@@ -2438,6 +2530,7 @@ function RailcarFormDialog({
     lining_material: (car as any)?.lining_material || (car as any)?.coating || "",
     notes: car?.notes ?? "",
     sold_to: (car as any)?.sold_to ?? "",
+    ops_flag: (car as any)?.ops_flag ?? "",
     nbv: (car as any)?.nbv != null ? String((car as any).nbv) : "",
     oac: (car as any)?.oac != null ? String((car as any).oac) : "",
     oec: (car as any)?.oec != null ? String((car as any).oec) : "",
@@ -2626,6 +2719,10 @@ function RailcarFormDialog({
               />
             </div>
           )}
+          <OpsFlagPicker
+            value={(form as any).ops_flag ?? ""}
+            onChange={(ops_flag) => setForm({ ...form, ops_flag })}
+          />
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Lining <span className="text-[10px] text-muted-foreground font-normal">(coating / lining material)</span></Label>
@@ -2815,6 +2912,7 @@ function useMemoReset(
         // Merge coating into lining_material
         lining_material: (car as any)?.lining_material || (car as any)?.coating || "",
         sold_to: (car as any)?.sold_to ?? "",
+        ops_flag: (car as any)?.ops_flag ?? "",
         active: (car as any)?.active ?? true,
         nbv: (car as any)?.nbv != null ? String((car as any).nbv) : "",
         oac: (car as any)?.oac != null ? String((car as any).oac) : "",

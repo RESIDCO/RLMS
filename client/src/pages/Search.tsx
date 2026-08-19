@@ -8,6 +8,7 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { FleetMembershipBadge, FleetAwareStatusBadge } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
+import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { asOne, resolveLeaseType } from "@shared/lease-type";
 import { displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ interface RailcarResult {
   lessee_name?: string | null;
   rider_external_id?: string | null;
   lease_type?: string | null;
+  ops_flag?: string | null;
   assignment: {
     id: number;
     fleet_name: string | null;
@@ -141,6 +143,7 @@ function RailcarRow({
             <EntityBadge entity={car.entity} />
             <FleetMembershipBadge active={car.active} />
             <LeaseTypeBadge carType={car.lease_type} mlaType={lease?.lease_type} />
+            {car.ops_flag ? <OpsFlagBadge flag={car.ops_flag} /> : null}
           </div>
           <div className="font-mono text-sm font-semibold text-foreground">
             {label}

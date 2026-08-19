@@ -65,6 +65,8 @@ type ProgramCar = {
   flag_tag: string | null;
   joined_date: string | null;
   exited_date: string | null;
+  completed?: boolean;
+  completed_at?: string | null;
   rider_external_id_snapshot: string | null;
   shop_id: number | null;
   scrap_yard_id: number | null;
@@ -116,6 +118,7 @@ const PD_EMPTY_COLS = new Set<string>();
 const PD_CORE = ["status", "flag", "comment", "ol_entry", "ol_now", "shop", "repair"] as const;
 const PD_LABELS: Record<string, string> = {
   car: "Car",
+  complete: "Complete",
   status: "Status",
   flag: "Flag",
   comment: "Comment",
@@ -127,6 +130,7 @@ const PD_LABELS: Record<string, string> = {
 const PD_WIDTHS: Record<string, number> = {
   _select: 36,
   car: 140,
+  complete: 84,
   status: 220,
   flag: 140,
   comment: 180,
@@ -239,11 +243,15 @@ export default function ProgramDetailPage() {
     setColWidth,
   } = useColumnPrefs(`program_cars_${Number.isFinite(id) ? id : 0}`, PD_EMPTY_COLS);
   const displayKeys = useMemo(() => {
-    const pinnedStart = canEdit ? ["_select", "car"] : ["car"];
+    const pinnedStart = canEdit ? ["_select", "car", "complete"] : ["car", "complete"];
     const movable = [...PD_CORE, ...defs.map((d) => `cf:${d.field_key}`)];
     return [...pinnedStart, ...mergeColOrder(movable, colOrder), "_actions"];
   }, [canEdit, defs, colOrder]);
-  const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "_actions");
+  const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "complete" && k !== "_actions");
+  const sortedCars = useMemo(
+    () => [...cars].sort((a, b) => Number(Boolean(a.completed)) - Number(Boolean(b.completed))),
+    [cars],
+  );
   const tableW = tableWidthFor(displayKeys, colWidths, PD_WIDTHS, 120);
   const gridW = Math.max(1100, tableW);
   const topScrollRef = useRef<HTMLDivElement>(null);
@@ -257,7 +265,7 @@ export default function ProgramDetailPage() {
   }
 
   function pdHeader(key: string) {
-    const pinned = key === "_select" || key === "car" || key === "_actions";
+    const pinned = key === "_select" || key === "car" || key === "complete" || key === "_actions";
     const cf = key.startsWith("cf:") ? defs.find((d) => `cf:${d.field_key}` === key) : null;
     const w = colWidth(colWidths, key, PD_WIDTHS[key] ?? 120);
     return (
@@ -270,6 +278,7 @@ export default function ProgramDetailPage() {
           "px-2 py-2 font-medium bg-card",
           key === "repair" ? "text-right" : "text-left",
           key === "_select" && "w-8",
+          key === "complete" && "text-center",
           key === "_actions" && "w-24",
         )}
         onResize={setColWidth}
@@ -316,6 +325,17 @@ export default function ProgramDetailPage() {
           <td key={key} className="px-2 py-1.5 font-mono whitespace-nowrap">
             {label}
             {exited && <div className="text-[10px] text-muted-foreground">Exited {String(c.exited_date).slice(0, 10)}</div>}
+          </td>
+        );
+      case "complete":
+        return (
+          <td key={key} className="px-2 py-1 text-center">
+            <Checkbox
+              checked={Boolean(c.completed)}
+              disabled={!canEdit || exited}
+              onCheckedChange={(v) => patchCar.mutate({ linkId: c.id, body: { completed: v === true } })}
+              aria-label={`Mark ${label} complete in this program`}
+            />
           </td>
         );
       case "status":
@@ -610,7 +630,11 @@ export default function ProgramDetailPage() {
                 <Checkbox checked={includeExited} onCheckedChange={(v) => setIncludeExited(v === true)} />
                 Show exited cars
               </label>
-              <span className="text-xs text-muted-foreground ml-auto">{cars.length} rows</span>
+              <span className="text-xs text-muted-foreground ml-auto">
+                {sortedCars.filter((c) => !c.completed).length} open
+                {sortedCars.some((c) => c.completed) ? ` · ${sortedCars.filter((c) => c.completed).length} complete` : ""}
+                {` · ${sortedCars.length} rows`}
+              </span>
             </div>
             {canEdit && selected.size > 0 && (
               <div className="shrink-0">
@@ -663,11 +687,12 @@ export default function ProgramDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cars.map((c) => {
+                  {sortedCars.map((c) => {
                     const label = carLabelOf(c);
                     const exited = Boolean(c.exited_date);
+                    const done = Boolean(c.completed);
                     return (
-                      <tr key={c.id} className={cn("border-t border-border/50", exited && "opacity-60")}>
+                      <tr key={c.id} className={cn("border-t border-border/50", exited && "opacity-60", done && !exited && "bg-muted/20")}>
                         {displayKeys.map((k) => pdCell(k, c, label, exited))}
                       </tr>
                     );
@@ -925,6 +950,7 @@ function BulkEditBar({
   const fieldOptions = [
     { value: "shop_id", label: "Shop" },
     { value: "status", label: "Status" },
+    { value: "completed", label: "Complete" },
     { value: "flag_tag", label: "Flag" },
     { value: "notes", label: "Comment" },
     { value: "repair_cost_total", label: "Repair $" },
@@ -940,6 +966,10 @@ function BulkEditBar({
     } else if (field === "status") {
       updates = { status: text };
       label = `Status to '${text || "—"}'`;
+    } else if (field === "completed") {
+      const on = text !== "false";
+      updates = { completed: on };
+      label = on ? "Complete" : "Not complete";
     } else if (field === "flag_tag") {
       updates = { flag_tag: text };
       label = `Flag to '${text || "—"}'`;
@@ -969,7 +999,7 @@ function BulkEditBar({
   return (
     <div className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
       <span className="text-sm font-medium">{count} selected</span>
-      <Select value={field} onValueChange={(v) => { setField(v); setText(""); }}>
+      <Select value={field} onValueChange={(v) => { setField(v); setText(v === "completed" ? "true" : ""); }}>
         <SelectTrigger className="h-8 w-40 text-xs"><SelectValue /></SelectTrigger>
         <SelectContent>
           {fieldOptions.map((f) => (
@@ -989,6 +1019,15 @@ function BulkEditBar({
           {statusOptions.map((o) => (
             <option key={o.id} value={o.value}>{o.value}</option>
           ))}
+        </select>
+      ) : field === "completed" ? (
+        <select
+          className="h-8 bg-background border border-border rounded px-2 text-xs [color-scheme:dark]"
+          value={text || "true"}
+          onChange={(e) => setText(e.target.value)}
+        >
+          <option value="true">Mark complete</option>
+          <option value="false">Clear complete</option>
         </select>
       ) : field === "flag_tag" ? (
         <input

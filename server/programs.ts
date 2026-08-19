@@ -23,11 +23,25 @@ program_documents(id)
 
 const CAR_SELECT = `
 id, program_id, railcar_id, status, notes, flag_tag, joined_date, exited_date,
-rider_external_id_snapshot, shop_id, scrap_yard_id, repair_cost_total, custom_fields, added_at,
+completed, completed_at, rider_external_id_snapshot, shop_id, scrap_yard_id, repair_cost_total, custom_fields, added_at,
 railcar:railcars(id, car_number, reporting_marks, car_type, status, entity, active, rider_external_id, lessee_name),
 shop:shops(id, name, location),
 scrap_yard:scrap_yards(id, name, location)
 `.replace(/\s+/g, " ").trim();
+
+const CAR_SELECT_NO_COMPLETED = CAR_SELECT.replace("completed, completed_at, ", "");
+const COMPLETE_CF = "__complete";
+
+function missingCompletedColumn(err: unknown) {
+  const msg = String((err as any)?.message ?? err ?? "");
+  return /completed/i.test(msg) && /column|schema cache|does not exist|could not find/i.test(msg);
+}
+
+function isCarCompleted(row: any): boolean {
+  if (row?.completed === true || row?.completed === "true") return true;
+  const cf = row?.custom_fields;
+  return Boolean(cf && typeof cf === "object" && (cf as any)[COMPLETE_CF]);
+}
 
 export async function logProgramActivity(row: {
   program_id: number;
@@ -110,23 +124,35 @@ export async function getProgram(id: number) {
 }
 
 export async function listProgramCars(programId: number, includeExited: boolean) {
-  let q = supabaseAdmin
-    .from("program_cars")
-    .select(CAR_SELECT)
-    .eq("program_id", programId)
-    .order("joined_date", { ascending: true })
-    .order("id", { ascending: true });
-  if (!includeExited) q = q.is("exited_date", null);
-  const { data, error } = await q;
+  async function run(select: string) {
+    let q = supabaseAdmin
+      .from("program_cars")
+      .select(select)
+      .eq("program_id", programId)
+      .order("joined_date", { ascending: true })
+      .order("id", { ascending: true });
+    if (!includeExited) q = q.is("exited_date", null);
+    return q;
+  }
+  let { data, error } = await run(CAR_SELECT);
+  if (error && missingCompletedColumn(error)) {
+    ({ data, error } = await run(CAR_SELECT_NO_COMPLETED));
+  }
   if (error) throw error;
-  return (data ?? []).map((row: any) => ({
-    ...row,
-    railcar: Array.isArray(row.railcar) ? row.railcar[0] ?? null : row.railcar,
-    shop: Array.isArray(row.shop) ? row.shop[0] ?? null : row.shop,
-    scrap_yard: Array.isArray(row.scrap_yard) ? row.scrap_yard[0] ?? null : row.scrap_yard,
-    custom_fields: row.custom_fields && typeof row.custom_fields === "object" ? row.custom_fields : {},
-    doc_count: 0,
-  }));
+  return (data ?? [])
+    .map((row: any) => {
+      const custom_fields = row.custom_fields && typeof row.custom_fields === "object" ? row.custom_fields : {};
+      return {
+        ...row,
+        completed: isCarCompleted({ ...row, custom_fields }),
+        railcar: Array.isArray(row.railcar) ? row.railcar[0] ?? null : row.railcar,
+        shop: Array.isArray(row.shop) ? row.shop[0] ?? null : row.shop,
+        scrap_yard: Array.isArray(row.scrap_yard) ? row.scrap_yard[0] ?? null : row.scrap_yard,
+        custom_fields,
+        doc_count: 0,
+      };
+    })
+    .sort((a, b) => Number(Boolean(a.completed)) - Number(Boolean(b.completed)));
 }
 
 async function attachDocCounts(rows: any[]) {
@@ -232,12 +258,14 @@ export async function exitCarFromProgram(programId: number, linkId: number, acto
 }
 
 function mapProgramCarRow(data: any) {
+  const custom_fields = data.custom_fields && typeof data.custom_fields === "object" ? data.custom_fields : {};
   return {
     ...data,
+    completed: isCarCompleted({ ...data, custom_fields }),
     railcar: Array.isArray(data.railcar) ? data.railcar[0] ?? null : data.railcar,
     shop: Array.isArray(data.shop) ? data.shop[0] ?? null : data.shop,
     scrap_yard: Array.isArray(data.scrap_yard) ? data.scrap_yard[0] ?? null : data.scrap_yard,
-    custom_fields: data.custom_fields && typeof data.custom_fields === "object" ? data.custom_fields : {},
+    custom_fields,
   };
 }
 
@@ -259,6 +287,13 @@ export async function patchProgramCar(
   if (body.status !== undefined) updates.status = body.status === "" ? null : String(body.status);
   if (body.notes !== undefined) updates.notes = body.notes === "" ? null : body.notes;
   if (body.flag_tag !== undefined) updates.flag_tag = body.flag_tag === "" ? null : String(body.flag_tag);
+  if (body.completed !== undefined) {
+    const on = body.completed === true || body.completed === "true" || body.completed === 1 || body.completed === "1";
+    updates.completed = on;
+    updates.completed_at = on ? new Date().toISOString() : null;
+    const prev = existing.custom_fields && typeof existing.custom_fields === "object" ? existing.custom_fields : {};
+    updates.custom_fields = { ...prev, [COMPLETE_CF]: on };
+  }
   if (body.shop_id !== undefined) updates.shop_id = body.shop_id === "" || body.shop_id == null ? null : Number(body.shop_id);
   if (body.scrap_yard_id !== undefined) {
     updates.scrap_yard_id = body.scrap_yard_id === "" || body.scrap_yard_id == null ? null : Number(body.scrap_yard_id);
@@ -268,16 +303,24 @@ export async function patchProgramCar(
     updates.repair_cost_total = n != null && Number.isFinite(n) ? n : null;
   }
   if (body.custom_fields && typeof body.custom_fields === "object") {
-    const prev = existing.custom_fields && typeof existing.custom_fields === "object" ? existing.custom_fields : {};
+    const prev =
+      (updates.custom_fields && typeof updates.custom_fields === "object"
+        ? updates.custom_fields
+        : existing.custom_fields && typeof existing.custom_fields === "object"
+          ? existing.custom_fields
+          : {}) as Record<string, unknown>;
     updates.custom_fields = { ...prev, ...(body.custom_fields as object) };
   }
   if (!Object.keys(updates).length) return existing;
-  const { data, error } = await supabaseAdmin
-    .from("program_cars")
-    .update(updates)
-    .eq("id", linkId)
-    .select(CAR_SELECT)
-    .single();
+  const runUpdate = (cols: Record<string, unknown>, select: string) =>
+    supabaseAdmin.from("program_cars").update(cols).eq("id", linkId).select(select).single();
+  let { data, error } = await runUpdate(updates, CAR_SELECT);
+  if (error && missingCompletedColumn(error) && (updates.completed !== undefined || updates.completed_at !== undefined)) {
+    const fallback = { ...updates };
+    delete fallback.completed;
+    delete fallback.completed_at;
+    ({ data, error } = await runUpdate(fallback, CAR_SELECT_NO_COMPLETED));
+  }
   if (error) throw error;
   if (updates.status !== undefined) {
     const from = existing.status ?? null;
@@ -292,6 +335,16 @@ export async function patchProgramCar(
         detail: { from, to },
       });
     }
+  }
+  if (updates.completed !== undefined && Boolean(existing.completed) !== Boolean(updates.completed)) {
+    await logProgramActivity({
+      program_id: programId,
+      action: updates.completed ? "car_completed" : "car_reopened",
+      actor,
+      program_car_id: linkId,
+      railcar_id: existing.railcar_id,
+      detail: { completed: updates.completed },
+    });
   }
   await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", programId);
   return mapProgramCarRow(data);
@@ -518,6 +571,7 @@ function coreCarColumns() {
     { key: "marks", label: "Reporting marks" },
     { key: "car_number", label: "Car number" },
     { key: "status", label: "Status" },
+    { key: "completed", label: "Complete" },
     { key: "flag_tag", label: "Flag" },
     { key: "notes", label: "Notes" },
     { key: "joined_date", label: "Joined" },
@@ -538,6 +592,8 @@ function carExportValue(row: any, key: string): string {
       return r.car_number ?? "";
     case "status":
       return row.status ?? "";
+    case "completed":
+      return isCarCompleted(row) ? "Yes" : "";
     case "flag_tag":
       return row.flag_tag ?? "";
     case "notes":

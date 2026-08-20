@@ -38,11 +38,8 @@ export function readInitialSearchQuery(): string {
 
 export function persistSearchQuery(q: string) {
   const path = searchPagePath(q);
-  window.history.replaceState(
-    null,
-    "",
-    `${window.location.pathname}${window.location.search}#${path}`,
-  );
+  // Pathname only — never keep a leaked document ?restore=1 from a bad hash navigate.
+  window.history.replaceState(null, "", `${window.location.pathname}#${path}`);
 }
 
 /** Cached Search page state so car click-through can return without re-running the API. */

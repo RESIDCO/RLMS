@@ -148,21 +148,35 @@ export function parseCarPasteList(raw: string): string[] {
     out.push(t);
   }
 
-  // Comma / semicolon / newline / tab separate cars. Spaces inside a record pair
-  // MARK + NUMBER (e.g. "TFOX 901745") into one unit before a bare-number fallback.
-  for (const record of String(raw ?? "").split(/[\n\r,;\t]+/)) {
-    const words = record.trim().split(/\s+/).filter(Boolean);
-    for (let i = 0; i < words.length; i++) {
-      const w = words[i];
-      const next = words[i + 1];
-      const isMark = /^[A-Za-z]{2,8}$/.test(w);
-      const nextIsNum = next != null && /^\d/.test(next);
-      if (isMark && nextIsNum) {
-        push(`${w} ${next}`);
-        i += 1;
-        continue;
+  // Newlines separate rows (Excel paste). Tabs are mark/number columns, not car breaks.
+  // Commas / semicolons on one line separate cars; a mark on that line scopes following bare numbers.
+  for (const line of String(raw ?? "").split(/[\n\r]+/)) {
+    if (!line.trim()) continue;
+    const normalized = line.replace(/\t+/g, " ");
+    let lineMark: string | null = null;
+    for (const segment of normalized.split(/[,;]+/)) {
+      const words = segment.trim().split(/\s+/).filter(Boolean);
+      for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        const next = words[i + 1];
+        const isMark = /^[A-Za-z]{2,8}$/.test(w);
+        const nextIsNum = next != null && /^\d/.test(next);
+        if (isMark && nextIsNum) {
+          lineMark = w.toUpperCase();
+          push(`${w} ${next}`);
+          i += 1;
+          continue;
+        }
+        if (isMark) {
+          lineMark = w.toUpperCase();
+          continue;
+        }
+        if (/^\d/.test(w) && lineMark) {
+          push(`${lineMark} ${w}`);
+          continue;
+        }
+        push(w);
       }
-      push(w);
     }
   }
   return out;

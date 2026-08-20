@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Search as SearchIcon, Train, FileText, BookOpen, Building2, Loader2, X, Pencil, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
@@ -29,6 +28,7 @@ import {
   shouldRestoreSearchSession,
 } from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
+import { useState, useRef, useEffect, useMemo } from "react";
 
 interface MasterLease {
   id: number;
@@ -164,12 +164,10 @@ function carLabel(car: RailcarResult) {
 
 function RailcarRow({
   car,
-  onOpen,
   onEdit,
   onHistory,
 }: {
   car: RailcarResult;
-  onOpen: () => void;
   onEdit: () => void;
   onHistory: () => void;
 }) {
@@ -179,10 +177,10 @@ function RailcarRow({
   const label = carLabel(car);
   return (
     <div className="flex items-start gap-3 py-3 border-b border-border/40 last:border-0 hover:bg-muted/30">
-      <button
-        type="button"
-        onClick={onOpen}
+      <Link
+        href={carPath(car.id)}
         className="flex-1 min-w-0 flex items-start gap-4 text-left"
+        data-testid={`link-search-car-${car.id}`}
       >
         <div className="min-w-[140px]">
           <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
@@ -222,7 +220,7 @@ function RailcarRow({
         <div className="shrink-0">
           <FleetAwareStatusBadge car={displayStatusInputFromRailcar(car as any)} />
         </div>
-      </button>
+      </Link>
       <div className="shrink-0 flex items-center gap-0.5 pt-0.5">
         <Button
           type="button"
@@ -231,7 +229,11 @@ function RailcarRow({
           className="h-8 w-8"
           aria-label={`Edit ${label}`}
           data-testid={`button-search-edit-${car.id}`}
-          onClick={onEdit}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onEdit();
+          }}
         >
           <Pencil className="h-3.5 w-3.5" />
         </Button>
@@ -242,7 +244,11 @@ function RailcarRow({
           className="h-8 w-8"
           aria-label={`View history for ${label}`}
           data-testid={`button-search-history-${car.id}`}
-          onClick={onHistory}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onHistory();
+          }}
         >
           <History className="h-3.5 w-3.5" />
         </Button>
@@ -514,7 +520,7 @@ export default function SearchPage() {
         <div className="font-eyebrow mb-1.5">RLMS</div>
         <h1 className="font-serif text-2xl font-semibold tracking-tight">Search</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Press Enter or Search. Paste a column of cars from Excel — one per line, commas, or MARK + number.
+          Press Enter or Search. Paste a column of cars from Excel — one per line (MARK + number, or tab-separated columns), commas, or a mark followed by a list of numbers.
         </p>
       </div>
 
@@ -706,7 +712,6 @@ export default function SearchPage() {
                   <RailcarRow
                     key={car.id}
                     car={car}
-                    onOpen={() => navigate(carPath(car.id))}
                     onEdit={() => setEditCarId(car.id)}
                     onHistory={() => openAppTab(historyPath(carLabel(car)))}
                   />

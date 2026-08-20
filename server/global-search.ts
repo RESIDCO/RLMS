@@ -1,4 +1,4 @@
-import { displayLeaseNumber } from "@shared/residco-import";
+import { displayLeaseNumber, splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag } from "@shared/ops-flag";
 import { carListSearchTokens } from "@shared/programs";
@@ -241,11 +241,18 @@ async function runCarListSearch(raw: string, tokens: string[]): Promise<GlobalSe
     orderedIds.push(id);
   };
   for (const m of resolved.matched) pushId(m.railcar_id);
+  // Bare numbers may match several marks — keep them all. Mark-scoped tokens must not fan out.
   for (const a of resolved.ambiguous) {
+    if (splitCarNumber(a.token).reporting_marks) continue;
     for (const m of a.matches) pushId(m.railcar_id);
   }
   const railcars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds));
-  const not_found = resolved.not_found.map((n) => n.token);
+  const not_found = [
+    ...resolved.not_found.map((n) => n.token),
+    ...resolved.ambiguous
+      .filter((a) => Boolean(splitCarNumber(a.token).reporting_marks))
+      .map((a) => a.token),
+  ];
   return {
     query: raw,
     terms: capped,

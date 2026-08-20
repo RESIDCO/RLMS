@@ -1818,16 +1818,19 @@ export function RailcarDetailSheet({
   );
 }
 
-function CarDetail({
+export function CarDetail({
   carId,
   onEdit,
   onDelete,
   canEdit,
+  showCarPageLink = true,
 }: {
   carId: number;
   onEdit: (car: RailcarWithAssignment) => void;
   onDelete: () => void;
   canEdit: boolean;
+  /** Hide when already on `#/cars/:id`. */
+  showCarPageLink?: boolean;
 }) {
   const { toast } = useToast();
   const [remarkOpen, setRemarkOpen] = useState(false);
@@ -1925,16 +1928,18 @@ function CarDetail({
 
   return (
     <div>
-      <SheetHeader>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-eyebrow">Railcar Detail</span>
-          <EntityBadge entity={(r as any).entity} size="lg" />
-        </div>
-        <SheetTitle className="font-mono-num">{[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}</SheetTitle>
-        <SheetDescription>
-          {r.car_type ?? "—"}{(r as any).mechanical_designation ? ` · ${(r as any).mechanical_designation}` : ""}
-        </SheetDescription>
-      </SheetHeader>
+      {showCarPageLink ? (
+        <SheetHeader>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-eyebrow">Railcar Detail</span>
+            <EntityBadge entity={(r as any).entity} size="lg" />
+          </div>
+          <SheetTitle className="font-mono-num">{[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}</SheetTitle>
+          <SheetDescription>
+            {r.car_type ?? "—"}{(r as any).mechanical_designation ? ` · ${(r as any).mechanical_designation}` : ""}
+          </SheetDescription>
+        </SheetHeader>
+      ) : null}
 
       {/* Sold banner */}
       {(r as any).sold_to && (
@@ -1983,10 +1988,12 @@ function CarDetail({
       )}
 
       <div className="flex gap-2 mt-4 flex-wrap">
-        <Button size="sm" variant="outline" onClick={() => openAppTab(carPath(r.id))} data-testid="button-open-car-page">
-          <ExternalLink className="h-3.5 w-3.5" />
-          Car page
-        </Button>
+        {showCarPageLink && (
+          <Button size="sm" variant="outline" onClick={() => openAppTab(carPath(r.id))} data-testid="button-open-car-page">
+            <ExternalLink className="h-3.5 w-3.5" />
+            Car page
+          </Button>
+        )}
         {canEdit && (
           <Button size="sm" variant="secondary" onClick={() => onEdit(data.railcar)} data-testid="button-edit-car">
             <Pencil className="h-4 w-4" />
@@ -2502,7 +2509,7 @@ function DetailRow({ label, value }: { label: string; value: any }) {
   );
 }
 
-function RailcarFormDialog({
+export function RailcarFormDialog({
   open,
   onClose,
   car,

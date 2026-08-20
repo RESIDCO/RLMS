@@ -13,7 +13,7 @@ import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { asOne } from "@shared/lease-type";
-import { ChevronRight, Calculator } from "lucide-react";
+import { ChevronRight, Calculator, ArrowLeft } from "lucide-react";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import {
   ENTITY_SLUGS,
@@ -27,6 +27,7 @@ import {
   turning50OlPath,
   turning50Path,
 } from "@/lib/browse-nav";
+import { hasSearchSession, searchReturnPath } from "@/lib/search-query";
 
 type DetailPayload = {
   railcar: any;
@@ -107,6 +108,8 @@ export default function CarDetailPage() {
   }
   crumbs.push({ label: mark });
 
+  const searchBackHref = hasSearchSession() ? searchReturnPath() : null;
+
   const build =
     (r?.build_date && String(r.build_date).slice(0, 10)) ||
     (r?.build_year != null ? String(r.build_year) : r?.built_year != null ? String(r.built_year) : null);
@@ -131,6 +134,18 @@ export default function CarDetailPage() {
         }
       />
       <div className="px-4 sm:px-8 py-5 max-w-5xl">
+        {searchBackHref && (
+          <div className="mb-3">
+            <Link
+              href={searchBackHref}
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
+              data-testid="link-back-to-search"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to search results
+            </Link>
+          </div>
+        )}
         <nav className="flex items-center gap-1.5 flex-wrap mb-5" aria-label="Breadcrumb">
           {crumbs.map((it, i) => (
             <span key={`${it.label}-${i}`} className="flex items-center gap-1.5">

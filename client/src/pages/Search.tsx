@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { carPath, lesseePath, olPath, olKeyFromLabel, historyPath, openAppTab } from "@/lib/browse-nav";
-import { persistSearchQuery, readInitialSearchQuery } from "@/lib/search-query";
+import { persistSearchQuery, readInitialSearchQuery, readSearchSession, saveSearchSession, clearSearchSession } from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 
 interface MasterLease {
@@ -341,6 +341,20 @@ export default function SearchPage() {
 
   useEffect(() => {
     const q = readInitialSearchQuery();
+    const session = readSearchSession();
+    if (q && session?.query === q && session.results) {
+      setQuery(session.query);
+      setCommitted(session.query);
+      setResults(session.results as SearchResults);
+      const f = session.filters;
+      if (f) {
+        setActiveFilter(f.active ?? "active");
+        setRentalFilter(f.rental ?? "all");
+        setLesseeFilter(f.lessee ?? "all");
+        setOlFilter(f.ol ?? "all");
+      }
+      return;
+    }
     if (q) {
       setQuery(q);
       runSearch(q);
@@ -348,11 +362,26 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!results || !committed) return;
+    saveSearchSession({
+      query: committed,
+      results,
+      filters: {
+        active: activeFilter,
+        rental: rentalFilter,
+        lessee: lesseeFilter,
+        ol: olFilter,
+      },
+    });
+  }, [results, committed, activeFilter, rentalFilter, lesseeFilter, olFilter]);
+
   async function runSearch(q: string) {
     const trimmed = q.trim();
     if (!trimmed) {
       setResults(null);
       setCommitted("");
+      clearSearchSession();
       return;
     }
     setLoading(true);
@@ -388,6 +417,7 @@ export default function SearchPage() {
     setError(null);
     setLesseeFilter("all");
     setOlFilter("all");
+    clearSearchSession();
     inputRef.current?.focus();
   }
 

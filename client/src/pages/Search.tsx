@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Search as SearchIcon, Train, FileText, BookOpen, Building2, Loader2, X, Pencil, History } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,8 +10,15 @@ import { FleetMembershipBadge, FleetAwareStatusBadge } from "@/components/Inacti
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { asOne, resolveLeaseType } from "@shared/lease-type";
-import { displayStatusInputFromRailcar } from "@shared/fleet-status";
+import { displayRailcarStatus, displayStatusInputFromRailcar, FLEET_STATUSES } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { carPath, lesseePath, olPath, olKeyFromLabel, historyPath, openAppTab } from "@/lib/browse-nav";
 import { persistSearchQuery, readInitialSearchQuery } from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
@@ -41,6 +48,7 @@ interface RailcarResult {
   reporting_marks: string | null;
   car_type: string | null;
   status: string | null;
+  fleet_status?: string | null;
   entity: string | null;
   active?: boolean | null;
   mechanical_designation: string | null;
@@ -68,6 +76,37 @@ interface RailcarResult {
       } | null;
     } | null;
   } | null;
+}
+
+function carLessee(car: RailcarResult): string {
+  return String(
+    car.lessee_name ||
+      car.assignment?.fleet_name ||
+      car.assignment?.rider?.master_lease?.lessee ||
+      ""
+  ).trim();
+}
+
+function carOl(car: RailcarResult): string {
+  return String(car.rider_external_id || car.assignment?.rider?.rider_name || "").trim();
+}
+
+function carMatchesSearchFilters(
+  car: RailcarResult,
+  active: "active" | "inactive" | "all",
+  rental: string,
+  lessee: string,
+  ol: string
+): boolean {
+  if (active === "active" && car.active === false) return false;
+  if (active === "inactive" && car.active !== false) return false;
+  if (rental !== "all") {
+    const status = displayRailcarStatus(displayStatusInputFromRailcar(car as any));
+    if (status !== rental) return false;
+  }
+  if (lessee !== "all" && carLessee(car) !== lessee) return false;
+  if (ol !== "all" && carOl(car) !== ol) return false;
+  return true;
 }
 
 interface SearchResults {
@@ -290,6 +329,10 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editCarId, setEditCarId] = useState<number | null>(null);
+  const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
+  const [rentalFilter, setRentalFilter] = useState<string>("all");
+  const [lesseeFilter, setLesseeFilter] = useState<string>("all");
+  const [olFilter, setOlFilter] = useState<string>("all");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -322,6 +365,8 @@ export default function SearchPage() {
       const data: SearchResults = await res.json();
       setResults(data);
       setCommitted(trimmed);
+      setLesseeFilter("all");
+      setOlFilter("all");
     } catch (e: any) {
       setError(e.message ?? "Search failed");
     } finally {
@@ -341,10 +386,40 @@ export default function SearchPage() {
     setResults(null);
     setCommitted("");
     setError(null);
+    setLesseeFilter("all");
+    setOlFilter("all");
     inputRef.current?.focus();
   }
 
   const parsedCars = carListSearchTokens(query);
+
+  const filterOptions = useMemo(() => {
+    const cars = results?.railcars ?? [];
+    const lessees = new Set<string>();
+    const ols = new Set<string>();
+    for (const car of cars) {
+      const lessee = carLessee(car);
+      if (lessee) lessees.add(lessee);
+      const ol = carOl(car);
+      if (ol) ols.add(ol);
+    }
+    return {
+      lessees: [...lessees].sort((a, b) => a.localeCompare(b)),
+      ols: [...ols].sort((a, b) => a.localeCompare(b)),
+    };
+  }, [results]);
+
+  const filteredCars = useMemo(() => {
+    const cars = results?.railcars ?? [];
+    return cars.filter((car) =>
+      carMatchesSearchFilters(car, activeFilter, rentalFilter, lesseeFilter, olFilter)
+    );
+  }, [results, activeFilter, rentalFilter, lesseeFilter, olFilter]);
+
+  const filtersNarrowed =
+    activeFilter !== "all" || rentalFilter !== "all" || lesseeFilter !== "all" || olFilter !== "all";
+  const hiddenCount = (results?.railcars.length ?? 0) - filteredCars.length;
+
   const lesseeNames: string[] = [];
   const seenLessee: Record<string, true> = {};
   const addLessee = (name: string | null | undefined) => {
@@ -354,15 +429,14 @@ export default function SearchPage() {
     lesseeNames.push(n);
   };
   for (const l of results?.leases ?? []) addLessee(l.lessee);
-  for (const c of results?.railcars ?? []) {
-    addLessee(c.lessee_name || c.assignment?.fleet_name || c.assignment?.rider?.master_lease?.lessee);
-  }
+  for (const c of filteredCars) addLessee(carLessee(c));
 
   const missing = results?.not_found ?? [];
   const pasteCount = committed ? carListSearchTokens(committed)?.length ?? 0 : 0;
   const committedLabel = pasteCount > 1 ? `${pasteCount} cars` : `"${committed}"`;
   const hasResults = results && (results.counts.total > 0 || missing.length > 0);
   const noResults = results && results.counts.total === 0 && missing.length === 0;
+  const noFilteredCars = hasResults && filteredCars.length === 0 && (results?.railcars.length ?? 0) > 0;
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -457,8 +531,72 @@ export default function SearchPage() {
 
       {hasResults && !loading && (
         <div className="mt-6 space-y-8">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={activeFilter} onValueChange={(v) => setActiveFilter(v as "active" | "inactive" | "all")}>
+              <SelectTrigger className="w-[150px]" data-testid="search-filter-active">
+                <SelectValue placeholder="Active / inactive" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active cars</SelectItem>
+                <SelectItem value="inactive">Inactive cars</SelectItem>
+                <SelectItem value="all">All cars</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={rentalFilter} onValueChange={setRentalFilter}>
+              <SelectTrigger className="w-[170px]" data-testid="search-filter-rental">
+                <SelectValue placeholder="Rental status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All rental statuses</SelectItem>
+                {FLEET_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={lesseeFilter} onValueChange={setLesseeFilter}>
+              <SelectTrigger className="w-[200px]" data-testid="search-filter-lessee">
+                <SelectValue placeholder="Lessee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All lessees</SelectItem>
+                {filterOptions.lessees.map((name) => (
+                  <SelectItem key={name} value={name}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={olFilter} onValueChange={setOlFilter}>
+              <SelectTrigger className="w-[180px]" data-testid="search-filter-ol">
+                <SelectValue placeholder="Rider / OL" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All riders / OLs</SelectItem>
+                {filterOptions.ols.map((name) => (
+                  <SelectItem key={name} value={name}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {filtersNarrowed && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-9 text-xs"
+                onClick={() => {
+                  setActiveFilter("active");
+                  setRentalFilter("all");
+                  setLesseeFilter("all");
+                  setOlFilter("all");
+                }}
+                data-testid="search-filter-reset"
+              >
+                Reset filters
+              </Button>
+            )}
+          </div>
+
           <div className="text-xs text-muted-foreground">
-            {results.railcars.length} car{results.railcars.length !== 1 ? "s" : ""}
+            {filteredCars.length} car{filteredCars.length !== 1 ? "s" : ""}
+            {hiddenCount > 0 ? ` shown · ${hiddenCount} hidden by filters` : ""}
             {missing.length > 0 ? ` · ${missing.length} not in fleet` : ""}
             {" for "}
             <span className="text-foreground font-medium">{committedLabel}</span>
@@ -471,11 +609,30 @@ export default function SearchPage() {
             </div>
           )}
 
-          {results.railcars.length > 0 && (
+          {noFilteredCars && (
+            <div className="rounded-lg border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+              No cars match these filters.
+              {" "}
+              <button
+                type="button"
+                className="text-foreground underline-offset-2 hover:underline"
+                onClick={() => {
+                  setActiveFilter("all");
+                  setRentalFilter("all");
+                  setLesseeFilter("all");
+                  setOlFilter("all");
+                }}
+              >
+                Show all {results?.railcars.length ?? 0} matches
+              </button>
+            </div>
+          )}
+
+          {filteredCars.length > 0 && (
             <section>
-              <SectionHeader icon={Train} label="Railcars" count={results.railcars.length} />
+              <SectionHeader icon={Train} label="Railcars" count={filteredCars.length} />
               <div className="rounded-lg border border-border bg-card px-4">
-                {results.railcars.map((car) => (
+                {filteredCars.map((car) => (
                   <RailcarRow
                     key={car.id}
                     car={car}

@@ -130,18 +130,21 @@ export default function CarDetailPage() {
       <div className="px-4 sm:px-8 py-5 max-w-5xl">
         {searchBackPath && (
           <div className="mb-3">
-            <a
-              href={`#${searchBackPath}`}
+            <button
+              type="button"
               className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
               data-testid="link-back-to-search"
-              onClick={(e) => {
-                e.preventDefault();
-                navigate(searchBackPath);
+              onClick={() => {
+                // Hash router: set the hash directly. A plain <a href="/search?restore=1">
+                // (or "#/search?restore=1") gets re-split by the browser into
+                // /?restore=1#/search, which drops restore from the SPA route.
+                const path = searchBackPath.startsWith("/") ? searchBackPath : `/${searchBackPath}`;
+                window.location.hash = path;
               }}
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               Back to search results
-            </a>
+            </button>
           </div>
         )}
         <nav className="flex items-center gap-1.5 flex-wrap mb-5" aria-label="Breadcrumb">

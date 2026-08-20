@@ -20,7 +20,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { carPath, lesseePath, olPath, olKeyFromLabel, historyPath, openAppTab } from "@/lib/browse-nav";
-import { persistSearchQuery, readInitialSearchQuery, readSearchSession, saveSearchSession, clearSearchSession } from "@/lib/search-query";
+import {
+  persistSearchQuery,
+  readInitialSearchQuery,
+  readSearchSession,
+  saveSearchSession,
+  clearSearchSession,
+  shouldRestoreSearchSession,
+} from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 
 interface MasterLease {
@@ -342,7 +349,9 @@ export default function SearchPage() {
   useEffect(() => {
     const q = readInitialSearchQuery();
     const session = readSearchSession();
-    if (q && session?.query === q && session.results) {
+    const wantRestore = shouldRestoreSearchSession();
+
+    if (session?.results && (wantRestore || (q && session.query === q))) {
       setQuery(session.query);
       setCommitted(session.query);
       setResults(session.results as SearchResults);
@@ -353,6 +362,8 @@ export default function SearchPage() {
         setLesseeFilter(f.lessee ?? "all");
         setOlFilter(f.ol ?? "all");
       }
+      // Put a stable URL back without remounting / re-searching.
+      persistSearchQuery(session.query);
       return;
     }
     if (q) {
@@ -427,7 +438,14 @@ export default function SearchPage() {
     const cars = results?.railcars ?? [];
     const lessees = new Set<string>();
     const ols = new Set<string>();
+    const rentals = new Set<string>();
+    let hasActive = false;
+    let hasInactive = false;
     for (const car of cars) {
+      if (car.active === false) hasInactive = true;
+      else hasActive = true;
+      const status = displayRailcarStatus(displayStatusInputFromRailcar(car as any));
+      if (status && status !== "—") rentals.add(status);
       const lessee = carLessee(car);
       if (lessee) lessees.add(lessee);
       const ol = carOl(car);
@@ -436,8 +454,30 @@ export default function SearchPage() {
     return {
       lessees: [...lessees].sort((a, b) => a.localeCompare(b)),
       ols: [...ols].sort((a, b) => a.localeCompare(b)),
+      rentals: FLEET_STATUSES.filter((s) => rentals.has(s)),
+      hasActive,
+      hasInactive,
     };
   }, [results]);
+
+  // Drop filter values that no longer exist in this result set (e.g. after restore).
+  useEffect(() => {
+    if (!results) return;
+    if (activeFilter === "active" && !filterOptions.hasActive) {
+      setActiveFilter(filterOptions.hasInactive ? "inactive" : "all");
+    } else if (activeFilter === "inactive" && !filterOptions.hasInactive) {
+      setActiveFilter(filterOptions.hasActive ? "active" : "all");
+    }
+    if (lesseeFilter !== "all" && !filterOptions.lessees.includes(lesseeFilter)) {
+      setLesseeFilter("all");
+    }
+    if (olFilter !== "all" && !filterOptions.ols.includes(olFilter)) {
+      setOlFilter("all");
+    }
+    if (rentalFilter !== "all" && !filterOptions.rentals.includes(rentalFilter as (typeof FLEET_STATUSES)[number])) {
+      setRentalFilter("all");
+    }
+  }, [results, filterOptions, activeFilter, lesseeFilter, olFilter, rentalFilter]);
 
   const filteredCars = useMemo(() => {
     const cars = results?.railcars ?? [];
@@ -567,9 +607,9 @@ export default function SearchPage() {
                 <SelectValue placeholder="Active / inactive" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="active">Active cars</SelectItem>
-                <SelectItem value="inactive">Inactive cars</SelectItem>
                 <SelectItem value="all">All cars</SelectItem>
+                {filterOptions.hasActive ? <SelectItem value="active">Active cars</SelectItem> : null}
+                {filterOptions.hasInactive ? <SelectItem value="inactive">Inactive cars</SelectItem> : null}
               </SelectContent>
             </Select>
             <Select value={rentalFilter} onValueChange={setRentalFilter}>
@@ -578,7 +618,7 @@ export default function SearchPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All rental statuses</SelectItem>
-                {FLEET_STATUSES.map((s) => (
+                {filterOptions.rentals.map((s) => (
                   <SelectItem key={s} value={s}>{s}</SelectItem>
                 ))}
               </SelectContent>
@@ -588,7 +628,7 @@ export default function SearchPage() {
                 <SelectValue placeholder="Lessee" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All lessees</SelectItem>
+                <SelectItem value="all">All lessees in results</SelectItem>
                 {filterOptions.lessees.map((name) => (
                   <SelectItem key={name} value={name}>{name}</SelectItem>
                 ))}
@@ -599,7 +639,7 @@ export default function SearchPage() {
                 <SelectValue placeholder="Rider / OL" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All riders / OLs</SelectItem>
+                <SelectItem value="all">All riders / OLs in results</SelectItem>
                 {filterOptions.ols.map((name) => (
                   <SelectItem key={name} value={name}>{name}</SelectItem>
                 ))}

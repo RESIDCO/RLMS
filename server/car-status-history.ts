@@ -23,6 +23,31 @@ async function createdByLabel(userId: string): Promise<string> {
 }
 
 /**
+ * Keep the current open assignment_history period's ACTIVE in sync with railcars.active
+ * so v_valid_export_rows / V_Valid export reflect guarded Inactive flips.
+ * Does not touch start_date / end_date / rider / labels.
+ */
+export async function syncCurrentAssignmentHistoryActive(
+  railcarId: number,
+  active: boolean,
+): Promise<void> {
+  const { data: openRows, error } = await supabaseAdmin
+    .from("assignment_history")
+    .select("id, start_date")
+    .eq("railcar_id", railcarId)
+    .is("end_date", null)
+    .order("start_date", { ascending: false });
+  if (error) throw error;
+  if (!openRows?.length) return;
+  const targetId = openRows[0].id;
+  const { error: uErr } = await supabaseAdmin
+    .from("assignment_history")
+    .update({ active })
+    .eq("id", targetId);
+  if (uErr) throw uErr;
+}
+
+/**
  * Apply Car Status to one or more cars.
  * Crossing the Inactive boundary requires a non-empty reason and writes history;
  * other status changes only update railcars.status (legacy behavior).
@@ -92,6 +117,7 @@ export async function applyCarStatusChange(opts: {
     updated += 1;
 
     if (crosses) {
+      await syncCurrentAssignmentHistoryActive(id, patch.active);
       historyRows.push({
         car_id: id,
         event_type: inactiveBoundaryEventType(toStatus),

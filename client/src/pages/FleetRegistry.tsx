@@ -847,6 +847,12 @@ export default function FleetRegistry() {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
+      queryClient.invalidateQueries({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) &&
+          (String(q.queryKey[0] ?? "").startsWith("/api/car-status-history") ||
+            q.queryKey[0] === "/api/railcars"),
+      });
       toast({ title: `${n} car${n !== 1 ? "s" : ""} updated to "${newStatus}"` });
       clearSelection();
     } catch (e: any) {
@@ -1408,10 +1414,17 @@ export default function FleetRegistry() {
                     <ChevronDown className="ml-1 h-3.5 w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
+                <DropdownMenuContent align="start" className="max-h-[360px] overflow-y-auto">
                   <DropdownMenuLabel>Change car status for selected cars</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {STATUS_EDIT_OPTIONS.map((s) => (
+                  <DropdownMenuItem
+                    data-testid="bulk-status-inactive"
+                    onSelect={() => bulkUpdateStatus("Inactive")}
+                  >
+                    Inactive
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {STATUS_EDIT_OPTIONS.filter((s) => s.value !== "Inactive").map((s) => (
                     <DropdownMenuItem key={s.value} onSelect={() => bulkUpdateStatus(s.value)}>
                       {s.label}
                     </DropdownMenuItem>
@@ -2683,7 +2696,16 @@ export function RailcarFormDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/car-status-history"] });
+      if (car?.id) {
+        queryClient.invalidateQueries({ queryKey: ["/api/railcars", car.id] });
+        queryClient.invalidateQueries({ queryKey: ["/api/car-status-history/car", car.id] });
+      } else {
+        queryClient.invalidateQueries({
+          predicate: (q) =>
+            Array.isArray(q.queryKey) &&
+            String(q.queryKey[0] ?? "").startsWith("/api/car-status-history"),
+        });
+      }
       if (!car && assignRiderId.trim()) {
         queryClient.invalidateQueries({ queryKey: ["/api/history"] });
         toast({ title: "Railcar created & assigned", description: `Assigned to ${assignRiderId.trim()}` });

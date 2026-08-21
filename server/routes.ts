@@ -14,8 +14,9 @@ import {
   assertInactivePatchAllowed,
   patchFieldsForStatusChange,
   writeCarStatusHistoryRow,
+  syncCurrentAssignmentHistoryActive,
 } from "./car-status-history";
-import { crossesInactiveBoundary, inactiveBoundaryEventType } from "@shared/car-lifecycle-status";
+import { crossesInactiveBoundary } from "@shared/car-lifecycle-status";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import {
   addCarsToProgram,
@@ -1415,6 +1416,7 @@ export async function registerRoutes(
       // Never let casual PATCH bodies flip fleet membership; only Inactive boundary status patches may.
       delete updateRow.active;
       delete updateRow.active_status;
+      delete updateRow.active_source;
 
       if (parsed.status !== undefined) {
         const { data: current, error: curErr } = await supabase
@@ -1447,6 +1449,8 @@ export async function registerRoutes(
       if (error) throw error;
 
       if (crossedInactive && String(inactiveReason ?? "").trim()) {
+        const nextActive = updateRow.active === true;
+        await syncCurrentAssignmentHistoryActive(id, nextActive);
         await writeCarStatusHistoryRow({
           carId: id,
           fromStatus: priorStatus,
@@ -2599,7 +2603,7 @@ export async function registerRoutes(
             // Skip entity in update when unchanged so the old managed_category trigger doesn't fire
             const { data: existingCar } = await supabase
               .from("railcars")
-              .select("entity, fleet_status_source")
+              .select("entity, fleet_status_source, active_source, active")
               .eq("id", existingId)
               .maybeSingle();
             const updatePayload = { ...payload };
@@ -2619,9 +2623,101 @@ export async function registerRoutes(
               });
               (updatePayload as any).fleet_status_source = "auto";
             }
+            // Never overwrite a human Inactive/Reactivate pick.
+            const activeManual = (existingCar as any)?.active_source === "manual";
+            if (activeManual) {
+              delete (updatePayload as any).active;
+              delete (updatePayload as any).active_status;
+              delete (updatePayload as any).status;
+              delete (updatePayload as any).active_source;
+            } else {
+              (updatePayload as any).active_source = "auto";
+            }
             const { error } = await supabase.from("railcars").update(updatePayload).eq("id", existingId);
             if (error) throw error;
             updated += 1;
+
+            // Idempotent assignment_history upsert — natural key car + ASSIGNMENT_ID + start_date
+            // (Do NOT delete-all / blind-insert; monthly re-runs must not double rows.)
+            const protectedActive =
+              activeManual ? ((existingCar as any).active === true) : null;
+            for (const p of car.periods) {
+              const hist = assignmentHistoryPayloadFromPeriod(railcarId!, p, movedAt);
+              // Only the open-ended (current) period feeds export "current" ACTIVE;
+              // keep it aligned with guarded railcars.active. Closed periods keep file ACTIVE.
+              if (protectedActive != null && hist.end_date == null) {
+                hist.active = protectedActive;
+              }
+              const key = assignmentHistoryNaturalKey(
+                hist.railcar_id,
+                hist.assignment_id_ext,
+                hist.start_date,
+                hist.end_date
+              );
+              const existing = ahByKey.get(key);
+              if (existing) {
+                if (assignmentHistoryContentEqual(existing, hist)) {
+                  assignmentUnchanged += 1;
+                } else {
+                  const { error } = await supabase
+                    .from("assignment_history")
+                    .update(hist)
+                    .eq("id", existing.id);
+                  if (error) throw error;
+                  ahByKey.set(key, { ...existing, ...hist });
+                  assignmentUpdated += 1;
+                }
+              } else {
+                const { data: ins, error } = await supabase
+                  .from("assignment_history")
+                  .insert(hist)
+                  .select("id")
+                  .single();
+                if (error) throw error;
+                ahByKey.set(key, { id: ins!.id, ...hist });
+                assignmentInserted += 1;
+              }
+              assignmentPeriods += 1;
+            }
+
+            // After import, re-assert current open AH.active for manual cars (export SoT).
+            if (activeManual) {
+              await syncCurrentAssignmentHistoryActive(
+                existingId,
+                (existingCar as any).active === true,
+              );
+            }
+
+            // Idempotent car_number_history upsert — remark natural key
+            for (const p of car.periods) {
+              const remark = carNumberHistoryPayloadFromPeriod(railcarId!, p, movedAt);
+              if (!remark) continue;
+              const key = carNumberHistoryNaturalKey({
+                railcarId: remark.railcar_id,
+                old_car_initial: remark.old_car_initial,
+                old_car_number: remark.old_car_number,
+                new_car_initial: remark.new_car_initial,
+                new_car_number: remark.new_car_number,
+                changed_at: remark.changed_at,
+              });
+              const existing = cnhByKey.get(key);
+              if (existing) {
+                remarkUnchanged += 1;
+                remarkHistory += 1;
+                continue;
+              }
+              const { data: ins, error } = await supabase
+                .from("car_number_history")
+                .insert(remark)
+                .select("id")
+                .single();
+              if (error) throw error;
+              cnhByKey.set(key, { id: ins!.id, ...remark });
+              remarkInserted += 1;
+              remarkHistory += 1;
+            }
+            historyRows += 1;
+            continue; // skip the shared AH/CNH loops below for this car
           } else {
             const { data: ins, error } = await supabase.from("railcars").insert({
               ...payload,
@@ -2632,6 +2728,7 @@ export async function registerRoutes(
                 managed_category: payload.managed_category as string | null,
               }),
               fleet_status_source: "auto",
+              active_source: "auto",
             }).select("id").single();
             if (error) throw error;
             railcarId = ins!.id;

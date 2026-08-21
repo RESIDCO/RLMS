@@ -59,6 +59,8 @@ export type Railcar = {
   status: string | null;
   fleet_status?: "Leased" | "Idle" | "Sold" | "Abatement" | null;
   fleet_status_source?: "auto" | "manual" | null;
+  /** auto = import may refresh active; manual = guarded Inactive/Reactivate owns it. */
+  active_source?: "auto" | "manual" | null;
   coating: string | null;
   transit_status: string | null;
   transit_label: string | null;
@@ -247,6 +249,7 @@ export const insertRailcarSchema = z.object({
   active: z.boolean().optional(),
   status: z.string().nullable().optional(),
   fleet_status: z.enum(["Leased", "Idle", "Sold", "Abatement"]).optional(),
+  active_source: z.enum(["auto", "manual"]).optional(),
   coating: z.string().nullable().optional(),
   transit_status: z.string().nullable().optional(),
   transit_label: z.string().nullable().optional(),

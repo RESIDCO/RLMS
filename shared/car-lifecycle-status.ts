@@ -47,14 +47,21 @@ export function fieldsForInactiveBoundaryChange(toStatus: string): {
   status: string;
   active: boolean;
   active_status: string;
+  active_source: "manual";
 } {
   if (isInactiveCarStatus(toStatus)) {
-    return { status: "Inactive", active: false, active_status: "Inactive" };
+    return {
+      status: "Inactive",
+      active: false,
+      active_status: "Inactive",
+      active_source: "manual",
+    };
   }
   return {
     status: String(toStatus ?? "").trim() || "Active/In-Service",
     active: true,
     active_status: "Active",
+    active_source: "manual",
   };
 }
 

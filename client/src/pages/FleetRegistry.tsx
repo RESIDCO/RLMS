@@ -65,7 +65,12 @@ import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
+import { confirmDelete, confirmSave, confirmWithReason } from "@/components/ConfirmActionDialog";
+import {
+  CAR_STATUS_EDIT_OPTIONS,
+  crossesInactiveBoundary,
+  isInactiveCarStatus,
+} from "@shared/car-lifecycle-status";
 
 type Row = RailcarWithAssignment;
 
@@ -95,17 +100,11 @@ const STATUS_FILTER_OPTIONS = [
   { value: "Bad Order",         label: "Bad Order" },
   { value: "Retired",           label: "Retired" },
   { value: "Scrapped",          label: "Scrapped" },
+  { value: "Inactive",          label: "Inactive" },
 ];
 
 /** Values that may be written to railcars.status (not derived fleet Sold/Idle). */
-const STATUS_EDIT_OPTIONS = [
-  { value: "Active/In-Service", label: "Active / In-Service" },
-  { value: "Storage",           label: "Storage" },
-  { value: "Bad Order",         label: "Bad Order" },
-  { value: "Off-Lease",         label: "Off-Lease" },
-  { value: "Retired",           label: "Retired" },
-  { value: "Scrapped",          label: "Scrapped" },
-];
+const STATUS_EDIT_OPTIONS = CAR_STATUS_EDIT_OPTIONS;
 
 function EntityBadge({ entity, size = "sm" }: { entity: string | null | undefined; size?: "sm" | "lg" }) {
   if (!entity) return null;
@@ -805,18 +804,50 @@ export default function FleetRegistry() {
 
   const bulkUpdateStatus = async (newStatus: string) => {
     const ids = Array.from(selectedIds);
-    const ok = await confirmSave({
-      title: `Set car status to ${newStatus} for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
-    });
-    if (!ok) return;
+    const n = ids.length;
+    const goingInactive = isInactiveCarStatus(newStatus);
+    const selectedRows = filtered.filter((r) => selectedIds.has(r.id));
+    const anyInactiveOnPage = selectedRows.some((r) => isInactiveCarStatus(r.status));
+    // Select-all-matching may include Inactive cars not on this page — guard reactivations.
+    const mayReactivate =
+      !goingInactive && (anyInactiveOnPage || selectedIds.size > filtered.length);
+    const needsGuard = goingInactive || mayReactivate;
+
+    let reason: string | null = null;
+    if (needsGuard) {
+      reason = await confirmWithReason({
+        title: goingInactive
+          ? `Mark ${n} car${n !== 1 ? "s" : ""} Inactive?`
+          : `Set car status to ${newStatus} for ${n} selected railcar${n !== 1 ? "s" : ""}?`,
+        description: goingInactive
+          ? "This removes them from active fleet counts, and any Lease Management OL/lease may be reclassified as inactive if this was its last active car."
+          : "If any selected cars are currently Inactive, this reactivates them into the active fleet. A reason is required for that change.",
+        confirmLabel: goingInactive ? "Mark Inactive" : "Confirm",
+        variant: goingInactive ? "destructive" : "default",
+        reasonLabel: "Reason (required)",
+        reasonPlaceholder: goingInactive
+          ? "Why are these cars being marked Inactive?"
+          : "Why are Inactive cars being reactivated (or status changed)?",
+      });
+      if (reason == null) return;
+    } else {
+      const ok = await confirmSave({
+        title: `Set car status to ${newStatus} for ${n} selected railcar${n !== 1 ? "s" : ""}?`,
+      });
+      if (!ok) return;
+    }
+
     setBulkStatusPending(true);
     try {
-      await Promise.all(
-        ids.map((id) => apiRequest("PATCH", `/api/railcars/${id}`, { status: newStatus }))
-      );
+      await apiRequest("POST", "/api/railcars/car-status", {
+        ids,
+        status: newStatus,
+        reason: reason ?? undefined,
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} updated to "${newStatus}"` });
+      queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
+      toast({ title: `${n} car${n !== 1 ? "s" : ""} updated to "${newStatus}"` });
       clearSelection();
     } catch (e: any) {
       toast({ title: "Bulk update failed", description: e.message, variant: "destructive" });
@@ -1864,6 +1895,13 @@ export function CarDetail({
   const currentRentStatus: "off_rent" | "on_rent" | null =
     rentEvents.length > 0 ? rentEvents[0].event_type : null;
 
+  const { data: statusHistoryData } = useQuery<any[]>({
+    queryKey: ["/api/car-status-history/car", carId],
+    queryFn: () =>
+      apiRequest("GET", `/api/car-status-history/car/${carId}`).then((r) => r.json()),
+  });
+  const statusHistory: any[] = statusHistoryData ?? [];
+
   const rentMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/rent-events", {
@@ -2271,6 +2309,62 @@ export function CarDetail({
         </div>
       )}
 
+      {/* Inactive / Reactivate history (append-only) */}
+      <div className="mt-6 border-t border-border pt-5">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
+          Active Status History
+        </div>
+        {statusHistory.length === 0 ? (
+          <div className="text-sm text-muted-foreground italic">
+            No Inactive / Reactivate events recorded
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {statusHistory.map((ev: any) => {
+              const markedOut = ev.event_type === "marked_inactive";
+              return (
+                <div
+                  key={ev.id}
+                  className={cn(
+                    "text-xs border-l-2 pl-3 py-1",
+                    markedOut ? "border-zinc-500/60" : "border-umler-teal/50",
+                  )}
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+                        markedOut
+                          ? "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
+                          : "border-umler-teal/30 bg-umler-teal/10 text-umler-teal",
+                      )}
+                    >
+                      {markedOut ? "Marked Inactive" : "Reactivated"}
+                    </span>
+                    <span className="font-mono-num text-muted-foreground">
+                      {ev.created_at ? new Date(ev.created_at).toLocaleString() : "—"}
+                    </span>
+                    {ev.created_by && (
+                      <span className="text-muted-foreground">· {ev.created_by}</span>
+                    )}
+                  </div>
+                  {(ev.from_status || ev.to_status) && (
+                    <div className="mt-0.5 font-mono text-muted-foreground">
+                      {ev.from_status ?? "—"}
+                      <span className="mx-1.5">→</span>
+                      {ev.to_status ?? "—"}
+                    </div>
+                  )}
+                  {ev.reason && (
+                    <div className="text-muted-foreground italic mt-0.5">{ev.reason}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* ── Rental Abatement / Rent Status ── */}
       <div className="mt-6 border-t border-border pt-5">
         <div className="flex items-center justify-between mb-3">
@@ -2563,10 +2657,11 @@ export function RailcarFormDialog({
   const allRiders: any[] = ridersData ?? [];
 
   const save = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (inactiveReason?: string | null) => {
       if (car) {
-        // apiRequest throws on non-OK automatically
-        await apiRequest("PATCH", `/api/railcars/${car.id}`, form);
+        const payload: Record<string, unknown> = { ...form };
+        if (inactiveReason) payload.inactive_change_reason = inactiveReason;
+        await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
       } else {
         const res = await apiRequest("POST", `/api/railcars`, form);
         // If a rider/OL was entered, resolve (match or create) then assign
@@ -2587,6 +2682,8 @@ export function RailcarFormDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/car-status-history"] });
       if (!car && assignRiderId.trim()) {
         queryClient.invalidateQueries({ queryKey: ["/api/history"] });
         toast({ title: "Railcar created & assigned", description: `Assigned to ${assignRiderId.trim()}` });
@@ -2604,10 +2701,31 @@ export function RailcarFormDialog({
       const mark = [form.reporting_marks, form.car_number].filter(Boolean).join(" ")
         || [car.reporting_marks, car.car_number].filter(Boolean).join(" ")
         || "this railcar";
+      const crosses = crossesInactiveBoundary(car.status, form.status);
+      if (crosses) {
+        const goingInactive = isInactiveCarStatus(form.status);
+        const reason = await confirmWithReason({
+          title: goingInactive
+            ? `Mark ${mark} Inactive?`
+            : `Reactivate ${mark}?`,
+          description: goingInactive
+            ? "This removes the car from active fleet counts, and its Lease Management OL/lease may be reclassified as inactive if this was its last active car."
+            : `This returns the car to the active fleet with Car Status “${form.status}”.`,
+          confirmLabel: goingInactive ? "Mark Inactive" : "Reactivate",
+          variant: goingInactive ? "destructive" : "default",
+          reasonLabel: "Reason (required)",
+          reasonPlaceholder: goingInactive
+            ? "Why is this car being marked Inactive?"
+            : "Why is this car being reactivated?",
+        });
+        if (reason == null) return;
+        save.mutate(reason);
+        return;
+      }
       const ok = await confirmSave({ title: `Save changes to ${mark}?` });
       if (!ok) return;
     }
-    save.mutate();
+    save.mutate(null);
   }
 
   return (
@@ -2684,8 +2802,13 @@ export function RailcarFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Car Status</Label>
+              <p className="text-[11px] text-muted-foreground mb-1.5">
+                Inactive requires confirm + reason and is logged permanently.
+              </p>
               <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                <SelectTrigger><SelectValue placeholder="Select car status" /></SelectTrigger>
+                <SelectTrigger data-testid="select-car-status">
+                  <SelectValue placeholder="Select car status" />
+                </SelectTrigger>
                 <SelectContent>
                   {STATUS_EDIT_OPTIONS.map((s) => (
                     <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
@@ -2700,7 +2823,9 @@ export function RailcarFormDialog({
           </div>
           <div>
             <Label>Rental Status</Label>
-            <p className="text-[11px] text-muted-foreground mb-1.5">Is this car leased, idle, sold, or on abatement (still leased, rent paused)?</p>
+            <p className="text-[11px] text-muted-foreground mb-1.5">
+              Leased / Idle / Sold / Abatement — does not change Car Status or active fleet membership.
+            </p>
             <Select
               value={form.fleet_status || "Leased"}
               onValueChange={(v) => setForm({ ...form, fleet_status: v as FleetStatus })}

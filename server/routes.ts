@@ -9,6 +9,13 @@ import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
+import {
+  applyCarStatusChange,
+  assertInactivePatchAllowed,
+  patchFieldsForStatusChange,
+  writeCarStatusHistoryRow,
+} from "./car-status-history";
+import { crossesInactiveBoundary, inactiveBoundaryEventType } from "@shared/car-lifecycle-status";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import {
   addCarsToProgram,
@@ -1063,6 +1070,7 @@ export async function registerRoutes(
       const historyRows: any[] = [];
       for (let i = 0; i < uniqueIds.length; i += CHUNK) {
         const slice = uniqueIds.slice(i, i + CHUNK);
+        // Rental Status only — never touch active / active_status / status (Car Status).
         const { data, error } = await supabase
           .from("railcars")
           .update({ fleet_status, fleet_status_source: "manual" })
@@ -1101,6 +1109,52 @@ export async function registerRoutes(
         }
       }
       res.json({ ok: true, updated, fleet_status });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  /** Guarded Car Status change (Inactive / reactivate require reason + history). */
+  app.post("/api/railcars/car-status", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const idsRaw = Array.isArray(req.body?.ids)
+        ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0)
+        : [];
+      const status = String(req.body?.status ?? "").trim();
+      const reason = typeof req.body?.reason === "string" ? req.body.reason : null;
+      if (!status) return res.status(400).json({ message: "status is required" });
+      if (!idsRaw.length) return res.status(400).json({ message: "ids required" });
+      if (idsRaw.length > 20_000) {
+        return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
+      }
+      const result = await applyCarStatusChange({
+        ids: idsRaw,
+        status,
+        reason,
+        userId: writerId,
+      });
+      res.json({ ok: true, ...result, status });
+    } catch (err: any) {
+      if (err?.status === 400) return res.status(400).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/car-status-history/car/:carId", async (req, res) => {
+    try {
+      const carId = Number(req.params.carId);
+      if (!Number.isFinite(carId) || carId <= 0) {
+        return res.status(400).json({ message: "Invalid car id" });
+      }
+      const { data, error } = await supabaseAdmin
+        .from("car_status_history")
+        .select("*")
+        .eq("car_id", carId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      res.json(data ?? []);
     } catch (err) {
       errHandler(res, err);
     }
@@ -1341,13 +1395,49 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
+      const inactiveReason =
+        typeof req.body?.inactive_change_reason === "string"
+          ? req.body.inactive_change_reason
+          : null;
       const parsed = insertRailcarSchema.partial().parse(req.body);
       const flag = parsed.ops_flag;
       const updateRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
+
+      // Rental Status must never flip active / active_status / Car Status as a side effect.
       if (parsed.fleet_status) {
         updateRow.fleet_status = parsed.fleet_status;
         updateRow.fleet_status_source = "manual";
       }
+
+      let priorStatus: string | null | undefined;
+      let crossedInactive = false;
+
+      // Never let casual PATCH bodies flip fleet membership; only Inactive boundary status patches may.
+      delete updateRow.active;
+      delete updateRow.active_status;
+
+      if (parsed.status !== undefined) {
+        const { data: current, error: curErr } = await supabase
+          .from("railcars")
+          .select("status")
+          .eq("id", id)
+          .single();
+        if (curErr) throw curErr;
+        priorStatus = current?.status;
+        try {
+          assertInactivePatchAllowed({
+            currentStatus: priorStatus,
+            nextStatus: parsed.status,
+            reason: inactiveReason,
+          });
+        } catch (e: any) {
+          if (e?.status === 400) return res.status(400).json({ message: e.message });
+          throw e;
+        }
+        crossedInactive = crossesInactiveBoundary(priorStatus, parsed.status);
+        Object.assign(updateRow, patchFieldsForStatusChange(priorStatus, String(parsed.status ?? "")));
+      }
+
       const { data, error } = await supabase
         .from("railcars")
         .update(updateRow)
@@ -1355,6 +1445,17 @@ export async function registerRoutes(
         .select()
         .single();
       if (error) throw error;
+
+      if (crossedInactive && String(inactiveReason ?? "").trim()) {
+        await writeCarStatusHistoryRow({
+          carId: id,
+          fromStatus: priorStatus,
+          toStatus: String((updateRow.status as string) ?? parsed.status),
+          reason: String(inactiveReason),
+          userId: writerId,
+        });
+      }
+
       if (flag !== undefined) await persistOpsFlag([id], flag);
       res.json(hydrateOpsFlag({ ...data, ops_flag: flag !== undefined ? flag : (data as any).ops_flag }));
     } catch (err) {

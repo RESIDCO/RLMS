@@ -175,6 +175,7 @@ const STATUS_BADGE: Record<string, string> = {
   "Off-Lease": "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
   Retired: "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
   Scrapped: "bg-umler-faint/15 text-umler-faint border-umler-faint/25",
+  Inactive: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
 };
 function StatusPill({ car }: { car: CarRow }) {
   const status = displayRailcarStatus(displayStatusInputFromRailcar(car));

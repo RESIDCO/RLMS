@@ -8,7 +8,7 @@ import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railca
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
-import { countCarsByRiderId } from "./rider-car-counts";
+import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import {
   addCarsToProgram,
@@ -1429,18 +1429,25 @@ export async function registerRoutes(
   // ---------- Leases (Master + nested riders) ----------
   app.get("/api/leases", async (_req, res) => {
     try {
-      const [leasesRes, ridersRes, countByRider] = await Promise.all([
+      const [leasesRes, ridersRes, countByRider, activeByRider] = await Promise.all([
         supabase.from("master_leases").select("*").order("lease_number"),
         supabase.from("riders").select("*").order("rider_name"),
         countCarsByRiderId(),
+        countActiveCarsByRiderId(),
       ]);
       if (leasesRes.error) throw leasesRes.error;
       if (ridersRes.error) throw ridersRes.error;
 
-      const riders = (ridersRes.data ?? []).map((r) => ({
-        ...r,
-        car_count: countByRider.get(r.id) ?? 0,
-      }));
+      const riders = (ridersRes.data ?? []).map((r) => {
+        const car_count = countByRider.get(r.id) ?? 0;
+        const active_car_count = activeByRider.get(r.id) ?? 0;
+        return {
+          ...r,
+          car_count,
+          active_car_count,
+          is_inactive: active_car_count === 0,
+        };
+      });
 
       const result = (leasesRes.data ?? []).map((l) => {
         const leaseRiders = riders.filter((r) => r.master_lease_id === l.id);
@@ -1448,7 +1455,9 @@ export async function registerRoutes(
           (acc, r) => acc + (r.car_count ?? 0),
           0
         );
-        return { ...l, riders: leaseRiders, car_count };
+        const is_inactive =
+          leaseRiders.length === 0 || leaseRiders.every((r) => r.is_inactive);
+        return { ...l, riders: leaseRiders, car_count, is_inactive };
       });
 
       res.json(result);

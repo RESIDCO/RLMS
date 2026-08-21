@@ -69,6 +69,28 @@ import type {
 } from "@shared/schema";
 
 import { matchesSearchQuery } from "@/lib/search-match";
+import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+
+function normOlToken(s: string | null | undefined): string {
+  return String(s ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+/** Exact OL / schedule / rider-name match — bypasses the default hide-inactive filter. */
+function isExactOlMatch(
+  rider: { rider_name?: string | null; schedule_number?: string | null },
+  qRaw: string,
+): boolean {
+  const q = normOlToken(qRaw);
+  if (!q) return false;
+  return normOlToken(rider.schedule_number) === q || normOlToken(rider.rider_name) === q;
+}
+
+function leaseHasExactOlMatch(lease: MasterLeaseWithRiders, qRaw: string): boolean {
+  return (lease.riders ?? []).some((r) => isExactOlMatch(r, qRaw));
+}
 
 function leaseMatchesSearch(lease: MasterLeaseWithRiders, qRaw: string): boolean {
   const q = qRaw.trim().toLowerCase();
@@ -88,6 +110,22 @@ function leaseMatchesSearch(lease: MasterLeaseWithRiders, qRaw: string): boolean
 
 function riderMatchesSearch(rider: { rider_name?: string | null; schedule_number?: string | null }, qRaw: string): boolean {
   return matchesSearchQuery([rider.rider_name, rider.schedule_number], qRaw);
+}
+
+function visibleRidersForLease(
+  lease: MasterLeaseWithRiders,
+  showInactive: boolean,
+  searchQ: string,
+  forceRiderId?: number | null,
+): MasterLeaseWithRiders["riders"] {
+  const riders = lease.riders ?? [];
+  if (showInactive) return riders;
+  return riders.filter(
+    (r) =>
+      !r.is_inactive ||
+      isExactOlMatch(r, searchQ) ||
+      (forceRiderId != null && r.id === forceRiderId),
+  );
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -129,6 +167,7 @@ export default function LeaseManagement() {
   const [editRider, setEditRider] = useState<any | null>(null);
   const [sortBy, setSortBy] = useState<"lessee" | "ol">("lessee");
   const [leaseSearch, setLeaseSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
   const { toast } = useToast();
@@ -175,24 +214,40 @@ export default function LeaseManagement() {
 
   const filteredLeases = useMemo(() => {
     const q = leaseSearch.trim();
-    if (!q) return sortedLeases;
-    return sortedLeases.filter((l) => leaseMatchesSearch(l, q));
-  }, [sortedLeases, leaseSearch]);
+    return sortedLeases.filter((l) => {
+      if (q && !leaseMatchesSearch(l, q)) return false;
+      const exactOl = q ? leaseHasExactOlMatch(l, q) : false;
+      const deepLinked =
+        targetRiderId != null &&
+        (l.riders ?? []).some((r) => r.id === targetRiderId);
+      if (!showInactive && l.is_inactive && !exactOl && !deepLinked) return false;
+      if (!showInactive && !exactOl && !deepLinked) {
+        const visible = visibleRidersForLease(l, false, q, targetRiderId);
+        if (visible.length === 0) return false;
+      }
+      return true;
+    });
+  }, [sortedLeases, leaseSearch, showInactive, targetRiderId]);
 
   useEffect(() => {
     const q = leaseSearch.trim();
     if (!q) return;
-    const matched = sortedLeases.filter((l) => leaseMatchesSearch(l, q));
+    const matched = sortedLeases.filter((l) => {
+      if (!leaseMatchesSearch(l, q)) return false;
+      const exactOl = leaseHasExactOlMatch(l, q);
+      if (!showInactive && l.is_inactive && !exactOl) return false;
+      return true;
+    });
     if (!matched.length) return;
     setExpandedLeases(new Set(matched.map((l) => l.id)));
     const rids = new Set<number>();
     for (const l of matched) {
-      for (const r of l.riders ?? []) {
-        if (riderMatchesSearch(r, q)) rids.add(r.id);
+      for (const r of visibleRidersForLease(l, showInactive, q, targetRiderId)) {
+        if (riderMatchesSearch(r, q) || isExactOlMatch(r, q)) rids.add(r.id);
       }
     }
     setExpandedRiders(rids);
-  }, [leaseSearch, sortedLeases]);
+  }, [leaseSearch, sortedLeases, showInactive, targetRiderId]);
 
   // Auto-expand: deep-link rider > ?filter=riders (all) > default first lease
   useEffect(() => {
@@ -249,7 +304,8 @@ export default function LeaseManagement() {
       setExpandedLeases(parentLeaseIds6);
       setExpandedRiders(riderIds6);
     } else if (expandedLeases.size === 0) {
-      setExpandedLeases(new Set([leases[0].id]));
+      const firstActive = leases.find((l) => !l.is_inactive) ?? leases[0];
+      if (firstActive) setExpandedLeases(new Set([firstActive.id]));
     }
   }, [leases, targetRiderId, filterRiders, filterExpiring, filterExpiring6]);
 
@@ -346,6 +402,16 @@ export default function LeaseManagement() {
                 <SelectItem value="ol">OL / Rider number</SelectItem>
               </SelectContent>
             </Select>
+            <label
+              className="flex items-center gap-2 h-8 px-2 rounded-md border border-border bg-background text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap"
+              data-testid="toggle-show-inactive-leases"
+            >
+              <Checkbox
+                checked={showInactive}
+                onCheckedChange={(v) => setShowInactive(v === true)}
+              />
+              Show inactive
+            </label>
             <Button
               size="sm"
               variant="outline"
@@ -413,12 +479,19 @@ export default function LeaseManagement() {
           <div className="rounded-lg border border-card-border bg-card px-5 py-10 text-center text-sm text-muted-foreground">
             {leaseSearch.trim()
               ? `No deals match “${leaseSearch.trim()}”. Try an OL number or lessee name.`
-              : "No master leases yet."}
+              : showInactive
+                ? "No master leases yet."
+                : "No active master leases. Turn on “Show inactive” to see historical deals."}
           </div>
         ) : (
           filteredLeases.map((lease) => {
             const open = expandedLeases.has(lease.id);
-            const ols = olCodesForLease(lease);
+            const q = leaseSearch.trim();
+            const ridersShown = visibleRidersForLease(lease, showInactive, q, targetRiderId);
+            const ols = ridersShown
+              .map((r: any) => String(r.schedule_number || r.rider_name || "").trim())
+              .filter(Boolean)
+              .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
             const olLine = formatOlSummary(ols);
             return (
               <div
@@ -450,6 +523,7 @@ export default function LeaseManagement() {
                         {displayLeaseNumber(lease.lease_number)}
                       </span>
                       <LeaseTypeBadge mlaType={lease.lease_type} />
+                      {lease.is_inactive && <InactiveFleetBadge active={false} />}
                       <span className="text-xs text-muted-foreground">
                         {lease.agreement_number ?? "—"}
                       </span>
@@ -531,12 +605,12 @@ export default function LeaseManagement() {
                       </Button>}
                     </div>
                     <div className="divide-y divide-border">
-                      {lease.riders.length === 0 && (
+                      {ridersShown.length === 0 && (
                         <div className="px-5 py-8 text-sm text-muted-foreground italic text-center">
                           No riders under this master lease.
                         </div>
                       )}
-                      {lease.riders.map((rider) => {
+                      {ridersShown.map((rider) => {
                         const open = expandedRiders.has(rider.id);
                         return (
                           <div key={rider.id}>
@@ -563,6 +637,7 @@ export default function LeaseManagement() {
                                   <span className="text-xs text-muted-foreground">
                                     {rider.schedule_number ?? "—"}
                                   </span>
+                                  {rider.is_inactive && <InactiveFleetBadge active={false} />}
                                   {(rider as any).sold_to && (
                                     <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30">
                                       SOLD
@@ -591,7 +666,7 @@ export default function LeaseManagement() {
                                 </div>
                               </div>
                               <div className="text-right text-sm font-mono-num">
-                                {rider.car_count}
+                                {rider.active_car_count ?? rider.car_count}
                                 <span className="text-muted-foreground text-xs ml-1">
                                   cars
                                 </span>

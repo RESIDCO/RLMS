@@ -324,11 +324,17 @@ export type RailcarWithAssignment = Railcar & {
 
 export type RiderWithCounts = Rider & {
   car_count: number;
+  /** Active fleet cars currently assigned to this rider (active !== false). */
+  active_car_count: number;
+  /** True when active_car_count === 0 (derived; not a stored flag). */
+  is_inactive: boolean;
 };
 
 export type MasterLeaseWithRiders = MasterLease & {
   riders: RiderWithCounts[];
   car_count: number;
+  /** True when every rider under this MLA is inactive (or there are no riders). */
+  is_inactive: boolean;
 };
 
 export type HistoryRow = AssignmentHistory & {

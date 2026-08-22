@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "./supabase";
 import {
   crossesInactiveBoundary,
-  fieldsForInactiveBoundaryChange,
+  fieldsForCarStatusSave,
   inactiveBoundaryEventType,
   isInactiveCarStatus,
   type CarStatusHistoryEventType,
@@ -47,10 +47,21 @@ export async function syncCurrentAssignmentHistoryActive(
   if (uErr) throw uErr;
 }
 
+function triadAlreadyMatches(
+  car: { status?: string | null; active?: boolean | null; active_status?: string | null },
+  patch: { status: string; active: boolean; active_status: string },
+): boolean {
+  return (
+    String(car.status ?? "").trim() === patch.status &&
+    car.active === patch.active &&
+    String(car.active_status ?? "").trim().toLowerCase() === patch.active_status.toLowerCase()
+  );
+}
+
 /**
  * Apply Car Status to one or more cars.
- * Crossing the Inactive boundary requires a non-empty reason and writes history;
- * other status changes only update railcars.status (legacy behavior).
+ * Always writes active/active_status implied by the submitted status (self-heals desync).
+ * Crossing the Inactive *status value* requires a reason and writes history.
  * Never touches fleet_status / rental status.
  */
 export async function applyCarStatusChange(opts: {
@@ -69,7 +80,7 @@ export async function applyCarStatusChange(opts: {
 
   const { data: cars, error: cErr } = await supabaseAdmin
     .from("railcars")
-    .select("id, status")
+    .select("id, status, active, active_status")
     .in("id", uniqueIds);
   if (cErr) throw cErr;
 
@@ -93,11 +104,6 @@ export async function applyCarStatusChange(opts: {
     const car = byId.get(id);
     if (!car) continue;
     const fromStatus = car.status ?? null;
-    if (String(fromStatus ?? "").trim() === toStatus) {
-      skipped_same += 1;
-      continue;
-    }
-
     const crosses = crossesInactiveBoundary(fromStatus, toStatus);
     if (crosses && !reason) {
       throw Object.assign(
@@ -108,16 +114,21 @@ export async function applyCarStatusChange(opts: {
       );
     }
 
-    const patch = crosses
-      ? fieldsForInactiveBoundaryChange(toStatus)
-      : { status: toStatus };
+    const patch = fieldsForCarStatusSave(toStatus, { stampManual: crosses });
+    if (triadAlreadyMatches(car, patch)) {
+      skipped_same += 1;
+      continue;
+    }
 
     const { error: uErr } = await supabaseAdmin.from("railcars").update(patch).eq("id", id);
     if (uErr) throw uErr;
     updated += 1;
 
-    if (crosses) {
+    if (car.active !== patch.active) {
       await syncCurrentAssignmentHistoryActive(id, patch.active);
+    }
+
+    if (crosses) {
       historyRows.push({
         car_id: id,
         event_type: inactiveBoundaryEventType(toStatus),
@@ -159,10 +170,8 @@ export function patchFieldsForStatusChange(
   currentStatus: string | null | undefined,
   nextStatus: string,
 ): Record<string, unknown> {
-  if (crossesInactiveBoundary(currentStatus, nextStatus)) {
-    return fieldsForInactiveBoundaryChange(nextStatus);
-  }
-  return { status: nextStatus };
+  const crosses = crossesInactiveBoundary(currentStatus, nextStatus);
+  return fieldsForCarStatusSave(nextStatus, { stampManual: crosses });
 }
 
 export async function writeCarStatusHistoryRow(opts: {

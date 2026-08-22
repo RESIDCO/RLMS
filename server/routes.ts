@@ -16,7 +16,7 @@ import {
   writeCarStatusHistoryRow,
   syncCurrentAssignmentHistoryActive,
 } from "./car-status-history";
-import { crossesInactiveBoundary } from "@shared/car-lifecycle-status";
+import { crossesInactiveBoundary, fieldsImpliedByCarStatus, statusAlignedToActiveFlag } from "@shared/car-lifecycle-status";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import {
   addCarsToProgram,
@@ -316,7 +316,7 @@ export async function registerRoutes(
             .from("railcars")
             .insert({
               ...carObj,
-              status: carObj.status ?? "Active/In-Service",
+              ...fieldsImpliedByCarStatus(carObj.status ?? "Active/In-Service"),
             })
             .select()
             .single();
@@ -1378,6 +1378,7 @@ export async function registerRoutes(
         insertRow.fleet_status = autoFleetStatusFromLegacyText(parsed);
         insertRow.fleet_status_source = "auto";
       }
+      Object.assign(insertRow, fieldsImpliedByCarStatus(String(parsed.status ?? "Active/In-Service")));
       const { data, error } = await supabase
         .from("railcars")
         .insert(insertRow)
@@ -1411,9 +1412,10 @@ export async function registerRoutes(
       }
 
       let priorStatus: string | null | undefined;
+      let priorActive: boolean | null | undefined;
       let crossedInactive = false;
 
-      // Never let casual PATCH bodies flip fleet membership; only Inactive boundary status patches may.
+      // Never let casual PATCH bodies flip fleet membership except via Car Status save.
       delete updateRow.active;
       delete updateRow.active_status;
       delete updateRow.active_source;
@@ -1421,11 +1423,12 @@ export async function registerRoutes(
       if (parsed.status !== undefined) {
         const { data: current, error: curErr } = await supabase
           .from("railcars")
-          .select("status")
+          .select("status, active")
           .eq("id", id)
           .single();
         if (curErr) throw curErr;
         priorStatus = current?.status;
+        priorActive = current?.active;
         try {
           assertInactivePatchAllowed({
             currentStatus: priorStatus,
@@ -1448,9 +1451,11 @@ export async function registerRoutes(
         .single();
       if (error) throw error;
 
+      if (parsed.status !== undefined && updateRow.active !== undefined && priorActive !== updateRow.active) {
+        await syncCurrentAssignmentHistoryActive(id, updateRow.active === true);
+      }
+
       if (crossedInactive && String(inactiveReason ?? "").trim()) {
-        const nextActive = updateRow.active === true;
-        await syncCurrentAssignmentHistoryActive(id, nextActive);
         await writeCarStatusHistoryRow({
           carId: id,
           fromStatus: priorStatus,
@@ -2047,6 +2052,7 @@ export async function registerRoutes(
 
     const managedCategory = deriveManagedCategory(entityRaw);
     const activeBool = activeStatus ? deriveActiveBool(activeStatus) : true;
+    const alignedStatus = statusAlignedToActiveFlag(status, activeBool);
 
     return {
       car_number: carNum,
@@ -2057,7 +2063,7 @@ export async function registerRoutes(
       // marks and number separately.
       full_car_number: marks ? `${marks}${carNum}` : carNum,
       car_type: carType,
-      status,
+      status: alignedStatus,
       fleet_name: fleetName,
       rider_name: riderName,
       notes,
@@ -2073,7 +2079,7 @@ export async function registerRoutes(
       oec, nbv, oac,
       rider_external_id: riderExternalId,
       lessee_name: lesseeName,
-      active_status: activeStatus,
+      active_status: activeBool ? "Active" : "Inactive",
       active: activeBool,
       data_source: dataSource,
       assignment_label: assignmentLabel,
@@ -2603,7 +2609,7 @@ export async function registerRoutes(
             // Skip entity in update when unchanged so the old managed_category trigger doesn't fire
             const { data: existingCar } = await supabase
               .from("railcars")
-              .select("entity, fleet_status_source, active_source, active")
+              .select("entity, fleet_status_source, active_source, active, status")
               .eq("id", existingId)
               .maybeSingle();
             const updatePayload = { ...payload };
@@ -2632,6 +2638,12 @@ export async function registerRoutes(
               delete (updatePayload as any).active_source;
             } else {
               (updatePayload as any).active_source = "auto";
+              if (typeof payload.active === "boolean") {
+                (updatePayload as any).status = statusAlignedToActiveFlag(
+                  (existingCar as any)?.status,
+                  payload.active,
+                );
+              }
             }
             const { error } = await supabase.from("railcars").update(updatePayload).eq("id", existingId);
             if (error) throw error;
@@ -2721,6 +2733,7 @@ export async function registerRoutes(
           } else {
             const { data: ins, error } = await supabase.from("railcars").insert({
               ...payload,
+              status: statusAlignedToActiveFlag(null, payload.active === true),
               fleet_status: autoFleetStatusFromLegacyText({
                 active: payload.active as boolean | undefined,
                 rider_external_id: payload.rider_external_id as string | null,
@@ -3217,6 +3230,7 @@ export async function registerRoutes(
         fleet_status: default_rental_status,
         fleet_status_source: "manual",
         active: true,
+        active_status: "Active",
         status: "Active/In-Service",
         acquisition_batch_id: batch.id,
         acquisition_date,

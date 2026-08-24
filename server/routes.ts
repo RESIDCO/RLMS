@@ -1476,44 +1476,81 @@ export async function registerRoutes(
     }
   });
 
-  // Change car number (remark change) — retains all attributes, logs history
+  // Change reporting mark / car number (remark) — retains all other attributes, logs history
   app.post("/api/railcars/:id/change-number", async (req, res) => {
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
       const { new_car_number, reason, changed_by } = changeCarNumberSchema.parse(req.body);
+      const split = splitCarNumber(new_car_number);
+      if (!split.car_number) {
+        return res.status(400).json({ message: "Enter a mark and number (e.g. OFCX 349699)" });
+      }
+      const newMarks = split.reporting_marks;
+      const newNum = split.car_number;
+      const newInitial = split.car_initial ?? split.reporting_marks;
 
-      // Get current car
       const { data: car, error: cErr } = await supabase
-        .from("railcars").select("id, car_number").eq("id", id).single();
+        .from("railcars")
+        .select("id, car_number, reporting_marks, car_initial")
+        .eq("id", id)
+        .single();
       if (cErr) throw cErr;
       if (!car) return res.status(404).json({ message: "Railcar not found" });
 
-      // Check new number not already in use
-      const { data: conflict } = await supabase
-        .from("railcars").select("id").eq("car_number", new_car_number).maybeSingle();
-      if (conflict) return res.status(400).json({ message: `Car number ${new_car_number} is already in use` });
+      const oldInitial = car.car_initial ?? car.reporting_marks ?? null;
+      const sameMark =
+        String(car.reporting_marks ?? "").toUpperCase() === String(newMarks ?? "").toUpperCase();
+      const sameNum = String(car.car_number ?? "").toUpperCase() === String(newNum).toUpperCase();
+      if (sameMark && sameNum) {
+        return res.status(400).json({ message: "New mark/number is the same as the current value" });
+      }
+
+      let conflictQ = supabase
+        .from("railcars")
+        .select("id")
+        .eq("car_number", newNum)
+        .neq("id", id);
+      conflictQ = newMarks == null
+        ? conflictQ.is("reporting_marks", null)
+        : conflictQ.eq("reporting_marks", newMarks);
+      const { data: conflict } = await conflictQ.maybeSingle();
+      if (conflict) {
+        const label = [newMarks, newNum].filter(Boolean).join(" ");
+        return res.status(400).json({ message: `Car number ${label} is already in use` });
+      }
 
       const changedAt = new Date().toISOString();
-
-      // Update the car number
       const { error: uErr } = await supabase
-        .from("railcars").update({ car_number: new_car_number }).eq("id", id);
+        .from("railcars")
+        .update({
+          car_number: newNum,
+          reporting_marks: newMarks,
+          car_initial: newInitial,
+        })
+        .eq("id", id);
       if (uErr) throw uErr;
 
-      // Log to history
       const { error: hErr } = await supabase.from("car_number_history").insert({
         railcar_id: id,
+        old_car_initial: oldInitial,
         old_car_number: car.car_number,
-        new_car_number,
+        new_car_initial: newInitial,
+        new_car_number: newNum,
         changed_at: changedAt,
-        changed_by: changed_by ?? "system",
+        changed_by: changed_by ?? req.authUser?.email ?? "system",
         reason: reason ?? null,
       });
       if (hErr) throw hErr;
 
-      res.json({ ok: true, old_car_number: car.car_number, new_car_number });
+      res.json({
+        ok: true,
+        old_car_initial: oldInitial,
+        old_car_number: car.car_number,
+        new_car_initial: newInitial,
+        new_car_number: newNum,
+      });
     } catch (err) { errHandler(res, err); }
   });
 

@@ -1017,8 +1017,7 @@ function RiderContactsPanel({ riderId }: { riderId: number }) {
   const { data: contacts, isLoading } = useQuery<RiderContact[]>({
     queryKey: ["/api/riders", riderId, "contacts"],
     queryFn: async () => {
-      const res = await fetch(`/api/riders/${riderId}/contacts`);
-      if (!res.ok) throw new Error(await res.text());
+      const res = await apiRequest("GET", `/api/riders/${riderId}/contacts`);
       return res.json();
     },
   });

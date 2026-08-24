@@ -2529,19 +2529,19 @@ export function CarDetail({
         open={remarkOpen}
         onClose={() => setRemarkOpen(false)}
         carId={carId}
-        currentNumber={r.car_number}
+        currentLabel={[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}
       />
     </div>
   );
 }
 
 function RemarkChangeDialog({
-  open, onClose, carId, currentNumber,
+  open, onClose, carId, currentLabel,
 }: {
   open: boolean;
   onClose: () => void;
   carId: number;
-  currentNumber: string;
+  currentLabel: string;
 }) {
   const { toast } = useToast();
   const [newNumber, setNewNumber] = useState("");
@@ -2551,21 +2551,26 @@ function RemarkChangeDialog({
 
   const save = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/railcars/${carId}/change-number`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ new_car_number: newNumber.trim().toUpperCase(), reason: reason || null }),
+      const res = await apiRequest("POST", `/api/railcars/${carId}/change-number`, {
+        new_car_number: newNumber.trim().toUpperCase(),
+        reason: reason.trim() || null,
       });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
       return res.json();
     },
     onSuccess: (d: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars", carId] });
-      toast({ title: `Car number changed: ${d.old_car_number} → ${d.new_car_number}` });
+      const from = [d.old_car_initial, d.old_car_number].filter(Boolean).join(" ") || d.old_car_number;
+      const to = [d.new_car_initial, d.new_car_number].filter(Boolean).join(" ") || d.new_car_number;
+      toast({ title: `Car number changed: ${from} → ${to}` });
       onClose();
     },
-    onError: (e: Error) => toast({ title: "Change failed", description: e.message, variant: "destructive" }),
+    onError: (e: Error) =>
+      toast({
+        title: "Change failed",
+        description: e.message || "Request failed",
+        variant: "destructive",
+      }),
   });
 
   return (
@@ -2577,15 +2582,15 @@ function RemarkChangeDialog({
         <div className="space-y-3 text-sm">
           <div className="rounded-md bg-muted/40 px-4 py-3">
             <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Current number</div>
-            <div className="font-mono font-semibold">{currentNumber}</div>
+            <div className="font-mono font-semibold">{currentLabel || "—"}</div>
           </div>
           <p className="text-xs text-muted-foreground">All car attributes (type, lining, capacity, history) are retained. Only the car number / reporting mark changes.</p>
           <div>
-            <Label>New Car Number <span className="text-destructive">*</span></Label>
+            <Label>New Mark + Number <span className="text-destructive">*</span></Label>
             <Input
               value={newNumber}
               onChange={(e) => setNewNumber(e.target.value.toUpperCase())}
-              placeholder="e.g. TEUX10823"
+              placeholder="e.g. OFCX 349699"
               className="font-mono"
             />
           </div>

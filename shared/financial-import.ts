@@ -1,6 +1,9 @@
 /**
  * §3 Financial Data Refresh — Asset Report parse, rail filter, reconciliation.
  * Preview is dry-run; commit writes rider_financial_summary + refreshes railcars.
+ *
+ * Do-not-touch: riders.account_manager, car_number, entity, active, lessee,
+ * rider assignment. See docs/IMPORT_WRITE_BOUNDARIES.md.
  */
 
 export type FinRawRow = Record<string, unknown>;

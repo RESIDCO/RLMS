@@ -17,6 +17,7 @@ import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import ProgramDocsPanel from "@/components/ProgramDocsPanel";
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import ShopCombobox, { type ShopOption } from "@/components/ShopCombobox";
+import AccountCombobox from "@/components/AccountCombobox";
 import { cn } from "@/lib/utils";
 import { Download, History, Plus, Paperclip, UserMinus } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
@@ -47,6 +48,8 @@ type Program = {
   tags: string[] | null;
   entity: string | null;
   account_manager: string | null;
+  account_id: number | null;
+  account: { id: number; name: string } | null;
   status_narrative: string | null;
   percent_complete: number | null;
   target_completion_date: string | null;
@@ -85,6 +88,7 @@ type ProgramCar = {
 type HeaderDraft = {
   entity: string;
   account_manager: string;
+  account_id: number | null;
   description: string;
   status_narrative: string;
   percent_complete: string;
@@ -99,6 +103,7 @@ function headerFrom(p: Program): HeaderDraft {
   return {
     entity: p.entity ?? "",
     account_manager: p.account_manager ?? "",
+    account_id: p.account_id ?? p.account?.id ?? null,
     description: p.description ?? "",
     status_narrative: p.status_narrative ?? "",
     percent_complete: p.percent_complete != null ? String(p.percent_complete) : "",
@@ -189,6 +194,9 @@ export default function ProgramDetailPage() {
   const { data: shops = [] } = useQuery<ShopOption[]>({
     queryKey: ["/api/programs/shops"],
     queryFn: () => apiRequest("GET", "/api/programs/shops").then((r) => r.json()),
+  });
+  const { data: accounts = [] } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ["/api/accounts"],
   });
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/programs/categories"],
@@ -455,6 +463,7 @@ export default function ProgramDetailPage() {
     await patchProgram.mutateAsync({
       entity: header.entity || null,
       account_manager: header.account_manager.trim() || null,
+      account_id: header.account_id,
       description: header.description.trim() || null,
       status_narrative: header.status_narrative,
       percent_complete: header.percent_complete,
@@ -575,6 +584,15 @@ export default function ProgramDetailPage() {
                 {PROGRAM_ENTITIES.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}
               </SelectContent>
             </Select>
+          </HeaderField>
+          <HeaderField label="Account">
+            <AccountCombobox
+              accounts={accounts}
+              value={header.account_id}
+              onChange={(id) => setHeader({ ...header, account_id: id })}
+              disabled={!canEdit}
+              compact
+            />
           </HeaderField>
           <HeaderField label="Account manager">
             <Input className="h-8 text-xs" value={header.account_manager} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, account_manager: e.target.value })} />

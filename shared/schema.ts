@@ -30,6 +30,16 @@ export type Rider = {
   monthly_rent_per_car: number | null;  // monthly rent charged per car (USD)
   sold_to: string | null;               // buyer if this rider was sold/transferred
   notes: string | null;
+  /** Free-text initials. Written only in Lease Management — never by importers. */
+  account_manager: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type Account = {
+  id: number;
+  name: string;
+  notes: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -223,8 +233,15 @@ export const insertRiderSchema = z.object({
   monthly_rent_per_car: z.coerce.number().nullable().optional(),
   sold_to: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
+  account_manager: z.string().nullable().optional(),
 });
 export type InsertRider = z.infer<typeof insertRiderSchema>;
+
+export const insertAccountSchema = z.object({
+  name: z.string().min(1),
+  notes: z.string().nullable().optional(),
+});
+export type InsertAccount = z.infer<typeof insertAccountSchema>;
 
 export const insertRailcarSchema = z.object({
   car_number: z.string().min(1),

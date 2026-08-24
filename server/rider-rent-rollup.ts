@@ -6,9 +6,13 @@
  * monthly_rate_pct has no car-level source and stays manual.
  * lessors_cost is left alone: it is a manually entered rider field with no
  * confirmed meaning as a sum of OEC/NBV.
+ *
+ * Write allowlist is RIDER_FINANCIAL_FILL_BLANK_FIELDS (monthly_rent_per_car only).
+ * account_manager is named in RIDER_IMPORT_NEVER_WRITE — not merely omitted.
  */
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
+import { riderFinancialFillBlankPayload } from "@shared/rider-import-guard";
 
 const DISAGREE_USD = 1;
 
@@ -113,7 +117,7 @@ export async function fillBlankRiderMonthlyRent(): Promise<RiderRentRollup> {
       slice.map((p) =>
         supabaseAdmin
           .from("riders")
-          .update({ monthly_rent_per_car: p.avg })
+          .update(riderFinancialFillBlankPayload("monthly_rent_per_car", p.avg))
           .eq("id", p.id)
           .is("monthly_rent_per_car", null),
       ),

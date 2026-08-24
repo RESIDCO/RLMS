@@ -14,10 +14,11 @@ import {
 } from "@shared/programs";
 
 const PROGRAM_LIST_SELECT = `
-id, name, description, status, category_id, tags, entity, account_manager,
+id, name, description, status, category_id, tags, entity, account_manager, account_id,
 status_narrative, percent_complete, target_completion_date, opened_date, closed_date,
 custom_fields, created_at, updated_at,
 category:program_categories(id, name),
+account:accounts(id, name),
 program_cars(id, exited_date),
 program_documents(id)
 `.replace(/\s+/g, " ").trim();
@@ -70,6 +71,7 @@ function mapProgramList(p: any) {
   return {
     ...p,
     category: Array.isArray(p.category) ? p.category[0] ?? null : p.category ?? null,
+    account: Array.isArray(p.account) ? p.account[0] ?? null : p.account ?? null,
     car_count: total,
     active_car_count: active,
     doc_count: p.program_documents?.length ?? 0,
@@ -78,14 +80,24 @@ function mapProgramList(p: any) {
   };
 }
 
+function missingAccountLink(err: unknown) {
+  const msg = String((err as any)?.message ?? err ?? "");
+  return /account_id|accounts|schema cache|does not exist|could not find/i.test(msg);
+}
+
 export async function listPrograms() {
-  const { data, error } = await supabaseAdmin
+  let q = await supabaseAdmin
     .from("programs")
     .select(PROGRAM_LIST_SELECT)
     .order("updated_at", { ascending: false });
-  if (error) throw error;
-  // Keep recently updated work on top; completed programs still show, but after active ones.
-  return (data ?? [])
+  if (q.error && missingAccountLink(q.error)) {
+    q = await supabaseAdmin
+      .from("programs")
+      .select(PROGRAM_LIST_SELECT.replace("account_id,", "").replace("account:accounts(id, name),", ""))
+      .order("updated_at", { ascending: false });
+  }
+  if (q.error) throw q.error;
+  return (q.data ?? [])
     .map(mapProgramList)
     .sort((a, b) => Number(a.status === "complete") - Number(b.status === "complete"));
 }
@@ -112,16 +124,24 @@ export async function listFieldDefs(categoryId: number): Promise<ProgramFieldDef
 }
 
 export async function getProgram(id: number) {
-  const { data, error } = await supabaseAdmin
+  let { data, error } = await supabaseAdmin
     .from("programs")
-    .select("*, category:program_categories(id, name, description)")
+    .select("*, category:program_categories(id, name, description), account:accounts(id, name)")
     .eq("id", id)
     .maybeSingle();
+  if (error && missingAccountLink(error)) {
+    ({ data, error } = await supabaseAdmin
+      .from("programs")
+      .select("*, category:program_categories(id, name, description)")
+      .eq("id", id)
+      .maybeSingle());
+  }
   if (error) throw error;
   if (!data) return null;
   const category = Array.isArray(data.category) ? data.category[0] ?? null : data.category;
+  const account = Array.isArray(data.account) ? data.account[0] ?? null : data.account ?? null;
   const field_defs = data.category_id ? await listFieldDefs(Number(data.category_id)) : [];
-  return { ...data, category, field_defs };
+  return { ...data, category, account, field_defs };
 }
 
 export async function listProgramCars(programId: number, includeExited: boolean) {

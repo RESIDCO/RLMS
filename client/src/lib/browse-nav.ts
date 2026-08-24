@@ -56,6 +56,9 @@ export function carPath(id: number) {
 export function programPath(id: number) {
   return `/programs/${id}`;
 }
+export function accountPath(id: number) {
+  return `/accounts/${id}`;
+}
 export function historyPath(carQuery: string) {
   return `/history?q=${encodeURIComponent(carQuery)}`;
 }

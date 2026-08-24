@@ -17,6 +17,7 @@ import { FolderOpen, Plus, Download, Trash2, FileSpreadsheet } from "lucide-reac
 import { cn } from "@/lib/utils";
 import { openAppTab, programPath } from "@/lib/browse-nav";
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
+import AccountCombobox from "@/components/AccountCombobox";
 import {
   CATEGORY_BADGE,
   PROGRAM_ENTITIES,
@@ -36,6 +37,7 @@ type ProgramRow = {
   tags: string[] | null;
   entity: string | null;
   account_manager: string | null;
+  account_id: number | null;
   status_narrative: string | null;
   percent_complete: number | null;
   updated_at: string;
@@ -358,11 +360,16 @@ function CreateProgramDialog({
   const [categoryId, setCategoryId] = useState("");
   const [entity, setEntity] = useState("");
   const [manager, setManager] = useState("");
+  const [accountId, setAccountId] = useState<number | null>(null);
   const [description, setDescription] = useState("");
   const [target, setTarget] = useState("");
   const [tags, setTags] = useState("");
   const [cars, setCars] = useState<PickedCar[]>([]);
   const [pending, setPending] = useState(false);
+  const { data: accounts = [] } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ["/api/accounts"],
+    enabled: open,
+  });
 
   async function save() {
     if (!name.trim() || !categoryId) {
@@ -376,6 +383,7 @@ function CreateProgramDialog({
         category_id: Number(categoryId),
         entity: entity || null,
         account_manager: manager.trim() || null,
+        account_id: accountId,
         description: description.trim() || null,
         target_completion_date: target || null,
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
@@ -393,6 +401,7 @@ function CreateProgramDialog({
       setCategoryId("");
       setEntity("");
       setManager("");
+      setAccountId(null);
       setDescription("");
       setTarget("");
       setTags("");
@@ -444,6 +453,13 @@ function CreateProgramDialog({
               <Label className="text-xs">Account manager</Label>
               <Input value={manager} onChange={(e) => setManager(e.target.value)} placeholder="Bahnline" />
             </div>
+          </div>
+          <div>
+            <Label className="text-xs">Account</Label>
+            <AccountCombobox accounts={accounts} value={accountId} onChange={setAccountId} />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Optional customer link. Account manager on this program stays independent.
+            </p>
           </div>
           <div>
             <Label className="text-xs">Target completion</Label>

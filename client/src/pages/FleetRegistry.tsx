@@ -303,6 +303,8 @@ function renderOptTd(key: string, r: any) {
       );
     case "rider_external_id":
       return <td key={key} className={num}>{r.rider_external_id ?? "—"}</td>;
+    case "account_manager_initials":
+      return <td key={key} className={text}>{r.account_manager_initials || ""}</td>;
     case "comment_event_note":
       return (
         <td key={key} className={`${text} max-w-[220px] truncate`} title={r.comment_event_note ?? ""}>
@@ -328,6 +330,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     "Commodity Family", "Commodity",
     "Build Year", "Lining", "Mech Desig.", "DOT Code",
     "Comment / Event Note",
+    "Acct Mgr",
     // Internal columns (post-workbook)
     "Managed Category", "Reporting Marks", "Car Status", "Rental Status", "Flag", "Transit Status", "Transit Label",
     "Rider Name", "Schedule #", "MLA Lease #", "Lessor", "Expiration Date",
@@ -368,6 +371,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     r.mechanical_designation ?? "",
     r.dot_code ?? r.dot_specification ?? "",
     get(r, "comment_event_note"),
+    r.account_manager_initials ?? "",
     // Internal
     r.managed_category ?? "",
     r.reporting_marks ?? "",
@@ -541,7 +545,7 @@ export default function FleetRegistry() {
     | "monthly_rent_per_car" | "monthly_depr_per_car"
     | "commodity" | "commodity_family"
     | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
-    | "data_source" | "active" | "comment_event_note" | "rider_external_id";
+    | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials";
   const OPT_COLS: { key: OptCol; label: string }[] = [
     { key: "nbv",                 label: "NBV" },
     { key: "oac",                 label: "OAC" },
@@ -562,6 +566,7 @@ export default function FleetRegistry() {
     { key: "data_source",         label: "Data Source" },
     { key: "active",              label: "Active" },
     { key: "rider_external_id",   label: "Rider ID" },
+    { key: "account_manager_initials", label: "Acct Mgr" },
     { key: "comment_event_note",  label: "Comment / Event Note" },
   ];
   const FR_DEFAULT_COLS = new Set<string>([]);
@@ -2113,6 +2118,7 @@ export function CarDetail({
         <DetailRow label="Data Source" value={(r as any).data_source ?? "—"} />
         <DetailRow label="Active" value={(r as any).active_status ?? ((r as any).active === false ? "Inactive" : (r as any).active === true ? "Active" : "—")} />
         <DetailRow label="Rider ID (external)" value={(r as any).rider_external_id ?? "—"} />
+        <DetailRow label="Acct Mgr" value={(r as any).account_manager_initials || ""} />
         <DetailRow label="Lease Start" value={fmtDate((r as any).lease_start_date)} />
         <DetailRow label="Lease End" value={fmtDate((r as any).lease_end_date)} />
         <DetailRow label="Lease Expiry" value={fmtDate((r as any).lease_expiry)} />

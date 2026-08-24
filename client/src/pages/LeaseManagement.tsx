@@ -651,6 +651,9 @@ export default function LeaseManagement() {
                                   <span title="Expiration Date">Expires: {fmtDate(rider.expiration_date)}</span>
                                   {" · "}
                                   <span title="Monthly Rate %">Rate: {fmtPct(rider.monthly_rate_pct)}</span>
+                                  {rider.account_manager ? (
+                                    <> · <span title="Account Manager">Acct Mgr: {rider.account_manager}</span></>
+                                  ) : null}
                                   {" · "}
                                   <span title="Lessor's Cost">Lessor's Cost: {fmtMoney(rider.lessors_cost)}</span>
                                   {(rider as any).monthly_rent_per_car != null && (
@@ -1410,6 +1413,7 @@ function RiderForm({
         monthly_rent_per_car: rider?.monthly_rent_per_car ?? "",
         sold_to: rider?.sold_to ?? "",
         notes: rider?.notes ?? "",
+        account_manager: rider?.account_manager ?? "",
       });
     }
   }, [open, rider, masterLeaseId]);
@@ -1423,6 +1427,7 @@ function RiderForm({
         base_term_months: form.base_term_months === "" ? null : Number(form.base_term_months),
         monthly_rent_per_car: form.monthly_rent_per_car === "" ? null : Number(form.monthly_rent_per_car),
         sold_to: form.sold_to?.trim() || null,
+        account_manager: form.account_manager?.trim() || null,
       };
       delete (body as any).notes;
       if (rider) await apiRequest("PATCH", `/api/riders/${rider.id}`, body);
@@ -1431,6 +1436,8 @@ function RiderForm({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
       toast({ title: rider ? "Rider updated" : "Rider created" });
       onClose();
     },
@@ -1537,6 +1544,17 @@ function RiderForm({
               onChange={(e) => setForm({ ...form, monthly_rent_per_car: e.target.value })}
             />
             <p className="text-xs text-muted-foreground mt-1">Typical range: $100 – $850 per car / month</p>
+          </div>
+          <div>
+            <Label>Account Manager</Label>
+            <Input
+              value={form.account_manager ?? ""}
+              onChange={(e) => setForm({ ...form, account_manager: e.target.value })}
+              placeholder="Initials, e.g. GS"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Free-text initials. This is the only place this field is set.
+            </p>
           </div>
           <div>
             <Label>Sold / Transferred To</Label>

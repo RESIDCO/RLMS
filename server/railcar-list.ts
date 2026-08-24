@@ -245,6 +245,42 @@ function applyOpsFlagFilter(query: any, flag: string | undefined, fallback?: boo
   return query.ilike("ops_flag", flag);
 }
 
+/**
+ * Live join: railcars.rider_external_id → riders.schedule_number → account_manager.
+ * Never stored on railcars — importers have nothing to clobber.
+ */
+export async function attachAccountManagerInitials<T extends { rider_external_id?: string | null }>(
+  rows: T[],
+): Promise<(T & { account_manager_initials: string | null })[]> {
+  const keys = [
+    ...new Set(rows.map((r) => String(r.rider_external_id ?? "").trim()).filter(Boolean)),
+  ];
+  const map = new Map<string, string>();
+  for (let i = 0; i < keys.length; i += 200) {
+    const slice = keys.slice(i, i + 200);
+    const { data, error } = await supabaseAdmin
+      .from("riders")
+      .select("schedule_number, account_manager")
+      .in("schedule_number", slice);
+    if (error) {
+      if (/account_manager|schema cache|does not exist|could not find/i.test(error.message)) {
+        return rows.map((r) => ({ ...r, account_manager_initials: null }));
+      }
+      throw error;
+    }
+    for (const row of data ?? []) {
+      const k = String(row.schedule_number ?? "").trim().toUpperCase();
+      if (!k) continue;
+      map.set(k, String(row.account_manager ?? "").trim());
+    }
+  }
+  return rows.map((r) => {
+    const k = String(r.rider_external_id ?? "").trim().toUpperCase();
+    const v = k ? map.get(k) : "";
+    return { ...r, account_manager_initials: v || null };
+  });
+}
+
 function mapRow(r: any) {
   const assignmentRaw = asOne(r.assignment);
   const rider = asOne(assignmentRaw?.rider);
@@ -354,7 +390,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     });
     const rows = all.map(mapRow).filter((r: any) => !assignedSet.has(r.id) && !r.assignment);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-    const merged = extra.length ? [...extra, ...rows] : rows;
+    const merged = await attachAccountManagerInitials(extra.length ? [...extra, ...rows] : rows);
     if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
     const start = (p.page! - 1) * p.pageSize!;
     return {
@@ -373,7 +409,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     });
     const rows = data.map(mapRow);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-    const merged = extra.length ? [...extra, ...rows] : rows;
+    const merged = await attachAccountManagerInitials(extra.length ? [...extra, ...rows] : rows);
     return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
   }
 
@@ -389,7 +425,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   if (error) throw error;
   const rows = (data ?? []).map(mapRow);
   const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-  const merged = extra.length ? [...extra, ...rows] : rows;
+  const merged = await attachAccountManagerInitials(extra.length ? [...extra, ...rows] : rows);
   return {
     rows: merged,
     total_count: (count ?? 0) + extra.length,

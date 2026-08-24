@@ -19,6 +19,7 @@ import {
   Pencil,
   KeyRound,
   BookUser,
+  Building2,
   Calculator,
   Menu,
   X as XIcon,
@@ -52,8 +53,9 @@ import { Button } from "@/components/ui/button";
 const UMLER_EXTERNAL_URL = "https://railcarumlerportal.vercel.app/";
 
 const mainNav: { href: string; label: string; icon: React.ElementType; aliases?: string[] }[] = [
-  { href: "/",         label: "Dashboard",       icon: LayoutDashboard },
-  { href: "/railcars", label: "Railcars",         icon: Train, aliases: ["/fleet"] },
+  { href: "/",         label: "Dashboard",           icon: LayoutDashboard },
+  { href: "/accounts", label: "Account Management",  icon: Building2, aliases: ["/account"] },
+  { href: "/railcars", label: "Railcars",             icon: Train, aliases: ["/fleet"] },
   { href: "/leases",   label: "Lease Management", icon: FileText },
   { href: "/move",     label: "Move Cars",        icon: ArrowRightLeft },
   { href: "/history",  label: "History",          icon: History },

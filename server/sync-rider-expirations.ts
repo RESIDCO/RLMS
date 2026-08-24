@@ -4,9 +4,13 @@
  *
  * This keeps Lease Management from showing decade-stale expirations without treating
  * the riders table as source of truth for Dashboard KPIs.
+ *
+ * Patch allowlist is RIDER_VCF_EXPIRATION_SYNC_FIELDS (expiration_date / effective_date).
+ * account_manager is named in RIDER_IMPORT_NEVER_WRITE — not merely omitted.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "./fetch-all";
+import { riderVcfExpirationSyncPayload } from "@shared/rider-import-guard";
 import {
   aggregateOlEndDate,
   carLeaseEndDate,
@@ -87,8 +91,10 @@ export async function syncRiderExpirationsFromCars(
     const prevEff = r.effective_date ? String(r.effective_date).slice(0, 10) : null;
     if (prevExp === nextExp && (nextEff == null || prevEff === nextEff)) continue;
 
-    const patch: Record<string, string | null> = { expiration_date: nextExp };
-    if (nextEff) patch.effective_date = nextEff;
+    const patch = riderVcfExpirationSyncPayload({
+      expiration_date: nextExp,
+      ...(nextEff ? { effective_date: nextEff } : {}),
+    });
     const { error } = await supabase.from("riders").update(patch).eq("id", r.id);
     if (error) throw error;
     ridersUpdated += 1;

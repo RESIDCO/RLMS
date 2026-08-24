@@ -4,7 +4,8 @@ import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
-import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railcar-list";
+import { queryRailcars, queryRailcarIds, parseRailcarListParams, attachAccountManagerInitials } from "./railcar-list";
+import { listAccounts, getAccount, createAccount, updateAccount } from "./accounts";
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
@@ -19,6 +20,7 @@ import {
 } from "./car-status-history";
 import { crossesInactiveBoundary, fieldsImpliedByCarStatus, statusAlignedToActiveFlag } from "@shared/car-lifecycle-status";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
+import { assertRiderImporterPatch } from "@shared/rider-import-guard";
 import {
   addCarsToProgram,
   buildProgramReport,
@@ -309,6 +311,7 @@ export async function registerRoutes(
         const { data: newRider, error: rErr } = await supabase
           .from("riders")
           .insert({ ...rp.rider, master_lease_id: newMla.id })
+          // account_manager is not sent by New Lease Setup — left null until Lease Management
           .select()
           .single();
         if (rErr) throw rErr;
@@ -1356,13 +1359,15 @@ export async function registerRoutes(
       if (!car) return res.status(404).json({ message: "Railcar not found" });
       const assignmentRaw = asOne(car.assignment);
       const rider = asOne(assignmentRaw?.rider);
-      const normalized = hydrateOpsFlag({
-        ...car,
-        assignment: assignmentRaw
-          ? { ...assignmentRaw, rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null }
-          : null,
-        railcar_ab_items: abRes.error ? [] : (abRes.data ?? []),
-      });
+      const [normalized] = await attachAccountManagerInitials([
+        hydrateOpsFlag({
+          ...car,
+          assignment: assignmentRaw
+            ? { ...assignmentRaw, rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null }
+            : null,
+          railcar_ab_items: abRes.error ? [] : (abRes.data ?? []),
+        }),
+      ]);
       res.json({ railcar: normalized, history: histRes.data ?? [], number_history: numHistRes.data ?? [] });
     } catch (err) {
       errHandler(res, err);
@@ -1799,6 +1804,7 @@ export async function registerRoutes(
           master_lease_id: mla!.id,
           rider_name: raw,
           schedule_number: raw,
+          // account_manager left null — Lease Management is the only writer
         })
         .select("id, rider_name")
         .single();
@@ -1814,6 +1820,9 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertRiderSchema.parse(req.body);
+      if (parsed.account_manager !== undefined) {
+        parsed.account_manager = parsed.account_manager?.trim() || null;
+      }
       const { data, error } = await supabase
         .from("riders")
         .insert(parsed)
@@ -1832,6 +1841,9 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRiderSchema.partial().parse(req.body);
+      if (parsed.account_manager !== undefined) {
+        parsed.account_manager = parsed.account_manager?.trim() || null;
+      }
       const { data, error } = await supabase
         .from("riders")
         .update(parsed)
@@ -2405,15 +2417,19 @@ export async function registerRoutes(
       // Insert any missing riders.
       const newRiderPayloads = Array.from(riderSpecs.values())
         .filter((s) => !riderKeyToId.has(riderKeyOf(s.master_lease_id, s.rider_name)))
-        .map((s) => ({
-          master_lease_id: s.master_lease_id,
-          rider_name: s.rider_name,
-          schedule_number: s.external_id,
-          effective_date: s.effective_date,
-          expiration_date: s.expiration_date,
-          permissible_commodity: s.permissible_commodity,
-          monthly_rent_per_car: s.monthly_rent_per_car,
-        }));
+        .map((s) => {
+          const row = {
+            master_lease_id: s.master_lease_id,
+            rider_name: s.rider_name,
+            schedule_number: s.external_id,
+            effective_date: s.effective_date,
+            expiration_date: s.expiration_date,
+            permissible_commodity: s.permissible_commodity,
+            monthly_rent_per_car: s.monthly_rent_per_car,
+          };
+          assertRiderImporterPatch(row);
+          return row;
+        });
       let ridersCreated = 0;
       for (let i = 0; i < newRiderPayloads.length; i += BATCH) {
         const slice = newRiderPayloads.slice(i, i + BATCH);
@@ -2573,6 +2589,10 @@ export async function registerRoutes(
 
   // VCF commit — gated. Requires confirmProductionImport === true after Bruce review.
   // Not used for the non-prod gate run; kept ready for the signed-off production load.
+  // Do-not-touch: riders.account_manager. VCF writes railcars + assignment_history
+  // + car_number_history. It does not insert riders. Post-commit expiration sync
+  // may patch riders.expiration_date / effective_date only.
+  // See docs/IMPORT_WRITE_BOUNDARIES.md.
   app.post("/api/import/vcf/commit", async (req: Request, res: Response) => {
     try {
       const writerId = await requireWrite(req, res);
@@ -3004,6 +3024,10 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  // Do-not-touch: riders.account_manager, car_number, entity, active, lessee,
+  // rider assignment. Writes rider_financial_summary + RAILCAR_FINANCIAL_REFRESH_FIELDS
+  // on railcars. fillBlankRiderMonthlyRent may fill blank riders.monthly_rent_per_car.
+  // See docs/IMPORT_WRITE_BOUNDARIES.md.
   app.post("/api/import/financial/commit", async (req: Request, res: Response) => {
     try {
       const writerId = await requireWrite(req, res);
@@ -4542,6 +4566,53 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  // ── ACCOUNTS ─────────────────────────────────────────────────────────────────
+
+  app.get("/api/accounts", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await listAccounts());
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/accounts", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      const row = await createAccount({
+        name: String(req.body.name ?? ""),
+        notes: req.body.notes ?? null,
+      });
+      res.json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/accounts/:id", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const row = await getAccount(Number(req.params.id));
+      if (!row) return res.status(404).json({ message: "Account not found" });
+      res.json(row);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.patch("/api/accounts/:id", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      const row = await updateAccount(Number(req.params.id), {
+        name: req.body.name,
+        notes: req.body.notes,
+      });
+      if (!row) return res.status(404).json({ message: "Account not found" });
+      res.json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
   // ── PROGRAMS MODULE ──────────────────────────────────────────────────────────
 
   app.get("/api/programs/categories", async (req, res) => {
@@ -4682,6 +4753,7 @@ export async function registerRoutes(
           tags: Array.isArray(req.body.tags) ? req.body.tags : null,
           entity: req.body.entity || null,
           account_manager: req.body.account_manager || null,
+          account_id: req.body.account_id ? Number(req.body.account_id) : null,
           status_narrative: req.body.status_narrative || null,
           target_completion_date: req.body.target_completion_date || null,
           created_by: userId,
@@ -4731,6 +4803,9 @@ export async function registerRoutes(
       if (req.body.tags !== undefined) updates.tags = Array.isArray(req.body.tags) ? req.body.tags : null;
       if (req.body.entity !== undefined) updates.entity = req.body.entity || null;
       if (req.body.account_manager !== undefined) updates.account_manager = req.body.account_manager || null;
+      if (req.body.account_id !== undefined) {
+        updates.account_id = req.body.account_id ? Number(req.body.account_id) : null;
+      }
       if (req.body.status_narrative !== undefined) updates.status_narrative = req.body.status_narrative || null;
       if (req.body.percent_complete !== undefined) {
         const n = req.body.percent_complete === "" || req.body.percent_complete == null ? null : Number(req.body.percent_complete);

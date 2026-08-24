@@ -3,7 +3,7 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { excelSheetName } from "@shared/programs";
-import { asOne, resolveLeaseType } from "@shared/lease-type";
+import { asOne, resolveLeaseType, deriveLeaseTypeFromCars } from "@shared/lease-type";
 import { fetchAllRows } from "./fetch-all";
 import { supabaseAdmin } from "./supabase";
 
@@ -197,12 +197,13 @@ export async function buildLeaseReport(opts: { leaseIds: number[] }): Promise<{ 
   for (const lease of leaseList) {
     const cars = carsByLease.get(lease.id) ?? [];
     const ridersFor = ridersByLease.get(lease.id) ?? [];
+    const derived = deriveLeaseTypeFromCars(cars);
     summary.addRow({
       lease_number: displayLeaseNumber(lease.lease_number),
       agreement_number: lease.agreement_number ?? "",
       lessor: lease.lessor ?? "",
       lessee: lease.lessee ?? "",
-      lease_type: lease.lease_type ?? "",
+      lease_type: derived.label ?? "",
       effective_date: lease.effective_date ?? "",
       rider_count: ridersFor.length,
       car_count: cars.length,
@@ -257,8 +258,9 @@ export async function buildLeaseReport(opts: { leaseIds: number[] }): Promise<{ 
     const sheet = wb.addWorksheet(name);
     sheet.addRow([...CAR_HEADERS]);
     sheet.getRow(1).font = { bold: true };
+    const derived = deriveLeaseTypeFromCars(carsByLease.get(lease.id) ?? []);
     for (const c of carsByLease.get(lease.id) ?? []) {
-      sheet.addRow(carRow(c, lease.lease_type));
+      sheet.addRow(carRow(c, derived.label));
     }
     sheet.columns.forEach((col, i) => {
       col.width = i === 0 || i === 3 ? 22 : i === 12 ? 16 : 14;

@@ -6,6 +6,7 @@ import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { isOperatingFleetCar, parseFleetStatus, deriveFleetStatus } from "@shared/fleet-status";
 import { carOlCode, carLesseeName } from "@shared/lease-authority";
+import { deriveLeaseTypeFromCars } from "@shared/lease-type";
 
 export const ENTITY_DB: Record<string, string> = {
   rps: "Rail Partners Select",
@@ -151,14 +152,22 @@ async function fetchOperatingCars(
   return cars.filter(operatingCar);
 }
 
-function riderRowForOl(ol: string | null, index: Map<string, RiderMeta>, carCount: number) {
+function riderRowForOl(
+  ol: string | null,
+  index: Map<string, RiderMeta>,
+  carCount: number,
+  carsForType?: Array<{ lease_type?: unknown; active?: boolean | null }>,
+) {
   const key = ol ? normalizeOl(ol) : "";
   const meta = key ? index.get(key) ?? index.get(olKeyFromLabel(ol) ?? "") : null;
+  const derived = carsForType ? deriveLeaseTypeFromCars(carsForType) : null;
   return {
     ol: ol || "Unassigned",
     rider_id: meta?.id ?? null,
     rider_name: meta?.rider_name ?? (ol || "Unassigned"),
-    lease_type: meta?.lease_type ?? null,
+    lease_type: derived?.label ?? null,
+    lease_type_mixed: derived?.mixed ?? false,
+    lease_type_breakdown: derived?.breakdown ?? [],
     effective_date: meta?.effective_date ?? null,
     expiration_date: meta?.expiration_date ?? null,
     lease_number: meta?.lease_number ?? null,
@@ -174,13 +183,15 @@ export async function browseGroup(kind: "lessee" | "entity", key: string) {
   const lessee = kind === "lessee" ? key : undefined;
   const cars = await fetchOperatingCars({ lessee, entity: entityDb });
   const index = await loadRiderIndex();
-  const buckets = new Map<string, number>();
+  const buckets = new Map<string, any[]>();
   for (const c of cars) {
     const ol = carOlCode(c) || "Unassigned";
-    buckets.set(ol, (buckets.get(ol) ?? 0) + 1);
+    const list = buckets.get(ol) ?? [];
+    list.push(c);
+    buckets.set(ol, list);
   }
   const riders = Array.from(buckets.entries())
-    .map(([ol, count]) => riderRowForOl(ol === "Unassigned" ? null : ol, index, count))
+    .map(([ol, list]) => riderRowForOl(ol === "Unassigned" ? null : ol, index, list.length, list))
     .sort((a, b) => b.car_count - a.car_count || a.ol.localeCompare(b.ol));
   return {
     kind,
@@ -204,7 +215,7 @@ export async function browseOl(code: string, filter?: { lessee?: string; entity?
     return rows.filter((c) => !carOlCode(c));
   });
   const index = await loadRiderIndex();
-  const summary = riderRowForOl(ol, index, cars.length);
+  const summary = riderRowForOl(ol, index, cars.length, cars);
   return {
     ...summary,
     cars: cars.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
@@ -217,13 +228,15 @@ export async function browseTurning50(year: number, ol?: string) {
   const base = { year, build_year: year - 50, car_count: cars.length };
 
   if (!ol) {
-    const buckets = new Map<string, number>();
+    const buckets = new Map<string, any[]>();
     for (const c of cars) {
       const key = carOlCode(c) || "Unassigned";
-      buckets.set(key, (buckets.get(key) ?? 0) + 1);
+      const list = buckets.get(key) ?? [];
+      list.push(c);
+      buckets.set(key, list);
     }
     const riders = Array.from(buckets.entries())
-      .map(([key, count]) => riderRowForOl(key === "Unassigned" ? null : key, index, count))
+      .map(([key, list]) => riderRowForOl(key === "Unassigned" ? null : key, index, list.length, list))
       .sort((a, b) => b.car_count - a.car_count || a.ol.localeCompare(b.ol));
     return { ...base, riders };
   }
@@ -234,7 +247,7 @@ export async function browseTurning50(year: number, ol?: string) {
     if (isUnassigned) return !code;
     return code === ol || normalizeOl(code) === normalizeOl(ol);
   });
-  const summary = riderRowForOl(isUnassigned ? null : ol, index, filtered.length);
+  const summary = riderRowForOl(isUnassigned ? null : ol, index, filtered.length, filtered);
   return {
     year,
     build_year: year - 50,

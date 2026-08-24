@@ -522,7 +522,10 @@ export default function LeaseManagement() {
                       <span className="font-mono-num text-base font-semibold">
                         {displayLeaseNumber(lease.lease_number)}
                       </span>
-                      <LeaseTypeBadge mlaType={lease.lease_type} />
+                      <LeaseTypeBadge
+                        mlaType={lease.lease_type}
+                        breakdown={(lease as any).lease_type_breakdown}
+                      />
                       {lease.is_inactive && <InactiveFleetBadge active={false} />}
                       <span className="text-xs text-muted-foreground">
                         {lease.agreement_number ?? "—"}
@@ -633,7 +636,10 @@ export default function LeaseManagement() {
                                   <span className="text-sm font-medium">
                                     {rider.rider_name}
                                   </span>
-                                  <LeaseTypeBadge mlaType={lease.lease_type} />
+                                  <LeaseTypeBadge
+                                    mlaType={(rider as any).lease_type ?? lease.lease_type}
+                                    breakdown={(rider as any).lease_type_breakdown}
+                                  />
                                   <span className="text-xs text-muted-foreground">
                                     {rider.schedule_number ?? "—"}
                                   </span>
@@ -701,7 +707,10 @@ export default function LeaseManagement() {
                             </div>
                             {open && (
                               <>
-                                <RiderCars riderId={rider.id} leaseType={lease.lease_type} />
+                                <RiderCars
+                                  riderId={rider.id}
+                                  leaseType={(rider as any).lease_type ?? lease.lease_type}
+                                />
                                 <RiderContactsPanel riderId={rider.id} />
                                 <div className="px-5 py-4 border-t border-border/50">
                                   <AttachmentsPanel entityType="rider" entityId={rider.id} compact />

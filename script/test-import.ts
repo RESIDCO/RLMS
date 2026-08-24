@@ -29,6 +29,11 @@ import {
 } from "../shared/build-year-backfill";
 import { parseTareWeight, parseTareWeightCsv } from "../shared/tare-weight-backfill";
 import {
+  deriveLeaseTypeFromCars,
+  resolveLeaseType,
+  storedLeaseTypeFromDerived,
+} from "../shared/lease-type";
+import {
   normalizeSnapshotMonth,
   buildCarFinancialUpdates,
   carFinancialFingerprint,
@@ -535,6 +540,38 @@ eq(
   eq(ol.lease_exp_date, "2025-12-31", "OL1942 keeps the earlier lease exp");
   eq(ol.months_until_lease_exp, 5, "OL1942 months follow the earlier lease exp");
   eq(ol.net_equipment_cost_per_car, 8416.59, "OL1942 OEC per car unchanged");
+}
+
+eq(resolveLeaseType("Full Service Lease", "Net Lease"), "Full Service Lease", "resolveLeaseType prefers car over stale MLA");
+eq(resolveLeaseType(null, "Net Lease"), "Net Lease", "resolveLeaseType falls back to MLA when car blank");
+eq(resolveLeaseType("IDLE", "Net Lease"), "IDLE", "resolveLeaseType keeps car IDLE over MLA");
+{
+  const ace = deriveLeaseTypeFromCars([
+    { lease_type: "Full Service Lease", active: true },
+    { lease_type: "Full Service Lease", active: true },
+    { lease_type: "Net Lease", active: false },
+  ]);
+  eq(ace.label, "Full Service Lease", "derive uses active cars only");
+  eq(ace.mixed, false, "derive not mixed when actives agree");
+  const mixed = deriveLeaseTypeFromCars([
+    { lease_type: "Full Service Lease", active: true },
+    { lease_type: "Net Lease", active: true },
+  ]);
+  eq(mixed.label, "Mixed", "derive Mixed when active types disagree");
+  eq(storedLeaseTypeFromDerived(mixed), "Mixed", "stored Mixed sentinel");
+  eq(mixed.breakdown.map((b) => b.type).sort(), ["Full Service Lease", "Net Lease"], "derive breakdown");
+  const dead = deriveLeaseTypeFromCars([
+    { lease_type: "IDLE", active: false },
+    { lease_type: "IDLE", active: false },
+  ]);
+  eq(dead.label, "IDLE", "derive falls back to inactive cars");
+  eq(dead.fromInactive, true, "derive marks inactive fallback");
+  const idleCase = deriveLeaseTypeFromCars([
+    { lease_type: "Idle", active: true },
+    { lease_type: "IDLE", active: true },
+  ]);
+  eq(idleCase.label, "IDLE", "Idle/IDLE normalize to one type");
+  eq(idleCase.mixed, false, "Idle/IDLE is not Mixed");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

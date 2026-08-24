@@ -522,10 +522,7 @@ export default function LeaseManagement() {
                       <span className="font-mono-num text-base font-semibold">
                         {displayLeaseNumber(lease.lease_number)}
                       </span>
-                      <LeaseTypeBadge
-                        mlaType={lease.lease_type}
-                        breakdown={(lease as any).lease_type_breakdown}
-                      />
+                      <LeaseTypeBadge mlaType={lease.lease_type} />
                       {lease.is_inactive && <InactiveFleetBadge active={false} />}
                       <span className="text-xs text-muted-foreground">
                         {lease.agreement_number ?? "—"}
@@ -636,10 +633,7 @@ export default function LeaseManagement() {
                                   <span className="text-sm font-medium">
                                     {rider.rider_name}
                                   </span>
-                                  <LeaseTypeBadge
-                                    mlaType={(rider as any).lease_type ?? lease.lease_type}
-                                    breakdown={(rider as any).lease_type_breakdown}
-                                  />
+                                  <LeaseTypeBadge mlaType={lease.lease_type} />
                                   <span className="text-xs text-muted-foreground">
                                     {rider.schedule_number ?? "—"}
                                   </span>
@@ -707,10 +701,7 @@ export default function LeaseManagement() {
                             </div>
                             {open && (
                               <>
-                                <RiderCars
-                                  riderId={rider.id}
-                                  leaseType={(rider as any).lease_type ?? lease.lease_type}
-                                />
+                                <RiderCars riderId={rider.id} leaseType={lease.lease_type} />
                                 <RiderContactsPanel riderId={rider.id} />
                                 <div className="px-5 py-4 border-t border-border/50">
                                   <AttachmentsPanel entityType="rider" entityId={rider.id} compact />
@@ -1238,7 +1229,7 @@ function MasterLeaseForm({
         agreement_number: lease?.agreement_number ?? "",
         lessor: lease?.lessor ?? "",
         lessee: lease?.lessee ?? "",
-        lease_type: lease?.lease_type ?? "Railcar Lease",
+        lease_type: lease?.lease_type ?? "",
         effective_date: lease?.effective_date ?? "",
         sold_to: lease?.sold_to ?? "",
         notes: lease?.notes ?? "",
@@ -1305,25 +1296,27 @@ function MasterLeaseForm({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Type</Label>
+              <Label>Lease Type</Label>
               <Select
-                value={form.lease_type || "Net Lease"}
+                value={form.lease_type || undefined}
                 onValueChange={(v) => setForm({ ...form, lease_type: v })}
               >
-                <SelectTrigger>
-                  <SelectValue />
+                <SelectTrigger data-testid="select-lease-type">
+                  <SelectValue placeholder="Select type…" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Net Lease">Net Lease</SelectItem>
                   <SelectItem value="Full Service Lease">Full Service Lease</SelectItem>
                   <SelectItem value="Modified Lease">Modified Lease</SelectItem>
-                  <SelectItem value="Railcar Lease">Railcar Lease</SelectItem>
                   {form.lease_type &&
-                    !["Net Lease", "Full Service Lease", "Modified Lease", "Railcar Lease"].includes(form.lease_type) && (
+                    !["Net Lease", "Full Service Lease", "Modified Lease"].includes(form.lease_type) && (
                       <SelectItem value={form.lease_type}>{form.lease_type}</SelectItem>
                     )}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Maintained here only — imports never overwrite this.
+              </p>
             </div>
             <div>
               <Label>Effective Date</Label>

@@ -9,10 +9,6 @@ export type MasterLease = {
   lessor: string | null;
   lessee: string | null;
   lease_type: string | null;
-  /** Present on /api/leases — derived from cars, not the stored column alone. */
-  lease_type_mixed?: boolean;
-  lease_type_breakdown?: Array<{ type: string; count: number }>;
-  lease_type_from_inactive?: boolean;
   effective_date: string | null;
   sold_to: string | null;          // buyer company if this MLA was sold/transferred
   notes: string | null;
@@ -335,11 +331,6 @@ export type RiderWithCounts = Rider & {
   active_car_count: number;
   /** True when active_car_count === 0 (derived; not a stored flag). */
   is_inactive: boolean;
-  /** Derived from assigned cars' lease_type (API). */
-  lease_type?: string | null;
-  lease_type_mixed?: boolean;
-  lease_type_breakdown?: Array<{ type: string; count: number }>;
-  lease_type_from_inactive?: boolean;
 };
 
 export type MasterLeaseWithRiders = MasterLease & {

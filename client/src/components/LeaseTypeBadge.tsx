@@ -3,7 +3,6 @@ import { resolveLeaseType } from "@shared/lease-type";
 
 function tone(label: string): string {
   const n = label.toLowerCase();
-  if (n === "mixed") return "border-umler-amber/40 bg-umler-amber/15 text-umler-amber";
   if (n.includes("net")) return "border-umler-teal/35 bg-umler-teal/15 text-umler-teal";
   if (n.includes("full")) return "border-umler-steel/35 bg-umler-steel/15 text-umler-steel";
   if (n.includes("modified")) return "border-umler-amber/35 bg-umler-amber/15 text-umler-amber";
@@ -13,14 +12,11 @@ function tone(label: string): string {
 export function LeaseTypeBadge({
   carType,
   mlaType,
-  breakdown,
   className,
   empty = "—",
 }: {
   carType?: unknown;
   mlaType?: unknown;
-  /** When present (rider/MLA derived Mixed), show counts in the title. */
-  breakdown?: Array<{ type: string; count: number }> | null;
   className?: string;
   empty?: string;
 }) {
@@ -38,10 +34,6 @@ export function LeaseTypeBadge({
       </span>
     );
   }
-  const title =
-    breakdown && breakdown.length > 0
-      ? breakdown.map((b) => `${b.type}: ${b.count}`).join(" · ")
-      : `Lease type: ${label}`;
   return (
     <span
       className={cn(
@@ -49,7 +41,7 @@ export function LeaseTypeBadge({
         tone(label),
         className,
       )}
-      title={title}
+      title={`Lease type: ${label}`}
     >
       {label}
     </span>

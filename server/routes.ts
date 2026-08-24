@@ -10,12 +10,6 @@ import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
-  attachDerivedLeaseTypes,
-  deriveLeaseTypesForRidersAndLeases,
-  fetchCarsByRiderId,
-} from "./lease-type-derive";
-import { deriveLeaseTypeFromCars, storedLeaseTypeFromDerived } from "@shared/lease-type";
-import {
   applyCarStatusChange,
   assertInactivePatchAllowed,
   patchFieldsForStatusChange,
@@ -294,10 +288,14 @@ export async function registerRoutes(
         }>;
       };
 
-      // 1. Create MLA
+      // 1. Create MLA (lease_type only if human set it in the wizard — never invent a default)
+      const mlaRow = { ...mla };
+      if (mlaRow.lease_type != null && String(mlaRow.lease_type).trim() === "") {
+        mlaRow.lease_type = null;
+      }
       const { data: newMla, error: mlaErr } = await supabase
         .from("master_leases")
-        .insert(mla)
+        .insert(mlaRow)
         .select()
         .single();
       if (mlaErr) throw mlaErr;
@@ -1545,12 +1543,11 @@ export async function registerRoutes(
   // ---------- Leases (Master + nested riders) ----------
   app.get("/api/leases", async (_req, res) => {
     try {
-      const [leasesRes, ridersRes, countByRider, activeByRider, carsByRider] = await Promise.all([
+      const [leasesRes, ridersRes, countByRider, activeByRider] = await Promise.all([
         supabase.from("master_leases").select("*").order("lease_number"),
         supabase.from("riders").select("*").order("rider_name"),
         countCarsByRiderId(),
         countActiveCarsByRiderId(),
-        fetchCarsByRiderId(),
       ]);
       if (leasesRes.error) throw leasesRes.error;
       if (ridersRes.error) throw ridersRes.error;
@@ -1566,22 +1563,16 @@ export async function registerRoutes(
         };
       });
 
-      const { byRiderId, byLeaseId } = deriveLeaseTypesForRidersAndLeases(riders, carsByRider);
-
-      const result = attachDerivedLeaseTypes(
-        (leasesRes.data ?? []).map((l) => {
-          const leaseRiders = riders.filter((r) => r.master_lease_id === l.id);
-          const car_count = leaseRiders.reduce(
-            (acc, r) => acc + (r.car_count ?? 0),
-            0
-          );
-          const is_inactive =
-            leaseRiders.length === 0 || leaseRiders.every((r) => r.is_inactive);
-          return { ...l, riders: leaseRiders, car_count, is_inactive };
-        }),
-        byRiderId,
-        byLeaseId,
-      );
+      const result = (leasesRes.data ?? []).map((l) => {
+        const leaseRiders = riders.filter((r) => r.master_lease_id === l.id);
+        const car_count = leaseRiders.reduce(
+          (acc, r) => acc + (r.car_count ?? 0),
+          0
+        );
+        const is_inactive =
+          leaseRiders.length === 0 || leaseRiders.every((r) => r.is_inactive);
+        return { ...l, riders: leaseRiders, car_count, is_inactive };
+      });
 
       res.json(result);
     } catch (err) {
@@ -1616,6 +1607,9 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertMasterLeaseSchema.parse(req.body);
+      if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
+        parsed.lease_type = null;
+      }
       const { data, error } = await supabase
         .from("master_leases")
         .insert(parsed)
@@ -1634,6 +1628,9 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertMasterLeaseSchema.partial().parse(req.body);
+      if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
+        parsed.lease_type = null;
+      }
       const { data, error } = await supabase
         .from("master_leases")
         .update(parsed)
@@ -1736,7 +1733,7 @@ export async function registerRoutes(
             lease_number: AD_HOC_LEASE,
             lessor: "RESIDCO",
             lessee: "Ad Hoc / Free-text OL",
-            lease_type: "Railcar Lease",
+            // lease_type left null — set in Lease Management
           })
           .select("id")
           .single();
@@ -2260,31 +2257,16 @@ export async function registerRoutes(
         if (id) lesseeToMlaId.set(lessee, id);
       }
 
-      // Insert any missing MLAs — lease_type from the cars that triggered creation,
-      // never a hardcoded "Net Lease" default.
-      const leaseTypesByLessee = new Map<string, Array<{ lease_type: unknown; active: boolean }>>();
-      for (const r of validRows) {
-        const lessee = deriveLeaseKey(r.lessee_name);
-        if (!lessee) continue;
-        const list = leaseTypesByLessee.get(lessee) ?? [];
-        list.push({
-          lease_type: r.lease_type ?? null,
-          active: r.active !== false,
-        });
-        leaseTypesByLessee.set(lessee, list);
-      }
+      // Insert any missing MLAs. lease_type is intentionally omitted —
+      // Lease Management is the sole writer of that field (left null for Bruce).
       const newMlaPayloads = Array.from(lesseeSet)
         .filter((lessee) => !lesseeToMlaId.has(lessee))
-        .map((lessee) => {
-          const derived = deriveLeaseTypeFromCars(leaseTypesByLessee.get(lessee) ?? []);
-          return {
-            lease_number: synthesizeLeaseNumber(lessee),
-            lessee,
-            lessor: "RESIDCO",
-            lease_type: storedLeaseTypeFromDerived(derived) ?? "Railcar Lease",
-            notes: "Auto-created by RESIDCO Master Car List import",
-          };
-        });
+        .map((lessee) => ({
+          lease_number: synthesizeLeaseNumber(lessee),
+          lessee,
+          lessor: "RESIDCO",
+          notes: "Auto-created by RESIDCO Master Car List import",
+        }));
       let mlasCreated = 0;
       for (let i = 0; i < newMlaPayloads.length; i += BATCH) {
         const slice = newMlaPayloads.slice(i, i + BATCH);
@@ -2309,7 +2291,6 @@ export async function registerRoutes(
         expiration_date: string | null;
         permissible_commodity: string | null;
         monthly_rent_per_car: number | null;
-        lease_type: string | null;
       };
       const riderKeyOf = (mlaId: number, name: string) => `${mlaId}|${name.trim().toUpperCase()}`;
       const riderSpecs = new Map<string, RiderSpec>();
@@ -2331,7 +2312,6 @@ export async function registerRoutes(
             expiration_date: r.lease_expiry ?? r.lease_end_date ?? null,
             permissible_commodity: r.commodity ?? null,
             monthly_rent_per_car: r.monthly_rent_per_car ?? null,
-            lease_type: r.lease_type ?? null,
           });
         }
       }

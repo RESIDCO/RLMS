@@ -434,7 +434,7 @@ export default function LeaseWizard() {
   // Step 1 — MLA
   const [mla, setMla] = useState<MlaForm>({
     lease_number: "", agreement_number: "", lessor: "",
-    lessee: "", lease_type: "Railcar Lease", effective_date: "", notes: "",
+    lessee: "", lease_type: "", effective_date: "", notes: "",
   });
 
   // Step 2 — Riders
@@ -596,10 +596,9 @@ export default function LeaseWizard() {
                 </div>
                 <div>
                   <Label>Lease Type</Label>
-                  <Select value={mla.lease_type} onValueChange={(v) => setMla({ ...mla, lease_type: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select value={mla.lease_type || undefined} onValueChange={(v) => setMla({ ...mla, lease_type: v })}>
+                    <SelectTrigger data-testid="wizard-select-lease-type"><SelectValue placeholder="Select type…" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Railcar Lease">Railcar Lease</SelectItem>
                       <SelectItem value="Net Lease">Net Lease</SelectItem>
                       <SelectItem value="Full Service Lease">Full Service Lease</SelectItem>
                       <SelectItem value="Modified Lease">Modified Lease</SelectItem>

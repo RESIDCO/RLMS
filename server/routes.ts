@@ -3498,7 +3498,10 @@ export async function registerRoutes(
     try {
       const railcarId = req.query.railcar_id ? Number(req.query.railcar_id) : undefined;
       const riderId = req.query.rider_id ? Number(req.query.rider_id) : undefined;
-      const q = (req.query.q as string | undefined)?.trim();
+      const qRaw = req.query.q;
+      const q = qRaw == null || qRaw === ""
+        ? undefined
+        : String(Array.isArray(qRaw) ? qRaw[0] : qRaw).trim() || undefined;
       const includeVcf = req.query.include_vcf === "1" || req.query.include_vcf === "true";
       const result = await listActivityLog({
         railcarId: Number.isFinite(railcarId) ? railcarId : undefined,

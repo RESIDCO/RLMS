@@ -1,4 +1,5 @@
 import { splitCarNumber } from "@shared/residco-import";
+import { asOne } from "@shared/lease-type";
 import { supabaseAdmin } from "./supabase";
 
 export type ActivityEntityType = "railcar" | "rider";
@@ -76,6 +77,34 @@ export async function resolveRailcarsByAnyIdentity(raw: string): Promise<number[
       }
     }
 
+    // Bare number: same fan-out as global Search (ilike on current + history numbers)
+    if (!mark && /^\d+$/.test(split.car_number)) {
+      const like = `%${split.car_number}%`;
+      const { data: ilikeCars, error: iErr } = await supabaseAdmin
+        .from("railcars")
+        .select("id")
+        .ilike("car_number", like)
+        .limit(80);
+      if (iErr) console.log(`[activity] bare-number ilike skipped: ${iErr.message}`);
+      for (const c of ilikeCars ?? []) ids.add(Number(c.id));
+      const { data: histLikeOld, error: hoErr } = await supabaseAdmin
+        .from("car_number_history")
+        .select("railcar_id")
+        .ilike("old_car_number", like)
+        .limit(80);
+      const { data: histLikeNew, error: hnErr } = await supabaseAdmin
+        .from("car_number_history")
+        .select("railcar_id")
+        .ilike("new_car_number", like)
+        .limit(80);
+      if (hoErr) console.log(`[activity] bare-number history old skipped: ${hoErr.message}`);
+      if (hnErr) console.log(`[activity] bare-number history new skipped: ${hnErr.message}`);
+      for (const h of [...(histLikeOld ?? []), ...(histLikeNew ?? [])]) {
+        const id = Number(h.railcar_id);
+        if (id) ids.add(id);
+      }
+    }
+
     const { data: oldHits, error: oErr } = await supabaseAdmin
       .from("car_number_history")
       .select("railcar_id, old_car_initial, old_car_number, new_car_initial, new_car_number")
@@ -99,9 +128,65 @@ export async function resolveRailcarsByAnyIdentity(raw: string): Promise<number[
   return [...ids];
 }
 
+const RESOLVED_CAR_SELECT = `
+id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation,
+lessee_name, rider_external_id, lease_type, ops_flag,
+assignment:railcar_assignments(
+  id, fleet_name,
+  rider:riders(
+    id, rider_name, schedule_number,
+    master_lease:master_leases(id, lease_number, lessee, lease_type)
+  )
+)
+`.replace(/\s+/g, " ").trim();
+
+async function hydrateRailcars(ids: number[]) {
+  const uniq = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!uniq.length) return [];
+  const { data, error } = await supabaseAdmin
+    .from("railcars")
+    .select(RESOLVED_CAR_SELECT)
+    .in("id", uniq.slice(0, 80));
+  if (error) {
+    console.log(`[activity] hydrate railcars skipped: ${error.message}`);
+    return [];
+  }
+  const byId = new Map((data ?? []).map((row: any) => {
+    const assignment = asOne(row.assignment);
+    const rider = asOne(assignment?.rider);
+    const master_lease = asOne(rider?.master_lease);
+    return [Number(row.id), {
+      ...row,
+      assignment: assignment
+        ? { ...assignment, rider: rider ? { ...rider, master_lease } : null }
+        : null,
+    }];
+  }));
+  return uniq.map((id) => byId.get(id)).filter(Boolean);
+}
+
+async function hydrateRiders(ids: number[]) {
+  const uniq = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!uniq.length) return [];
+  const { data, error } = await supabaseAdmin
+    .from("riders")
+    .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(id, lease_number, lessee, lease_type)")
+    .in("id", uniq.slice(0, 80));
+  if (error) {
+    console.log(`[activity] hydrate riders skipped: ${error.message}`);
+    return [];
+  }
+  const byId = new Map(
+    (data ?? []).map((r: any) => [Number(r.id), { ...r, master_lease: asOne(r.master_lease) }]),
+  );
+  return uniq.map((id) => byId.get(id)).filter(Boolean);
+}
+
 export async function resolveRidersByQuery(raw: string): Promise<number[]> {
   const q = String(raw ?? "").trim().replace(/[%*,()]/g, " ").trim();
   if (!q) return [];
+  // Pure car numbers are not rider queries — Search fans those out on cars only.
+  if (/^\d+$/.test(q)) return [];
   const like = `%${q}%`;
   const ids = new Set<number>();
   const { data: riders, error: rErr } = await supabaseAdmin
@@ -149,19 +234,31 @@ function isVcfAssignmentNoise(row: any): boolean {
 
 export async function listActivityLog(opts: ListActivityOpts) {
   const limit = Math.min(Math.max(opts.limit ?? 500, 1), 1000);
+  const qText = opts.q != null ? String(opts.q).trim() : "";
   let railcarIds: number[] = opts.railcarId ? [opts.railcarId] : [];
   let riderIds: number[] = opts.riderId ? [opts.riderId] : [];
-  const resolved = { railcar_ids: [] as number[], rider_ids: [] as number[] };
+  const resolved = {
+    railcar_ids: [] as number[],
+    rider_ids: [] as number[],
+    railcars: [] as any[],
+    riders: [] as any[],
+  };
 
-  if (opts.q?.trim()) {
+  if (qText) {
     const [cars, riders] = await Promise.all([
-      resolveRailcarsByAnyIdentity(opts.q),
-      resolveRidersByQuery(opts.q),
+      resolveRailcarsByAnyIdentity(qText),
+      resolveRidersByQuery(qText),
     ]);
     if (!opts.railcarId) railcarIds = cars;
     if (!opts.riderId) riderIds = riders;
     resolved.railcar_ids = cars;
     resolved.rider_ids = riders;
+    const [railcars, riderRows] = await Promise.all([
+      hydrateRailcars(cars),
+      hydrateRiders(riders),
+    ]);
+    resolved.railcars = railcars;
+    resolved.riders = riderRows;
   }
 
   let q = supabaseAdmin
@@ -182,8 +279,8 @@ export async function listActivityLog(opts: ListActivityOpts) {
     q = q.in("railcar_id", railcarIds);
   } else if (riderIds.length) {
     q = q.in("rider_id", riderIds);
-  } else if (opts.q?.trim()) {
-    return { events: [], resolved, query: opts.q };
+  } else if (qText) {
+    return { events: [], resolved, query: qText };
   }
 
   const { data, error } = await q;
@@ -194,7 +291,7 @@ export async function listActivityLog(opts: ListActivityOpts) {
     rider: Array.isArray(row.rider) ? row.rider[0] ?? null : row.rider,
   }));
   if (!opts.includeVcfNoise) events = events.filter((e) => !isVcfAssignmentNoise(e));
-  return { events, resolved, query: opts.q ?? null };
+  return { events, resolved, query: qText || null };
 }
 
 export async function addNote(opts: {

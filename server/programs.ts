@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
+import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { splitCarNumber } from "@shared/residco-import";
 import {
   excelSheetName,
@@ -445,6 +446,31 @@ export async function resolveProgramCars(opts: { text: string; programId?: numbe
       return rm === wantMark || ci === wantMark;
     });
     if (hits.length === 0) {
+      const priorIds = await resolveRailcarsByAnyIdentity(p.token);
+      if (priorIds.length === 1) {
+        const { data: car } = await supabaseAdmin
+          .from("railcars")
+          .select("id, car_number, reporting_marks")
+          .eq("id", priorIds[0])
+          .maybeSingle();
+        if (car) {
+          const row = { token: p.token, railcar_id: Number(car.id), label: carLabel(car) };
+          if (openIds.has(row.railcar_id)) already.push(row);
+          else matched.push(row);
+          continue;
+        }
+      }
+      if (priorIds.length > 1) {
+        const { data: cars } = await supabaseAdmin
+          .from("railcars")
+          .select("id, car_number, reporting_marks")
+          .in("id", priorIds.slice(0, 20));
+        ambiguous.push({
+          token: p.token,
+          matches: (cars ?? []).map((c) => ({ railcar_id: Number(c.id), label: carLabel(c) })),
+        });
+        continue;
+      }
       notFound.push({ token: p.token });
       continue;
     }

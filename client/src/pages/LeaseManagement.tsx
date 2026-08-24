@@ -58,6 +58,7 @@ import { carBuildYear } from "@shared/build-year";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import ActivityTimeline from "@/components/ActivityTimeline";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import { carPath } from "@/lib/browse-nav";
@@ -703,6 +704,9 @@ export default function LeaseManagement() {
                               <>
                                 <RiderCars riderId={rider.id} leaseType={lease.lease_type} />
                                 <RiderContactsPanel riderId={rider.id} />
+                                <div className="px-5 pb-2">
+                                  <ActivityTimeline riderId={rider.id} canEdit={canEdit} title="Rider activity" />
+                                </div>
                                 <div className="px-5 py-4 border-t border-border/50">
                                   <AttachmentsPanel entityType="rider" entityId={rider.id} compact />
                                 </div>
@@ -1420,6 +1424,7 @@ function RiderForm({
         monthly_rent_per_car: form.monthly_rent_per_car === "" ? null : Number(form.monthly_rent_per_car),
         sold_to: form.sold_to?.trim() || null,
       };
+      delete (body as any).notes;
       if (rider) await apiRequest("PATCH", `/api/riders/${rider.id}`, body);
       else await apiRequest("POST", `/api/riders`, body);
     },
@@ -1549,11 +1554,9 @@ function RiderForm({
           </div>
           <div>
             <Label>Notes</Label>
-            <Textarea
-              rows={2}
-              value={form.notes ?? ""}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Add timestamped notes on the rider Activity timeline after saving. Prior comments are never overwritten.
+            </p>
           </div>
         </div>
         <DialogFooter>

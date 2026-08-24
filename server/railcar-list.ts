@@ -4,6 +4,7 @@ import { splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag, OPS_FLAG_FALLBACK_PREFIX } from "@shared/ops-flag";
 import { fetchAllRows } from "./fetch-all";
+import { resolveRailcarsByAnyIdentity } from "./activity-log";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
 export const RAILCAR_LIST_SELECT = `
@@ -322,6 +323,20 @@ async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]
   return data.map((r) => r.id);
 }
 
+async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, haveIds: Set<number>) {
+  if (!p.search) return [];
+  const ids = (await resolveRailcarsByAnyIdentity(p.search)).filter((id) => !haveIds.has(id));
+  if (!ids.length) return [];
+  let q = supabaseAdmin.from("railcars").select(select).in("id", ids.slice(0, 80));
+  q = applyRailcarFilters(q, { ...p, search: undefined });
+  const { data, error } = await q;
+  if (error) {
+    console.log(`[railcars] prior-identity hydrate skipped: ${error.message}`);
+    return [];
+  }
+  return (data ?? []).map(mapRow);
+}
+
 async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   const db = supabaseAdmin;
   const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
@@ -338,11 +353,13 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
       return q;
     });
     const rows = all.map(mapRow).filter((r: any) => !assignedSet.has(r.id) && !r.assignment);
-    if (p.all) return { rows, total_count: rows.length, page: 1, pageSize: rows.length };
+    const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
+    const merged = extra.length ? [...extra, ...rows] : rows;
+    if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
     const start = (p.page! - 1) * p.pageSize!;
     return {
-      rows: rows.slice(start, start + p.pageSize!),
-      total_count: rows.length,
+      rows: merged.slice(start, start + p.pageSize!),
+      total_count: merged.length,
       page: p.page,
       pageSize: p.pageSize,
     };
@@ -355,7 +372,9 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
       return q;
     });
     const rows = data.map(mapRow);
-    return { rows, total_count: rows.length, page: 1, pageSize: rows.length };
+    const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
+    const merged = extra.length ? [...extra, ...rows] : rows;
+    return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
   }
 
   const from = (p.page! - 1) * p.pageSize!;
@@ -368,9 +387,12 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   q = applyRailcarFilters(q, p);
   const { data, error, count } = await q;
   if (error) throw error;
+  const rows = (data ?? []).map(mapRow);
+  const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
+  const merged = extra.length ? [...extra, ...rows] : rows;
   return {
-    rows: (data ?? []).map(mapRow),
-    total_count: count ?? 0,
+    rows: merged,
+    total_count: (count ?? 0) + extra.length,
     page: p.page,
     pageSize: p.pageSize,
   };

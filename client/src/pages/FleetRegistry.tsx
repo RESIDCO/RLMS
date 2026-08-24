@@ -35,7 +35,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList, ExternalLink } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
@@ -63,6 +62,7 @@ import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
 import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate, todayIsoDateOnly } from "@shared/lease-authority";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import ActivityTimeline from "@/components/ActivityTimeline";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { confirmDelete, confirmSave, confirmWithReason } from "@/components/ConfirmActionDialog";
@@ -1900,20 +1900,13 @@ export function CarDetail({
   const allRiders: any[] = ridersData ?? [];
 
   // Rent events for this car
-  const { data: rentEventsData, isLoading: rentLoading } = useQuery<any[]>({
+  const { data: rentEventsData } = useQuery<any[]>({
     queryKey: ["/api/rent-events/car", carId],
     queryFn: () => apiRequest("GET", `/api/rent-events/car/${carId}`).then((r) => r.json()),
   });
   const rentEvents: any[] = rentEventsData ?? [];
   const currentRentStatus: "off_rent" | "on_rent" | null =
     rentEvents.length > 0 ? rentEvents[0].event_type : null;
-
-  const { data: statusHistoryData } = useQuery<any[]>({
-    queryKey: ["/api/car-status-history/car", carId],
-    queryFn: () =>
-      apiRequest("GET", `/api/car-status-history/car/${carId}`).then((r) => r.json()),
-  });
-  const statusHistory: any[] = statusHistoryData ?? [];
 
   const rentMutation = useMutation({
     mutationFn: async () => {
@@ -1929,6 +1922,7 @@ export function CarDetail({
       queryClient.invalidateQueries({ queryKey: ["/api/rent-events/car", carId] });
       queryClient.invalidateQueries({ queryKey: ["/api/rent-events"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
       toast({ title: "Rent event logged", description: "Rental status updated successfully." });
       setRentFormOpen(false);
       setRentReason("");
@@ -1955,6 +1949,7 @@ export function CarDetail({
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
       toast({ title: "Car assigned", description: "Assignment saved successfully." });
       setAssignOpen(false);
       setAssignRiderId("");
@@ -2262,122 +2257,6 @@ export function CarDetail({
         </div>
       )}
 
-      <div className="mt-6 border-t border-border pt-5">
-        <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
-          Assignment History
-        </div>
-        {data.history.length === 0 ? (
-          <div className="text-sm text-muted-foreground italic">No moves recorded.</div>
-        ) : (
-          <div className="space-y-3">
-            {data.history.map((h: any) => (
-              <div key={h.id} className="text-xs border-l-2 border-primary/50 pl-3 py-1">
-                <div className="font-mono-num text-muted-foreground">
-                  {new Date(h.moved_at).toLocaleString()}
-                </div>
-                <div className="mt-0.5">
-                  <span className="text-muted-foreground">
-                    {h.from_rider?.rider_name ?? "—"}
-                  </span>
-                  <span className="mx-1.5 text-primary">→</span>
-                  <span>{h.to_rider?.rider_name ?? "—"}</span>
-                </div>
-                {(h.from_fleet_name || h.to_fleet_name) && (
-                  <div className="text-muted-foreground mt-0.5">
-                    {h.from_fleet_name ?? "—"} → {h.to_fleet_name ?? "—"}
-                  </div>
-                )}
-                {h.reason && (
-                  <div className="text-muted-foreground italic mt-0.5">{h.reason}</div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Car number history */}
-      {(data.number_history ?? []).length > 0 && (
-        <div className="mt-6 border-t border-border pt-5">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3 flex items-center gap-1.5">
-            <Hash className="h-3 w-3" /> Reporting Mark History
-          </div>
-          <div className="space-y-2">
-            {data.number_history.map((h: any) => (
-              <div key={h.id} className="text-xs border-l-2 border-amber-500/50 pl-3 py-1">
-                <div className="font-mono-num text-muted-foreground">{new Date(h.changed_at).toLocaleString()}</div>
-                <div className="mt-0.5 font-mono font-medium">
-                  <span className="text-muted-foreground">
-                    {[h.old_car_initial, h.old_car_number].filter(Boolean).join(" ") || h.old_car_number}
-                  </span>
-                  <span className="mx-1.5 text-amber-400">→</span>
-                  <span>
-                    {[h.new_car_initial, h.new_car_number].filter(Boolean).join(" ") || h.new_car_number}
-                  </span>
-                </div>
-                {h.reason && <div className="text-muted-foreground italic mt-0.5">{h.reason}</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Inactive / Reactivate history (append-only) */}
-      <div className="mt-6 border-t border-border pt-5">
-        <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
-          Active Status History
-        </div>
-        {statusHistory.length === 0 ? (
-          <div className="text-sm text-muted-foreground italic">
-            No Inactive / Reactivate events recorded
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {statusHistory.map((ev: any) => {
-              const markedOut = ev.event_type === "marked_inactive";
-              return (
-                <div
-                  key={ev.id}
-                  className={cn(
-                    "text-xs border-l-2 pl-3 py-1",
-                    markedOut ? "border-zinc-500/60" : "border-umler-teal/50",
-                  )}
-                >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-                        markedOut
-                          ? "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
-                          : "border-umler-teal/30 bg-umler-teal/10 text-umler-teal",
-                      )}
-                    >
-                      {markedOut ? "Marked Inactive" : "Reactivated"}
-                    </span>
-                    <span className="font-mono-num text-muted-foreground">
-                      {ev.created_at ? new Date(ev.created_at).toLocaleString() : "—"}
-                    </span>
-                    {ev.created_by && (
-                      <span className="text-muted-foreground">· {ev.created_by}</span>
-                    )}
-                  </div>
-                  {(ev.from_status || ev.to_status) && (
-                    <div className="mt-0.5 font-mono text-muted-foreground">
-                      {ev.from_status ?? "—"}
-                      <span className="mx-1.5">→</span>
-                      {ev.to_status ?? "—"}
-                    </div>
-                  )}
-                  {ev.reason && (
-                    <div className="text-muted-foreground italic mt-0.5">{ev.reason}</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       {/* ── Rental Abatement / Rent Status ── */}
       <div className="mt-6 border-t border-border pt-5">
         <div className="flex items-center justify-between mb-3">
@@ -2478,47 +2357,9 @@ export function CarDetail({
             </div>
           </div>
         )}
-
-        {/* History table */}
-        {rentLoading ? (
-          <Skeleton className="h-16 w-full" />
-        ) : rentEvents.length > 0 ? (
-          <div className="space-y-2">
-            {rentEvents.map((ev: any) => (
-              <div
-                key={ev.id}
-                className={`text-xs border-l-2 pl-3 py-1 ${
-                  ev.event_type === "off_rent"
-                    ? "border-[hsl(var(--error))]/60"
-                    : "border-[hsl(var(--success))]/60"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className={`font-medium ${
-                    ev.event_type === "off_rent"
-                      ? "text-[hsl(var(--error))]"
-                      : "text-[hsl(var(--success))]"
-                  }`}>
-                    {ev.event_type === "off_rent" ? "Off Rent" : "On Rent"}
-                  </span>
-                  <span className="text-muted-foreground font-mono-num">{ev.event_date}</span>
-                </div>
-                <div className="mt-0.5 text-muted-foreground italic">{ev.reason}</div>
-                <div className="mt-0.5 text-muted-foreground/60">{ev.created_by}</div>
-              </div>
-            ))}
-          </div>
-        ) : null}
       </div>
 
-      {r.notes && (
-        <div className="mt-6 border-t border-border pt-5">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">
-            Notes
-          </div>
-          <p className="text-sm whitespace-pre-wrap">{r.notes}</p>
-        </div>
-      )}
+      <ActivityTimeline railcarId={carId} canEdit={canEdit} title="Activity" />
 
       {/* Railcar-level attachments */}
       <div className="mt-6 border-t border-border pt-5">
@@ -2560,6 +2401,7 @@ function RemarkChangeDialog({
     onSuccess: (d: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars", carId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
       const from = [d.old_car_initial, d.old_car_number].filter(Boolean).join(" ") || d.old_car_number;
       const to = [d.new_car_initial, d.new_car_number].filter(Boolean).join(" ") || d.new_car_number;
       toast({ title: `Car number changed: ${from} → ${to}` });
@@ -2678,6 +2520,7 @@ export function RailcarFormDialog({
     mutationFn: async (inactiveReason?: string | null) => {
       if (car) {
         const payload: Record<string, unknown> = { ...form };
+        delete payload.notes;
         if (inactiveReason) payload.inactive_change_reason = inactiveReason;
         await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
       } else {
@@ -2984,11 +2827,9 @@ export function RailcarFormDialog({
           )}
           <div>
             <Label>Notes</Label>
-            <Textarea
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              rows={3}
-            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Notes are now append-only on the Activity timeline on the car detail panel. Adding a note there keeps every prior comment.
+            </p>
           </div>
 
           {/* ── Assign to Rider (new cars only) ──────────────────────────── */}

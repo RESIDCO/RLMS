@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "./supabase";
+import { logActivity } from "./activity-log";
 import {
   crossesInactiveBoundary,
   fieldsForCarStatusSave,
@@ -141,9 +142,30 @@ export async function applyCarStatusChange(opts: {
   }
 
   if (historyRows.length) {
-    const { error: hErr } = await supabaseAdmin.from("car_status_history").insert(historyRows);
+    const { data: inserted, error: hErr } = await supabaseAdmin
+      .from("car_status_history")
+      .insert(historyRows)
+      .select("id, car_id, event_type, reason, created_by, from_status, to_status, created_at");
     if (hErr) throw hErr;
-    history_written = historyRows.length;
+    history_written = inserted?.length ?? historyRows.length;
+    for (const h of inserted ?? []) {
+      await logActivity({
+        entity_type: "railcar",
+        entity_id: h.car_id,
+        railcar_id: h.car_id,
+        action: "status_change",
+        actor: h.created_by,
+        detail: {
+          event_type: h.event_type,
+          from: h.from_status,
+          to: h.to_status,
+          reason: h.reason,
+        },
+        occurred_at: h.created_at,
+        source_table: "car_status_history",
+        source_id: h.id,
+      });
+    }
   }
 
   return { updated, history_written, skipped_same };
@@ -182,15 +204,31 @@ export async function writeCarStatusHistoryRow(opts: {
   userId: string;
 }): Promise<void> {
   const created_by = await createdByLabel(opts.userId);
-  const { error } = await supabaseAdmin.from("car_status_history").insert({
+  const { data, error } = await supabaseAdmin.from("car_status_history").insert({
     car_id: opts.carId,
     event_type: inactiveBoundaryEventType(opts.toStatus),
     reason: opts.reason.trim(),
     created_by,
     from_status: opts.fromStatus ?? null,
     to_status: opts.toStatus,
-  });
+  }).select("id, created_at").single();
   if (error) throw error;
+  await logActivity({
+    entity_type: "railcar",
+    entity_id: opts.carId,
+    railcar_id: opts.carId,
+    action: "status_change",
+    actor: created_by,
+    detail: {
+      event_type: inactiveBoundaryEventType(opts.toStatus),
+      from: opts.fromStatus ?? null,
+      to: opts.toStatus,
+      reason: opts.reason.trim(),
+    },
+    occurred_at: data?.created_at,
+    source_table: "car_status_history",
+    source_id: data?.id ?? null,
+  });
 }
 
 export { isInactiveCarStatus, crossesInactiveBoundary };

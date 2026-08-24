@@ -8,6 +8,7 @@ import { queryRailcars, queryRailcarIds, parseRailcarListParams } from "./railca
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
+import { addNote, listActivityLog, logActivity } from "./activity-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
   applyCarStatusChange,
@@ -1532,7 +1533,7 @@ export async function registerRoutes(
         .eq("id", id);
       if (uErr) throw uErr;
 
-      const { error: hErr } = await supabase.from("car_number_history").insert({
+      const { data: histRow, error: hErr } = await supabase.from("car_number_history").insert({
         railcar_id: id,
         old_car_initial: oldInitial,
         old_car_number: car.car_number,
@@ -1541,8 +1542,22 @@ export async function registerRoutes(
         changed_at: changedAt,
         changed_by: changed_by ?? req.authUser?.email ?? "system",
         reason: reason ?? null,
-      });
+      }).select("id").single();
       if (hErr) throw hErr;
+
+      const fromLabel = [oldInitial, car.car_number].filter(Boolean).join(" ");
+      const toLabel = [newInitial, newNum].filter(Boolean).join(" ");
+      await logActivity({
+        entity_type: "railcar",
+        entity_id: id,
+        railcar_id: id,
+        action: "mark_change",
+        actor: changed_by ?? req.authUser?.email ?? "system",
+        detail: { from: fromLabel, to: toLabel, reason: reason ?? null },
+        occurred_at: changedAt,
+        source_table: "car_number_history",
+        source_id: histRow?.id ?? null,
+      });
 
       res.json({
         ok: true,
@@ -1940,10 +1955,32 @@ export async function registerRoutes(
       }
 
       if (historyRows.length) {
-        const { error: hErr } = await supabase
+        const { data: insertedHist, error: hErr } = await supabase
           .from("assignment_history")
-          .insert(historyRows);
+          .insert(historyRows)
+          .select("id, railcar_id, from_rider_id, to_rider_id, from_fleet_name, to_fleet_name, moved_at, moved_by, reason");
         if (hErr) throw hErr;
+        const actor = moved_by ?? req.authUser?.email ?? "system";
+        for (const h of insertedHist ?? []) {
+          await logActivity({
+            entity_type: "railcar",
+            entity_id: h.railcar_id,
+            railcar_id: h.railcar_id,
+            rider_id: h.to_rider_id ?? null,
+            action: "reassignment",
+            actor,
+            detail: {
+              from_rider_id: h.from_rider_id,
+              to_rider_id: h.to_rider_id,
+              from_fleet: h.from_fleet_name,
+              to_fleet: h.to_fleet_name,
+              reason: h.reason,
+            },
+            occurred_at: h.moved_at,
+            source_table: "assignment_history",
+            source_id: h.id,
+          });
+        }
       }
 
       res.json({ ok: true, moved: car_ids.length });
@@ -3457,6 +3494,46 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/activity", async (req, res) => {
+    try {
+      const railcarId = req.query.railcar_id ? Number(req.query.railcar_id) : undefined;
+      const riderId = req.query.rider_id ? Number(req.query.rider_id) : undefined;
+      const q = (req.query.q as string | undefined)?.trim();
+      const includeVcf = req.query.include_vcf === "1" || req.query.include_vcf === "true";
+      const result = await listActivityLog({
+        railcarId: Number.isFinite(railcarId) ? railcarId : undefined,
+        riderId: Number.isFinite(riderId) ? riderId : undefined,
+        q,
+        includeVcfNoise: includeVcf,
+      });
+      res.json(result);
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/activity/notes", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const entity_type = req.body?.entity_type === "rider" ? "rider" : "railcar";
+      const entity_id = Number(req.body?.entity_id);
+      const body = String(req.body?.body ?? "");
+      if (!Number.isFinite(entity_id) || entity_id <= 0) {
+        return res.status(400).json({ message: "entity_id is required" });
+      }
+      const row = await addNote({
+        entity_type,
+        entity_id,
+        body,
+        actor: req.authUser?.email ?? "system",
+      });
+      res.status(201).json(row);
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
   // ─────────────────────────────────────────────────────────────
   // AUTH ROUTES
   // ─────────────────────────────────────────────────────────────
@@ -3798,6 +3875,20 @@ export async function registerRoutes(
           await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
           throw dbError;
         }
+        const eid = parseInt(entityId, 10);
+        if (entityType === "railcar" || entityType === "rider") {
+          await logActivity({
+            entity_type: entityType,
+            entity_id: eid,
+            railcar_id: entityType === "railcar" ? eid : null,
+            rider_id: entityType === "rider" ? eid : null,
+            action: "attachment",
+            actor: user.email ?? user.id,
+            detail: { file_name: req.file.originalname, notes },
+            source_table: "attachments",
+            source_id: data?.id ?? null,
+          });
+        }
         res.status(201).json(data);
       } catch (err) { errHandler(res, err); }
     }
@@ -3879,6 +3970,17 @@ export async function registerRoutes(
         .select()
         .single();
       if (error) throw error;
+      await logActivity({
+        entity_type: "railcar",
+        entity_id: Number(car_id),
+        railcar_id: Number(car_id),
+        action: "rent_event",
+        actor: created_by,
+        detail: { event_type, event_date, reason: reason.trim() },
+        occurred_at: `${event_date}T12:00:00.000Z`,
+        source_table: "rent_events",
+        source_id: data?.id ?? null,
+      });
       res.json(data);
     } catch (err) { errHandler(res, err); }
   });

@@ -1,166 +1,27 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import PageHeader from "@/components/PageHeader";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowUpDown } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
-import { cn } from "@/lib/utils";
-import { displayLeaseNumber } from "@shared/residco-import";
+import ActivityTimeline from "@/components/ActivityTimeline";
 import { hashSearchParams } from "@/lib/hash-location";
-
-function historyCarMatches(h: any, q: string): boolean {
-  if (!q) return true;
-  const marks = String(h.railcar?.reporting_marks ?? "");
-  const num = String(h.railcar?.car_number ?? "");
-  const blob = [num, marks, `${marks} ${num}`, `${marks}${num}`, String(h.railcar_id ?? "")]
-    .join(" ")
-    .toLowerCase();
-  return blob.includes(q);
-}
 
 export default function HistoryPage() {
   const [search, setSearch] = useState(() => hashSearchParams().get("q") ?? "");
-  const [dir, setDir] = useState<"asc" | "desc">("desc");
-
-  const { data, isLoading } = useQuery<any[]>({
-    queryKey: ["/api/history"],
-  });
-
-  const rows = useMemo(() => {
-    let r = data ?? [];
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      r = r.filter((h: any) => historyCarMatches(h, q));
-    }
-    r = [...r].sort((a: any, b: any) => {
-      const av = new Date(a.moved_at).getTime();
-      const bv = new Date(b.moved_at).getTime();
-      return dir === "desc" ? bv - av : av - bv;
-    });
-    return r;
-  }, [data, search, dir]);
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
-        title="Assignment History"
-        subtitle="Full audit trail of every railcar move across the fleet"
+        title="History"
+        subtitle="Lineage of railcars and leases — mark changes, assignments, notes, status, and rent events"
       />
 
-      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
-        <div className="shrink-0 flex items-center gap-2">
-          <ClearableSearchInput
-            placeholder="Search car number…"
-            value={search}
-            onChange={setSearch}
-            testId="input-search-history"
-          />
-          <div className="text-xs text-muted-foreground ml-auto font-mono-num">
-            {rows.length} records
-          </div>
-        </div>
-
-        <div className="flex-1 min-h-[240px] rounded-lg border border-card-border bg-card overflow-hidden flex flex-col">
-          <div className="flex-1 min-h-0 overflow-auto">
-            <table className="w-full text-sm min-w-[700px]">
-              <thead className="sticky top-0 z-10 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
-                <tr className="text-left">
-                  <th
-                    className={cn(
-                      "px-4 py-3 font-medium text-[11px] uppercase tracking-wider cursor-pointer select-none bg-muted/40",
-                      "text-foreground"
-                    )}
-                    onClick={() => setDir((d) => (d === "desc" ? "asc" : "desc"))}
-                  >
-                    <span className="inline-flex items-center gap-1">
-                      Date <ArrowUpDown className="h-3 w-3" />
-                    </span>
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
-                    Car
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
-                    From
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
-                    To
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
-                    Lessee
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
-                    Reason
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40">
-                    By
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading ? (
-                  Array.from({ length: 6 }).map((_, i) => (
-                    <tr key={i} className="border-t border-border">
-                      {Array.from({ length: 7 }).map((__, j) => (
-                        <td key={j} className="px-4 py-3">
-                          <Skeleton className="h-4 w-full" />
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                ) : rows.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-16 text-center text-muted-foreground"
-                    >
-                      No moves on record yet. Use Move Cars to reassign railcars.
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((h: any) => (
-                    <tr
-                      key={h.id}
-                      className="border-t border-border hover-elevate"
-                      data-testid={`history-row-${h.id}`}
-                    >
-                      <td className="px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap">
-                        {new Date(h.moved_at).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 font-mono-num">
-                        {h.railcar ? [h.railcar.reporting_marks, h.railcar.car_number].filter(Boolean).join(" ") : `#${h.railcar_id}`}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm">
-                          {h.from_rider?.rider_name ?? "—"}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground font-mono-num">
-                          {displayLeaseNumber(h.from_rider?.master_lease?.lease_number)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm">
-                          {h.to_rider?.rider_name ?? "—"}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground font-mono-num">
-                          {displayLeaseNumber(h.to_rider?.master_lease?.lease_number)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {h.from_fleet_name ?? "—"} → {h.to_fleet_name ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 italic text-muted-foreground">
-                        {h.reason ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs font-mono-num">
-                        {h.moved_by ?? "—"}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4 overflow-auto">
+        <ClearableSearchInput
+          placeholder="Search current or prior mark+number, or OL / rider…"
+          value={search}
+          onChange={setSearch}
+          testId="input-search-history"
+        />
+        <ActivityTimeline q={search.trim() || undefined} showSearchHint />
       </div>
     </div>
   );

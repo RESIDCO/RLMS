@@ -6,6 +6,7 @@ import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { applySearchFilter } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
+import { resolveRailcarsByAnyIdentity } from "./activity-log";
 
 const CAR_LIMIT = 500;
 const SIDE_LIMIT = 100;
@@ -283,8 +284,9 @@ export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> 
   const groups = raw.split(/[\n\r,;]+/).map((g) => g.trim()).filter(Boolean);
   const terms = groups.flatMap((g) => g.split(/\s+/).filter(Boolean));
 
-  const [textCars, allRiders, allLeases] = await Promise.all([
+  const [textCars, priorIds, allRiders, allLeases] = await Promise.all([
     timed("railcars-text-query", () => fetchCarsByText(groups)),
+    timed("railcars-prior-identity", () => resolveRailcarsByAnyIdentity(raw)),
     timed("riders-fetch", fetchRiders),
     timed("leases-fetch", fetchLeases),
   ]);
@@ -306,7 +308,10 @@ export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> 
     `[search] score-riders-leases ${Date.now() - tScore}ms riders=${matchedRiders.length} leases=${matchedLeases.length}`,
   );
 
-  const have = new Set(textCars.map((c) => c.id));
+  const priorCars = await timed("railcars-prior-hydrate", () =>
+    fetchCarsByIds(priorIds.filter((id) => !textCars.some((c) => c.id === id))),
+  );
+  const have = new Set([...textCars, ...priorCars].map((c) => c.id));
   const riderIds = matchedRiders.map((r: any) => r.id).filter(Boolean);
   const leaseIds = matchedLeases.map((l: any) => l.id).filter(Boolean);
 
@@ -319,8 +324,12 @@ export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> 
   });
 
   const tCarScore = Date.now();
-  const matchedCars = dedupeCars([...textCars, ...extraCars])
-    .map((c) => ({ c, score: bestScore(carBlob(c), groups) }))
+  const priorSet = new Set(priorIds);
+  const matchedCars = dedupeCars([...priorCars, ...textCars, ...extraCars])
+    .map((c) => ({
+      c,
+      score: priorSet.has(Number(c.id)) ? 0 : bestScore(carBlob(c), groups),
+    }))
     .filter((x) => x.score != null)
     .sort(
       (a, b) =>

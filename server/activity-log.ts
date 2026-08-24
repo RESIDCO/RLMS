@@ -128,41 +128,43 @@ export async function resolveRailcarsByAnyIdentity(raw: string): Promise<number[
   return [...ids];
 }
 
-const RESOLVED_CAR_SELECT = `
-id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation,
-lessee_name, rider_external_id, lease_type, ops_flag,
-assignment:railcar_assignments(
-  id, fleet_name,
-  rider:riders(
-    id, rider_name, schedule_number,
-    master_lease:master_leases(id, lease_number, lessee, lease_type)
-  )
-)
-`.replace(/\s+/g, " ").trim();
+const RESOLVED_CAR_SELECTS = [
+  "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation, lessee_name, rider_external_id, lease_type, ops_flag, assignment:railcar_assignments(id, fleet_name, rider:riders(id, rider_name, schedule_number, master_lease:master_leases(id, lease_number, lessee, lease_type)))",
+  "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation, lessee_name, rider_external_id, lease_type, assignment:railcar_assignments(id, fleet_name, rider:riders(id, rider_name, schedule_number, master_lease:master_leases(id, lease_number, lessee, lease_type)))",
+  "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, lessee_name, rider_external_id, assignment:railcar_assignments(id, fleet_name, rider:riders(id, rider_name, master_lease:master_leases(id, lease_number, lessee)))",
+  "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, lessee_name, rider_external_id",
+  "id, car_number, reporting_marks, active",
+];
+
+function mapHydratedCar(row: any) {
+  const assignment = asOne(row.assignment);
+  const rider = asOne(assignment?.rider);
+  const master_lease = asOne(rider?.master_lease);
+  return {
+    ...row,
+    id: Number(row.id),
+    assignment: assignment
+      ? { ...assignment, rider: rider ? { ...rider, master_lease } : null }
+      : null,
+  };
+}
 
 async function hydrateRailcars(ids: number[]) {
-  const uniq = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  const uniq = [...new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
   if (!uniq.length) return [];
-  const { data, error } = await supabaseAdmin
-    .from("railcars")
-    .select(RESOLVED_CAR_SELECT)
-    .in("id", uniq.slice(0, 80));
-  if (error) {
-    console.log(`[activity] hydrate railcars skipped: ${error.message}`);
-    return [];
+  const slice = uniq.slice(0, 80);
+  for (const select of RESOLVED_CAR_SELECTS) {
+    const { data, error } = await supabaseAdmin.from("railcars").select(select).in("id", slice);
+    if (error) {
+      console.log(`[activity] hydrate railcars select failed: ${error.message}`);
+      continue;
+    }
+    const byId = new Map((data ?? []).map((row: any) => [Number(row.id), mapHydratedCar(row)]));
+    const out = uniq.map((id) => byId.get(id)).filter(Boolean);
+    if (out.length) return out;
+    console.log(`[activity] hydrate railcars returned 0 rows for ids=${slice.join(",")}`);
   }
-  const byId = new Map((data ?? []).map((row: any) => {
-    const assignment = asOne(row.assignment);
-    const rider = asOne(assignment?.rider);
-    const master_lease = asOne(rider?.master_lease);
-    return [Number(row.id), {
-      ...row,
-      assignment: assignment
-        ? { ...assignment, rider: rider ? { ...rider, master_lease } : null }
-        : null,
-    }];
-  }));
-  return uniq.map((id) => byId.get(id)).filter(Boolean);
+  return [];
 }
 
 async function hydrateRiders(ids: number[]) {

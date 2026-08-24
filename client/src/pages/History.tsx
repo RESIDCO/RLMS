@@ -42,6 +42,8 @@ type ResolvedRider = {
 type ActivityResponse = {
   events: any[];
   resolved?: {
+    railcar_ids?: number[];
+    rider_ids?: number[];
     railcars?: ResolvedCar[];
     riders?: ResolvedRider[];
   };
@@ -58,13 +60,31 @@ export default function HistoryPage() {
   const q = search.trim();
 
   const { data, isLoading } = useQuery<ActivityResponse>({
-    queryKey: ["/api/activity", { railcarId: undefined, riderId: undefined, q }],
+    queryKey: ["/api/activity", "history-page", q],
     queryFn: () =>
       apiRequest("GET", q ? `/api/activity?q=${encodeURIComponent(q)}` : "/api/activity").then((r) => r.json()),
   });
 
-  const cars = data?.resolved?.railcars ?? [];
+  const carsFromApi = data?.resolved?.railcars ?? [];
   const riders = data?.resolved?.riders ?? [];
+  const railcarIds = (data?.resolved?.railcar_ids ?? []).map(Number).filter((n) => n > 0);
+  const needCarFallback = Boolean(q) && railcarIds.length > 0 && carsFromApi.length === 0;
+
+  const { data: fallbackCars } = useQuery<ResolvedCar[]>({
+    queryKey: ["/api/railcars", "history-resolve", railcarIds],
+    enabled: needCarFallback,
+    queryFn: async () => {
+      const rows = await Promise.all(
+        railcarIds.slice(0, 20).map(async (id) => {
+          const body = await apiRequest("GET", `/api/railcars/${id}`).then((r) => r.json());
+          return (body.railcar ?? body) as ResolvedCar;
+        }),
+      );
+      return rows.filter((c) => c && c.id);
+    },
+  });
+
+  const cars = carsFromApi.length ? carsFromApi : (fallbackCars ?? []);
   const showResolved = Boolean(q);
 
   return (

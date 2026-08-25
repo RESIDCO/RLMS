@@ -3,6 +3,7 @@
 
 import {
   accountHandoffPct,
+  displayTransitionAm,
   flaggedHandoffAvgPct,
   isCommunicationMethod,
   isFlaggedTransition,
@@ -43,6 +44,8 @@ ok(
   ]) === 50,
   "tile avg is mean of flagged thirds",
 );
+ok(displayTransitionAm(null) === "Not assigned", "blank AM is Not assigned");
+ok(displayTransitionAm("ML") === "ML", "set AM is unchanged");
 ok(isCommunicationMethod("in_person") && isCommunicationMethod("call") && isCommunicationMethod("email"), "handoff bucket methods are valid");
 
 console.log(`passed ${passed} failed ${failed}`);

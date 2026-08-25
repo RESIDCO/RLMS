@@ -67,14 +67,25 @@ export function flaggedHandoffAvgPct(rows: HandoffScoreInput[]): number | null {
   return Math.round(avg);
 }
 
-export const METHOD_LIST_TAG: Record<string, { label: string; rowClass: string }> = {
-  in_person: { label: "Face to Face", rowClass: "bg-emerald-500/10" },
-  call: { label: "Virtual", rowClass: "bg-amber-400/15" },
-  email: { label: "Email", rowClass: "bg-red-500/10" },
+export const METHOD_LIST_TAG: Record<string, { label: string; rowClass: string; rowStyle: { backgroundColor: string } }> = {
+  in_person: { label: "Face to Face", rowClass: "bg-emerald-500/10", rowStyle: { backgroundColor: "rgba(16,185,129,.1)" } },
+  call: { label: "Virtual", rowClass: "bg-amber-400/15", rowStyle: { backgroundColor: "rgba(251,191,36,.15)" } },
+  email: { label: "Email", rowClass: "bg-red-500/10", rowStyle: { backgroundColor: "rgba(239,68,68,.1)" } },
 };
 
 export function methodListTag(method: string | null | undefined) {
   const m = String(method ?? "").trim();
   if (!m) return null;
-  return METHOD_LIST_TAG[m] ?? { label: COMMUNICATION_METHOD_LABEL[m as CommunicationMethod] ?? m, rowClass: "" };
+  return (
+    METHOD_LIST_TAG[m] ?? {
+      label: COMMUNICATION_METHOD_LABEL[m as CommunicationMethod] ?? m,
+      rowClass: "",
+      rowStyle: { backgroundColor: "transparent" },
+    }
+  );
+}
+
+export function displayTransitionAm(v: string | null | undefined): string {
+  const s = String(v ?? "").trim();
+  return s || "Not assigned";
 }

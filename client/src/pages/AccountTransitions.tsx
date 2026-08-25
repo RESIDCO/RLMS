@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -21,11 +21,12 @@ import {
   COMMUNICATION_METHODS,
   COMMUNICATION_METHOD_LABEL,
   accountHandoffPct,
+  displayTransitionAm,
   handoffScoreParts,
   isFlaggedTransition,
   methodListTag,
 } from "@shared/account-transitions";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import { displayAmAuthor } from "@/components/AmCommentThread";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
@@ -78,6 +79,41 @@ type DetailPayload = {
   milestones: { id: number; label: string; done: boolean; milestone_date: string | null }[];
   comments: { id: number; author_email: string; body: string; created_at: string }[];
 };
+
+type RecordDraft = {
+  from_account_manager: string;
+  to_account_manager: string;
+  communication_method: string | null;
+  status: "open" | "complete";
+  meeting_scheduled: boolean;
+  meeting_date: string;
+  communication_completed: boolean;
+  communication_completed_date: string;
+};
+
+function isoDate(v: string | null | undefined) {
+  return v ? String(v).slice(0, 10) : "";
+}
+
+function recordToDraft(rec: RecordRow): RecordDraft {
+  return {
+    from_account_manager: rec.from_account_manager ?? "",
+    to_account_manager: rec.to_account_manager ?? "",
+    communication_method: rec.communication_method ?? null,
+    status: rec.status,
+    meeting_scheduled: Boolean(rec.meeting_scheduled),
+    meeting_date: isoDate(rec.meeting_date),
+    communication_completed: Boolean(rec.communication_completed),
+    communication_completed_date: isoDate(rec.communication_completed_date),
+  };
+}
+
+function displayMeetingDate(v: string | null | undefined) {
+  const s = isoDate(v);
+  if (!s) return "Not scheduled";
+  const label = formatCalendarDate(s);
+  return label === "—" ? "Not scheduled" : label;
+}
 
 export default function AccountTransitionsPage() {
   const [match, params] = useRoute("/account-transitions/:id");
@@ -183,8 +219,9 @@ function TransitionList() {
                 <tr>
                   <th className="text-left font-medium px-2 py-1.5">Account</th>
                   <th className="text-left font-medium px-2 py-1.5 w-[7.5rem]">Method</th>
-                  <th className="text-left font-medium px-2 py-1.5 w-16">Outgoing</th>
-                  <th className="text-left font-medium px-2 py-1.5 w-16">Incoming</th>
+                  <th className="text-left font-medium px-2 py-1.5 w-[6.75rem]">Outgoing</th>
+                  <th className="text-left font-medium px-2 py-1.5 w-[6.75rem]">Incoming</th>
+                  <th className="text-left font-medium px-2 py-1.5 w-[6.75rem]">Meeting Date</th>
                   <th className="text-right font-medium px-2 py-1.5 w-12">%</th>
                   <th className="text-left font-medium px-2 py-1.5 w-[5.5rem]">Status</th>
                 </tr>
@@ -194,7 +231,7 @@ function TransitionList() {
                   const tag = methodListTag(r.communication_method);
                   const pct = r.pct_complete ?? accountHandoffPct(r);
                   return (
-                  <tr key={r.id} className={cn("border-t border-border", tag?.rowClass, "hover:brightness-110")}>
+                  <tr key={r.id} className="border-t border-border hover:brightness-110" style={tag?.rowStyle}>
                     <td className="px-2 py-1.5 min-w-0">
                       <Link
                         href={`/account-transitions/${r.id}`}
@@ -216,8 +253,15 @@ function TransitionList() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{r.from_account_manager || "—"}</td>
-                    <td className="px-2 py-1.5 whitespace-nowrap">{r.to_account_manager || "—"}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap truncate" title={displayTransitionAm(r.from_account_manager)}>
+                      {displayTransitionAm(r.from_account_manager)}
+                    </td>
+                    <td className="px-2 py-1.5 whitespace-nowrap truncate" title={displayTransitionAm(r.to_account_manager)}>
+                      {displayTransitionAm(r.to_account_manager)}
+                    </td>
+                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap truncate" title={displayMeetingDate(r.meeting_date)}>
+                      {displayMeetingDate(r.meeting_date)}
+                    </td>
                     <td className="px-2 py-1.5 text-right font-mono-num tabular-nums">{pct}%</td>
                     <td className="px-2 py-1.5 capitalize whitespace-nowrap">{r.status}</td>
                   </tr>
@@ -225,7 +269,7 @@ function TransitionList() {
                 })}
                 {(data?.records ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-2 py-10 text-center text-muted-foreground">
+                    <td colSpan={7} className="px-2 py-10 text-center text-muted-foreground">
                       No transition records yet. Add an account to start a handoff.
                     </td>
                   </tr>
@@ -294,39 +338,103 @@ function TransitionList() {
     </div>
   );
 }
-
 function TransitionDetail({ id }: { id: number }) {
+  const { data, isLoading } = useQuery<DetailPayload>({
+    queryKey: ["/api/account-transitions", id],
+    queryFn: () => apiRequest("GET", `/api/account-transitions/${id}`).then((r) => r.json()),
+  });
+  if (isLoading || !data) {
+    return (
+      <div className="p-8">
+        <Skeleton className="h-40 w-full max-w-xl" />
+      </div>
+    );
+  }
+  return <TransitionDetailForm key={id} id={id} payload={data} />;
+}
+
+function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayload }) {
   const [, navigate] = useLocation();
   const qc = useQueryClient();
   const { toast } = useToast();
   const { canEditAccountTransitions, canDeleteAccountMgmtComments } = usePermissions();
   const canWrite = canEditAccountTransitions;
-  const [fromAm, setFromAm] = useState<string | null>(null);
-  const [toAm, setToAm] = useState<string | null>(null);
-  const [method, setMethod] = useState<string | null>(null);
+  const data = payload;
+  const [draft, setDraft] = useState(() => recordToDraft(payload.record));
+  const [baseline, setBaseline] = useState(() => JSON.stringify(recordToDraft(payload.record)));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
   const [milestoneDraft, setMilestoneDraft] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
+  const dirty = JSON.stringify(draft) !== baseline;
 
-  const { data, isLoading } = useQuery<DetailPayload>({
-    queryKey: ["/api/account-transitions", id],
-    queryFn: () => apiRequest("GET", `/api/account-transitions/${id}`).then((r) => r.json()),
-  });
+  useEffect(() => {
+    if (!dirty) return;
+    const onLeave = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [dirty]);
 
-  const rec = data?.record;
-  const displayFrom = fromAm ?? rec?.from_account_manager ?? "";
-  const displayTo = toAm ?? rec?.to_account_manager ?? "";
-  const displayMethod = method ?? rec?.communication_method ?? "";
+  function goBack() {
+    if (dirty && !window.confirm("You have unsaved changes. Leave anyway?")) return;
+    navigate("/account-transitions");
+  }
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiRequest("PATCH", `/api/account-transitions/${id}`, body).then((r) => r.json()),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/account-transitions"] });
+    onSuccess: (row: RecordRow) => {
+      const nextDraft = recordToDraft(row);
+      setDraft(nextDraft);
+      setBaseline(JSON.stringify(nextDraft));
+      setSaveError(null);
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 2500);
+      qc.setQueryData<DetailPayload>(["/api/account-transitions", id], (old) =>
+        old ? { ...old, record: { ...old.record, ...row } } : old,
+      );
+      qc.setQueriesData<ListPayload>({ queryKey: ["/api/account-transitions"] }, (old) => {
+        if (!old || !("records" in old) || !Array.isArray(old.records)) return old;
+        return {
+          ...old,
+          records: old.records.map((r) =>
+            r.id === row.id
+              ? {
+                  ...r,
+                  ...row,
+                  account_name: r.account_name,
+                  flagged: isFlaggedTransition(row.to_account_manager),
+                  pct_complete: accountHandoffPct(row),
+                }
+              : r,
+          ),
+        };
+      });
       qc.invalidateQueries({ queryKey: ["/api/account-transitions/summary"] });
-      toast({ title: "Saved" });
     },
-    onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
+    onError: (e: Error) => {
+      setSaveError(e.message || "Save failed");
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    },
   });
+
+  function onSave() {
+    setJustSaved(false);
+    setSaveError(null);
+    save.mutate({
+      from_account_manager: draft.from_account_manager,
+      to_account_manager: draft.to_account_manager,
+      communication_method: draft.communication_method,
+      status: draft.status,
+      meeting_scheduled: draft.meeting_scheduled,
+      meeting_date: draft.meeting_date || null,
+      communication_completed: draft.communication_completed,
+      communication_completed_date: draft.communication_completed_date || null,
+    });
+  }
 
   const addMs = useMutation({
     mutationFn: (label: string) => apiRequest("POST", `/api/account-transitions/${id}/milestones`, { label }),
@@ -337,11 +445,11 @@ function TransitionDetail({ id }: { id: number }) {
     onError: (e: Error) => toast({ title: "Could not add milestone", description: e.message, variant: "destructive" }),
   });
   const patchMs = useMutation({
-    mutationFn: (payload: { mid: number; done?: boolean; milestone_date?: string | null }) => {
+    mutationFn: (payloadMs: { mid: number; done?: boolean; milestone_date?: string | null }) => {
       const body: Record<string, unknown> = {};
-      if (payload.done !== undefined) body.done = payload.done;
-      if (payload.milestone_date !== undefined) body.milestone_date = payload.milestone_date;
-      return apiRequest("PATCH", `/api/account-transitions/${id}/milestones/${payload.mid}`, body);
+      if (payloadMs.done !== undefined) body.done = payloadMs.done;
+      if (payloadMs.milestone_date !== undefined) body.milestone_date = payloadMs.milestone_date;
+      return apiRequest("PATCH", `/api/account-transitions/${id}/milestones/${payloadMs.mid}`, body);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/account-transitions", id] }),
   });
@@ -362,28 +470,18 @@ function TransitionDetail({ id }: { id: number }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/account-transitions", id] }),
   });
 
-  if (isLoading || !data) {
-    return (
-      <div className="p-8">
-        <Skeleton className="h-40 w-full max-w-xl" />
-      </div>
-    );
-  }
-
   const acct = data.account;
-  const flagged = isFlaggedTransition(displayTo);
+  const flagged = isFlaggedTransition(draft.to_account_manager);
   const score = handoffScoreParts({
-    to_account_manager: displayTo,
-    meeting_scheduled: rec.meeting_scheduled,
-    communication_completed: rec.communication_completed,
+    to_account_manager: draft.to_account_manager,
+    meeting_scheduled: draft.meeting_scheduled,
+    communication_completed: draft.communication_completed,
   });
   const breakdown = [
     score.incoming ? "Incoming AM set" : "Incoming AM not set",
     score.meeting ? "Meeting scheduled" : "Meeting not yet scheduled",
     score.communication ? "Communication completed" : "Communication not yet completed",
   ].join(" · ");
-  const meetingIso = rec.meeting_date ? String(rec.meeting_date).slice(0, 10) : "";
-  const commIso = rec.communication_completed_date ? String(rec.communication_completed_date).slice(0, 10) : "";
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -391,17 +489,33 @@ function TransitionDetail({ id }: { id: number }) {
         title={acct.name}
         subtitle="Account transition"
         actions={
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-            onClick={() => navigate("/account-transitions")}
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to transitions
-          </button>
+          <div className="flex items-center gap-2">
+            {canWrite && (
+              <Button size="sm" disabled={!dirty || save.isPending} onClick={onSave} data-testid="button-save-transition">
+                {save.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  "Save"
+                )}
+              </Button>
+            )}
+            {justSaved && !dirty ? <span className="text-xs text-emerald-500">Saved</span> : null}
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+              onClick={goBack}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to transitions
+            </button>
+          </div>
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-5 space-y-6 max-w-5xl">
+        {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
         <p className="text-xs text-muted-foreground">
           {acct.counts.mlas} MLA · {acct.counts.ols} OL · {acct.counts.active_cars} active cars
           {flagged ? "" : " · Set Incoming AM to flag this account in the completion tile."}
@@ -412,31 +526,27 @@ function TransitionDetail({ id }: { id: number }) {
           <div>
             <Label className="text-xs">Outgoing AM</Label>
             <Input
-              value={displayFrom}
+              value={draft.from_account_manager}
+              placeholder="Not assigned"
               disabled={!canWrite}
-              onChange={(e) => setFromAm(e.target.value)}
-              onBlur={() => canWrite && save.mutate({ from_account_manager: displayFrom })}
+              onChange={(e) => setDraft((d) => ({ ...d, from_account_manager: e.target.value }))}
             />
           </div>
           <div>
             <Label className="text-xs">Incoming AM</Label>
             <Input
-              value={displayTo}
+              value={draft.to_account_manager}
+              placeholder="Not assigned"
               disabled={!canWrite}
-              onChange={(e) => setToAm(e.target.value)}
-              onBlur={() => canWrite && save.mutate({ to_account_manager: displayTo })}
+              onChange={(e) => setDraft((d) => ({ ...d, to_account_manager: e.target.value }))}
             />
           </div>
           <div>
             <Label className="text-xs">Communication method</Label>
             <Select
-              value={displayMethod || "none"}
+              value={draft.communication_method || "none"}
               disabled={!canWrite}
-              onValueChange={(v) => {
-                const next = v === "none" ? null : v;
-                setMethod(next);
-                save.mutate({ communication_method: next });
-              }}
+              onValueChange={(v) => setDraft((d) => ({ ...d, communication_method: v === "none" ? null : v }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Not set" />
@@ -454,9 +564,9 @@ function TransitionDetail({ id }: { id: number }) {
           <div>
             <Label className="text-xs">Status</Label>
             <Select
-              value={rec.status}
+              value={draft.status}
               disabled={!canWrite}
-              onValueChange={(v) => save.mutate({ status: v })}
+              onValueChange={(v) => setDraft((d) => ({ ...d, status: v as "open" | "complete" }))}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -483,16 +593,16 @@ function TransitionDetail({ id }: { id: number }) {
             <Label className="text-xs">Meeting Scheduled</Label>
             <div className="flex flex-wrap items-center gap-2">
               <Checkbox
-                checked={rec.meeting_scheduled}
+                checked={draft.meeting_scheduled}
                 disabled={!canWrite}
-                onCheckedChange={(v) => save.mutate({ meeting_scheduled: v === true })}
+                onCheckedChange={(v) => setDraft((d) => ({ ...d, meeting_scheduled: v === true }))}
               />
               <Input
                 type="date"
                 className="h-8 w-[11.5rem] text-xs"
-                value={meetingIso}
+                value={draft.meeting_date}
                 disabled={!canWrite}
-                onChange={(e) => save.mutate({ meeting_date: e.target.value || null })}
+                onChange={(e) => setDraft((d) => ({ ...d, meeting_date: e.target.value }))}
                 aria-label="Date of meeting"
               />
             </div>
@@ -501,22 +611,21 @@ function TransitionDetail({ id }: { id: number }) {
             <Label className="text-xs">Communication Completed</Label>
             <div className="flex flex-wrap items-center gap-2">
               <Checkbox
-                checked={rec.communication_completed}
+                checked={draft.communication_completed}
                 disabled={!canWrite}
-                onCheckedChange={(v) => save.mutate({ communication_completed: v === true })}
+                onCheckedChange={(v) => setDraft((d) => ({ ...d, communication_completed: v === true }))}
               />
               <Input
                 type="date"
                 className="h-8 w-[11.5rem] text-xs"
-                value={commIso}
+                value={draft.communication_completed_date}
                 disabled={!canWrite}
-                onChange={(e) => save.mutate({ communication_completed_date: e.target.value || null })}
+                onChange={(e) => setDraft((d) => ({ ...d, communication_completed_date: e.target.value }))}
                 aria-label="Communication completed date"
               />
             </div>
           </div>
         </div>
-
         <div>
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">OLs (read-only)</div>
           <div className="rounded-xl border border-card-border bg-card overflow-hidden">

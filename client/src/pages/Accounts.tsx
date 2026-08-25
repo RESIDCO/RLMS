@@ -237,7 +237,7 @@ function AccountListView() {
         <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-3">
           <div className="text-sm font-medium">Account Transitions</div>
           <p className="text-xs text-muted-foreground mt-1">
-            Coming soon. Handoff documents can already be attached on each account’s detail page — permanently tagged Account Transitions.
+            In Development. Handoff documents can already be attached on each account’s detail page — permanently tagged Account Transitions.
           </p>
         </div>
 

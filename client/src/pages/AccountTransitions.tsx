@@ -122,6 +122,56 @@ function displayMeetingDate(v: string | null | undefined) {
   return label === "—" ? "Not scheduled" : label;
 }
 
+function csvCell(v: unknown) {
+  const s = v == null ? "" : String(v);
+  return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function yesNo(v: boolean) {
+  return v ? "yes" : "no";
+}
+
+function downloadVisibleTransitionsCsv(rows: RecordRow[]) {
+  const headers = [
+    "Account",
+    "Method",
+    "Outgoing",
+    "Incoming",
+    "Meeting Date",
+    "Briefing",
+    "%",
+    "Status",
+    "Briefing Form Completed Date",
+    "Communication Completed",
+    "Communication Completed Date",
+  ];
+  const body = rows.map((r) => {
+    const tag = methodListTag(r.communication_method);
+    const pct = r.pct_complete ?? accountHandoffPct(r);
+    return [
+      r.account_name,
+      tag?.label ?? "",
+      displayTransitionAm(r.from_account_manager),
+      displayTransitionAm(r.to_account_manager),
+      isoDate(r.meeting_date),
+      yesNo(Boolean(r.briefing_form_completed)),
+      String(pct),
+      r.status,
+      isoDate(r.briefing_form_completed_date),
+      yesNo(Boolean(r.communication_completed)),
+      isoDate(r.communication_completed_date),
+    ].map(csvCell).join(",");
+  });
+  const csv = [headers.map(csvCell).join(","), ...body].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `account_transitions_export_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function AccountTransitionsPage() {
   const [match, params] = useRoute("/account-transitions/:id");
   if (match && params?.id) return <TransitionDetail id={Number(params.id)} />;
@@ -207,9 +257,17 @@ function TransitionList() {
         subtitle="Handoff tracking — does not change Account Manager on the account"
         actions={
           <div className="flex items-center gap-2">
-            <Link href={accountListPath(readAccountMgmtListState())} className="text-sm text-muted-foreground hover:text-foreground">
-              Back to Account Management
-            </Link>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              aria-label="Back to Account Management"
+              title="Back to Account Management"
+              onClick={() => navigate(accountListPath(readAccountMgmtListState()))}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
             <a
               href="/templates/Account_Handoff_Briefing_Form_TEMPLATE.docx"
               className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -218,6 +276,16 @@ function TransitionList() {
               <Download className="h-3.5 w-3.5" />
               Download Briefing Form Template
             </a>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={visibleRecords.length === 0}
+              onClick={() => downloadVisibleTransitionsCsv(visibleRecords)}
+              data-testid="button-export-account-transitions"
+            >
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
             {canEditAccountTransitions && (
               <Button size="sm" onClick={() => setAddOpen(true)} data-testid="button-add-transition-account">
                 <Plus className="h-4 w-4" /> Add Account

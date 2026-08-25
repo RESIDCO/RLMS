@@ -65,7 +65,7 @@ type DetailPayload = {
     }[];
     counts: { mlas: number; ols: number; active_cars: number };
   };
-  milestones: { id: number; label: string; done: boolean }[];
+  milestones: { id: number; label: string; done: boolean; milestone_date: string | null }[];
   comments: { id: number; author_email: string; body: string; created_at: string }[];
 };
 
@@ -275,8 +275,12 @@ function TransitionDetail({ id }: { id: number }) {
     onError: (e: Error) => toast({ title: "Could not add milestone", description: e.message, variant: "destructive" }),
   });
   const patchMs = useMutation({
-    mutationFn: ({ mid, done }: { mid: number; done: boolean }) =>
-      apiRequest("PATCH", `/api/account-transitions/${id}/milestones/${mid}`, { done }),
+    mutationFn: (payload: { mid: number; done?: boolean; milestone_date?: string | null }) => {
+      const body: Record<string, unknown> = {};
+      if (payload.done !== undefined) body.done = payload.done;
+      if (payload.milestone_date !== undefined) body.milestone_date = payload.milestone_date;
+      return apiRequest("PATCH", `/api/account-transitions/${id}/milestones/${payload.mid}`, body);
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/account-transitions", id] }),
   });
   const delMs = useMutation({
@@ -451,14 +455,30 @@ function TransitionDetail({ id }: { id: number }) {
 
         <div className="space-y-2">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Milestones</div>
-          {(data.milestones ?? []).map((m) => (
-            <div key={m.id} className="flex items-center gap-2">
+          {(data.milestones ?? []).map((m) => {
+            const dateIso = m.milestone_date ? String(m.milestone_date).slice(0, 10) : "";
+            const dateLabel = dateIso ? formatCalendarDate(dateIso) : "";
+            return (
+            <div key={m.id} className="flex flex-wrap items-center gap-2">
               <Checkbox
                 checked={m.done}
                 disabled={!canWrite}
                 onCheckedChange={(v) => patchMs.mutate({ mid: m.id, done: v === true })}
               />
-              <span className={cn("text-sm", m.done && "line-through text-muted-foreground")}>{m.label}</span>
+              <span className={cn("text-sm", m.done && "text-muted-foreground")}>
+                {m.label}
+                {dateLabel ? ` — ${dateLabel}` : ""}
+                {m.done ? " ✓" : ""}
+              </span>
+              {canWrite ? (
+                <Input
+                  type="date"
+                  className="h-8 w-[11.5rem] text-xs"
+                  value={dateIso}
+                  onChange={(e) => patchMs.mutate({ mid: m.id, milestone_date: e.target.value || null })}
+                  aria-label={`${m.label} date`}
+                />
+              ) : null}
               {canWrite && (
                 <Button
                   size="icon"
@@ -473,7 +493,8 @@ function TransitionDetail({ id }: { id: number }) {
                 </Button>
               )}
             </div>
-          ))}
+            );
+          })}
           {canWrite && (
             <div className="flex gap-2 max-w-md">
               <Input

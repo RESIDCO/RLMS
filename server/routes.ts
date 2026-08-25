@@ -4945,7 +4945,12 @@ export async function registerRoutes(
       if (!(await requireAccountMgmtWrite(req, res))) return;
       const mid = Number(req.params.mid);
       if (!Number.isFinite(mid) || mid <= 0) return res.status(400).json({ message: "Invalid milestone" });
-      const row = await patchMilestone(mid, { done: req.body?.done, label: req.body?.label });
+      const body = req.body ?? {};
+      const patch: { done?: boolean; label?: string; milestone_date?: string | null } = {};
+      if ("done" in body) patch.done = body.done;
+      if ("label" in body) patch.label = body.label;
+      if ("milestone_date" in body) patch.milestone_date = body.milestone_date;
+      const row = await patchMilestone(mid, patch);
       if (!row) return res.status(404).json({ message: "Not found" });
       res.json(row);
     } catch (err: any) {

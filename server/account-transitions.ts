@@ -199,7 +199,7 @@ export async function patchTransitionRecord(
 export async function listMilestones(recordId: number) {
   const { data, error } = await supabaseAdmin
     .from("account_transition_milestones")
-    .select("id, record_id, label, done, sort_order, created_at")
+    .select("id, record_id, label, done, milestone_date, sort_order, created_at")
     .eq("record_id", recordId)
     .order("sort_order", { ascending: true })
     .order("id", { ascending: true });
@@ -225,9 +225,21 @@ export async function addMilestone(recordId: number, label: string) {
   return data;
 }
 
-export async function patchMilestone(id: number, patch: { done?: boolean; label?: string }) {
+function parseMilestoneDate(v: unknown): string | null {
+  if (v == null || String(v).trim() === "") return null;
+  const s = String(v).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const err: any = new Error("milestone_date must be YYYY-MM-DD");
+    err.status = 400;
+    throw err;
+  }
+  return s;
+}
+
+export async function patchMilestone(id: number, patch: { done?: boolean; label?: string; milestone_date?: string | null }) {
   const next: Record<string, unknown> = {};
   if (typeof patch.done === "boolean") next.done = patch.done;
+  if (patch.milestone_date !== undefined) next.milestone_date = parseMilestoneDate(patch.milestone_date);
   if (patch.label != null) {
     const text = String(patch.label).trim();
     if (!text) {

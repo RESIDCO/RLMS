@@ -38,20 +38,23 @@ export type HandoffScoreInput = {
   to_account_manager?: string | null;
   meeting_scheduled?: boolean | null;
   communication_completed?: boolean | null;
+  briefing_form_completed?: boolean | null;
 };
 
-/** One-third each: Incoming AM, Meeting Scheduled, Communication Completed. */
+/** One quarter each: Incoming AM, Meeting Scheduled, Communication Completed, Briefing Form. */
 export function handoffScoreParts(r: HandoffScoreInput) {
   const incoming = isFlaggedTransition(r.to_account_manager);
   const meeting = Boolean(r.meeting_scheduled);
   const communication = Boolean(r.communication_completed);
-  const hits = (incoming ? 1 : 0) + (meeting ? 1 : 0) + (communication ? 1 : 0);
+  const briefing = Boolean(r.briefing_form_completed);
+  const hits = (incoming ? 1 : 0) + (meeting ? 1 : 0) + (communication ? 1 : 0) + (briefing ? 1 : 0);
   return {
     incoming,
     meeting,
     communication,
+    briefing,
     hits,
-    pct: Math.round((100 * hits) / 3),
+    pct: Math.round((100 * hits) / 4),
   };
 }
 
@@ -59,11 +62,11 @@ export function accountHandoffPct(r: HandoffScoreInput): number {
   return handoffScoreParts(r).pct;
 }
 
-/** Average of the Section 4 expression over flagged accounts only. Null when none are flagged. */
+/** Average of the per-account expression over flagged accounts only. Null when none are flagged. */
 export function flaggedHandoffAvgPct(rows: HandoffScoreInput[]): number | null {
   const flagged = rows.filter((r) => isFlaggedTransition(r.to_account_manager));
   if (!flagged.length) return null;
-  const avg = flagged.reduce((sum, r) => sum + (100 * handoffScoreParts(r).hits) / 3, 0) / flagged.length;
+  const avg = flagged.reduce((sum, r) => sum + (100 * handoffScoreParts(r).hits) / 4, 0) / flagged.length;
   return Math.round(avg);
 }
 

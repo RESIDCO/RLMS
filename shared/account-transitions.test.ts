@@ -23,26 +23,35 @@ function ok(cond: boolean, label: string) {
 ok(!isFlaggedTransition(null), "blank incoming is not flagged");
 ok(isFlaggedTransition("GS"), "incoming AM flags the record");
 ok(accountHandoffPct({}) === 0, "empty record is 0%");
-ok(accountHandoffPct({ to_account_manager: "BH" }) === 33, "incoming only is 33%");
+ok(accountHandoffPct({ to_account_manager: "BH" }) === 25, "incoming only is 25%");
 ok(
-  accountHandoffPct({ to_account_manager: "BH", meeting_scheduled: true }) === 67,
-  "incoming + meeting is 67%",
+  accountHandoffPct({ to_account_manager: "BH", meeting_scheduled: true }) === 50,
+  "incoming + meeting is 50%",
 );
 ok(
   accountHandoffPct({
     to_account_manager: "BH",
     meeting_scheduled: true,
     communication_completed: true,
+  }) === 75,
+  "three of four is 75%",
+);
+ok(
+  accountHandoffPct({
+    to_account_manager: "BH",
+    meeting_scheduled: true,
+    communication_completed: true,
+    briefing_form_completed: true,
   }) === 100,
-  "all three is 100%",
+  "all four is 100%",
 );
 ok(flaggedHandoffAvgPct([{ meeting_scheduled: true }]) === null, "unflagged rows excluded from tile avg");
 ok(
   flaggedHandoffAvgPct([
     { to_account_manager: "BH", meeting_scheduled: true },
     { to_account_manager: "FF" },
-  ]) === 50,
-  "tile avg is mean of flagged thirds",
+  ]) === 38,
+  "tile avg is mean of flagged quarters",
 );
 ok(displayTransitionAm(null) === "Not assigned", "blank AM is Not assigned");
 ok(displayTransitionAm("ML") === "ML", "set AM is unchanged");

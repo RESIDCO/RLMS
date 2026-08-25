@@ -10,7 +10,7 @@ import {
 } from "@shared/account-transitions";
 
 const RECORD_SELECT =
-  "id, account_id, from_account_manager, to_account_manager, communication_method, status, completed_at, meeting_scheduled, meeting_date, communication_completed, communication_completed_date, created_at, updated_at";
+  "id, account_id, from_account_manager, to_account_manager, communication_method, status, completed_at, meeting_scheduled, meeting_date, communication_completed, communication_completed_date, briefing_form_completed, briefing_form_completed_date, created_at, updated_at";
 
 export type TransitionRecord = {
   id: number;
@@ -24,6 +24,8 @@ export type TransitionRecord = {
   meeting_date: string | null;
   communication_completed: boolean;
   communication_completed_date: string | null;
+  briefing_form_completed: boolean;
+  briefing_form_completed_date: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -41,6 +43,8 @@ function mapRecord(row: any): TransitionRecord {
     meeting_date: row.meeting_date ?? null,
     communication_completed: Boolean(row.communication_completed),
     communication_completed_date: row.communication_completed_date ?? null,
+    briefing_form_completed: Boolean(row.briefing_form_completed),
+    briefing_form_completed_date: row.briefing_form_completed_date ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -54,7 +58,7 @@ function cleanAm(v: unknown): string | null {
 export async function listTransitionSummary() {
   const { data, error } = await supabaseAdmin
     .from("account_transition_records")
-    .select("to_account_manager, meeting_scheduled, communication_completed");
+    .select("to_account_manager, meeting_scheduled, communication_completed, briefing_form_completed");
   if (error) throw error;
   const rows = data ?? [];
   const flagged = rows.filter((r) => isFlaggedTransition(r.to_account_manager));
@@ -178,6 +182,8 @@ export async function patchTransitionRecord(
     meeting_date?: string | null;
     communication_completed?: boolean;
     communication_completed_date?: string | null;
+    briefing_form_completed?: boolean;
+    briefing_form_completed_date?: string | null;
   },
 ) {
   const { data: existingRow, error: loadErr } = await supabaseAdmin
@@ -207,6 +213,10 @@ export async function patchTransitionRecord(
   if (patch.communication_completed_date !== undefined) {
     next.communication_completed_date = parseIsoDate(patch.communication_completed_date, "communication_completed_date");
   }
+  if (typeof patch.briefing_form_completed === "boolean") next.briefing_form_completed = patch.briefing_form_completed;
+  if (patch.briefing_form_completed_date !== undefined) {
+    next.briefing_form_completed_date = parseIsoDate(patch.briefing_form_completed_date, "briefing_form_completed_date");
+  }
   if (patch.status !== undefined && patch.status != null) {
     if (!isTransitionStatus(patch.status)) {
       const err: any = new Error("status must be open or complete");
@@ -226,6 +236,8 @@ export async function patchTransitionRecord(
       next.meeting_scheduled !== undefined ? Boolean(next.meeting_scheduled) : existing.meeting_scheduled,
     communication_completed:
       next.communication_completed !== undefined ? Boolean(next.communication_completed) : existing.communication_completed,
+    briefing_form_completed:
+      next.briefing_form_completed !== undefined ? Boolean(next.briefing_form_completed) : existing.briefing_form_completed,
   };
   const was100 = accountHandoffPct(existing) === 100;
   const now100 = accountHandoffPct(merged) === 100;

@@ -26,8 +26,9 @@ import {
   isFlaggedTransition,
   methodListTag,
 } from "@shared/account-transitions";
-import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
+import { BriefingFormPanel } from "@/components/BriefingFormPanel";
+import { ArrowLeft, Download, Loader2, Plus, Trash2 } from "lucide-react";
 import { displayAmAuthor } from "@/components/AmCommentThread";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { confirmDelete } from "@/components/ConfirmActionDialog";
@@ -47,6 +48,8 @@ type RecordRow = {
   meeting_date: string | null;
   communication_completed: boolean;
   communication_completed_date: string | null;
+  briefing_form_completed: boolean;
+  briefing_form_completed_date: string | null;
 };
 
 type ListPayload = {
@@ -89,6 +92,8 @@ type RecordDraft = {
   meeting_date: string;
   communication_completed: boolean;
   communication_completed_date: string;
+  briefing_form_completed: boolean;
+  briefing_form_completed_date: string;
 };
 
 function isoDate(v: string | null | undefined) {
@@ -105,6 +110,8 @@ function recordToDraft(rec: RecordRow): RecordDraft {
     meeting_date: isoDate(rec.meeting_date),
     communication_completed: Boolean(rec.communication_completed),
     communication_completed_date: isoDate(rec.communication_completed_date),
+    briefing_form_completed: Boolean(rec.briefing_form_completed),
+    briefing_form_completed_date: isoDate(rec.briefing_form_completed_date),
   };
 }
 
@@ -174,6 +181,14 @@ function TransitionList() {
             <Link href={accountListPath(readAccountMgmtListState())} className="text-sm text-muted-foreground hover:text-foreground">
               Back to Account Management
             </Link>
+            <a
+              href="/templates/Account_Handoff_Briefing_Form_TEMPLATE.docx"
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              download
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download Briefing Form Template
+            </a>
             {canEditAccountTransitions && (
               <Button size="sm" onClick={() => setAddOpen(true)} data-testid="button-add-transition-account">
                 <Plus className="h-4 w-4" /> Add Account
@@ -433,6 +448,8 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
       meeting_date: draft.meeting_date || null,
       communication_completed: draft.communication_completed,
       communication_completed_date: draft.communication_completed_date || null,
+      briefing_form_completed: draft.briefing_form_completed,
+      briefing_form_completed_date: draft.briefing_form_completed_date || null,
     });
   }
 
@@ -476,11 +493,13 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
     to_account_manager: draft.to_account_manager,
     meeting_scheduled: draft.meeting_scheduled,
     communication_completed: draft.communication_completed,
+    briefing_form_completed: draft.briefing_form_completed,
   });
   const breakdown = [
     score.incoming ? "Incoming AM set" : "Incoming AM not set",
     score.meeting ? "Meeting scheduled" : "Meeting not yet scheduled",
     score.communication ? "Communication completed" : "Communication not yet completed",
+    score.briefing ? "Briefing form completed" : "Briefing form not yet completed",
   ].join(" · ");
 
   return (
@@ -625,6 +644,24 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
               />
             </div>
           </div>
+          <div className="space-y-2">
+            <Label className="text-xs">Briefing Form Completed</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Checkbox
+                checked={draft.briefing_form_completed}
+                disabled={!canWrite}
+                onCheckedChange={(v) => setDraft((d) => ({ ...d, briefing_form_completed: v === true }))}
+              />
+              <Input
+                type="date"
+                className="h-8 w-[11.5rem] text-xs"
+                value={draft.briefing_form_completed_date}
+                disabled={!canWrite}
+                onChange={(e) => setDraft((d) => ({ ...d, briefing_form_completed_date: e.target.value }))}
+                aria-label="Briefing form completed date"
+              />
+            </div>
+          </div>
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">OLs (read-only)</div>
@@ -674,6 +711,8 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
             <p className="text-sm whitespace-pre-wrap">{acct.notes}</p>
           </div>
         ) : null}
+
+        <BriefingFormPanel recordId={id} accountId={acct.id} canWrite={canWrite} />
 
         <AccountTransitionDocuments
           accountId={acct.id}

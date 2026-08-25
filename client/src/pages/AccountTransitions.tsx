@@ -9,7 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { matchesSearchQuery } from "@/lib/search-match";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/lib/AuthContext";
@@ -83,6 +85,7 @@ function TransitionList() {
   const [am, setAm] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [pick, setPick] = useState("");
+  const [acctQ, setAcctQ] = useState("");
 
   const { data, isLoading } = useQuery<ListPayload>({
     queryKey: ["/api/account-transitions", am],
@@ -98,6 +101,11 @@ function TransitionList() {
   });
 
   const already = useMemo(() => new Set((data?.records ?? []).map((r) => r.account_id)), [data?.records]);
+  const filteredAccounts = useMemo(() => {
+    const q = acctQ.trim();
+    const list = q ? accounts.filter((a) => matchesSearchQuery([a.name], q)) : accounts;
+    return [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }, [accounts, acctQ]);
 
   const create = useMutation({
     mutationFn: async (account_id: number) => {
@@ -200,7 +208,16 @@ function TransitionList() {
         )}
       </div>
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <Dialog
+        open={addOpen}
+        onOpenChange={(open) => {
+          setAddOpen(open);
+          if (!open) {
+            setPick("");
+            setAcctQ("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Account</DialogTitle>
@@ -208,19 +225,36 @@ function TransitionList() {
           <p className="text-xs text-muted-foreground">
             Starts a handoff record. It is flagged into the percent-complete tile only after Incoming AM is set.
           </p>
-          <Select value={pick} onValueChange={setPick}>
-            <SelectTrigger>
-              <SelectValue placeholder="Choose an account" />
-            </SelectTrigger>
-            <SelectContent>
-              {accounts.map((a) => (
-                <SelectItem key={a.id} value={String(a.id)}>
-                  {a.name}
-                  {already.has(a.id) ? " (already in module)" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Command shouldFilter={false} className="rounded-md border border-border">
+            <CommandInput
+              placeholder="Search accounts…"
+              value={acctQ}
+              onValueChange={setAcctQ}
+              autoFocus
+            />
+            <CommandList className="max-h-64">
+              <CommandEmpty>No accounts match</CommandEmpty>
+              <CommandGroup>
+                {filteredAccounts.map((a) => (
+                  <CommandItem
+                    key={a.id}
+                    value={`${a.id} ${a.name}`}
+                    onSelect={() => setPick(String(a.id))}
+                  >
+                    <span className={cn("truncate", pick === String(a.id) && "font-medium")}>
+                      {a.name}
+                      {already.has(a.id) ? " (already in module)" : ""}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+          {pick ? (
+            <p className="text-xs text-muted-foreground">
+              Selected: {accounts.find((a) => String(a.id) === pick)?.name ?? pick}
+            </p>
+          ) : null}
           <Button
             disabled={!pick || create.isPending}
             onClick={() => create.mutate(Number(pick))}

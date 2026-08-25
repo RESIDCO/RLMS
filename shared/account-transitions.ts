@@ -1,10 +1,20 @@
 export const TRANSITION_STATUSES = ["open", "complete"] as const;
 export type TransitionStatus = (typeof TRANSITION_STATUSES)[number];
 
-export const COMMUNICATION_METHODS = ["email", "phone", "meeting", "teams", "other"] as const;
+export const COMMUNICATION_METHODS = [
+  "in_person",
+  "call",
+  "email",
+  "phone",
+  "meeting",
+  "teams",
+  "other",
+] as const;
 export type CommunicationMethod = (typeof COMMUNICATION_METHODS)[number];
 
 export const COMMUNICATION_METHOD_LABEL: Record<CommunicationMethod, string> = {
+  in_person: "In person",
+  call: "Call",
   email: "Email",
   phone: "Phone",
   meeting: "Meeting",

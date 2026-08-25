@@ -171,7 +171,7 @@ export async function patchTransitionRecord(
   if (patch.communication_method !== undefined) {
     const raw = cleanAm(patch.communication_method);
     if (raw && !isCommunicationMethod(raw)) {
-      const err: any = new Error("communication_method must be email, phone, meeting, teams, or other");
+      const err: any = new Error("communication_method must be in_person, call, email, phone, meeting, teams, or other");
       err.status = 400;
       throw err;
     }

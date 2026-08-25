@@ -91,7 +91,6 @@ type HeaderDraft = {
   account_id: number | null;
   description: string;
   status_narrative: string;
-  percent_complete: string;
   opened_date: string;
   target_completion_date: string;
   closed_date: string;
@@ -106,7 +105,6 @@ function headerFrom(p: Program): HeaderDraft {
     account_id: p.account_id ?? p.account?.id ?? null,
     description: p.description ?? "",
     status_narrative: p.status_narrative ?? "",
-    percent_complete: p.percent_complete != null ? String(p.percent_complete) : "",
     opened_date: p.opened_date?.slice(0, 10) ?? "",
     target_completion_date: p.target_completion_date?.slice(0, 10) ?? "",
     closed_date: p.closed_date?.slice(0, 10) ?? "",
@@ -238,6 +236,8 @@ export default function ProgramDetailPage() {
       apiRequest("PATCH", `/api/programs/${id}/cars/${linkId}`, body).then((r) => r.json()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: carsKey });
+      qc.invalidateQueries({ queryKey: ["/api/programs", id] });
+      qc.invalidateQueries({ queryKey: ["/api/programs"] });
       qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
     },
   });
@@ -445,6 +445,8 @@ export default function ProgramDetailPage() {
                   if (!ok) return;
                   await apiRequest("DELETE", `/api/programs/${id}/cars/${c.id}`);
                   qc.invalidateQueries({ queryKey: carsKey });
+                  qc.invalidateQueries({ queryKey: ["/api/programs", id] });
+                  qc.invalidateQueries({ queryKey: ["/api/programs"] });
                   qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
                 }}
               >
@@ -466,7 +468,6 @@ export default function ProgramDetailPage() {
       account_id: header.account_id,
       description: header.description.trim() || null,
       status_narrative: header.status_narrative,
-      percent_complete: header.percent_complete,
       opened_date: header.opened_date || null,
       target_completion_date: header.target_completion_date || null,
       closed_date: header.closed_date || null,
@@ -598,7 +599,9 @@ export default function ProgramDetailPage() {
             <Input className="h-8 text-xs" value={header.account_manager} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, account_manager: e.target.value })} />
           </HeaderField>
           <HeaderField label="% Complete">
-            <Input className="h-8 text-xs" type="number" value={header.percent_complete} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, percent_complete: e.target.value })} />
+            <div className="h-8 px-2 flex items-center text-xs font-mono-num tabular-nums">
+              {program.percent_complete != null ? `${program.percent_complete}%` : "—"}
+            </div>
           </HeaderField>
           <HeaderField label="Opened">
             <Input className="h-8 text-xs" type="date" value={header.opened_date} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, opened_date: e.target.value })} />
@@ -673,6 +676,8 @@ export default function ProgramDetailPage() {
                   });
                   setSelected(new Set());
                   qc.invalidateQueries({ queryKey: carsKey });
+                  qc.invalidateQueries({ queryKey: ["/api/programs", id] });
+                  qc.invalidateQueries({ queryKey: ["/api/programs"] });
                   qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
                   toast({ title: `Updated ${selected.size} car${selected.size === 1 ? "" : "s"}` });
                 }}
@@ -744,6 +749,7 @@ export default function ProgramDetailPage() {
         onAdded={() => {
           setAddOpen(false);
           qc.invalidateQueries({ queryKey: carsKey });
+          qc.invalidateQueries({ queryKey: ["/api/programs", id] });
           qc.invalidateQueries({ queryKey: ["/api/programs"] });
           qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
         }}

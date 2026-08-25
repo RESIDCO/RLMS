@@ -5291,7 +5291,7 @@ export async function registerRoutes(
       const userId = await requireWrite(req, res);
       if (!userId) return;
       const id = Number(req.params.id);
-      const { data: before } = await supabaseAdmin.from("programs").select("status, percent_complete, name").eq("id", id).maybeSingle();
+      const { data: before } = await supabaseAdmin.from("programs").select("status, name").eq("id", id).maybeSingle();
       const updates: any = { updated_at: new Date().toISOString() };
       if (req.body.name !== undefined) updates.name = String(req.body.name).trim();
       if (req.body.description !== undefined) updates.description = req.body.description || null;
@@ -5304,10 +5304,6 @@ export async function registerRoutes(
         updates.account_id = req.body.account_id ? Number(req.body.account_id) : null;
       }
       if (req.body.status_narrative !== undefined) updates.status_narrative = req.body.status_narrative || null;
-      if (req.body.percent_complete !== undefined) {
-        const n = req.body.percent_complete === "" || req.body.percent_complete == null ? null : Number(req.body.percent_complete);
-        updates.percent_complete = n != null && Number.isFinite(n) ? n : null;
-      }
       if (req.body.target_completion_date !== undefined) updates.target_completion_date = req.body.target_completion_date || null;
       if (req.body.opened_date !== undefined) updates.opened_date = req.body.opened_date || null;
       if (req.body.closed_date !== undefined) updates.closed_date = req.body.closed_date || null;
@@ -5319,14 +5315,6 @@ export async function registerRoutes(
           action: "status_changed",
           actor: userId,
           detail: { from: before.status, to: updates.status },
-        });
-      }
-      if (before && updates.percent_complete !== undefined && updates.percent_complete !== before.percent_complete) {
-        await logProgramActivity({
-          program_id: id,
-          action: "percent_complete_changed",
-          actor: userId,
-          detail: { from: before.percent_complete, to: updates.percent_complete },
         });
       }
       res.json(data);

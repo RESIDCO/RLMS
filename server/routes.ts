@@ -16,7 +16,7 @@ import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
-import { countActiveCarsByRiderId, countActiveOls, countCarsByRiderId } from "./rider-car-counts";
+import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
   applyCarStatusChange,
   assertInactivePatchAllowed,
@@ -98,6 +98,7 @@ import {
   parseFleetStatus,
   countsAsLeasedForKpi,
   isLeasedFleetStatus,
+  isResidcoOwnedEntity,
   type FleetStatus,
 } from "@shared/fleet-status";
 import {
@@ -465,7 +466,7 @@ export async function registerRoutes(
         : 0;
 
       const rpsCars = railcars.filter((r: any) => r.entity === "Rail Partners Select");
-      const ownedCars = railcars.filter((r: any) => r.entity === "Main");
+      const ownedCars = railcars.filter((r: any) => isResidcoOwnedEntity(r.entity));
       const coalCars = railcars.filter((r: any) => r.entity === "Coal");
       const rpsAssigned = rpsCars.filter((r: any) => countsAsLeasedForKpi(r.fleet_status)).length;
       const ownedAssigned = ownedCars.filter((r: any) => countsAsLeasedForKpi(r.fleet_status)).length;
@@ -780,11 +781,47 @@ export async function registerRoutes(
       }
       const in_transit_leased_count = in_program_count;
 
-      const [activeOlCount, amOverview] = await Promise.all([
-        countActiveOls(),
+      const [activeByRider, amOverview, riderExpRows] = await Promise.all([
+        countActiveCarsByRiderId(),
         listAccountManagementOverview(null, { includeInactive: false }),
+        fetchAllRows<{
+          id: number;
+          rider_name: string;
+          schedule_number: string | null;
+          expiration_date: string | null;
+          master_lease: { lessee: string | null; lease_number: string | null } | { lessee: string | null; lease_number: string | null }[] | null;
+        }>((from, to) =>
+          supabaseAdmin
+            .from("riders")
+            .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(lessee, lease_number)")
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
       ]);
+      let activeOlCount = 0;
+      for (const n of activeByRider.values()) {
+        if (n > 0) activeOlCount += 1;
+      }
       const dealsExpiring = amOverview.kpis.expiring;
+      const riderExpirationTimeline = riderExpRows
+        .filter((r) => (activeByRider.get(r.id) ?? 0) > 0 && String(r.expiration_date ?? "").trim())
+        .map((r) => {
+          const ml = Array.isArray(r.master_lease) ? r.master_lease[0] : r.master_lease;
+          return {
+            rider_id: r.id,
+            rider_name: r.rider_name,
+            schedule_number: r.schedule_number,
+            expiration_date: String(r.expiration_date).trim().slice(0, 10),
+            lease_number: ml?.lease_number ?? ml?.lessee ?? null,
+            car_count: activeByRider.get(r.id) ?? 0,
+            source: "financial" as const,
+            months_until_lease_exp: null as number | null,
+          };
+        })
+        .sort(
+          (a, b) =>
+            a.expiration_date.localeCompare(b.expiration_date) || a.rider_name.localeCompare(b.rider_name)
+        );
 
       let fleetKpis = sqlKpis
         ? {
@@ -943,8 +980,8 @@ export async function registerRoutes(
               cars: [],
             }))
           : carsByFleet,
-        expiration_timeline: expirationTimeline,
-        expiration_timeline_vcf: sqlKpis ? (fleetSql.expiration_timeline_vcf || []) : vcfTimeline,
+        expiration_timeline: riderExpirationTimeline,
+        expiration_timeline_vcf: [],
         fleet_age,
       });
     } catch (err) {

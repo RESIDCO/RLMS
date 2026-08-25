@@ -142,17 +142,16 @@ export function normalizeRow(row: WorkbookRow): Partial<Record<CanonicalRailcarF
  * Derive the managed/ownership category from raw entity.
  * Always preserve the raw entity in the caller; this helper is non-destructive.
  *   Main                 -> RESIDCO Owned
+ *   Coal                 -> RESIDCO Owned (owned fleet, not a partner bucket)
  *   Rail Partners Select -> RPS
- *   Coal                 -> Coal
  *   anything else        -> entity unchanged (or null)
  */
 export function deriveManagedCategory(entity: string | null | undefined): string | null {
   if (entity == null) return null;
   const e = String(entity).trim();
   if (!e) return null;
-  if (e === "Main") return "RESIDCO Owned";
+  if (e === "Main" || e === "Coal") return "RESIDCO Owned";
   if (e === "Rail Partners Select") return "RPS";
-  if (e === "Coal") return "Coal";
   return e;
 }
 

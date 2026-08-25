@@ -2,7 +2,7 @@
 
 export const ENTITY_SLUGS: Record<string, { db: string; label: string }> = {
   rps: { db: "Rail Partners Select", label: "RPS" },
-  main: { db: "Main", label: "Main" },
+  main: { db: "Main", label: "RESIDCO Fleet" },
   coal: { db: "Coal", label: "Coal" },
 };
 

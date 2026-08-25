@@ -591,7 +591,7 @@ export default function Dashboard() {
           <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-3.5 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Fleet Utilization by Entity</h2>
-              <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">RPS vs MAIN</span>
+              <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">RPS vs RESIDCO (Main + Coal)</span>
             </header>
             <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
@@ -648,11 +648,10 @@ export default function Dashboard() {
             <header className="px-5 py-3.5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
               <h2 className="text-sm font-semibold">Fleet Age — Turning 50</h2>
               <span className="text-[11px] text-muted-foreground">
-                {(data.fleet_age?.operating_count ?? 0).toLocaleString()} active cars
-                {" — "}
-                build year unknown for {(data.fleet_age?.unknown_count ?? 0).toLocaleString()}
-                {(data.fleet_age?.known_count ?? 0) === 0
-                  ? " (tiles stay at 0 until build years are populated)"
+                {(data.fleet_age?.known_count ?? 0).toLocaleString()} of{" "}
+                {(data.fleet_age?.operating_count ?? 0).toLocaleString()} cars have a build year
+                {(data.fleet_age?.unknown_count ?? 0) > 0
+                  ? ` — ${(data.fleet_age?.unknown_count ?? 0).toLocaleString()} missing`
                   : ""}
               </span>
             </header>
@@ -714,7 +713,7 @@ export default function Dashboard() {
             </div>
           </section>
 
-          {/* Lease Expiration Timeline — Asset Report rider-level Lease Exp */}
+          {/* Lease Expiration Timeline — riders.expiration_date on OLs with active cars */}
           <section className="rounded-xl border border-card-border bg-card shadow-card">
             <header className="px-5 py-4 border-b border-border flex items-center justify-between">
               <h2 className="text-sm font-semibold">Lease Expiration Timeline</h2>
@@ -733,11 +732,11 @@ export default function Dashboard() {
               ) : (() => {
                 type TimelineItem = NonNullable<DashboardData["expiration_timeline"]>[number];
                 const withEnd = data?.expiration_timeline ?? [];
-                const vcfExtra = data?.expiration_timeline_vcf ?? [];
+                const vcfExtra: TimelineItem[] = [];
                 if (withEnd.length === 0) {
                   return (
                     <div className="px-5 py-8 text-sm text-muted-foreground">
-                      No rider-level Lease Exp dates in the Asset Report snapshot.
+                      No governed expiration dates on active OLs.
                     </div>
                   );
                 }

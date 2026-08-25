@@ -113,7 +113,7 @@ eq(
 // --- deriveManagedCategory ---------------------------------------------------
 eq(deriveManagedCategory("Main"), "RESIDCO Owned", "Main → RESIDCO Owned");
 eq(deriveManagedCategory("Rail Partners Select"), "RPS", "Rail Partners Select → RPS");
-eq(deriveManagedCategory("Coal"), "Coal", "Coal → Coal (preserved)");
+eq(deriveManagedCategory("Coal"), "RESIDCO Owned", "Coal → RESIDCO Owned (same owned fleet as Main)");
 eq(deriveManagedCategory("Some Other"), "Some Other", "unknown entity preserved as-is");
 eq(deriveManagedCategory(null), null, "null entity → null");
 eq(deriveManagedCategory(""), null, "empty entity → null");

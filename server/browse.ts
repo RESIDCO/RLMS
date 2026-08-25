@@ -13,6 +13,16 @@ export const ENTITY_DB: Record<string, string> = {
   coal: "Coal",
 };
 
+/** `main` browse is RESIDCO-owned (Main + Coal), matching the dashboard tile. `coal` stays Coal-only. */
+export function entityDbValues(slug: string): string[] | undefined {
+  const k = slug.toLowerCase();
+  if (k === "main") return ["Main", "Coal"];
+  if (k === "coal") return ["Coal"];
+  if (k === "rps") return ["Rail Partners Select"];
+  const one = ENTITY_DB[k];
+  return one ? [one] : undefined;
+}
+
 const CAR_LIST_SELECT =
   "id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, lessee_name, rider_external_id, assignment_label, managed_category, sold_to, lease_type";
 
@@ -132,7 +142,7 @@ async function loadRiderIndex(): Promise<Map<string, RiderMeta>> {
 }
 
 async function fetchOperatingCars(
-  filter: { lessee?: string; entity?: string; ol?: string; buildYear?: number },
+  filter: { lessee?: string; entity?: string | string[]; ol?: string; buildYear?: number },
   opts?: { extra?: boolean },
 ) {
   const cars = await fetchAllRows<any>((from, to) => {
@@ -143,7 +153,8 @@ async function fetchOperatingCars(
       .order("id", { ascending: true })
       .range(from, to);
     if (filter.lessee) q = q.eq("lessee_name", filter.lessee);
-    if (filter.entity) q = q.eq("entity", filter.entity);
+    if (Array.isArray(filter.entity) && filter.entity.length) q = q.in("entity", filter.entity);
+    else if (typeof filter.entity === "string" && filter.entity) q = q.eq("entity", filter.entity);
     if (filter.ol) q = q.eq("rider_external_id", filter.ol);
     if (filter.buildYear != null) q = q.eq("build_year", filter.buildYear);
     return q;
@@ -170,9 +181,9 @@ function riderRowForOl(ol: string | null, index: Map<string, RiderMeta>, carCoun
 }
 
 export async function browseGroup(kind: "lessee" | "entity", key: string) {
-  const entityDb = kind === "entity" ? ENTITY_DB[key.toLowerCase()] ?? key : undefined;
+  const entityValues = kind === "entity" ? entityDbValues(key) ?? [key] : undefined;
   const lessee = kind === "lessee" ? key : undefined;
-  const cars = await fetchOperatingCars({ lessee, entity: entityDb });
+  const cars = await fetchOperatingCars({ lessee, entity: entityValues });
   const index = await loadRiderIndex();
   const buckets = new Map<string, number>();
   for (const c of cars) {
@@ -184,7 +195,7 @@ export async function browseGroup(kind: "lessee" | "entity", key: string) {
     .sort((a, b) => b.car_count - a.car_count || a.ol.localeCompare(b.ol));
   return {
     kind,
-    key: kind === "entity" ? (entityDb ?? key) : key,
+    key: kind === "entity" ? (entityValues?.[0] ?? key) : key,
     entity_slug: kind === "entity" ? key.toLowerCase() : null,
     car_count: cars.length,
     riders,
@@ -194,10 +205,10 @@ export async function browseGroup(kind: "lessee" | "entity", key: string) {
 export async function browseOl(code: string, filter?: { lessee?: string; entity?: string }) {
   const isUnassigned = !code || /^unassigned$/i.test(code);
   const ol = isUnassigned ? null : (olKeyFromLabel(code) ?? normalizeOl(code));
-  const entityDb = filter?.entity ? ENTITY_DB[filter.entity.toLowerCase()] ?? filter.entity : undefined;
+  const entityValues = filter?.entity ? entityDbValues(filter.entity) ?? [filter.entity] : undefined;
   const cars = await fetchOperatingCars({
     lessee: filter?.lessee,
-    entity: entityDb,
+    entity: entityValues,
     ol: ol ?? undefined,
   }).then((rows) => {
     if (!isUnassigned) return rows;

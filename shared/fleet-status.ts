@@ -27,6 +27,12 @@ export function isLeasedFleetStatus(status: FleetStatus | string | null | undefi
   return status === "Leased";
 }
 
+/** RESIDCO-owned fleet for Dashboard entity util — Coal is not a partner (RPS) bucket. */
+export function isResidcoOwnedEntity(entity: string | null | undefined): boolean {
+  const e = String(entity ?? "").trim();
+  return e === "Main" || e === "Coal";
+}
+
 export type FleetStatusInput = {
   active?: boolean | null;
   fleet_status?: FleetStatus | string | null;

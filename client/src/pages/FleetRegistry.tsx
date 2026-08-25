@@ -38,6 +38,7 @@ import { Label } from "@/components/ui/label";
 import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList, ExternalLink } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
+import { AmCommentThread, formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { OpsFlagPicker } from "@/components/OpsFlagPicker";
 import { OPS_FLAG_PRESETS, composeOpsFlag } from "@shared/ops-flag";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
@@ -316,6 +317,14 @@ function renderOptTd(key: string, r: any) {
       return <td key={key} className={num}>{r.rider_external_id ?? "—"}</td>;
     case "account_manager_initials":
       return <td key={key} className={text}>{r.account_manager_initials || ""}</td>;
+    case "am_note": {
+      const snippet = formatAmNoteSnippet(r.am_note);
+      return (
+        <td key={key} className={`${text} max-w-[240px] truncate`} title={snippet || ""}>
+          {snippet || ""}
+        </td>
+      );
+    }
     case "comment_event_note":
       return (
         <td key={key} className={`${text} max-w-[220px] truncate`} title={r.comment_event_note ?? ""}>
@@ -342,6 +351,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     "Build Year", "Lining", "Mech Desig.", "DOT Code",
     "Comment / Event Note",
     "Acct Mgr",
+    "Latest AM Note",
     // Internal columns (post-workbook)
     "Managed Category", "Reporting Marks", "Car Status", "Rental Status", "Flag", "Transit Status", "Transit Label",
     "Rider Name", "Schedule #", "MLA Lease #", "Lessor", "Expiration Date",
@@ -383,6 +393,7 @@ function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
     r.dot_code ?? r.dot_specification ?? "",
     get(r, "comment_event_note"),
     r.account_manager_initials ?? "",
+    formatAmNoteSnippet(r.am_note),
     // Internal
     r.managed_category ?? "",
     r.reporting_marks ?? "",
@@ -556,7 +567,7 @@ export default function FleetRegistry() {
     | "monthly_rent_per_car" | "monthly_depr_per_car"
     | "commodity" | "commodity_family"
     | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
-    | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials";
+    | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials" | "am_note";
   const OPT_COLS: { key: OptCol; label: string }[] = [
     { key: "nbv",                 label: "NBV" },
     { key: "oac",                 label: "OAC" },
@@ -578,6 +589,7 @@ export default function FleetRegistry() {
     { key: "active",              label: "Active" },
     { key: "rider_external_id",   label: "Rider ID" },
     { key: "account_manager_initials", label: "Acct Mgr" },
+    { key: "am_note", label: "Latest AM Note" },
     { key: "comment_event_note",  label: "Comment / Event Note" },
   ];
   const FR_DEFAULT_COLS = new Set<string>([]);
@@ -2130,6 +2142,7 @@ export function CarDetail({
         <DetailRow label="Active" value={(r as any).active_status ?? ((r as any).active === false ? "Inactive" : (r as any).active === true ? "Active" : "—")} />
         <DetailRow label="Rider ID (external)" value={(r as any).rider_external_id ?? "—"} />
         <DetailRow label="Acct Mgr" value={(r as any).account_manager_initials || ""} />
+        <DetailRow label="Latest AM Note" value={formatAmNoteSnippet((r as any).am_note) || ""} />
         <DetailRow label="Lease Start" value={fmtDate((r as any).lease_start_date)} />
         <DetailRow
           label="Lease End"
@@ -2160,6 +2173,20 @@ export function CarDetail({
         />
         <DetailRow label="Comment / Event Note" value={(r as any).comment_event_note ?? "—"} />
       </dl>
+      {(() => {
+        const a = (r as any).assignment;
+        const assign = Array.isArray(a) ? a[0] : a;
+        const riderId = Number(assign?.rider_id ?? assign?.rider?.id);
+        if (!Number.isFinite(riderId) || riderId <= 0) return null;
+        return (
+          <div className="mt-5">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+              Account Management notes
+            </div>
+            <AmCommentThread riderId={riderId} canCompose={false} canDelete={false} compact />
+          </div>
+        );
+      })()}
 
       {/* Previously known as — sourced from car_number_history (VCF remarks), not flat old_car_* */}
       {(data.number_history ?? []).length > 0 && (() => {

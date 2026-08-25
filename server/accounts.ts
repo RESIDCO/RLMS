@@ -320,7 +320,6 @@ export type AccountOlRow = {
   lease_number: string | null;
   expiration_date: string | null;
   status_tag: StatusTag | null;
-  account_mgmt_comment: string | null;
   active_car_count: number;
 };
 
@@ -349,12 +348,11 @@ export async function getAccount(id: number) {
     master_lease_id: number;
     expiration_date: string | null;
     status_tag: string | null;
-    account_mgmt_comment: string | null;
   }[] = [];
   if (leaseIds.length) {
     const { data: riders, error: rErr } = await supabaseAdmin
       .from("riders")
-      .select("id, rider_name, schedule_number, master_lease_id, expiration_date, status_tag, account_mgmt_comment")
+      .select("id, rider_name, schedule_number, master_lease_id, expiration_date, status_tag")
       .in("master_lease_id", leaseIds)
       .order("schedule_number");
     if (rErr) throw rErr;
@@ -370,7 +368,6 @@ export async function getAccount(id: number) {
     lease_number: leaseNumberById.get(r.master_lease_id) ?? null,
     expiration_date: r.expiration_date,
     status_tag: isStatusTag(r.status_tag) ? r.status_tag : null,
-    account_mgmt_comment: r.account_mgmt_comment ?? null,
     active_car_count: activeByRider.get(r.id) ?? 0,
   }));
 
@@ -399,18 +396,7 @@ export async function patchRiderStatusTag(riderId: number, statusTag: StatusTag 
     .from("riders")
     .update({ status_tag: statusTag })
     .eq("id", riderId)
-    .select("id, status_tag, account_mgmt_comment")
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-}
-
-export async function patchRiderAccountMgmtComment(riderId: number, comment: string | null) {
-  const { data, error } = await supabaseAdmin
-    .from("riders")
-    .update({ account_mgmt_comment: comment })
-    .eq("id", riderId)
-    .select("id, status_tag, account_mgmt_comment")
+    .select("id, status_tag")
     .maybeSingle();
   if (error) throw error;
   return data;

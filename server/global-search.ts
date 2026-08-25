@@ -6,7 +6,7 @@ import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { applySearchFilter } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
-import { resolveRailcarsByAnyIdentity } from "./activity-log";
+import { attachLatestAmNotes, latestAmNotesByRiderIds } from "./rider-account-comments";
 
 const CAR_LIMIT = 500;
 const SIDE_LIMIT = 100;
@@ -248,6 +248,7 @@ async function runCarListSearch(raw: string, tokens: string[]): Promise<GlobalSe
     for (const m of a.matches) pushId(m.railcar_id);
   }
   const railcars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds));
+  const railcarsWithNotes = await attachLatestAmNotes(railcars);
   const not_found = [
     ...resolved.not_found.map((n) => n.token),
     ...resolved.ambiguous
@@ -257,7 +258,7 @@ async function runCarListSearch(raw: string, tokens: string[]): Promise<GlobalSe
   return {
     query: raw,
     terms: capped,
-    railcars,
+    railcars: railcarsWithNotes,
     riders: [],
     leases: [],
     not_found,
@@ -342,27 +343,30 @@ export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> 
   const countByRider = await timed("rider-car-counts", () =>
     activeCarCountsByRider(matchedRiders.map((r: any) => r.id)),
   );
+  const notesByRider = await latestAmNotesByRiderIds(matchedRiders.map((r: any) => r.id));
   const ridersOut = matchedRiders.map((r: any) => ({
     ...r,
     car_count: countByRider.get(r.id) ?? 0,
+    am_note: notesByRider.get(r.id) ?? null,
   }));
+  const carsOut = await attachLatestAmNotes(matchedCars);
 
   console.log(
-    `[search] total ${Date.now() - tAll}ms q=${JSON.stringify(raw)} cars=${matchedCars.length} riders=${ridersOut.length} leases=${matchedLeases.length}`,
+    `[search] total ${Date.now() - tAll}ms q=${JSON.stringify(raw)} cars=${carsOut.length} riders=${ridersOut.length} leases=${matchedLeases.length}`,
   );
 
   return {
     query: raw,
     terms,
-    railcars: matchedCars,
+    railcars: carsOut,
     riders: ridersOut,
     leases: matchedLeases,
     not_found: [],
     counts: {
-      railcars: matchedCars.length,
+      railcars: carsOut.length,
       riders: ridersOut.length,
       leases: matchedLeases.length,
-      total: matchedCars.length + ridersOut.length + matchedLeases.length,
+      total: carsOut.length + ridersOut.length + matchedLeases.length,
     },
   };
 }

@@ -23,7 +23,7 @@ function ok(cond: boolean, label: string) {
 }
 
 ok(RIDER_IMPORT_NEVER_WRITE.includes("status_tag"), "status_tag is named never-write");
-ok(RIDER_IMPORT_NEVER_WRITE.includes("account_mgmt_comment"), "account_mgmt_comment is named never-write");
+ok(!(RIDER_IMPORT_NEVER_WRITE as readonly string[]).includes("account_mgmt_comment"), "dropped riders.account_mgmt_comment is not a rider column");
 let tagThrew = false;
 try {
   assertRiderImporterPatch({ status_tag: "good" });
@@ -31,13 +31,6 @@ try {
   tagThrew = true;
 }
 ok(tagThrew, "assert rejects riders.status_tag");
-let commentThrew = false;
-try {
-  assertRiderImporterPatch({ account_mgmt_comment: "note" });
-} catch {
-  commentThrew = true;
-}
-ok(commentThrew, "assert rejects riders.account_mgmt_comment");
 ok(
   !(RIDER_FINANCIAL_FILL_BLANK_FIELDS as readonly string[]).includes("account_manager"),
   "account_manager is not a fill-blank field",

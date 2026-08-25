@@ -41,8 +41,6 @@ export type Rider = {
   account_manager: string | null;
   /** OL relationship status. Written only from Account Management. */
   status_tag: "good" | "watch" | "risk" | null;
-  /** OL note. Written only from Account Management. */
-  account_mgmt_comment: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -353,6 +351,13 @@ export type MoveCarsInput = z.infer<typeof moveCarsSchema>;
 // ---- Composite shapes used by API ----
 
 export type RailcarWithAssignment = Railcar & {
+  account_manager_initials?: string | null;
+  am_note?: {
+    author_email: string;
+    created_at: string;
+    body: string;
+    count: number;
+  } | null;
   assignment: (RailcarAssignment & {
     rider: (Rider & { master_lease: MasterLease | null }) | null;
   }) | null;

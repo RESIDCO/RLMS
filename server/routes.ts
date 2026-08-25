@@ -5,7 +5,13 @@ import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, attachAccountManagerInitials } from "./railcar-list";
-import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, patchRiderAccountMgmtComment, listRiderCarsForAccountMgmt } from "./accounts";
+import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
+import {
+  attachLatestAmNotes,
+  createRiderAccountComment,
+  deleteRiderAccountComment,
+  listRiderAccountComments,
+} from "./rider-account-comments";
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
@@ -1381,7 +1387,7 @@ export async function registerRoutes(
       if (!car) return res.status(404).json({ message: "Railcar not found" });
       const assignmentRaw = asOne(car.assignment);
       const rider = asOne(assignmentRaw?.rider);
-      const [normalized] = await attachAccountManagerInitials([
+      const [normalized] = await attachLatestAmNotes(await attachAccountManagerInitials([
         hydrateOpsFlag({
           ...car,
           assignment: assignmentRaw
@@ -1389,7 +1395,7 @@ export async function registerRoutes(
             : null,
           railcar_ab_items: abRes.error ? [] : (abRes.data ?? []),
         }),
-      ]);
+      ]));
       res.json({ railcar: normalized, history: histRes.data ?? [], number_history: numHistRes.data ?? [] });
     } catch (err) {
       errHandler(res, err);
@@ -4661,19 +4667,48 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  app.patch("/api/account-management/riders/:riderId/comment", async (req, res) => {
+  app.get("/api/account-management/riders/:riderId/comments", async (req, res) => {
     try {
-      if (!(await requireAccountMgmtWrite(req, res))) return;
+      if (!(await requireUser(req, res))) return;
       const riderId = Number(req.params.riderId);
       if (!Number.isFinite(riderId) || riderId <= 0) {
         return res.status(400).json({ message: "Invalid rider" });
       }
-      const comment = req.body?.account_mgmt_comment == null
-        ? null
-        : String(req.body.account_mgmt_comment).trim() || null;
-      const row = await patchRiderAccountMgmtComment(riderId, comment);
-      if (!row) return res.status(404).json({ message: "Rider not found" });
-      res.json(row);
+      res.json({ comments: await listRiderAccountComments(riderId) });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/account-management/riders/:riderId/comments", async (req, res) => {
+    try {
+      const userId = await requireAccountMgmtWrite(req, res);
+      if (!userId) return;
+      const riderId = Number(req.params.riderId);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      const row = await createRiderAccountComment({
+        riderId,
+        authorUserId: userId,
+        authorEmail: req.authUser?.email ?? "",
+        body: String(req.body?.body ?? ""),
+      });
+      res.status(201).json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/account-management/comments/:commentId", async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const commentId = Number(req.params.commentId);
+      if (!Number.isFinite(commentId) || commentId <= 0) {
+        return res.status(400).json({ message: "Invalid comment" });
+      }
+      const ok = await deleteRiderAccountComment(commentId);
+      if (!ok) return res.status(404).json({ message: "Comment not found" });
+      res.json({ ok: true });
     } catch (err) { errHandler(res, err); }
   });
 

@@ -72,6 +72,7 @@ import type {
 
 import { matchesSearchQuery } from "@/lib/search-match";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+import { AmCommentThread } from "@/components/AmCommentThread";
 
 function normOlToken(s: string | null | undefined): string {
   return String(s ?? "")
@@ -721,6 +722,12 @@ export default function LeaseManagement() {
                               <>
                                 <RiderCars riderId={rider.id} leaseType={lease.lease_type} />
                                 <RiderContactsPanel riderId={rider.id} />
+                                <div className="px-5 pb-3">
+                                  <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
+                                    Account Management notes
+                                  </div>
+                                  <AmCommentThread riderId={rider.id} canCompose={false} canDelete={false} compact />
+                                </div>
                                 <div className="px-5 pb-2">
                                   <ActivityTimeline riderId={rider.id} canEdit={canEdit} title="Rider activity" />
                                 </div>

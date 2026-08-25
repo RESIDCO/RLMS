@@ -28,6 +28,7 @@ import {
   shouldRestoreSearchSession,
 } from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
+import { formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { useState, useRef, useEffect, useMemo } from "react";
 
 interface MasterLease {
@@ -63,6 +64,7 @@ interface RailcarResult {
   rider_external_id?: string | null;
   lease_type?: string | null;
   ops_flag?: string | null;
+  am_note?: { author_email: string; created_at: string; body: string; count: number } | null;
   assignment: {
     id: number;
     fleet_name: string | null;
@@ -196,6 +198,11 @@ function RailcarRow({
             {car.car_type ?? "—"}
             {car.mechanical_designation ? ` · ${car.mechanical_designation}` : ""}
           </div>
+          {car.am_note ? (
+            <div className="text-[11px] text-muted-foreground mt-1 max-w-md" title={car.am_note.body}>
+              {formatAmNoteSnippet(car.am_note)}
+            </div>
+          ) : null}
         </div>
         <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>

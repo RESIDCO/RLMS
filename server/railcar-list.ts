@@ -5,6 +5,7 @@ import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag, OPS_FLAG_FALLBACK_PREFIX } from "@shared/ops-flag";
 import { fetchAllRows } from "./fetch-all";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
+import { attachLatestAmNotes } from "./rider-account-comments";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
 export const RAILCAR_LIST_SELECT = `
@@ -317,6 +318,13 @@ export async function attachAccountManagerInitials<T extends { rider_external_id
   });
 }
 
+async function attachAccountJoins<T extends { rider_external_id?: string | null; assignment?: unknown }>(
+  rows: T[],
+) {
+  const withAm = await attachAccountManagerInitials(rows);
+  return attachLatestAmNotes(withAm);
+}
+
 function mapRow(r: any) {
   const assignmentRaw = asOne(r.assignment);
   const rider = asOne(assignmentRaw?.rider);
@@ -427,7 +435,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     });
     const rows = all.map(mapRow).filter((r: any) => !assignedSet.has(r.id) && !r.assignment);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-    const merged = await attachAccountManagerInitials(extra.length ? [...extra, ...rows] : rows);
+    const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
     if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
     const start = (p.page! - 1) * p.pageSize!;
     return {
@@ -446,7 +454,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     });
     const rows = data.map(mapRow);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-    const merged = await attachAccountManagerInitials(extra.length ? [...extra, ...rows] : rows);
+    const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
     return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
   }
 
@@ -462,7 +470,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   if (error) throw error;
   const rows = (data ?? []).map(mapRow);
   const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-  const merged = await attachAccountManagerInitials(extra.length ? [...extra, ...rows] : rows);
+  const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
   return {
     rows: merged,
     total_count: (count ?? 0) + extra.length,

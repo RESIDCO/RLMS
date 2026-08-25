@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { Building2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { accountPath, programPath } from "@/lib/browse-nav";
+import { AmCommentThread } from "@/components/AmCommentThread";
 
 type StatusTag = "good" | "watch" | "risk";
 
@@ -47,7 +48,6 @@ type AccountOl = {
   lease_number: string | null;
   expiration_date: string | null;
   status_tag: StatusTag | null;
-  account_mgmt_comment: string | null;
   active_car_count: number;
 };
 
@@ -318,7 +318,7 @@ function AccountDetailView({ id }: { id: number }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const canEdit = useCanEdit();
-  const { canEditAccountMgmtTags, canEditAccountMgmtComments } = usePermissions();
+  const { canEditAccountMgmtTags, canEditAccountMgmtComments, canDeleteAccountMgmtComments } = usePermissions();
   const { data, isLoading } = useQuery<AccountDetail>({
     queryKey: ["/api/accounts", id],
     queryFn: () => apiRequest("GET", `/api/accounts/${id}`).then((r) => r.json()),
@@ -376,9 +376,9 @@ function AccountDetailView({ id }: { id: number }) {
           </span>
         </div>
         <p className="text-xs text-muted-foreground max-w-3xl">
-          Status tags and comments are owned by Account Management and can be edited by anyone with access to this page
-          (including Viewers). Car lists, dates, and other OL fields are Lease Management / Railcars data shown for
-          reference only and are not editable here.
+          Status tags and notes are owned by Account Management. Anyone with access to this page (including Viewers)
+          can set tags and post notes; notes are append-only. Car lists, dates, and other OL fields are Lease
+          Management / Railcars data shown for reference only and are not editable here.
         </p>
 
         {canEdit && (
@@ -426,6 +426,7 @@ function AccountDetailView({ id }: { id: number }) {
                   onToggle={() => setExpanded(expanded === ol.id ? null : ol.id)}
                   canTag={canEditAccountMgmtTags}
                   canComment={canEditAccountMgmtComments}
+                  canDeleteComment={canDeleteAccountMgmtComments}
                 />
               ))}
               {(data.ols ?? []).length === 0 && (
@@ -470,6 +471,7 @@ function OlRows({
   onToggle,
   canTag,
   canComment,
+  canDeleteComment,
 }: {
   accountId: number;
   ol: AccountOl;
@@ -477,13 +479,10 @@ function OlRows({
   onToggle: () => void;
   canTag: boolean;
   canComment: boolean;
+  canDeleteComment: boolean;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [comment, setComment] = useState(ol.account_mgmt_comment ?? "");
-  useEffect(() => {
-    setComment(ol.account_mgmt_comment ?? "");
-  }, [ol.account_mgmt_comment]);
   const cars = useQuery<{ cars: OlCar[] }>({
     queryKey: ["/api/account-management/riders", ol.id, "cars"],
     queryFn: () => apiRequest("GET", `/api/account-management/riders/${ol.id}/cars`).then((r) => r.json()),
@@ -498,15 +497,6 @@ function OlRows({
       qc.invalidateQueries({ queryKey: ["/api/account-management/overview"] });
     },
     onError: (e: Error) => toast({ title: "Could not save status", description: e.message, variant: "destructive" }),
-  });
-
-  const commentMut = useMutation({
-    mutationFn: (account_mgmt_comment: string) =>
-      apiRequest("PATCH", `/api/account-management/riders/${ol.id}/comment`, { account_mgmt_comment }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/accounts", accountId] });
-    },
-    onError: (e: Error) => toast({ title: "Could not save comment", description: e.message, variant: "destructive" }),
   });
 
   function setTag(next: StatusTag) {
@@ -551,18 +541,11 @@ function OlRows({
             ))}
           </div>
         </td>
-        <td className="px-4 py-2 min-w-[12rem]">
-          <Textarea
-            rows={2}
-            className="text-xs"
-            value={comment}
-            readOnly={!canComment}
-            onChange={(e) => setComment(e.target.value)}
-            onBlur={() => {
-              if (!canComment) return;
-              if (comment.trim() === (ol.account_mgmt_comment ?? "").trim()) return;
-              commentMut.mutate(comment);
-            }}
+        <td className="px-4 py-2 min-w-[16rem]">
+          <AmCommentThread
+            riderId={ol.id}
+            canCompose={canComment}
+            canDelete={canDeleteComment}
           />
         </td>
       </tr>

@@ -553,6 +553,13 @@ export default function Dashboard() {
                 accent={data.kpis.off_rent_count > 0 ? "warning" : "muted"}
                 marker="icon"
               />
+              <KpiCard
+                testId="kpi-riders"
+                label="Active OLs"
+                value={data.kpis.riders_count}
+                icon={FileText}
+                onClick={() => navigate("/leases?filter=riders")}
+              />
               {(data.kpis.deals_expiring ?? []).map((tile) => (
                 <KpiCard
                   key={tile.year}
@@ -575,13 +582,6 @@ export default function Dashboard() {
                   }
                 />
               ))}
-              <KpiCard
-                testId="kpi-riders"
-                label="Active OLs"
-                value={data.kpis.riders_count}
-                icon={FileText}
-                onClick={() => navigate("/leases?filter=riders")}
-              />
             </>
           ) : null}
         </div>

@@ -206,7 +206,7 @@ function expirationYear(iso: string | null | undefined): number | null {
 /** Calendar years on Deals Expiring tiles (Dashboard + Account Management ALL). */
 export function dealsExpireYears(): number[] {
   const y = new Date().getFullYear();
-  return [y, y + 1, y + 2, y + 3];
+  return [y, y + 1, y + 2, y + 3, y + 4];
 }
 
 export type AccountOverviewRow = AccountListRow & {

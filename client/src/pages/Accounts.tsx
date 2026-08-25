@@ -204,7 +204,7 @@ function AccountListView() {
 
         <div>
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Deals Expiring</div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {(data?.kpis.expiring ?? data?.expire_years.map((year) => ({ year, count: 0 })) ?? []).map((tile) => (
               <KpiTile
                 key={tile.year}

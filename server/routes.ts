@@ -4712,6 +4712,16 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.patch("/api/account-management/comments/:commentId", (_req, res) => {
+    res.status(405).json({ message: "Account Management notes cannot be edited" });
+  });
+  app.put("/api/account-management/comments/:commentId", (_req, res) => {
+    res.status(405).json({ message: "Account Management notes cannot be edited" });
+  });
+  app.patch("/api/account-management/riders/:riderId/comment", (_req, res) => {
+    res.status(410).json({ message: "Use POST /api/account-management/riders/:riderId/comments" });
+  });
+
   app.get("/api/account-management/riders/:riderId/cars", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;

@@ -97,18 +97,21 @@ import {
   carLesseeName,
   carOlCode,
   parseIsoDateOnly,
-  estimatedExpiryDateFromAssetMonths,
   effectiveDateToTimestamp,
 } from "@shared/lease-authority";
 import {
+  buildAssetReportExpirations,
+  buildCarFallbackExpirations,
+  resolveGovernedExpiration,
+} from "@shared/lease-governance";
+import { governLeaseDates } from "./govern-lease-dates";
+import {
   MissingExpiryEstimateColumnsError,
   probeEstimatedLeaseExpiryColumns,
-  refreshEstimatedLeaseExpiry,
 } from "./refresh-estimated-lease-expiry";
 import { carBuildYear, turning50ByYear } from "@shared/build-year";
 import { browseGroup, browseOl, browseTurning50, countInProgram } from "./browse";
 import { buildTurning50Report } from "./turning50-export";
-import { syncRiderExpirationsFromCars } from "./sync-rider-expirations";
 import {
   buildFinancialReview,
   financialRowToDbPayload,
@@ -373,7 +376,9 @@ export async function registerRoutes(
   // ---------- Dashboard ----------
   app.get("/api/dashboard", async (_req, res) => {
     try {
-      // Lease status / lessee / OL authority = railcars fields (VCF), NOT riders.expiration_date.
+      // Lease dates: Asset Report first (via rider_financial_summary / governed
+      // riders.expiration_date). V_Valid car dates only fill OLs the report omits.
+      // Lessee / OL identity still come from railcars.
       // PostgREST caps at 1000 rows — paginate and verify exact count or refuse to serve.
       const db = supabaseAdmin;
       const { data: fleetSql, error: fleetSqlErr } = await db.rpc("rlms_fleet_kpis");
@@ -500,6 +505,21 @@ export async function registerRoutes(
       const sixMo = new Date(now);
       sixMo.setMonth(sixMo.getMonth() + 6);
 
+      const { latestSnap, byOl: assetByOl } = buildAssetReportExpirations(finRows as any[]);
+      const carFallbackByOl = sqlKpis
+        ? (() => {
+            const m = new Map<string, string>();
+            for (const row of fleetSql.expiration_timeline_vcf || []) {
+              const key = String(row.rider_name ?? "").trim().toUpperCase();
+              const d = String(row.expiration_date ?? "").trim().slice(0, 10);
+              if (!key || !/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+              const prev = m.get(key);
+              if (!prev || d < prev) m.set(key, d);
+            }
+            return m;
+          })()
+        : buildCarFallbackExpirations(railcars as any[]);
+
       // Active Riders / OLs — distinct rider_external_id on operating cars
       type OlAgg = {
         ol: string;
@@ -519,9 +539,10 @@ export async function registerRoutes(
       const endBuckets = new Map<string, EndBucket>();
       let undefinedEndCarCount = 0;
       for (const c of railcars as any[]) {
-        const end = carLeaseEndDate(c);
-        if (!end) undefinedEndCarCount += 1;
         const ol = carOlCode(c);
+        const governed = ol ? resolveGovernedExpiration(ol, assetByOl, carFallbackByOl) : null;
+        if (!governed) undefinedEndCarCount += 1;
+        const end = governed?.expiration_date ?? carLeaseEndDate(c);
         if (!ol) continue;
         const key = ol.toUpperCase();
         let agg = olMap.get(key);
@@ -541,8 +562,6 @@ export async function registerRoutes(
         if (end) agg.ends.push(end);
         if (!agg.lessee_name) agg.lessee_name = carLesseeName(c);
 
-        // Timeline / expiring tiles: count only cars that share this exact end date.
-        // Null ends are omitted (see undefined_end_car_count), never folded into another car's date.
         if (end) {
           const bkey = `${key}|${end}`;
           let bucket = endBuckets.get(bkey);
@@ -559,11 +578,25 @@ export async function registerRoutes(
           if (!bucket.lessee_name) bucket.lessee_name = carLesseeName(c);
         }
       }
+      if (sqlKpis) {
+        const olCounts = fleetSql.ol_counts || {};
+        let assignedToOl = 0;
+        undefinedEndCarCount = 0;
+        for (const [ol, nRaw] of Object.entries(olCounts)) {
+          const n = Number(nRaw) || 0;
+          assignedToOl += n;
+          if (!resolveGovernedExpiration(ol, assetByOl, carFallbackByOl)) undefinedEndCarCount += n;
+        }
+        const operating = Number(sqlKpis.operating) || 0;
+        undefinedEndCarCount += Math.max(0, operating - assignedToOl);
+      }
       const activeOls = Array.from(olMap.values()).map((agg) => ({
-        id: agg.ol, // string key for UI (was numeric riders.id)
+        id: agg.ol,
         rider_name: agg.ol,
         schedule_number: agg.ol,
-        expiration_date: aggregateOlEndDate(agg.ends),
+        expiration_date:
+          resolveGovernedExpiration(agg.ol, assetByOl, carFallbackByOl)?.expiration_date ??
+          aggregateOlEndDate(agg.ends),
         lease_number: null as string | null,
         lessee_name: agg.lessee_name,
         car_count: agg.car_count,
@@ -586,49 +619,7 @@ export async function registerRoutes(
         months_until_lease_exp: number | null;
       };
 
-      const snapDates = (finRows as any[])
-        .map((r) => String(r.snapshot_month ?? "").slice(0, 10))
-        .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
-      const latestSnap = snapDates.length ? snapDates.reduce((a, b) => (a > b ? a : b)) : null;
-      const latestFin = latestSnap
-        ? (finRows as any[]).filter((r) => String(r.snapshot_month ?? "").slice(0, 10) === latestSnap)
-        : [];
-
-      type FinOl = {
-        ol: string;
-        expiration_date: string;
-        months: number | null;
-        lessee: string | null;
-      };
-      const finByOl = new Map<string, FinOl>();
-      for (const r of latestFin) {
-        const ol = String(r.rider_id ?? "").trim();
-        if (!ol) continue;
-        const key = ol.toUpperCase();
-        const leaseExp = String(r.lease_exp_date ?? "").trim().slice(0, 10);
-        const monthsRaw = r.months_until_lease_exp;
-        const months = monthsRaw == null || monthsRaw === "" ? null : Math.round(Number(monthsRaw));
-        const date =
-          /^\d{4}-\d{2}-\d{2}$/.test(leaseExp)
-            ? leaseExp
-            : months != null && Number.isFinite(months) && latestSnap
-              ? estimatedExpiryDateFromAssetMonths(latestSnap, months)
-              : null;
-        if (!date) continue;
-        const existing = finByOl.get(key);
-        if (!existing || date < existing.expiration_date) {
-          finByOl.set(key, {
-            ol,
-            expiration_date: date,
-            months: Number.isFinite(months as number) ? (months as number) : null,
-            lessee: r.lessee ? String(r.lessee) : null,
-          });
-        } else if (existing && !existing.lessee && r.lessee) {
-          existing.lessee = String(r.lessee);
-        }
-      }
-
-      const financialTimeline: TimelineRow[] = Array.from(finByOl.values())
+      const financialTimeline: TimelineRow[] = Array.from(assetByOl.values())
         .map((f) => {
           const live = olMap.get(f.ol.toUpperCase());
           const sqlCount = fleetSql?.ol_counts?.[f.ol.toUpperCase()];
@@ -641,7 +632,7 @@ export async function registerRoutes(
             lease_number: f.lessee ?? live?.lessee_name ?? sqlLessee ?? null,
             car_count: live?.car_count ?? (Number(sqlCount) || 0),
             source: "financial" as const,
-            months_until_lease_exp: f.months,
+            months_until_lease_exp: f.months_until,
           };
         })
         .filter((r) => r.car_count > 0)
@@ -661,9 +652,36 @@ export async function registerRoutes(
         }))
         .filter((r) => r.car_count > 0);
 
-      const expirationTimeline = financialTimeline;
-      const expiringRiders = financialTimeline.filter((r) => inExpiryWindow(r.expiration_date, twelveMo));
-      const expiring6Groups = financialTimeline.filter((r) => inExpiryWindow(r.expiration_date, sixMo));
+      const fallbackTimeline: TimelineRow[] = [];
+      const olKeysForFallback = sqlKpis
+        ? Object.keys(fleetSql.ol_counts || {})
+        : Array.from(olMap.keys());
+      for (const key of olKeysForFallback) {
+        if (assetByOl.has(key.toUpperCase())) continue;
+        const governed = resolveGovernedExpiration(key, assetByOl, carFallbackByOl);
+        if (!governed) continue;
+        const live = olMap.get(key.toUpperCase());
+        const sqlCount = fleetSql?.ol_counts?.[key.toUpperCase()];
+        const sqlLessee = fleetSql?.ol_lessees?.[key.toUpperCase()];
+        const carCount = live?.car_count ?? (Number(sqlCount) || 0);
+        if (carCount <= 0) continue;
+        fallbackTimeline.push({
+          rider_id: governed.ol,
+          rider_name: live?.ol ?? governed.ol,
+          schedule_number: live?.ol ?? governed.ol,
+          expiration_date: governed.expiration_date,
+          lease_number: live?.lessee_name ?? sqlLessee ?? null,
+          car_count: carCount,
+          source: "vcf",
+          months_until_lease_exp: null,
+        });
+      }
+
+      const expirationTimeline = [...financialTimeline, ...fallbackTimeline].sort(
+        (a, b) => a.expiration_date.localeCompare(b.expiration_date) || a.rider_name.localeCompare(b.rider_name)
+      );
+      const expiringRiders = expirationTimeline.filter((r) => inExpiryWindow(r.expiration_date, twelveMo));
+      const expiring6Groups = expirationTimeline.filter((r) => inExpiryWindow(r.expiration_date, sixMo));
       const expiring12mo = expiringRiders.length;
       const expiring6mo = expiring6Groups.length;
 
@@ -773,7 +791,7 @@ export async function registerRoutes(
               expiring_12mo: expiring12mo,
               expiring_6mo: expiring6mo,
               off_rent_count: Number(sqlKpis.off_rent) || 0,
-              undefined_end_car_count: Number(sqlKpis.undefined_end) || 0,
+              undefined_end_car_count: undefinedEndCarCount,
               financial_snapshot_month: latestSnap,
               riders_count: Number(sqlKpis.riders_count) || 0,
               utilization_pct: sqlUtil(fleetKpis.total_fleet, fleetKpis.active_assignments),
@@ -792,7 +810,7 @@ export async function registerRoutes(
               owned_util_pct: sqlUtil(fleetKpis.owned_total, fleetKpis.owned_assigned),
               coal_total: fleetKpis.coal_total,
               lessee_count: Array.isArray(fleetSql?.cars_by_fleet) ? fleetSql.cars_by_fleet.length : 0,
-              lease_authority: "railcars",
+              lease_authority: "asset_report",
               railcars_scanned: fleetKpis.railcars_scanned,
             }
           : {
@@ -821,7 +839,7 @@ export async function registerRoutes(
           owned_util_pct: ownedUtil,
           coal_total: coalCars.length,
           lessee_count: carsByFleet.length,
-          lease_authority: "railcars",
+          lease_authority: "asset_report",
           railcars_scanned: Number((scannedCountRes as any)?.count) || allRailcarsRaw.length,
         },
         detail: {
@@ -1018,12 +1036,12 @@ export async function registerRoutes(
     }
   });
 
-  /** One-shot / ops: refresh riders.expiration_date from railcars (derived cache). */
+  /** Refresh riders.expiration_date + car lease dates: Asset Report first, V_Valid fallback. */
   app.post("/api/riders/sync-expirations", async (req, res) => {
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const result = await syncRiderExpirationsFromCars(supabase);
+      const result = await governLeaseDates(supabase);
       res.json(result);
     } catch (err) {
       errHandler(res, err);
@@ -2961,12 +2979,13 @@ export async function registerRoutes(
         }
       }
 
-      // Keep riders.expiration_date as a derived cache of car-level ends (not Dashboard SoT)
-      let riderExpirationSync: Awaited<ReturnType<typeof syncRiderExpirationsFromCars>> | null = null;
+      // After VCF writes raw car lease dates, re-apply Asset Report precedence
+      // (and V_Valid fallback only for OLs the report omits).
+      let riderExpirationSync: Awaited<ReturnType<typeof governLeaseDates>> | null = null;
       try {
-        riderExpirationSync = await syncRiderExpirationsFromCars(supabase);
+        riderExpirationSync = await governLeaseDates(supabase);
       } catch (syncErr) {
-        console.warn("[vcf/commit] rider expiration sync failed", syncErr);
+        console.warn("[vcf/commit] lease date governance failed", syncErr);
       }
 
       res.json({
@@ -3067,7 +3086,8 @@ export async function registerRoutes(
 
   // Do-not-touch: accounts.account_manager, riders.account_manager (deprecated),
   // car_number, entity, active, lessee, rider assignment. Writes
-  // rider_financial_summary + RAILCAR_FINANCIAL_REFRESH_FIELDS on railcars.
+  // rider_financial_summary + RAILCAR_FINANCIAL_REFRESH_FIELDS on railcars,
+  // then governLeaseDates for OL expiration onto riders and cars.
   // fillBlankRiderMonthlyRent may fill blank riders.monthly_rent_per_car.
   // See docs/IMPORT_WRITE_BOUNDARIES.md.
   app.post("/api/import/financial/commit", async (req: Request, res: Response) => {
@@ -3197,7 +3217,7 @@ export async function registerRoutes(
         carsUpdated += slice.length;
       }
 
-      const leaseExpiryEstimates = await refreshEstimatedLeaseExpiry(supabaseAdmin, month);
+      const leaseGovernance = await governLeaseDates(supabaseAdmin);
       const riderRentRollup = await fillBlankRiderMonthlyRent();
 
       console.log("[financial-refresh]", JSON.stringify({
@@ -3210,7 +3230,7 @@ export async function registerRoutes(
         coalSkipped,
         unmatchedRiders: review.unmatchedRiders.length,
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
-        leaseExpiryEstimates,
+        leaseGovernance,
         riderRentRollup,
       }));
 
@@ -3233,7 +3253,7 @@ export async function registerRoutes(
         fileNoCarMatchCount: review.fileNoCarMatches.length,
         activeCarsInRlms: review.activeCarsInRlms,
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
-        leaseExpiryEstimates,
+        leaseGovernance,
         riderRentRollup,
       });
     } catch (err) { errHandler(res, err); }

@@ -24,6 +24,9 @@ export type Rider = {
   schedule_number: string | null;
   effective_date: string | null;
   expiration_date: string | null;
+  /** asset_report | car_records — how expiration_date was last governed. */
+  expiration_source?: string | null;
+  expiration_snapshot_month?: string | null;
   permissible_commodity: string | null;
   monthly_rate_pct: number | null;
   lessors_cost: number | null;
@@ -90,6 +93,8 @@ export type Railcar = {
   assignment_label: string | null;
   lease_start_date: string | null;
   lease_end_date: string | null;
+  /** asset_report | car_records — last governed source for lease dates on this row. */
+  lease_date_source?: string | null;
   lease_expiry: string | null;
   estimated_lease_expiry?: string | null;
   lease_expiry_snapshot_month?: string | null;

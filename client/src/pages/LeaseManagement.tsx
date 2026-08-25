@@ -56,6 +56,7 @@ import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import { formatCalendarDate } from "@shared/lease-authority";
+import { leaseExpirationSourceLabel } from "@shared/lease-governance";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ActivityTimeline from "@/components/ActivityTimeline";
@@ -131,6 +132,16 @@ function visibleRidersForLease(
 
 function fmtDate(d: string | null | undefined) {
   return formatCalendarDate(d);
+}
+
+function ExpirationSourceTag({ rider }: { rider: { expiration_source?: string | null; expiration_snapshot_month?: string | null } }) {
+  const label = leaseExpirationSourceLabel(rider.expiration_source, rider.expiration_snapshot_month);
+  if (!label) return null;
+  return (
+    <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/80" title={label}>
+      {label}
+    </span>
+  );
 }
 function fmtPct(n: number | null) {
   return n == null ? "—" : `${Number(n).toFixed(3)}%`;
@@ -648,7 +659,10 @@ export default function LeaseManagement() {
                                 <div className="text-xs text-muted-foreground mt-0.5 font-mono-num">
                                   <span title="Effective Date">Effective: {fmtDate(rider.effective_date)}</span>
                                   {" · "}
-                                  <span title="Expiration Date">Expires: {fmtDate(rider.expiration_date)}</span>
+                                  <span title="Expiration Date">
+                                    Expires: {fmtDate(rider.expiration_date)}
+                                    <ExpirationSourceTag rider={rider as any} />
+                                  </span>
                                   {" · "}
                                   <span title="Monthly Rate %">Rate: {fmtPct(rider.monthly_rate_pct)}</span>
                   {lease.account_manager ? (
@@ -1495,6 +1509,7 @@ function RiderForm({
                   setForm({ ...form, expiration_date: e.target.value })
                 }
               />
+              {rider ? <p className="text-[11px] text-muted-foreground mt-1"><ExpirationSourceTag rider={rider as any} /></p> : null}
             </div>
           </div>
           <div>

@@ -907,7 +907,7 @@ export default function BulkImportPage() {
           <header className="mb-4">
             <h2 className="text-base font-semibold">Financial Data Refresh (Asset Report)</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Writes only <span className="font-mono">rider_financial_summary</span> and per-car NBV, OEC, Monthly Rent P/C, Monthly Depr P/C, plus which month produced those numbers. Also refreshes active-car <span className="font-mono">estimated_lease_expiry</span> from that month’s rider terms. Never changes car number, entity, active, lessee, assignments, or real <span className="font-mono">lease_end_date</span>.
+              Writes <span className="font-mono">rider_financial_summary</span> plus per-car NBV, OEC, Monthly Rent P/C, Monthly Depr P/C. Then governs lease/OL dates from the Asset Report onto riders and every car on that OL (V_Valid fills only OLs the report omits). Never changes car number, entity, active, lessee, or assignments.
             </p>
           </header>
           <div

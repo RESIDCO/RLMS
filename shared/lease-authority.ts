@@ -1,11 +1,12 @@
 /**
- * Lease-status authority: railcars fields written by monthly VCF import.
+ * Date helpers for lease/OL fields.
  *
- * riders.expiration_date is NOT authoritative — historically seeded and often
- * years stale. Prefer railcars.lease_end_date / lease_expiry / lessee_name /
- * rider_external_id for any "is this lease current / who is the lessee / which OL"
- * question. riders.expiration_date may be refreshed as a derived cache for
- * Lease Management UI, but Dashboard and lease-status KPIs must read cars.
+ * Lease/OL dates (including copies on the car row: lease_start_date,
+ * lease_end_date, lease_expiry, estimated_lease_expiry) are governed by the
+ * Asset Report, with V_Valid as fallback — see shared/lease-governance.ts.
+ * Genuinely car-intrinsic fields (build date, type, tare, AAR, etc.) stay
+ * V_Valid. Lessee / OL identity still come from railcars.lessee_name and
+ * rider_external_id.
  */
 
 import { isIndefiniteEndDate } from "./vcf-import";
@@ -119,9 +120,8 @@ export function formatAssetReportMonth(iso: string | null | undefined): string {
 }
 
 /**
- * Latest known end among cars that have one. For the derived riders.expiration_date
- * cache only — never use this as a stand-in date for cars whose lease_end_date is null.
- * Dashboard timeline / expiring tiles must group by (OL, exact end date) instead.
+ * Latest known end among cars that have one. Used for display rollups that want
+ * the farthest horizon. Governed OL termination uses soonestOlEndDate instead.
  */
 export function aggregateOlEndDate(ends: Array<string | null | undefined>): string | null {
   let best: string | null = null;
@@ -129,6 +129,17 @@ export function aggregateOlEndDate(ends: Array<string | null | undefined>): stri
     const s = genuineEndDate(e ?? "");
     if (!s) continue;
     if (!best || s > best) best = s;
+  }
+  return best;
+}
+
+/** Most conservative (soonest) known end — Asset Report / OL governance. */
+export function soonestOlEndDate(ends: Array<string | null | undefined>): string | null {
+  let best: string | null = null;
+  for (const e of ends) {
+    const s = genuineEndDate(e ?? "");
+    if (!s) continue;
+    if (!best || s < best) best = s;
   }
   return best;
 }

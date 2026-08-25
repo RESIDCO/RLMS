@@ -20,7 +20,18 @@ export const ACCOUNT_IMPORT_NEVER_WRITE = ["account_manager"] as const;
 export const RIDER_FINANCIAL_FILL_BLANK_FIELDS = ["monthly_rent_per_car"] as const;
 
 /**
+ * Rider columns written by lease-date governance (Asset Report first, V_Valid fallback).
+ * Does not write effective_date — that field is already populated on nearly all riders.
+ */
+export const RIDER_LEASE_GOVERNANCE_FIELDS = [
+  "expiration_date",
+  "expiration_source",
+  "expiration_snapshot_month",
+] as const;
+
+/**
  * Only these rider columns may be patched by VCF post-commit expiration sync.
+ * @deprecated Prefer RIDER_LEASE_GOVERNANCE_FIELDS via governLeaseDates.
  */
 export const RIDER_VCF_EXPIRATION_SYNC_FIELDS = ["expiration_date", "effective_date"] as const;
 
@@ -71,6 +82,21 @@ export function riderVcfExpirationSyncPayload(
   for (const key of Object.keys(patch) as Array<keyof typeof patch>) {
     if (!(RIDER_VCF_EXPIRATION_SYNC_FIELDS as readonly string[]).includes(key)) {
       throw new Error(`VCF expiration sync does not allow riders.${String(key)}`);
+    }
+    const v = patch[key];
+    if (v !== undefined) out[key] = v;
+  }
+  assertRiderImporterPatch(out);
+  return out;
+}
+
+export function riderLeaseGovernancePayload(
+  patch: Partial<Record<(typeof RIDER_LEASE_GOVERNANCE_FIELDS)[number], string | null>>,
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const key of Object.keys(patch) as Array<keyof typeof patch>) {
+    if (!(RIDER_LEASE_GOVERNANCE_FIELDS as readonly string[]).includes(key)) {
+      throw new Error(`Lease governance does not allow riders.${String(key)}`);
     }
     const v = patch[key];
     if (v !== undefined) out[key] = v;

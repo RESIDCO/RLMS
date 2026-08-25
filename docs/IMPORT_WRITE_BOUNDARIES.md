@@ -25,11 +25,13 @@ Do-not-touch for all three: **`accounts.account_manager`** and **`riders.account
 
 Does **not** insert `riders`, `master_leases`, or `accounts`.
 
-After commit, `syncRiderExpirationsFromCars` may patch `riders.expiration_date` and (when known) `riders.effective_date` via `riderVcfExpirationSyncPayload`.
+After commit, `governLeaseDates` re-applies Asset Report lease/OL dates onto `riders.expiration_date` and the car-level copies (`lease_end_date` / `lease_expiry` / `estimated_lease_expiry` / `lease_start_date` from `riders.effective_date`). V_Valid car dates are used only for OLs the Asset Report omits. It does not write `effective_date` on riders.
 
 ## Financial Data Refresh / Asset Report (`POST /api/import/financial/commit`)
 
 Fill-if-blank on riders uses `riderFinancialFillBlankPayload("monthly_rent_per_car", …)`.
+
+After writing `rider_financial_summary`, the same `governLeaseDates` pass upserts `riders.expiration_date` from `snapshot_month + months_until_lease_exp` (soonest date if an OL is split across rows) and pushes that date down to every car on the OL.
 
 ## Master Car List (`POST /api/import/commit`)
 

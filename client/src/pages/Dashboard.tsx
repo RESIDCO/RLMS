@@ -206,7 +206,7 @@ function DrillDownDrawer({
     total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold). Equals Idle + Active Assignments (+ Unassigned)." },
     active_assignments: { title: "Active Assignments",   description: "Leased cars in the operating fleet (rental status Leased or Abatement)" },
     unassigned_cars:    { title: "Unassigned Cars",      description: "Operating cars with no railcar_assignments row — distinct from Idle (rental status)" },
-    expiring_12mo:      { title: "Expiring <12 months", description: "Rider deals whose Asset Report Lease Exp falls within the next 12 months (not VCF car-level lease_end_date)." },
+    expiring_12mo:      { title: "Expiring <12 months", description: "OLs whose Asset Report–governed expiration (or V_Valid fallback if the report is silent) falls within the next 12 months." },
     riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
     utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
   };

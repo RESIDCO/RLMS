@@ -60,6 +60,7 @@ import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
 import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate, todayIsoDateOnly } from "@shared/lease-authority";
+import { leaseExpirationSourceLabel } from "@shared/lease-governance";
 import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ActivityTimeline from "@/components/ActivityTimeline";
@@ -227,7 +228,17 @@ function EstimatedExpiryMark({
 
 function ExpiresDisplay({ r }: { r: any }) {
   const real = carLeaseEndDate(r);
-  if (real) return <span>{fmtDate(real)}</span>;
+  const source = leaseExpirationSourceLabel(r.lease_date_source, r.lease_expiry_snapshot_month);
+  if (real) {
+    return (
+      <span>
+        {fmtDate(real)}
+        {source ? (
+          <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/80">{source}</span>
+        ) : null}
+      </span>
+    );
+  }
   const estimate = String(r.estimated_lease_expiry ?? "").trim().slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(estimate)) {
     return (
@@ -2120,7 +2131,19 @@ export function CarDetail({
         <DetailRow label="Rider ID (external)" value={(r as any).rider_external_id ?? "—"} />
         <DetailRow label="Acct Mgr" value={(r as any).account_manager_initials || ""} />
         <DetailRow label="Lease Start" value={fmtDate((r as any).lease_start_date)} />
-        <DetailRow label="Lease End" value={fmtDate((r as any).lease_end_date)} />
+        <DetailRow
+          label="Lease End"
+          value={
+            <>
+              {fmtDate((r as any).lease_end_date)}
+              {leaseExpirationSourceLabel((r as any).lease_date_source, (r as any).lease_expiry_snapshot_month) ? (
+                <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                  {leaseExpirationSourceLabel((r as any).lease_date_source, (r as any).lease_expiry_snapshot_month)}
+                </span>
+              ) : null}
+            </>
+          }
+        />
         <DetailRow label="Lease Expiry" value={fmtDate((r as any).lease_expiry)} />
         <DetailRow
           label="Estimated expiry"

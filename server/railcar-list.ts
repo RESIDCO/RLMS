@@ -10,7 +10,7 @@ import { resolveRailcarsByAnyIdentity } from "./activity-log";
 export const RAILCAR_LIST_SELECT = `
 id, car_number, reporting_marks, car_type, status, fleet_status, fleet_status_source, entity, active, sold_to,
 rider_external_id, assignment_label, managed_category, lessee_name,
-lease_start_date, lease_end_date, lease_expiry, estimated_lease_expiry, lease_expiry_snapshot_month, transit_status, transit_label,
+lease_start_date, lease_end_date, lease_expiry, estimated_lease_expiry, lease_expiry_snapshot_month, lease_date_source, transit_status, transit_label,
 nbv, oac, oec, monthly_rent_per_car, monthly_depr_per_car, build_year, build_date,
 capacity_cf, lining_material, lining, coating, mechanical_designation,
 general_description, commodity, notes, data_source, lease_type, managed,
@@ -345,6 +345,7 @@ function selectWithoutOptionalDateCols(select: string) {
   return select
     .replace(/\s*estimated_lease_expiry,?\s*/g, " ")
     .replace(/\s*lease_expiry_snapshot_month,?\s*/g, " ")
+    .replace(/\s*lease_date_source,?\s*/g, " ")
     .replace(/\s*build_date,?\s*/g, " ")
     .replace(/\s*acquisition_batch_id,?\s*/g, " ")
     .replace(/\s*acquisition_date,?\s*/g, " ")
@@ -356,7 +357,7 @@ function selectWithoutOptionalDateCols(select: string) {
 
 function isMissingOptionalDateColumn(err: unknown) {
   const msg = String((err as any)?.message ?? err ?? "");
-  return /estimated_lease_expiry|lease_expiry_snapshot_month|build_date|acquisition_batch_id|acquisition_date|purchase_price|needs_completion|ops_flag/i.test(msg);
+  return /estimated_lease_expiry|lease_expiry_snapshot_month|lease_date_source|build_date|acquisition_batch_id|acquisition_date|purchase_price|needs_completion|ops_flag/i.test(msg);
 }
 
 export async function queryRailcars(p: RailcarListParams) {

@@ -4645,7 +4645,10 @@ export async function registerRoutes(
     try {
       if (!(await requireUser(req, res))) return;
       const am = typeof req.query.account_manager === "string" ? req.query.account_manager : "";
-      res.json(await listAccountManagementOverview(am.trim() || null));
+      const includeInactive =
+        req.query.include_inactive === "1" ||
+        req.query.include_inactive === "true";
+      res.json(await listAccountManagementOverview(am.trim() || null, { includeInactive }));
     } catch (err) { errHandler(res, err); }
   });
 

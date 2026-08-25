@@ -206,10 +206,21 @@ function expirationYear(iso: string | null | undefined): number | null {
 export type AccountOverviewRow = AccountListRow & {
   expire_years: number[];
   status_tags: StatusTag[];
+  ol_count: number;
+  active_car_count: number;
+  is_inactive: boolean;
+};
+
+export type AccountManagerPill = {
+  name: string;
+  account_count: number;
 };
 
 export type AccountOverview = {
   managers: string[];
+  manager_pills: AccountManagerPill[];
+  unassigned_count: number;
+  all_count: number;
   expire_years: [number, number, number];
   kpis: {
     expiring: { year: number; count: number }[];
@@ -217,16 +228,26 @@ export type AccountOverview = {
   };
   /** Dashboard/History source of truth for OL expiration — not railcars.estimated_lease_expiry. */
   expiration_source: "riders.expiration_date";
+  include_inactive: boolean;
   accounts: AccountOverviewRow[];
 };
 
-export async function listAccountManagementOverview(accountManager?: string | null): Promise<AccountOverview> {
+/** Same rule as GET /api/leases: inactive iff zero active assigned cars. */
+function riderIsInactive(riderId: number, activeByRider: Map<number, number>): boolean {
+  return (activeByRider.get(riderId) ?? 0) === 0;
+}
+
+export async function listAccountManagementOverview(
+  accountManager?: string | null,
+  opts?: { includeInactive?: boolean },
+): Promise<AccountOverview> {
+  const includeInactive = opts?.includeInactive === true;
   const nowYear = new Date().getFullYear();
   const expireYears: [number, number, number] = [nowYear, nowYear + 1, nowYear + 2];
   const wantAm = String(accountManager ?? "").trim();
   const wantUnassigned = wantAm.toLowerCase() === "unassigned";
 
-  const [accounts, leases, riders] = await Promise.all([
+  const [accounts, leases, riders, activeByRider] = await Promise.all([
     listAccounts(),
     fetchAllRows<{ id: number; account_id: number | null }>((from, to) =>
       supabaseAdmin
@@ -247,73 +268,124 @@ export async function listAccountManagementOverview(accountManager?: string | nu
         .order("id", { ascending: true })
         .range(from, to)
     ),
+    countActiveCarsByRiderId(),
   ]);
 
-  const managers = [
-    ...new Set(
-      accounts
-        .map((a) => String(a.account_manager ?? "").trim())
-        .filter(Boolean),
-    ),
-  ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
   const accountIdByLease = new Map<number, number>();
   for (const l of leases) {
     if (l.account_id == null) continue;
     accountIdByLease.set(l.id, l.account_id);
   }
 
-  const scopedAccountIds = new Set(
-    accounts
-      .filter((a) => {
-        const am = String(a.account_manager ?? "").trim();
-        if (!wantAm) return true;
-        if (wantUnassigned) return !am;
-        return am === wantAm;
-      })
-      .map((a) => a.id),
-  );
+  type AccAgg = {
+    liveOls: number;
+    deadOls: number;
+    activeCars: number;
+    expireYears: Set<number>;
+    tags: Set<StatusTag>;
+  };
+  const aggByAccount = new Map<number, AccAgg>();
+  function agg(id: number): AccAgg {
+    let a = aggByAccount.get(id);
+    if (!a) {
+      a = { liveOls: 0, deadOls: 0, activeCars: 0, expireYears: new Set(), tags: new Set() };
+      aggByAccount.set(id, a);
+    }
+    return a;
+  }
 
-  const expireYearsByAccount = new Map<number, Set<number>>();
-  const tagsByAccount = new Map<number, Set<StatusTag>>();
   const expiringCounts = new Map<number, number>(expireYears.map((y) => [y, 0]));
   const statusCounts = { good: 0, watch: 0, risk: 0 };
+
+  const amMatches = (accountId: number) => {
+    const acct = accountById.get(accountId);
+    if (!acct) return false;
+    const am = String(acct.account_manager ?? "").trim();
+    if (!wantAm) return true;
+    if (wantUnassigned) return !am;
+    return am === wantAm;
+  };
 
   for (const r of riders) {
     if (r.master_lease_id == null) continue;
     const accountId = accountIdByLease.get(r.master_lease_id);
-    if (accountId == null || !scopedAccountIds.has(accountId)) continue;
+    if (accountId == null) continue;
+    const inactive = riderIsInactive(r.id, activeByRider);
+    const a = agg(accountId);
+    if (inactive) a.deadOls += 1;
+    else {
+      a.liveOls += 1;
+      a.activeCars += activeByRider.get(r.id) ?? 0;
+    }
+    const includeOl = includeInactive || !inactive;
+    if (!includeOl) continue;
+    if (!amMatches(accountId)) continue;
     const year = expirationYear(r.expiration_date);
     if (year != null) {
-      const set = expireYearsByAccount.get(accountId) ?? new Set<number>();
-      set.add(year);
-      expireYearsByAccount.set(accountId, set);
+      a.expireYears.add(year);
       if (expiringCounts.has(year)) expiringCounts.set(year, (expiringCounts.get(year) ?? 0) + 1);
     }
     if (isStatusTag(r.status_tag)) {
-      const set = tagsByAccount.get(accountId) ?? new Set<StatusTag>();
-      set.add(r.status_tag);
-      tagsByAccount.set(accountId, set);
+      a.tags.add(r.status_tag);
       statusCounts[r.status_tag] += 1;
     }
   }
 
-  const scopedAccounts: AccountOverviewRow[] = accounts
-    .filter((a) => scopedAccountIds.has(a.id))
-    .map((a) => ({
-      ...a,
-      expire_years: [...(expireYearsByAccount.get(a.id) ?? new Set())].sort(),
-      status_tags: [...(tagsByAccount.get(a.id) ?? new Set())],
-    }));
+  const accountIsVisible = (acct: AccountListRow) => {
+    const a = aggByAccount.get(acct.id);
+    const live = a?.liveOls ?? 0;
+    if (!includeInactive && live === 0) return false;
+    return true;
+  };
+
+  const amFilter = (acct: AccountListRow) => {
+    const am = String(acct.account_manager ?? "").trim();
+    if (!wantAm) return true;
+    if (wantUnassigned) return !am;
+    return am === wantAm;
+  };
+
+  const allVisible = accounts.filter(accountIsVisible);
+  const visibleAccounts = allVisible.filter(amFilter);
+
+  const countByManager = new Map<string, number>();
+  let unassignedCount = 0;
+  for (const acct of allVisible) {
+    const am = String(acct.account_manager ?? "").trim();
+    if (!am) unassignedCount += 1;
+    else countByManager.set(am, (countByManager.get(am) ?? 0) + 1);
+  }
+  const managerPills: AccountManagerPill[] = Array.from(countByManager.entries())
+    .map(([name, account_count]) => ({ name, account_count }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+
+  const scopedAccounts: AccountOverviewRow[] = visibleAccounts.map((acct) => {
+    const a = aggByAccount.get(acct.id);
+    const live = a?.liveOls ?? 0;
+    const dead = a?.deadOls ?? 0;
+    return {
+      ...acct,
+      expire_years: a ? Array.from(a.expireYears).sort() : [],
+      status_tags: a ? Array.from(a.tags) : [],
+      ol_count: includeInactive ? live + dead : live,
+      active_car_count: a?.activeCars ?? 0,
+      is_inactive: live === 0 && dead > 0,
+    };
+  });
 
   return {
-    managers,
+    managers: managerPills.map((m) => m.name),
+    manager_pills: managerPills,
+    unassigned_count: unassignedCount,
+    all_count: allVisible.length,
     expire_years: expireYears,
     kpis: {
       expiring: expireYears.map((year) => ({ year, count: expiringCounts.get(year) ?? 0 })),
       status: statusCounts,
     },
     expiration_source: "riders.expiration_date",
+    include_inactive: includeInactive,
     accounts: scopedAccounts,
   };
 }
@@ -327,6 +399,7 @@ export type AccountOlRow = {
   expiration_date: string | null;
   status_tag: StatusTag | null;
   active_car_count: number;
+  is_inactive: boolean;
 };
 
 export async function getAccount(id: number) {
@@ -366,16 +439,20 @@ export async function getAccount(id: number) {
   }
 
   const activeByRider = await countActiveCarsByRiderId();
-  const ols: AccountOlRow[] = riderRows.map((r) => ({
-    id: r.id,
-    rider_name: r.rider_name,
-    schedule_number: r.schedule_number,
-    master_lease_id: r.master_lease_id,
-    lease_number: leaseNumberById.get(r.master_lease_id) ?? null,
-    expiration_date: r.expiration_date,
-    status_tag: isStatusTag(r.status_tag) ? r.status_tag : null,
-    active_car_count: activeByRider.get(r.id) ?? 0,
-  }));
+  const ols: AccountOlRow[] = riderRows.map((r) => {
+    const active_car_count = activeByRider.get(r.id) ?? 0;
+    return {
+      id: r.id,
+      rider_name: r.rider_name,
+      schedule_number: r.schedule_number,
+      master_lease_id: r.master_lease_id,
+      lease_number: leaseNumberById.get(r.master_lease_id) ?? null,
+      expiration_date: r.expiration_date,
+      status_tag: isStatusTag(r.status_tag) ? r.status_tag : null,
+      active_car_count,
+      is_inactive: active_car_count === 0,
+    };
+  });
 
   const { data: programs, error: pErr } = await supabaseAdmin
     .from("programs")

@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useRoute } from "wouter";
+import { Link, useLocation, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
@@ -14,9 +15,20 @@ import { useToast } from "@/hooks/use-toast";
 import { useCanEdit, usePermissions } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 import { formatCalendarDate } from "@shared/lease-authority";
-import { Building2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
-import { accountPath, programPath } from "@/lib/browse-nav";
+import { ArrowLeft, Building2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
+import { programPath } from "@/lib/browse-nav";
 import { AmCommentThread } from "@/components/AmCommentThread";
+import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+import { navigateHash } from "@/lib/hash-location";
+import {
+  UNASSIGNED_AM,
+  accountDetailPath,
+  accountListPath,
+  readAccountMgmtListState,
+  replaceAccountMgmtListState,
+  type AccountKpiFilter,
+  type AccountMgmtListState,
+} from "@/lib/account-mgmt-nav";
 
 type StatusTag = "good" | "watch" | "risk";
 
@@ -28,10 +40,16 @@ type OverviewAccount = {
   program_count: number;
   expire_years: number[];
   status_tags: StatusTag[];
+  ol_count: number;
+  active_car_count: number;
+  is_inactive: boolean;
 };
 
 type Overview = {
   managers: string[];
+  manager_pills: { name: string; account_count: number }[];
+  unassigned_count: number;
+  all_count: number;
   expire_years: [number, number, number];
   kpis: {
     expiring: { year: number; count: number }[];
@@ -49,6 +67,7 @@ type AccountOl = {
   expiration_date: string | null;
   status_tag: StatusTag | null;
   active_car_count: number;
+  is_inactive: boolean;
 };
 
 type AccountDetail = {
@@ -69,11 +88,6 @@ type OlCar = {
   expiration_date: string | null;
 };
 
-type KpiFilter =
-  | { kind: "year"; year: number }
-  | { kind: "tag"; tag: StatusTag }
-  | null;
-
 const TAG_LABEL: Record<StatusTag, string> = { good: "Good", watch: "Watch", risk: "Risk" };
 const TAG_CLASS: Record<StatusTag, string> = {
   good: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
@@ -87,20 +101,29 @@ export default function AccountsPage() {
   return <AccountListView />;
 }
 
-const UNASSIGNED_AM = "unassigned";
-
 function AccountListView() {
   const { toast } = useToast();
   const canEdit = useCanEdit();
-  const [search, setSearch] = useState("");
-  const [manager, setManager] = useState<string | null>(null);
-  const [kpi, setKpi] = useState<KpiFilter>(null);
+  const initial = readAccountMgmtListState();
+  const [search, setSearch] = useState(initial.search);
+  const [manager, setManager] = useState<string | null>(initial.manager);
+  const [kpi, setKpi] = useState<AccountKpiFilter>(initial.kpi);
+  const [showInactive, setShowInactive] = useState(initial.showInactive);
   const [createOpen, setCreateOpen] = useState(false);
 
+  const listState: AccountMgmtListState = { manager, kpi, showInactive, search };
+
+  useEffect(() => {
+    replaceAccountMgmtListState(listState);
+  }, [manager, kpi, showInactive, search]);
+
   const { data, isLoading } = useQuery<Overview>({
-    queryKey: ["/api/account-management/overview", manager],
+    queryKey: ["/api/account-management/overview", manager, showInactive],
     queryFn: () => {
-      const q = manager ? `?account_manager=${encodeURIComponent(manager)}` : "";
+      const p = new URLSearchParams();
+      if (manager) p.set("account_manager", manager);
+      if (showInactive) p.set("include_inactive", "1");
+      const q = p.toString() ? `?${p.toString()}` : "";
       return apiRequest("GET", `/api/account-management/overview${q}`).then((r) => r.json());
     },
   });
@@ -116,7 +139,7 @@ function AccountListView() {
     });
   }, [data?.accounts, search, kpi]);
 
-  function toggleKpi(next: KpiFilter) {
+  function toggleKpi(next: AccountKpiFilter) {
     if (
       kpi &&
       next &&
@@ -154,10 +177,12 @@ function AccountListView() {
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-4">
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">Account Manager</span>
-          <FilterPill active={!manager} onClick={() => setManager(null)}>ALL</FilterPill>
-          {(data?.managers ?? []).map((m) => (
-            <FilterPill key={m} active={manager === m} onClick={() => setManager(m)}>
-              {m}
+          <FilterPill active={!manager} onClick={() => setManager(null)}>
+            ALL{data ? ` · ${data.all_count}` : ""}
+          </FilterPill>
+          {(data?.manager_pills ?? []).map((m) => (
+            <FilterPill key={m.name} active={manager === m.name} onClick={() => setManager(m.name)}>
+              {m.name} · {m.account_count}
             </FilterPill>
           ))}
           <button
@@ -172,7 +197,7 @@ function AccountListView() {
             title="Accounts with no account manager set"
             data-testid="filter-unassigned-am"
           >
-            Unassigned
+            Unassigned{data ? ` · ${data.unassigned_count}` : ""}
           </button>
         </div>
 
@@ -220,6 +245,16 @@ function AccountListView() {
             value={search}
             onChange={setSearch}
           />
+          <label
+            className="flex items-center gap-2 h-9 px-2 rounded-md border border-border bg-background text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap"
+            data-testid="toggle-show-inactive-ols"
+          >
+            <Checkbox
+              checked={showInactive}
+              onCheckedChange={(v) => setShowInactive(v === true)}
+            />
+            Show inactive OLs
+          </label>
           {kpiLabel && (
             <button
               type="button"
@@ -244,6 +279,8 @@ function AccountListView() {
                 <tr>
                   <th className="text-left font-medium px-4 py-2">Name</th>
                   <th className="text-left font-medium px-4 py-2">Account Manager</th>
+                  <th className="text-right font-medium px-4 py-2"># OLs</th>
+                  <th className="text-right font-medium px-4 py-2"># Active Cars</th>
                   <th className="text-left font-medium px-4 py-2 hidden sm:table-cell">Programs</th>
                 </tr>
               </thead>
@@ -251,17 +288,24 @@ function AccountListView() {
                 {filtered.map((a) => (
                   <tr key={a.id} className="border-t border-border hover:bg-muted/20">
                     <td className="px-4 py-2">
-                      <Link href={accountPath(a.id)} className="font-medium text-foreground hover:underline">
+                      <Link href={accountDetailPath(a.id, listState)} className="font-medium text-foreground hover:underline">
                         {a.name}
                       </Link>
+                      {a.is_inactive && (
+                        <span className="ml-2">
+                          <InactiveFleetBadge active={false} />
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-muted-foreground">{a.account_manager || ""}</td>
+                    <td className="px-4 py-2 text-right font-mono-num">{a.ol_count}</td>
+                    <td className="px-4 py-2 text-right font-mono-num">{a.active_car_count}</td>
                     <td className="px-4 py-2 text-muted-foreground hidden sm:table-cell">{a.program_count || ""}</td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
                       No accounts match.
                     </td>
                   </tr>
@@ -340,8 +384,11 @@ function KpiTile({
 function AccountDetailView({ id }: { id: number }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [, navigate] = useLocation();
   const canEdit = useCanEdit();
   const { canEditAccountMgmtTags, canEditAccountMgmtComments, canDeleteAccountMgmtComments } = usePermissions();
+  const listState = readAccountMgmtListState();
+  const [showInactive, setShowInactive] = useState(listState.showInactive);
   const { data, isLoading } = useQuery<AccountDetail>({
     queryKey: ["/api/accounts", id],
     queryFn: () => apiRequest("GET", `/api/accounts/${id}`).then((r) => r.json()),
@@ -353,6 +400,26 @@ function AccountDetailView({ id }: { id: number }) {
   const displayName = name ?? data?.name ?? "";
   const displayNotes = notes ?? data?.notes ?? "";
   const displayManager = accountManager ?? data?.account_manager ?? "";
+
+  const visibleOls = useMemo(() => {
+    const rows = data?.ols ?? [];
+    if (showInactive) return rows;
+    return rows.filter((ol) => !ol.is_inactive);
+  }, [data?.ols, showInactive]);
+
+  const visibleCounts = useMemo(() => {
+    const mlas = new Set(visibleOls.map((ol) => ol.master_lease_id));
+    return {
+      mlas: mlas.size,
+      ols: visibleOls.length,
+      active_cars: visibleOls.reduce((n, ol) => n + (ol.active_car_count ?? 0), 0),
+    };
+  }, [visibleOls]);
+
+  function setDetailInactive(next: boolean) {
+    setShowInactive(next);
+    navigateHash(accountDetailPath(id, { ...listState, showInactive: next }), { replace: true });
+  }
 
   const save = useMutation({
     mutationFn: () =>
@@ -382,9 +449,15 @@ function AccountDetailView({ id }: { id: number }) {
         title={data.name}
         subtitle="Account"
         actions={
-          <Link href="/accounts" className="text-sm text-muted-foreground hover:text-foreground">
-            All accounts
-          </Link>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            onClick={() => navigate(accountListPath({ ...listState, showInactive }))}
+            data-testid="button-back-accounts"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to accounts
+          </button>
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-5 space-y-6 max-w-5xl">
@@ -395,8 +468,18 @@ function AccountDetailView({ id }: { id: number }) {
             <span className="text-xs text-muted-foreground">No account manager</span>
           )}
           <span className="text-muted-foreground font-mono-num">
-            {data.counts.mlas} MLA · {data.counts.ols} OL · {data.counts.active_cars} active cars
+            {visibleCounts.mlas} MLA · {visibleCounts.ols} OL · {visibleCounts.active_cars} active cars
           </span>
+          <label
+            className="flex items-center gap-2 h-7 px-2 rounded-md border border-border bg-background text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap"
+            data-testid="toggle-show-inactive-ols-detail"
+          >
+            <Checkbox
+              checked={showInactive}
+              onCheckedChange={(v) => setDetailInactive(v === true)}
+            />
+            Show inactive OLs
+          </label>
         </div>
         <p className="text-xs text-muted-foreground max-w-3xl">
           Status tags and notes are owned by Account Management. Anyone with access to this page (including Viewers)
@@ -440,7 +523,7 @@ function AccountDetailView({ id }: { id: number }) {
               </tr>
             </thead>
             <tbody>
-              {(data.ols ?? []).map((ol) => (
+              {(visibleOls).map((ol) => (
                 <OlRows
                   key={ol.id}
                   accountId={id}
@@ -452,10 +535,10 @@ function AccountDetailView({ id }: { id: number }) {
                   canDeleteComment={canDeleteAccountMgmtComments}
                 />
               ))}
-              {(data.ols ?? []).length === 0 && (
+              {visibleOls.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                    No OLs linked to this account.
+                    {showInactive ? "No OLs linked to this account." : "No active OLs. Turn on “Show inactive OLs” to see historical deals."}
                   </td>
                 </tr>
               )}
@@ -531,6 +614,11 @@ function OlRows({
       <tr className="border-t border-border align-top">
         <td className="px-4 py-2 font-mono-num">
           {ol.schedule_number || ol.rider_name}
+          {ol.is_inactive ? (
+            <span className="ml-2">
+              <InactiveFleetBadge active={false} />
+            </span>
+          ) : null}
           {ol.expiration_date ? (
             <div className="text-[11px] text-muted-foreground">Exp {formatCalendarDate(ol.expiration_date)}</div>
           ) : null}

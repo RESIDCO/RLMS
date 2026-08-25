@@ -468,12 +468,14 @@ eq(
   };
   const first = buildCarFinancialUpdates([car, coal], [july, august]);
   const second = buildCarFinancialUpdates([car, coal], [july, august]);
-  eq(first.updates.length, 1, "buildCarFinancialUpdates: one Main car matched");
-  eq(first.updates[0].financial_snapshot_month, "2026-08-01", "latest snapshot_month wins over July");
-  eq(first.updates[0].nbv, 90, "NBV comes from August, not averaged with July");
-  eq(first.updates[0].monthly_rent_per_car, 11, "rent comes from August");
-  eq(first.coalSkipped, 1, "Coal cars never match");
-  eq(first.leftBlank, 1, "Coal counted as left blank");
+  eq(first.updates.length, 2, "buildCarFinancialUpdates: unambiguous OL applies to Main and Coal");
+  const byId = new Map(first.updates.map((u) => [u.id, u]));
+  eq(byId.get(1)?.financial_snapshot_month, "2026-08-01", "latest snapshot_month wins over July");
+  eq(byId.get(1)?.nbv, 90, "NBV comes from August, not averaged with July");
+  eq(byId.get(1)?.monthly_rent_per_car, 11, "rent comes from August");
+  eq(byId.get(2)?.nbv, 90, "Coal car on a single-entity OL gets the same per-asset figures");
+  eq(first.coalSkipped, 0, "Coal is not skipped when the OL is unambiguous");
+  eq(first.leftBlank, 0, "both cars matched");
   eq(
     carFinancialFingerprint(first.updates[0]),
     carFinancialFingerprint(second.updates[0]),
@@ -487,6 +489,35 @@ eq(
     carFinancialFingerprint({ nbv: 24008.06, oec: 25282.7, monthly_rent_per_car: 400, monthly_depr_per_car: 424.88 }),
     "fingerprint treats float noise as the same cents"
   );
+
+  const rpsCar: ActiveCarForJoin = { ...car, id: 3, entity: "Rail Partners Select", rider_external_id: "OL1236" };
+  const mainSplit: ActiveCarForJoin = { ...car, id: 4, entity: "Main", rider_external_id: "OL1236" };
+  const coalSplit: ActiveCarForJoin = { ...coal, id: 5, rider_external_id: "OL1236" };
+  const splitMain: SummaryRowForRefresh = {
+    ...august,
+    rider_id: "OL1236",
+    entity: "Main",
+    book_value_per_asset: 10,
+    net_equipment_cost_per_car: 100,
+    monthly_rent_per_car: 1,
+    monthly_depreciation_per_asset: 0.5,
+    count_cars: 1,
+  };
+  const splitRps: SummaryRowForRefresh = {
+    ...splitMain,
+    entity: "RPS",
+    book_value_per_asset: 20,
+    net_equipment_cost_per_car: 200,
+    monthly_rent_per_car: 2,
+    monthly_depreciation_per_asset: 1,
+    count_cars: 47,
+  };
+  const split = buildCarFinancialUpdates([mainSplit, rpsCar, coalSplit], [splitMain, splitRps]);
+  const splitById = new Map(split.updates.map((u) => [u.id, u]));
+  eq(split.updates.length, 3, "Main/RPS split still matches every car via entity alias");
+  eq(splitById.get(4)?.nbv, 10, "Main car on a split OL takes the Main row");
+  eq(splitById.get(3)?.nbv, 20, "Rail Partners Select aliases to RPS on a split OL");
+  eq(splitById.get(5)?.nbv, 10, "Coal aliases to Main on a split OL");
 }
 
 {

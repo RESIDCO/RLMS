@@ -26,6 +26,7 @@ import {
 } from "./car-status-history";
 import { crossesInactiveBoundary, fieldsImpliedByCarStatus, statusAlignedToActiveFlag } from "@shared/car-lifecycle-status";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
+import { applyCarFinancialsFromSummary, loadFinancialSummaryRows } from "./refresh-car-financials";
 import { assertRiderImporterPatch } from "@shared/rider-import-guard";
 import {
   addCarsToProgram,
@@ -123,11 +124,8 @@ import {
   buildFinancialReview,
   financialRowToDbPayload,
   mergeFinancialRowsByUniqueKey,
-  buildCarFinancialUpdates,
   normalizeSnapshotMonth,
-  carFinancialFingerprint,
   RAILCAR_FINANCIAL_REFRESH_FIELDS,
-  type SummaryRowForRefresh,
 } from "@shared/financial-import";
 import {
   classifyAcquisitionRows,
@@ -3192,41 +3190,13 @@ export async function registerRoutes(
       }
 
       // Recompute cars from the latest month that matches each car (not only this file).
-      const summaryRows = await fetchAllRows<SummaryRowForRefresh>((fromR, toR) =>
-        supabaseAdmin
-          .from("rider_financial_summary")
-          .select("snapshot_month, rider_id, car_type, entity, count_cars, book_value_per_asset, monthly_rent_per_car, monthly_depreciation_per_asset, net_equipment_cost_per_car")
-          .order("id", { ascending: true })
-          .range(fromR, toR)
-      );
-      const { updates, leftBlank, coalSkipped } = buildCarFinancialUpdates(activeCars, summaryRows);
-
-      const byId = new Map(activeCars.map((c: any) => [c.id, c]));
-      let carsUpdated = 0;
-      let carsUnchanged = 0;
-      const WAVE = 40;
-      const pending = updates.filter((u) => {
-        const car = byId.get(u.id);
-        if (car && carFinancialFingerprint(car) === carFinancialFingerprint(u)) {
-          carsUnchanged += 1;
-          return false;
-        }
-        return true;
-      });
-      for (let i = 0; i < pending.length; i += WAVE) {
-        const slice = pending.slice(i, i + WAVE);
-        const results = await Promise.all(
-          slice.map((u) => {
-            const payload: Record<string, unknown> = {};
-            for (const f of RAILCAR_FINANCIAL_REFRESH_FIELDS) payload[f] = u[f];
-            return supabaseAdmin.from("railcars").update(payload).eq("id", u.id);
-          })
-        );
-        for (const r of results) {
-          if (r.error) throw r.error;
-        }
-        carsUpdated += slice.length;
-      }
+      const summaryRows = await loadFinancialSummaryRows(supabaseAdmin);
+      const {
+        carsUpdated,
+        carsUnchanged,
+        carsLeftBlank: leftBlank,
+        coalSkipped,
+      } = await applyCarFinancialsFromSummary(supabaseAdmin, activeCars, summaryRows);
 
       const leaseGovernance = await governLeaseDates(supabaseAdmin);
       const riderRentRollup = await fillBlankRiderMonthlyRent();

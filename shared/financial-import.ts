@@ -439,7 +439,7 @@ export type MatchPathStats = {
   alias: number;
   single_rider_fallback: number;
   none: number;
-  /** Coal cars forced to none (Bruce: no Coal financial source) */
+  /** Coal cars that still did not match (type miss, or Main/RPS split with no Main row) */
   coalExcluded: number;
 };
 
@@ -490,14 +490,131 @@ function riderTypeKey(rider: string, carType: string, entity?: string) {
   return entity ? `${rider}|${carType}|${entity}` : `${rider}|${carType}`;
 }
 
-/** Map RLMS car.entity → financial sheet entity filter. Coal never matches. */
+/** Asset Report buckets: Main vs RPS. `Rail Partners Select` is the RLMS spelling of RPS. */
+export function normalizeFinancialSheetEntity(
+  entity: string | null | undefined
+): "Main" | "RPS" | null {
+  const e = String(entity ?? "").trim();
+  if (e === "RPS" || e === "Rail Partners Select") return "RPS";
+  if (e === "Main") return "Main";
+  return null;
+}
+
+/**
+ * Map RLMS car.entity → report bucket when a rider is split across Main and RPS.
+ * Coal is a real RLMS label that the report rolls into Main.
+ */
 export function financialSheetForCarEntity(
   entity: string | null | undefined
 ): "Main" | "RPS" | null {
-  if (entity === "Rail Partners Select") return "RPS";
-  if (entity === "Main") return "Main";
-  // Coal / Main-Coal / unknown → no financial source
+  const e = String(entity ?? "").trim();
+  if (e === "Rail Partners Select" || e === "RPS") return "RPS";
+  if (e === "Main" || e === "Coal" || e === "Main-Coal") return "Main";
   return null;
+}
+
+export function isCoalCarEntity(entity: string | null | undefined): boolean {
+  const e = String(entity ?? "").trim();
+  return e === "Coal" || e === "Main-Coal";
+}
+
+type JoinableFinancialRow = {
+  snapshot_month: string;
+  rider_id: string;
+  car_type: string;
+  entity: string;
+};
+
+export function indexFinancialJoinRows<T extends JoinableFinancialRow>(rows: T[]) {
+  const byRiderTypeEntity = new Map<string, T[]>();
+  const byRiderType = new Map<string, T[]>();
+  const assetsByRider = new Map<string, Set<string>>();
+  const assetsByRiderEntity = new Map<string, Set<string>>();
+  const entitiesByRiderMonth = new Map<string, Set<"Main" | "RPS">>();
+
+  for (const raw of rows) {
+    const row = { ...raw, snapshot_month: snapshotKey(String(raw.snapshot_month)) } as T;
+    const sheet = normalizeFinancialSheetEntity(row.entity);
+    const sheetLabel = sheet ?? String(row.entity ?? "").trim();
+    const kEnt = `${row.rider_id}|${row.car_type}|${sheetLabel}`;
+    const listEnt = byRiderTypeEntity.get(kEnt) ?? [];
+    listEnt.push(row);
+    byRiderTypeEntity.set(kEnt, listEnt);
+
+    const kType = `${row.rider_id}|${row.car_type}`;
+    const listType = byRiderType.get(kType) ?? [];
+    listType.push(row);
+    byRiderType.set(kType, listType);
+
+    const assets = assetsByRider.get(row.rider_id) ?? new Set<string>();
+    assets.add(row.car_type);
+    assetsByRider.set(row.rider_id, assets);
+
+    const rk = `${row.rider_id}|${sheetLabel}`;
+    const setEnt = assetsByRiderEntity.get(rk) ?? new Set<string>();
+    setEnt.add(row.car_type);
+    assetsByRiderEntity.set(rk, setEnt);
+
+    if (sheet) {
+      const em = `${row.rider_id}|${row.snapshot_month}`;
+      const ents = entitiesByRiderMonth.get(em) ?? new Set<"Main" | "RPS">();
+      ents.add(sheet);
+      entitiesByRiderMonth.set(em, ents);
+    }
+  }
+
+  return { byRiderTypeEntity, byRiderType, assetsByRider, assetsByRiderEntity, entitiesByRiderMonth };
+}
+
+/**
+ * Join a car to Asset Report rows by OL first.
+ * Entity is only used when that rider+snapshot has both Main and RPS rows.
+ */
+export function matchCarToFinancialRows<T extends JoinableFinancialRow>(
+  car: ActiveCarForJoin,
+  index: ReturnType<typeof indexFinancialJoinRows<T>>
+): { batches: T[]; snapshot: string; path: MatchPath; mappedAsset: string } | null {
+  const rider = String(car.rider_external_id ?? "").trim();
+  if (!rider) return null;
+
+  const familyHits: Array<{ asset: string; rows: T[] }> = [];
+  let path: MatchPath = "none";
+  for (const asset of candidateAssetFamilies(car)) {
+    const found = index.byRiderType.get(`${rider}|${asset}`);
+    if (found?.length) {
+      familyHits.push({ asset, rows: found });
+      path = "alias";
+    }
+  }
+  if (!familyHits.length) {
+    const only = index.assetsByRider.get(rider);
+    if (only && only.size === 1) {
+      const asset = [...only][0];
+      const found = index.byRiderType.get(`${rider}|${asset}`);
+      if (found?.length) {
+        familyHits.push({ asset, rows: found });
+        path = "single_rider_fallback";
+      }
+    }
+  }
+  if (!familyHits.length) return null;
+
+  const latest = familyHits
+    .flatMap((h) => h.rows.map((b) => snapshotKey(String(b.snapshot_month))))
+    .sort()
+    .at(-1)!;
+  const chosen = familyHits.find((h) => h.rows.some((b) => snapshotKey(String(b.snapshot_month)) === latest))!;
+  let latestBatches = chosen.rows.filter((b) => snapshotKey(String(b.snapshot_month)) === latest);
+
+  const ents = index.entitiesByRiderMonth.get(`${rider}|${latest}`) ?? new Set();
+  if (ents.size > 1) {
+    const carSheet = financialSheetForCarEntity(car.entity);
+    if (!carSheet) return null;
+    latestBatches = latestBatches.filter((b) => normalizeFinancialSheetEntity(b.entity) === carSheet);
+    if (!latestBatches.length) return null;
+  }
+
+  return { batches: latestBatches, snapshot: latest, path, mappedAsset: chosen.asset };
 }
 
 /** Weighted average of per-asset figures across cost-basis batches (§3.4). */
@@ -587,20 +704,7 @@ export function buildFinancialReview(
 
   const qualifyingCarCount = allRows.reduce((s, r) => s + (r.count_cars || 0), 0);
 
-  // Index by rider|asset|sheetEntity — join is entity-scoped.
-  // Coal cars never match (Bruce: no Coal financial source).
-  const fileByRiderTypeEntity = new Map<string, FinancialParsedRow[]>();
-  const assetsByRiderEntity = new Map<string, Set<string>>();
-  for (const r of allRows) {
-    const k = riderTypeKey(r.rider_id, r.car_type, r.entity);
-    const list = fileByRiderTypeEntity.get(k) ?? [];
-    list.push(r);
-    fileByRiderTypeEntity.set(k, list);
-    const rk = `${r.rider_id}|${r.entity}`;
-    const set = assetsByRiderEntity.get(rk) ?? new Set();
-    set.add(r.car_type);
-    assetsByRiderEntity.set(rk, set);
-  }
+  const joinIndex = indexFinancialJoinRows(allRows);
 
   const activeWithRider = activeCars.filter((c) => c.rider_external_id);
   let carsMatched = 0;
@@ -620,69 +724,41 @@ export function buildFinancialReview(
 
   for (const car of activeWithRider) {
     const rider = String(car.rider_external_id).trim();
-    const sheetEnt = financialSheetForCarEntity(car.entity);
-    const isCoal = car.entity === "Coal" || car.entity === "Main-Coal";
+    const mapped = carToAssetFamily(car);
+    const hit = matchCarToFinancialRows(car, joinIndex);
 
-    if (!sheetEnt || isCoal) {
-      carsUnmatched += 1;
-      coalUnmatched += 1;
-      matchPathStats.none += 1;
-      matchPathStats.coalExcluded += 1;
-      continue;
-    }
-
-    let mapped = carToAssetFamily(car);
-    let batches: FinancialParsedRow[] | undefined;
-    let usedKey: string | null = null;
-    let path: MatchPath = "none";
-
-    for (const asset of candidateAssetFamilies(car)) {
-      const k = riderTypeKey(rider, asset, sheetEnt);
-      const found = fileByRiderTypeEntity.get(k);
-      if (found?.length) {
-        batches = found;
-        usedKey = k;
-        mapped = asset;
-        path = "alias";
-        break;
-      }
-    }
-    if (!batches?.length) {
-      const only = assetsByRiderEntity.get(`${rider}|${sheetEnt}`);
-      if (only && only.size === 1) {
-        const asset = [...only][0];
-        usedKey = riderTypeKey(rider, asset, sheetEnt);
-        batches = fileByRiderTypeEntity.get(usedKey);
-        mapped = asset;
-        path = "single_rider_fallback";
-      }
-    }
-
-    if (batches && batches.length && usedKey) {
+    if (hit) {
+      const sheet = normalizeFinancialSheetEntity(hit.batches[0]?.entity) ?? hit.batches[0]?.entity ?? "Main";
+      const usedKey = riderTypeKey(rider, hit.mappedAsset, sheet);
       carsMatched += 1;
       matchedFileKeys.add(usedKey);
       matchedRiderIds.add(rider);
-      if (batches.length > 1) multiBatchKeys.add(usedKey);
-      if (path === "alias") matchPathStats.alias += 1;
+      if (hit.batches.length > 1) multiBatchKeys.add(usedKey);
+      if (hit.path === "alias") matchPathStats.alias += 1;
       else matchPathStats.single_rider_fallback += 1;
     } else {
       carsUnmatched += 1;
       matchPathStats.none += 1;
-      mainRpsUnmatched += 1;
-      if (sampleMainRps.length < 40) {
-        sampleMainRps.push({
-          id: car.id,
-          rider_external_id: car.rider_external_id,
-          car_type: car.car_type,
-          mapped_asset: mapped,
-          entity: car.entity,
-        });
+      if (isCoalCarEntity(car.entity)) {
+        coalUnmatched += 1;
+        matchPathStats.coalExcluded += 1;
+      } else {
+        mainRpsUnmatched += 1;
+        if (sampleMainRps.length < 40) {
+          sampleMainRps.push({
+            id: car.id,
+            rider_external_id: car.rider_external_id,
+            car_type: car.car_type,
+            mapped_asset: mapped,
+            entity: car.entity,
+          });
+        }
       }
     }
   }
 
   const fileNoCarMatches: FinancialReview["fileNoCarMatches"] = [];
-  for (const [k, batches] of fileByRiderTypeEntity) {
+  for (const [k, batches] of joinIndex.byRiderTypeEntity) {
     if (matchedFileKeys.has(k)) continue;
     const parts = k.split("|");
     const rider_id = parts[0];
@@ -738,10 +814,11 @@ export function buildFinancialReview(
     ],
     joinRules: {
       entityScoped: true,
-      coalCarsNeverMatch: true,
+      coalCarsNeverMatch: false,
       detail:
-        "Main cars only match Main-sheet rows; RPS cars only match RPS-sheet rows; " +
-        "entity=Coal never match (even if Main sheet has COAL GONDOLAS/HOPPERS for the same rider).",
+        "Join on OL/rider first. When that rider has a single Asset Report entity for the snapshot, " +
+        "every active car on the OL gets those per-asset figures (Coal included). " +
+        "RPS aliases Rail Partners Select. Entity matching is only used when the same snapshot has both Main and RPS rows.",
     },
     unmatchedRiders,
   };
@@ -918,26 +995,15 @@ function snapshotKey(raw: string): string {
 
 /**
  * For each active car, take matching Asset Report batches from the latest
- * snapshot_month that has a hit for that rider+type+entity. Never averages
+ * snapshot_month that has a hit for that rider+type. Entity is only a gate
+ * when the rider has both Main and RPS rows in that month. Never averages
  * across months.
  */
 export function buildCarFinancialUpdates(
   cars: ActiveCarForJoin[],
   summaryRows: SummaryRowForRefresh[]
 ): { updates: CarFinancialUpdate[]; leftBlank: number; coalSkipped: number } {
-  const fileByRiderTypeEntity = new Map<string, SummaryRowForRefresh[]>();
-  const assetsByRiderEntity = new Map<string, Set<string>>();
-  for (const r of summaryRows) {
-    const row = { ...r, snapshot_month: snapshotKey(String(r.snapshot_month)) };
-    const k = `${row.rider_id}|${row.car_type}|${row.entity}`;
-    const list = fileByRiderTypeEntity.get(k) ?? [];
-    list.push(row);
-    fileByRiderTypeEntity.set(k, list);
-    const rk = `${row.rider_id}|${row.entity}`;
-    const set = assetsByRiderEntity.get(rk) ?? new Set();
-    set.add(row.car_type);
-    assetsByRiderEntity.set(rk, set);
-  }
+  const joinIndex = indexFinancialJoinRows(summaryRows);
 
   const updates: CarFinancialUpdate[] = [];
   let leftBlank = 0;
@@ -945,46 +1011,24 @@ export function buildCarFinancialUpdates(
 
   for (const car of cars) {
     const rider = String(car.rider_external_id ?? "").trim();
-    const sheetEnt = financialSheetForCarEntity(car.entity);
-    if (!rider || !sheetEnt) {
-      if (!sheetEnt) coalSkipped += 1;
+    if (!rider) {
       leftBlank += 1;
       continue;
     }
-
-    // Collect hits per asset family, then use the first family (candidate order)
-    // that has the latest snapshot_month. Never average across months, and never
-    // mix two families from the same month.
-    const familyHits: SummaryRowForRefresh[][] = [];
-    for (const asset of candidateAssetFamilies(car)) {
-      const found = fileByRiderTypeEntity.get(`${rider}|${asset}|${sheetEnt}`);
-      if (found?.length) familyHits.push(found);
-    }
-    if (!familyHits.length) {
-      const only = assetsByRiderEntity.get(`${rider}|${sheetEnt}`);
-      if (only && only.size === 1) {
-        const found = fileByRiderTypeEntity.get(`${rider}|${[...only][0]}|${sheetEnt}`);
-        if (found?.length) familyHits.push(found);
-      }
-    }
-    if (!familyHits.length) {
+    const hit = matchCarToFinancialRows(car, joinIndex);
+    if (!hit) {
+      if (isCoalCarEntity(car.entity)) coalSkipped += 1;
       leftBlank += 1;
       continue;
     }
-    const latest = familyHits
-      .flatMap((rows) => rows.map((b) => b.snapshot_month))
-      .sort()
-      .at(-1)!;
-    const chosen = familyHits.find((rows) => rows.some((b) => b.snapshot_month === latest))!;
-    const latestBatches = chosen.filter((b) => b.snapshot_month === latest);
-    const avg = averageBatches(latestBatches as FinancialParsedRow[]);
+    const avg = averageBatches(hit.batches as FinancialParsedRow[]);
     updates.push({
       id: car.id,
       nbv: roundMoney(avg.nbv),
       oec: roundMoney(avg.oec),
       monthly_rent_per_car: roundMoney(avg.monthly_rent_per_car),
       monthly_depr_per_car: roundMoney(avg.monthly_depr_per_car),
-      financial_snapshot_month: latest,
+      financial_snapshot_month: hit.snapshot,
     });
   }
 

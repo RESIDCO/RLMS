@@ -237,6 +237,7 @@ function TransitionList() {
                   <th className="text-left font-medium px-2 py-1.5 w-[6.75rem]">Outgoing</th>
                   <th className="text-left font-medium px-2 py-1.5 w-[6.75rem]">Incoming</th>
                   <th className="text-left font-medium px-2 py-1.5 w-[6.75rem]">Meeting Date</th>
+                  <th className="text-center font-medium px-2 py-1.5 w-16">Briefing</th>
                   <th className="text-right font-medium px-2 py-1.5 w-12">%</th>
                   <th className="text-left font-medium px-2 py-1.5 w-[5.5rem]">Status</th>
                 </tr>
@@ -277,6 +278,23 @@ function TransitionList() {
                     <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap truncate" title={displayMeetingDate(r.meeting_date)}>
                       {displayMeetingDate(r.meeting_date)}
                     </td>
+                    <td className="px-2 py-1.5 text-center">
+                      <span
+                        className="inline-flex"
+                        title={
+                          r.briefing_form_completed_date
+                            ? formatCalendarDate(String(r.briefing_form_completed_date).slice(0, 10))
+                            : undefined
+                        }
+                      >
+                        <Checkbox
+                          checked={Boolean(r.briefing_form_completed)}
+                          disabled
+                          className="pointer-events-none"
+                          aria-label={r.briefing_form_completed ? "Briefing form completed" : "Briefing form not completed"}
+                        />
+                      </span>
+                    </td>
                     <td className="px-2 py-1.5 text-right font-mono-num tabular-nums">{pct}%</td>
                     <td className="px-2 py-1.5 capitalize whitespace-nowrap">{r.status}</td>
                   </tr>
@@ -284,7 +302,7 @@ function TransitionList() {
                 })}
                 {(data?.records ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-2 py-10 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-2 py-10 text-center text-muted-foreground">
                       No transition records yet. Add an account to start a handoff.
                     </td>
                   </tr>

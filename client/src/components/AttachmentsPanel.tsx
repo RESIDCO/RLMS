@@ -16,7 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { confirmDelete } from "@/components/ConfirmActionDialog";
+import { formatAttachmentProvenance } from "@shared/attachment-source";
 
 type Attachment = {
   id: number;
@@ -29,6 +29,7 @@ type Attachment = {
   uploaded_by: string | null;
   uploaded_at: string;
   notes: string | null;
+  source_module?: string | null;
 };
 
 type EntityType = "master_lease" | "rider" | "railcar";
@@ -52,14 +53,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-CA", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
 }
 
 export default function AttachmentsPanel({ entityType, entityId, compact = false, readOnly = false }: Props) {
@@ -236,7 +229,7 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate leading-tight">{att.file_name}</p>
                 <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-                  {formatBytes(att.file_size)} · {formatDate(att.uploaded_at)}
+                  {formatBytes(att.file_size)} · {formatAttachmentProvenance(att.source_module, att.uploaded_at)}
                   {att.uploaded_by && ` · ${att.uploaded_by}`}
                 </p>
               </div>

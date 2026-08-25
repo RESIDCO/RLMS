@@ -18,6 +18,7 @@ import { formatCalendarDate } from "@shared/lease-authority";
 import { ArrowLeft, Building2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { programPath } from "@/lib/browse-nav";
 import { AmCommentThread } from "@/components/AmCommentThread";
+import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 import { navigateHash } from "@/lib/hash-location";
@@ -235,7 +236,9 @@ function AccountListView() {
 
         <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-3">
           <div className="text-sm font-medium">Account Transitions</div>
-          <p className="text-xs text-muted-foreground mt-1">Coming soon.</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Coming soon. Handoff documents can already be attached on each account’s detail page — permanently tagged Account Transitions.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -548,6 +551,15 @@ function AccountDetailView({ id }: { id: number }) {
             </tbody>
           </table>
         </div>
+
+        <AccountTransitionDocuments
+          accountId={id}
+          ols={visibleOls.map((ol) => ({
+            id: ol.id,
+            label: String(ol.schedule_number || ol.rider_name || `OL ${ol.id}`),
+          }))}
+          canUpload={canEditAccountMgmtComments}
+        />
 
         <div>
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Linked programs</div>

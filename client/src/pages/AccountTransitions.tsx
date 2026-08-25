@@ -20,7 +20,10 @@ import { formatCalendarDate } from "@shared/lease-authority";
 import {
   COMMUNICATION_METHODS,
   COMMUNICATION_METHOD_LABEL,
+  accountHandoffPct,
+  handoffScoreParts,
   isFlaggedTransition,
+  methodListTag,
 } from "@shared/account-transitions";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
@@ -37,7 +40,12 @@ type RecordRow = {
   to_account_manager: string | null;
   communication_method: string | null;
   status: "open" | "complete";
-  flagged: boolean;
+  flagged?: boolean;
+  pct_complete?: number;
+  meeting_scheduled: boolean;
+  meeting_date: string | null;
+  communication_completed: boolean;
+  communication_completed_date: string | null;
 };
 
 type ListPayload = {
@@ -170,34 +178,54 @@ function TransitionList() {
           <Skeleton className="h-40 w-full" />
         ) : (
           <div className="rounded-xl border border-card-border bg-card overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full table-fixed text-sm">
               <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <tr>
-                  <th className="text-left font-medium px-4 py-2">Account</th>
-                  <th className="text-left font-medium px-4 py-2">Outgoing</th>
-                  <th className="text-left font-medium px-4 py-2">Incoming</th>
-                  <th className="text-left font-medium px-4 py-2">Status</th>
+                  <th className="text-left font-medium px-2 py-1.5">Account</th>
+                  <th className="text-left font-medium px-2 py-1.5 w-[7.5rem]">Method</th>
+                  <th className="text-left font-medium px-2 py-1.5 w-16">Outgoing</th>
+                  <th className="text-left font-medium px-2 py-1.5 w-16">Incoming</th>
+                  <th className="text-right font-medium px-2 py-1.5 w-12">%</th>
+                  <th className="text-left font-medium px-2 py-1.5 w-[5.5rem]">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {(data?.records ?? []).map((r) => (
-                  <tr key={r.id} className="border-t border-border hover:bg-muted/20">
-                    <td className="px-4 py-2">
-                      <Link href={`/account-transitions/${r.id}`} className="font-medium hover:underline">
+                {(data?.records ?? []).map((r) => {
+                  const tag = methodListTag(r.communication_method);
+                  const pct = r.pct_complete ?? accountHandoffPct(r);
+                  return (
+                  <tr key={r.id} className={cn("border-t border-border", tag?.rowClass, "hover:brightness-110")}>
+                    <td className="px-2 py-1.5 min-w-0">
+                      <Link
+                        href={`/account-transitions/${r.id}`}
+                        className="block truncate font-medium hover:underline"
+                        title={r.account_name}
+                      >
                         {r.account_name}
                       </Link>
                       {!r.flagged && (
-                        <span className="ml-2 text-[11px] text-muted-foreground">not flagged</span>
+                        <span className="text-[10px] text-muted-foreground">not flagged</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-muted-foreground">{r.from_account_manager || "—"}</td>
-                    <td className="px-4 py-2">{r.to_account_manager || "—"}</td>
-                    <td className="px-4 py-2 capitalize">{r.status}</td>
+                    <td className="px-2 py-1.5">
+                      {tag ? (
+                        <span className="inline-flex max-w-full truncate rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-medium leading-none">
+                          {tag.label}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{r.from_account_manager || "—"}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">{r.to_account_manager || "—"}</td>
+                    <td className="px-2 py-1.5 text-right font-mono-num tabular-nums">{pct}%</td>
+                    <td className="px-2 py-1.5 capitalize whitespace-nowrap">{r.status}</td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(data?.records ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-2 py-10 text-center text-muted-foreground">
                       No transition records yet. Add an account to start a handoff.
                     </td>
                   </tr>
@@ -344,6 +372,18 @@ function TransitionDetail({ id }: { id: number }) {
 
   const acct = data.account;
   const flagged = isFlaggedTransition(displayTo);
+  const score = handoffScoreParts({
+    to_account_manager: displayTo,
+    meeting_scheduled: rec.meeting_scheduled,
+    communication_completed: rec.communication_completed,
+  });
+  const breakdown = [
+    score.incoming ? "Incoming AM set" : "Incoming AM not set",
+    score.meeting ? "Meeting scheduled" : "Meeting not yet scheduled",
+    score.communication ? "Communication completed" : "Communication not yet completed",
+  ].join(" · ");
+  const meetingIso = rec.meeting_date ? String(rec.meeting_date).slice(0, 10) : "";
+  const commIso = rec.communication_completed_date ? String(rec.communication_completed_date).slice(0, 10) : "";
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -426,6 +466,54 @@ function TransitionDetail({ id }: { id: number }) {
                 <SelectItem value="complete">Complete</SelectItem>
               </SelectContent>
             </Select>
+            <div className="mt-2">
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-primary" style={{ width: `${score.pct}%` }} />
+                </div>
+                <span className="text-sm font-mono-num font-medium w-10 text-right">{score.pct}%</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">{breakdown}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4 max-w-xl">
+          <div className="space-y-2">
+            <Label className="text-xs">Meeting Scheduled</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Checkbox
+                checked={rec.meeting_scheduled}
+                disabled={!canWrite}
+                onCheckedChange={(v) => save.mutate({ meeting_scheduled: v === true })}
+              />
+              <Input
+                type="date"
+                className="h-8 w-[11.5rem] text-xs"
+                value={meetingIso}
+                disabled={!canWrite}
+                onChange={(e) => save.mutate({ meeting_date: e.target.value || null })}
+                aria-label="Date of meeting"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs">Communication Completed</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Checkbox
+                checked={rec.communication_completed}
+                disabled={!canWrite}
+                onCheckedChange={(v) => save.mutate({ communication_completed: v === true })}
+              />
+              <Input
+                type="date"
+                className="h-8 w-[11.5rem] text-xs"
+                value={commIso}
+                disabled={!canWrite}
+                onChange={(e) => save.mutate({ communication_completed_date: e.target.value || null })}
+                aria-label="Communication completed date"
+              />
+            </div>
           </div>
         </div>
 

@@ -130,7 +130,7 @@ function AccountListView() {
       return apiRequest("GET", `/api/account-management/overview${q}`).then((r) => r.json());
     },
   });
-  const { data: atSummary } = useQuery<{ flagged: number; complete: number; pct: number | null }>({
+  const { data: atSummary } = useQuery<{ flagged: number; pct: number | null }>({
     queryKey: ["/api/account-transitions/summary"],
     queryFn: () => apiRequest("GET", "/api/account-transitions/summary").then((r) => r.json()),
   });
@@ -243,13 +243,13 @@ function AccountListView() {
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Account Transitions</div>
             <div className="text-2xl font-semibold font-mono-num mt-1">
-              {atSummary?.pct == null ? "—" : `${atSummary.pct}%`}
+              {atSummary?.pct == null ? "Not started" : `${atSummary.pct}%`}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               {atSummary
                 ? atSummary.flagged === 0
                   ? "No accounts flagged yet — set Incoming AM on a handoff to start the count."
-                  : `${atSummary.complete} of ${atSummary.flagged} flagged accounts complete`
+                  : `${atSummary.pct}% — ${atSummary.flagged} accounts flagged`
                 : "Loading…"}
             </p>
           </div>

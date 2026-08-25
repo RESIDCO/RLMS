@@ -1,15 +1,16 @@
 import { supabaseAdmin } from "./supabase";
 import { getAccount } from "./accounts";
 import {
+  accountHandoffPct,
+  flaggedHandoffAvgPct,
   isCommunicationMethod,
   isFlaggedTransition,
   isTransitionStatus,
-  transitionPct,
   type TransitionStatus,
 } from "@shared/account-transitions";
 
 const RECORD_SELECT =
-  "id, account_id, from_account_manager, to_account_manager, communication_method, status, completed_at, created_at, updated_at";
+  "id, account_id, from_account_manager, to_account_manager, communication_method, status, completed_at, meeting_scheduled, meeting_date, communication_completed, communication_completed_date, created_at, updated_at";
 
 export type TransitionRecord = {
   id: number;
@@ -19,6 +20,10 @@ export type TransitionRecord = {
   communication_method: string | null;
   status: TransitionStatus;
   completed_at: string | null;
+  meeting_scheduled: boolean;
+  meeting_date: string | null;
+  communication_completed: boolean;
+  communication_completed_date: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -32,6 +37,10 @@ function mapRecord(row: any): TransitionRecord {
     communication_method: row.communication_method ?? null,
     status: isTransitionStatus(String(row.status ?? "open")) ? row.status : "open",
     completed_at: row.completed_at ?? null,
+    meeting_scheduled: Boolean(row.meeting_scheduled),
+    meeting_date: row.meeting_date ?? null,
+    communication_completed: Boolean(row.communication_completed),
+    communication_completed_date: row.communication_completed_date ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -43,14 +52,15 @@ function cleanAm(v: unknown): string | null {
 }
 
 export async function listTransitionSummary() {
-  const { data, error } = await supabaseAdmin.from("account_transition_records").select("status, to_account_manager");
+  const { data, error } = await supabaseAdmin
+    .from("account_transition_records")
+    .select("to_account_manager, meeting_scheduled, communication_completed");
   if (error) throw error;
-  const flagged = (data ?? []).filter((r) => isFlaggedTransition(r.to_account_manager));
-  const complete = flagged.filter((r) => r.status === "complete").length;
+  const rows = data ?? [];
+  const flagged = rows.filter((r) => isFlaggedTransition(r.to_account_manager));
   return {
     flagged: flagged.length,
-    complete,
-    pct: transitionPct(complete, flagged.length),
+    pct: flaggedHandoffAvgPct(rows),
   };
 }
 
@@ -95,6 +105,7 @@ export async function listTransitionRecords(amFilter: string | null) {
       ...r,
       account_name: names.get(r.account_id) ?? `Account ${r.account_id}`,
       flagged: isFlaggedTransition(r.to_account_manager),
+      pct_complete: accountHandoffPct(r),
     })),
   };
 }
@@ -163,8 +174,21 @@ export async function patchTransitionRecord(
     to_account_manager?: string | null;
     communication_method?: string | null;
     status?: string;
+    meeting_scheduled?: boolean;
+    meeting_date?: string | null;
+    communication_completed?: boolean;
+    communication_completed_date?: string | null;
   },
 ) {
+  const { data: existingRow, error: loadErr } = await supabaseAdmin
+    .from("account_transition_records")
+    .select(RECORD_SELECT)
+    .eq("id", recordId)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!existingRow) return null;
+  const existing = mapRecord(existingRow);
+
   const next: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.from_account_manager !== undefined) next.from_account_manager = cleanAm(patch.from_account_manager);
   if (patch.to_account_manager !== undefined) next.to_account_manager = cleanAm(patch.to_account_manager);
@@ -177,6 +201,12 @@ export async function patchTransitionRecord(
     }
     next.communication_method = raw;
   }
+  if (typeof patch.meeting_scheduled === "boolean") next.meeting_scheduled = patch.meeting_scheduled;
+  if (patch.meeting_date !== undefined) next.meeting_date = parseIsoDate(patch.meeting_date, "meeting_date");
+  if (typeof patch.communication_completed === "boolean") next.communication_completed = patch.communication_completed;
+  if (patch.communication_completed_date !== undefined) {
+    next.communication_completed_date = parseIsoDate(patch.communication_completed_date, "communication_completed_date");
+  }
   if (patch.status !== undefined && patch.status != null) {
     if (!isTransitionStatus(patch.status)) {
       const err: any = new Error("status must be open or complete");
@@ -184,8 +214,26 @@ export async function patchTransitionRecord(
       throw err;
     }
     next.status = patch.status;
-    next.completed_at = patch.status === "complete" ? new Date().toISOString() : null;
+    next.completed_at = patch.status === "complete"
+      ? existing.completed_at ?? new Date().toISOString()
+      : null;
   }
+
+  const merged = {
+    to_account_manager:
+      next.to_account_manager !== undefined ? (next.to_account_manager as string | null) : existing.to_account_manager,
+    meeting_scheduled:
+      next.meeting_scheduled !== undefined ? Boolean(next.meeting_scheduled) : existing.meeting_scheduled,
+    communication_completed:
+      next.communication_completed !== undefined ? Boolean(next.communication_completed) : existing.communication_completed,
+  };
+  const was100 = accountHandoffPct(existing) === 100;
+  const now100 = accountHandoffPct(merged) === 100;
+  if (now100 && !was100 && patch.status === undefined) {
+    next.status = "complete";
+    if (!existing.completed_at) next.completed_at = new Date().toISOString();
+  }
+
   const { data, error } = await supabaseAdmin
     .from("account_transition_records")
     .update(next)
@@ -225,15 +273,19 @@ export async function addMilestone(recordId: number, label: string) {
   return data;
 }
 
-function parseMilestoneDate(v: unknown): string | null {
+function parseIsoDate(v: unknown, field: string): string | null {
   if (v == null || String(v).trim() === "") return null;
   const s = String(v).trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const err: any = new Error("milestone_date must be YYYY-MM-DD");
+    const err: any = new Error(`${field} must be YYYY-MM-DD`);
     err.status = 400;
     throw err;
   }
   return s;
+}
+
+function parseMilestoneDate(v: unknown): string | null {
+  return parseIsoDate(v, "milestone_date");
 }
 
 export async function patchMilestone(id: number, patch: { done?: boolean; label?: string; milestone_date?: string | null }) {

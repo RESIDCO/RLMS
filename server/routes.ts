@@ -13,6 +13,18 @@ import {
   listRiderAccountComments,
 } from "./rider-account-comments";
 import {
+  addComment as addTransitionComment,
+  addMilestone,
+  createTransitionRecord,
+  deleteComment as deleteTransitionComment,
+  deleteMilestone,
+  getTransitionDetail,
+  listTransitionRecords,
+  listTransitionSummary,
+  patchMilestone,
+  patchTransitionRecord,
+} from "./account-transitions";
+import {
   ACCOUNT_TRANSITIONS_SOURCE,
   genericUploadSource,
   insertAttachmentRow,
@@ -4852,6 +4864,133 @@ export async function registerRoutes(
   });
   app.patch("/api/account-management/riders/:riderId/comment", (_req, res) => {
     res.status(410).json({ message: "Use POST /api/account-management/riders/:riderId/comments" });
+  });
+
+  app.get("/api/account-transitions/summary", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await listTransitionSummary());
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/account-transitions", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const am = typeof req.query.am === "string" ? req.query.am : "";
+      res.json(await listTransitionRecords(am.trim() || null));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/account-transitions", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const row = await createTransitionRecord(Number(req.body?.account_id));
+      res.status(201).json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/account-transitions/:id", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "Invalid record" });
+      const row = await getTransitionDetail(id);
+      if (!row) return res.status(404).json({ message: "Not found" });
+      res.json(row);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.patch("/api/account-transitions/:id", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "Invalid record" });
+      const body = req.body ?? {};
+      const patch: {
+        from_account_manager?: string | null;
+        to_account_manager?: string | null;
+        communication_method?: string | null;
+        status?: string;
+      } = {};
+      if ("from_account_manager" in body) patch.from_account_manager = body.from_account_manager;
+      if ("to_account_manager" in body) patch.to_account_manager = body.to_account_manager;
+      if ("communication_method" in body) patch.communication_method = body.communication_method;
+      if ("status" in body) patch.status = body.status;
+      const row = await patchTransitionRecord(id, patch);
+      if (!row) return res.status(404).json({ message: "Not found" });
+      res.json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/account-transitions/:id/milestones", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "Invalid record" });
+      res.status(201).json(await addMilestone(id, String(req.body?.label ?? "")));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.patch("/api/account-transitions/:id/milestones/:mid", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const mid = Number(req.params.mid);
+      if (!Number.isFinite(mid) || mid <= 0) return res.status(400).json({ message: "Invalid milestone" });
+      const row = await patchMilestone(mid, { done: req.body?.done, label: req.body?.label });
+      if (!row) return res.status(404).json({ message: "Not found" });
+      res.json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/account-transitions/:id/milestones/:mid", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const mid = Number(req.params.mid);
+      if (!Number.isFinite(mid) || mid <= 0) return res.status(400).json({ message: "Invalid milestone" });
+      await deleteMilestone(mid);
+      res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/account-transitions/:id/comments", async (req, res) => {
+    try {
+      const userId = await requireAccountMgmtWrite(req, res);
+      if (!userId) return;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "Invalid record" });
+      const row = await addTransitionComment({
+        recordId: id,
+        authorUserId: userId,
+        authorEmail: req.authUser?.email ?? "",
+        body: String(req.body?.body ?? ""),
+      });
+      res.status(201).json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/account-transitions/:id/comments/:cid", async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const cid = Number(req.params.cid);
+      if (!Number.isFinite(cid) || cid <= 0) return res.status(400).json({ message: "Invalid comment" });
+      await deleteTransitionComment(cid);
+      res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
   });
 
   app.get("/api/account-management/riders/:riderId/cars", async (req, res) => {

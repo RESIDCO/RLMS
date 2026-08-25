@@ -151,7 +151,7 @@ export async function requireUser(req: Request, res: Response): Promise<string |
   return auth.user.id;
 }
 
-/** All roles may set Account Management OL status tags and post AM notes. */
+/** All roles may set Account Management OL status tags, post AM notes, and write Account Transitions. */
 export async function requireAccountMgmtWrite(req: Request, res: Response): Promise<string | null> {
   return requireUser(req, res);
 }

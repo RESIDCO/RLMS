@@ -106,6 +106,7 @@ export default function AccountsPage() {
 function AccountListView() {
   const { toast } = useToast();
   const canEdit = useCanEdit();
+  const [, navigate] = useLocation();
   const initial = readAccountMgmtListState();
   const [search, setSearch] = useState(initial.search);
   const [manager, setManager] = useState<string | null>(initial.manager);
@@ -128,6 +129,10 @@ function AccountListView() {
       const q = p.toString() ? `?${p.toString()}` : "";
       return apiRequest("GET", `/api/account-management/overview${q}`).then((r) => r.json());
     },
+  });
+  const { data: atSummary } = useQuery<{ flagged: number; complete: number; pct: number | null }>({
+    queryKey: ["/api/account-transitions/summary"],
+    queryFn: () => apiRequest("GET", "/api/account-transitions/summary").then((r) => r.json()),
   });
 
   const filtered = useMemo(() => {
@@ -234,11 +239,27 @@ function AccountListView() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-dashed border-border bg-card/40 px-4 py-3">
-          <div className="text-sm font-medium">Account Transitions</div>
-          <p className="text-xs text-muted-foreground mt-1">
-            In Development. Handoff documents can already be attached on each account’s detail page — permanently tagged Account Transitions.
-          </p>
+        <div className="rounded-xl border border-card-border bg-card shadow-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Account Transitions</div>
+            <div className="text-2xl font-semibold font-mono-num mt-1">
+              {atSummary?.pct == null ? "—" : `${atSummary.pct}%`}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {atSummary
+                ? atSummary.flagged === 0
+                  ? "No accounts flagged yet — set Incoming AM on a handoff to start the count."
+                  : `${atSummary.complete} of ${atSummary.flagged} flagged accounts complete`
+                : "Loading…"}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => navigate("/account-transitions")}
+            data-testid="button-enter-account-transitions"
+          >
+            Enter Account Transitions
+          </Button>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">

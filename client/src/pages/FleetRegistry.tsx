@@ -1845,11 +1845,14 @@ function downloadRentEventsCsv(events: any[], carNumber: string) {
 export function RailcarDetailSheet({
   carId,
   onClose,
+  readOnly = false,
 }: {
   carId: number | null;
   onClose: () => void;
+  /** Context-gated: hide Edit / Change Number / Delete and the edit form. Not a role check. */
+  readOnly?: boolean;
 }) {
-  const canEdit = useCanEdit();
+  const canEdit = useCanEdit() && !readOnly;
   const { toast } = useToast();
   const [editCar, setEditCar] = useState<Row | null>(null);
 
@@ -1874,18 +1877,22 @@ export function RailcarDetailSheet({
           {carId != null && (
             <CarDetail
               carId={carId}
-              onEdit={(car) => setEditCar(car)}
-              onDelete={() => deleteMutation.mutate(carId)}
+              onEdit={readOnly ? () => {} : (car) => setEditCar(car)}
+              onDelete={readOnly ? () => {} : () => deleteMutation.mutate(carId)}
               canEdit={canEdit}
+              showCarPageLink={!readOnly}
+              readOnly={readOnly}
             />
           )}
         </SheetContent>
       </Sheet>
-      <RailcarFormDialog
-        open={!!editCar}
-        onClose={() => setEditCar(null)}
-        car={editCar}
-      />
+      {!readOnly && (
+        <RailcarFormDialog
+          open={!!editCar}
+          onClose={() => setEditCar(null)}
+          car={editCar}
+        />
+      )}
     </>
   );
 }
@@ -1896,6 +1903,7 @@ export function CarDetail({
   onDelete,
   canEdit,
   showCarPageLink = true,
+  readOnly = false,
 }: {
   carId: number;
   onEdit: (car: RailcarWithAssignment) => void;
@@ -1903,7 +1911,10 @@ export function CarDetail({
   canEdit: boolean;
   /** Hide when already on `#/cars/:id`. */
   showCarPageLink?: boolean;
+  /** Context-gated read-only (e.g. Account Management). Overrides canEdit. */
+  readOnly?: boolean;
 }) {
+  const allowEdits = canEdit && !readOnly;
   const { toast } = useToast();
   const [remarkOpen, setRemarkOpen] = useState(false);
   const [rentFormOpen, setRentFormOpen] = useState(false);
@@ -2068,19 +2079,19 @@ export function CarDetail({
             Car page
           </Button>
         )}
-        {canEdit && (
+        {allowEdits && (
           <Button size="sm" variant="secondary" onClick={() => onEdit(data.railcar)} data-testid="button-edit-car">
             <Pencil className="h-4 w-4" />
             Edit
           </Button>
         )}
-        {canEdit && (
+        {allowEdits && (
           <Button size="sm" variant="outline" onClick={() => setRemarkOpen(true)}>
             <Hash className="h-3.5 w-3.5" />
             Change Number
           </Button>
         )}
-        {canEdit && (
+        {allowEdits && (
           <Button
             size="sm"
             variant="destructive"
@@ -2234,7 +2245,7 @@ export function CarDetail({
       </div>
 
       {/* Assign / Reassign panel */}
-      {canEdit && (
+      {allowEdits && (
         <div className="mt-4">
           {!assignOpen ? (
             <Button
@@ -2330,7 +2341,7 @@ export function CarDetail({
                 <Download className="h-3 w-3 mr-1" />Export
               </Button>
             )}
-            {canEdit && (
+            {allowEdits && (
               <Button
                 size="sm"
                 variant="outline"
@@ -2415,19 +2426,21 @@ export function CarDetail({
         )}
       </div>
 
-      <ActivityTimeline railcarId={carId} canEdit={canEdit} title="Activity" />
+      <ActivityTimeline railcarId={carId} canEdit={allowEdits} title="Activity" />
 
       {/* Railcar-level attachments */}
       <div className="mt-6 border-t border-border pt-5">
-        <AttachmentsPanel entityType="railcar" entityId={carId} compact />
+        <AttachmentsPanel entityType="railcar" entityId={carId} compact readOnly={readOnly} />
       </div>
 
-      <RemarkChangeDialog
-        open={remarkOpen}
-        onClose={() => setRemarkOpen(false)}
-        carId={carId}
-        currentLabel={[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}
-      />
+      {!readOnly && (
+        <RemarkChangeDialog
+          open={remarkOpen}
+          onClose={() => setRemarkOpen(false)}
+          carId={carId}
+          currentLabel={[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}
+        />
+      )}
     </div>
   );
 }

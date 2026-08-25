@@ -19,6 +19,7 @@ import { ArrowLeft, Building2, ChevronDown, ChevronRight, Plus, X } from "lucide
 import { programPath } from "@/lib/browse-nav";
 import { AmCommentThread } from "@/components/AmCommentThread";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 import { navigateHash } from "@/lib/hash-location";
 import {
   UNASSIGNED_AM,
@@ -86,6 +87,7 @@ type OlCar = {
   reporting_marks: string | null;
   car_type: string | null;
   expiration_date: string | null;
+  active?: boolean;
 };
 
 const TAG_LABEL: Record<StatusTag, string> = { good: "Good", watch: "Watch", risk: "Risk" };
@@ -397,6 +399,7 @@ function AccountDetailView({ id }: { id: number }) {
   const [notes, setNotes] = useState<string | null>(null);
   const [accountManager, setAccountManager] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [sheetCarId, setSheetCarId] = useState<number | null>(null);
   const displayName = name ?? data?.name ?? "";
   const displayNotes = notes ?? data?.notes ?? "";
   const displayManager = accountManager ?? data?.account_manager ?? "";
@@ -530,6 +533,7 @@ function AccountDetailView({ id }: { id: number }) {
                   ol={ol}
                   expanded={expanded === ol.id}
                   onToggle={() => setExpanded(expanded === ol.id ? null : ol.id)}
+                  onOpenCar={setSheetCarId}
                   canTag={canEditAccountMgmtTags}
                   canComment={canEditAccountMgmtComments}
                   canDeleteComment={canDeleteAccountMgmtComments}
@@ -566,6 +570,7 @@ function AccountDetailView({ id }: { id: number }) {
           )}
         </div>
       </div>
+      <RailcarDetailSheet carId={sheetCarId} onClose={() => setSheetCarId(null)} readOnly />
     </div>
   );
 }
@@ -575,6 +580,7 @@ function OlRows({
   ol,
   expanded,
   onToggle,
+  onOpenCar,
   canTag,
   canComment,
   canDeleteComment,
@@ -583,6 +589,7 @@ function OlRows({
   ol: AccountOl;
   expanded: boolean;
   onToggle: () => void;
+  onOpenCar: (carId: number) => void;
   canTag: boolean;
   canComment: boolean;
   canDeleteComment: boolean;
@@ -666,7 +673,7 @@ function OlRows({
             {cars.isLoading ? (
               <p className="text-xs text-muted-foreground">Loading cars…</p>
             ) : (cars.data?.cars ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">No active cars on this OL.</p>
+              <p className="text-xs text-muted-foreground">No cars on this OL.</p>
             ) : (
               <table className="w-full text-xs">
                 <thead className="text-muted-foreground">
@@ -680,7 +687,19 @@ function OlRows({
                   {(cars.data?.cars ?? []).map((c) => (
                     <tr key={c.id}>
                       <td className="py-0.5 font-mono-num">
-                        {(c.reporting_marks || "") + (c.car_number || "")}
+                        <button
+                          type="button"
+                          className="text-left hover:underline text-foreground"
+                          onClick={() => onOpenCar(c.id)}
+                          data-testid={`open-am-car-${c.id}`}
+                        >
+                          {(c.reporting_marks || "") + (c.car_number || "")}
+                        </button>
+                        {c.active === false ? (
+                          <span className="ml-2">
+                            <InactiveFleetBadge active={false} />
+                          </span>
+                        ) : null}
                       </td>
                       <td className="py-0.5 text-muted-foreground">{c.car_type || ""}</td>
                       <td className="py-0.5 text-muted-foreground">

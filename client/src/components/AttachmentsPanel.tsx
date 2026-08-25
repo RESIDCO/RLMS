@@ -38,6 +38,8 @@ interface Props {
   entityId: number;
   /** compact=true renders as a small inline section (for use inside detail panels) */
   compact?: boolean;
+  /** Hide upload/delete even for editors (context-gated, e.g. Account Management). */
+  readOnly?: boolean;
 }
 
 function fileIcon(mime: string) {
@@ -60,8 +62,8 @@ function formatDate(iso: string): string {
   });
 }
 
-export default function AttachmentsPanel({ entityType, entityId, compact = false }: Props) {
-  const canEdit = useCanEdit();
+export default function AttachmentsPanel({ entityType, entityId, compact = false, readOnly = false }: Props) {
+  const canEdit = useCanEdit() && !readOnly;
   const qc = useQueryClient();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);

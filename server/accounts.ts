@@ -489,8 +489,7 @@ export async function listRiderCarsForAccountMgmt(riderId: number) {
   const { data: assigns, error } = await supabaseAdmin
     .from("railcar_assignments")
     .select("railcar_id, railcars!inner(id, car_number, reporting_marks, car_type, active, estimated_lease_expiry, lease_expiry, lease_end_date)")
-    .eq("rider_id", riderId)
-    .eq("railcars.active", true);
+    .eq("rider_id", riderId);
   if (error) throw error;
   return (assigns ?? []).map((row: any) => {
     const c = Array.isArray(row.railcars) ? row.railcars[0] : row.railcars;
@@ -499,6 +498,7 @@ export async function listRiderCarsForAccountMgmt(riderId: number) {
       car_number: c?.car_number ?? null,
       reporting_marks: c?.reporting_marks ?? null,
       car_type: c?.car_type ?? null,
+      active: c?.active !== false,
       expiration_date:
         c?.estimated_lease_expiry || c?.lease_expiry || c?.lease_end_date || null,
     };

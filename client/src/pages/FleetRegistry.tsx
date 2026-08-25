@@ -1671,7 +1671,7 @@ export default function FleetRegistry() {
               {bulkRentalTarget === "Sold"
                 ? "Sold / Transferred To is left blank on a bulk change — fill buyer names per car afterward if needed."
                 : bulkRentalTarget === "Abatement"
-                  ? "Abatement keeps the car leased; rent is paused. Active Assignments / Total Fleet counts do not change."
+                  ? "Abatement keeps the car leased; rent is paused. It stays in Total Fleet and is netted out of Active Cars."
                   : `This marks the selected cars as ${bulkRentalTarget}.`}
             </DialogDescription>
           </DialogHeader>

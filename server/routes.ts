@@ -16,7 +16,7 @@ import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
-import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
+import { countActiveCarsByRiderId, countActiveOls, countCarsByRiderId } from "./rider-car-counts";
 import {
   applyCarStatusChange,
   assertInactivePatchAllowed,
@@ -97,6 +97,7 @@ import {
   autoFleetStatusFromLegacyText,
   parseFleetStatus,
   countsAsLeasedForKpi,
+  isLeasedFleetStatus,
   type FleetStatus,
 } from "@shared/fleet-status";
 import {
@@ -441,7 +442,7 @@ export async function registerRoutes(
       const operatingCarIds = new Set(railcars.map((r: any) => r.id));
       const soldCars = activeCars.filter((r: any) => r.fleet_status === "Sold");
       const idleCars = activeCars.filter((r: any) => r.fleet_status === "Idle");
-      const leasedCars = activeCars.filter((r: any) => countsAsLeasedForKpi(r.fleet_status));
+      const leasedCars = activeCars.filter((r: any) => isLeasedFleetStatus(r.fleet_status));
       const abatementCars = activeCars.filter((r: any) => r.fleet_status === "Abatement");
 
       const assignments = assignmentsRaw.filter((a: any) =>
@@ -449,15 +450,18 @@ export async function registerRoutes(
       );
       const assignedCarIds = new Set(assignments.map((a: any) => a.railcar_id));
 
-      // Active Assignments = fleet_status Leased on operating fleet (car-level; not riders table)
+      // Active Cars = operating fleet minus Idle, Abatement, Unassigned (Sold already out of Total Fleet).
       const activeAssignments = leasedCars.filter((r: any) => operatingCarIds.has(r.id)).length;
 
       // Unassigned = operating cars with no railcar_assignments row (not "rider expired")
       const unassignedCarList = railcars.filter((r: any) => !assignedCarIds.has(r.id));
       const unassignedCars = unassignedCarList.length;
+      const formulaActiveCars = (total: number, idle: number, abatement: number, unassigned: number) =>
+        total - idle - abatement - unassigned;
+      const jsActiveCars = formulaActiveCars(railcars.length, idleCars.length, abatementCars.length, unassignedCars);
 
       const utilization = railcars.length > 0
-        ? Math.round((activeAssignments / railcars.length) * 1000) / 10
+        ? Math.round((jsActiveCars / railcars.length) * 1000) / 10
         : 0;
 
       const rpsCars = railcars.filter((r: any) => r.entity === "Rail Partners Select");
@@ -496,13 +500,21 @@ export async function registerRoutes(
         ),
       ]);
       const latestRentByCarId = new Map<number, string>();
+      const activeCarIds = new Set(activeCars.map((r: any) => r.id));
       for (const ev of rentEvents as any[]) {
-        if (!operatingCarIds.has(ev.car_id)) continue;
+        if (!activeCarIds.has(ev.car_id)) continue;
         if (!latestRentByCarId.has(ev.car_id)) {
           latestRentByCarId.set(ev.car_id, ev.event_type);
         }
       }
-      const offRentCount = Array.from(latestRentByCarId.values()).filter((t) => t === "off_rent").length;
+      const offRentIds = new Set<number>();
+      for (const c of activeCars as any[]) {
+        if (c.fleet_status === "Idle" || c.fleet_status === "Abatement") offRentIds.add(c.id);
+      }
+      for (const [id, t] of latestRentByCarId) {
+        if (t === "off_rent") offRentIds.add(id);
+      }
+      const offRentCount = offRentIds.size;
 
       const now = new Date();
       const twelveMo = new Date(now);
@@ -768,6 +780,12 @@ export async function registerRoutes(
       }
       const in_transit_leased_count = in_program_count;
 
+      const [activeOlCount, amOverview] = await Promise.all([
+        countActiveOls(),
+        listAccountManagementOverview(null, { includeInactive: false }),
+      ]);
+      const dealsExpiring = amOverview.kpis.expiring;
+
       let fleetKpis = sqlKpis
         ? {
             total_fleet: Number(sqlKpis.operating) || 0,
@@ -784,22 +802,40 @@ export async function registerRoutes(
             owned_assigned: Number(sqlKpis.owned_assigned) || 0,
             coal_total: Number(sqlKpis.coal_total) || 0,
             railcars_scanned: Number(sqlKpis.scanned) || 0,
+            leased_only: Number(sqlKpis.leased_only ?? sqlKpis.leased_operating) || 0,
           }
         : null;
+
+      const sqlActiveCars = fleetKpis
+        ? formulaActiveCars(
+            fleetKpis.total_fleet,
+            fleetKpis.idle_count,
+            fleetKpis.abatement_count,
+            fleetKpis.unassigned_cars
+          )
+        : jsActiveCars;
+      if (fleetKpis && fleetKpis.leased_only !== sqlActiveCars) {
+        console.warn("[dashboard] Active Cars mismatch", { leased_only: fleetKpis.leased_only, byFormula: sqlActiveCars });
+      } else if (!fleetKpis && activeAssignments !== jsActiveCars) {
+        console.warn("[dashboard] Active Cars mismatch", { leased: activeAssignments, byFormula: jsActiveCars });
+      }
 
       res.json({
         kpis: fleetKpis
           ? {
               total_fleet: fleetKpis.total_fleet,
-              active_assignments: fleetKpis.active_assignments,
+              active_assignments: sqlActiveCars,
+              active_cars: sqlActiveCars,
               unassigned_cars: fleetKpis.unassigned_cars,
               expiring_12mo: expiring12mo,
               expiring_6mo: expiring6mo,
+              deals_expiring: dealsExpiring,
               off_rent_count: Number(sqlKpis.off_rent) || 0,
               undefined_end_car_count: undefinedEndCarCount,
               financial_snapshot_month: latestSnap,
-              riders_count: Number(sqlKpis.riders_count) || 0,
-              utilization_pct: sqlUtil(fleetKpis.total_fleet, fleetKpis.active_assignments),
+              riders_count: activeOlCount,
+              utilization_pct: sqlUtil(fleetKpis.total_fleet, sqlActiveCars),
+              utilization_cars: sqlActiveCars,
               sold_count: fleetKpis.sold_count,
               idle_count: fleetKpis.idle_count,
               leased_count: fleetKpis.leased_count,
@@ -820,15 +856,18 @@ export async function registerRoutes(
             }
           : {
           total_fleet: railcars.length,
-          active_assignments: activeAssignments,
+          active_assignments: jsActiveCars,
+          active_cars: jsActiveCars,
           unassigned_cars: unassignedCars,
           expiring_12mo: expiring12mo,
           expiring_6mo: expiring6mo,
+          deals_expiring: dealsExpiring,
           off_rent_count: offRentCount,
           undefined_end_car_count: undefinedEndCarCount,
           financial_snapshot_month: latestSnap,
-          riders_count: activeOls.length,
+          riders_count: activeOlCount,
           utilization_pct: utilization,
+          utilization_cars: jsActiveCars,
           sold_count: soldCars.length,
           idle_count: idleCars.length,
           leased_count: leasedCars.length,

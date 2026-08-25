@@ -5,7 +5,7 @@
  * Sold  = no longer owned by RESIDCO, still tracked (active) until remarked.
  * Leased = on rent.
  * Abatement = still leased (lease has not ended); rent is temporarily paused.
- *   Counts as Leased for Total Fleet / Active Assignments KPI math.
+ *   Netted out of Active Cars and fleet Utilization (2026-08-25); still in Total Fleet.
  *
  * Live KPIs and UI read the stored column. Text-matching of assignment_label /
  * managed_category is ONLY for the one-time backfill and for auto-deriving
@@ -17,9 +17,14 @@ export type FleetStatusSource = "auto" | "manual";
 
 export const FLEET_STATUSES: FleetStatus[] = ["Leased", "Idle", "Sold", "Abatement"];
 
-/** Abatement is a flag on an otherwise-leased car — include it in Leased KPI buckets. */
+/** Entity assigned counts — Abatement still counts as on-lease for RPS/Main util bars. */
 export function countsAsLeasedForKpi(status: FleetStatus | string | null | undefined): boolean {
   return status === "Leased" || status === "Abatement";
+}
+
+/** Active Cars KPI: strict Leased tag (Idle, Abatement, Sold, Unassigned are other tiles). */
+export function isLeasedFleetStatus(status: FleetStatus | string | null | undefined): boolean {
+  return status === "Leased";
 }
 
 export type FleetStatusInput = {

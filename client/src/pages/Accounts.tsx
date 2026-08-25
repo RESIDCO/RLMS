@@ -51,7 +51,7 @@ type Overview = {
   manager_pills: { name: string; account_count: number }[];
   unassigned_count: number;
   all_count: number;
-  expire_years: [number, number, number];
+  expire_years: number[];
   kpis: {
     expiring: { year: number; count: number }[];
     status: { good: number; watch: number; risk: number };
@@ -204,7 +204,7 @@ function AccountListView() {
 
         <div>
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Deals Expiring</div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {(data?.kpis.expiring ?? data?.expire_years.map((year) => ({ year, count: 0 })) ?? []).map((tile) => (
               <KpiTile
                 key={tile.year}

@@ -25,8 +25,10 @@ import {
   PauseCircle,
   TimerOff,
   FolderOpen,
+  CalendarDays,
 } from "lucide-react";
 import { openAppTab, lesseePath, olPath, entityPath, turning50Path, olKeyFromLabel } from "@/lib/browse-nav";
+import { accountListPath } from "@/lib/account-mgmt-nav";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type CarRow = {
@@ -72,14 +74,17 @@ type DashboardData = {
   kpis: {
     total_fleet: number;
     active_assignments: number;
+    active_cars?: number;
     unassigned_cars: number;
     expiring_12mo: number;
     expiring_6mo: number;
+    deals_expiring?: { year: number; count: number }[];
     off_rent_count: number;
     undefined_end_car_count?: number;
     financial_snapshot_month?: string | null;
     riders_count: number;
     utilization_pct: number;
+    utilization_cars?: number;
     sold_count: number;
     idle_count?: number;
     leased_count?: number;
@@ -203,12 +208,12 @@ function DrillDownDrawer({
   const open = !!drillKey && !!data;
 
   const config: Record<NonNullable<DrillKey>, { title: string; description: string }> = {
-    total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold). Equals Idle + Active Assignments (+ Unassigned)." },
-    active_assignments: { title: "Active Assignments",   description: "Leased cars in the operating fleet (rental status Leased or Abatement)" },
+    total_fleet:        { title: "Total Fleet",          description: "Active operating fleet (excludes Sold). Equals Idle + Abatement + Active Cars + Unassigned." },
+    active_assignments: { title: "Active Cars",          description: "Total Fleet minus Idle, Abatement, and Unassigned. Strict Leased tag — Sold is already outside Total Fleet." },
     unassigned_cars:    { title: "Unassigned Cars",      description: "Operating cars with no railcar_assignments row — distinct from Idle (rental status)" },
-    expiring_12mo:      { title: "Expiring <12 months", description: "OLs whose Asset Report–governed expiration (or V_Valid fallback if the report is silent) falls within the next 12 months." },
-    riders_count:       { title: "Active OLs / Riders", description: "Distinct rider_external_id values on the operating fleet" },
-    utilization_pct:    { title: "Fleet Utilization",    description: "Leased cars ÷ operating fleet (active, excluding Sold)" },
+    expiring_12mo:      { title: "Expiring <12 months", description: "Unused — calendar-year tiles replaced this window." },
+    riders_count:       { title: "Active OLs / Riders", description: "Riders with at least one active assigned car (same rule as Lease Management)." },
+    utilization_pct:    { title: "Fleet Utilization",    description: "Active Cars ÷ Total Fleet (same Active Cars KPI as the tile — Idle, Abatement, and Unassigned are out of the numerator)." },
   };
 
   const info = drillKey ? config[drillKey] : null;
@@ -244,7 +249,7 @@ function DrillDownDrawer({
           {drillKey === "utilization_pct" && data && (
             <div className="mt-3 space-y-1.5">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{data.kpis.active_assignments} assigned</span>
+                <span>{data.kpis.utilization_cars ?? data.kpis.active_assignments} on lease</span>
                 <span className="font-semibold text-foreground">{data.kpis.utilization_pct}%</span>
                 <span>{data.kpis.unassigned_cars} off-lease</span>
               </div>
@@ -446,10 +451,10 @@ export default function Dashboard() {
       />
 
       <div className="px-4 sm:px-8 py-5 sm:py-7 space-y-7">
-        {/* KPIs — Total Fleet = Idle + Active Assignments (+ Unassigned); Sold is outside operating fleet */}
+        {/* KPIs — Total Fleet = Idle + Abatement + Active Cars + Unassigned; Sold is outside operating fleet */}
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0">
           {isLoading ? (
-            Array.from({ length: 12 }).map((_, i) => (
+            Array.from({ length: 14 }).map((_, i) => (
               <Skeleton key={i} className="h-[110px] rounded-lg" />
             ))
           ) : data ? (
@@ -467,7 +472,7 @@ export default function Dashboard() {
                 testId="kpi-idle"
                 label="Idle"
                 value={data.kpis.idle_count ?? 0}
-                subtext="Active cars not currently leased"
+                subtext="Active cars tagged Idle"
                 icon={PauseCircle}
                 onClick={() => navigate("/railcars?filter=offlease")}
               />
@@ -475,17 +480,17 @@ export default function Dashboard() {
                 testId="kpi-abatement"
                 label="Abatement"
                 value={data.kpis.abatement_count ?? 0}
-                subtext="Still leased; rent paused (counts in Active Assignments)"
+                subtext="Tagged Abatement; netted out of Active Cars"
                 icon={TimerOff}
                 onClick={() => navigate("/railcars?filter=abatement")}
               />
               <KpiCard
                 testId="kpi-active-assignments"
-                label="Active Assignments"
-                value={data.kpis.active_assignments}
-                subtext="Leased cars in the operating fleet"
+                label="Active Cars"
+                value={data.kpis.active_cars ?? data.kpis.active_assignments}
+                subtext="Total Fleet − Idle − Abatement − Unassigned"
                 icon={LinkIcon}
-                onClick={() => navigate("/railcars?filter=assigned")}
+                onClick={() => navigate("/railcars?filter=leased")}
               />
               <KpiCard
                 testId="kpi-unassigned"
@@ -524,7 +529,7 @@ export default function Dashboard() {
                       {utilPct}%
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                      {data.kpis.active_assignments.toLocaleString()} / {data.kpis.total_fleet.toLocaleString()}
+                      {(data.kpis.utilization_cars ?? data.kpis.active_assignments).toLocaleString()} / {data.kpis.total_fleet.toLocaleString()}
                     </div>
                   </div>
                 </div>
@@ -543,27 +548,33 @@ export default function Dashboard() {
                 testId="kpi-off-rent"
                 label="Off Rent"
                 value={data.kpis.off_rent_count}
-                subtext="Latest rent_events status is off_rent"
+                subtext="Idle ∪ Abatement ∪ latest rent event off_rent"
                 icon={AlertTriangle}
                 accent={data.kpis.off_rent_count > 0 ? "warning" : "muted"}
                 marker="icon"
               />
-              <KpiCard
-                testId="kpi-expiring6"
-                label="Expiring <6mo"
-                value={data.kpis.expiring_6mo}
-                accent="error"
-                marker="dot"
-                onClick={() => navigate("/leases?filter=expiring6")}
-              />
-              <KpiCard
-                testId="kpi-expiring"
-                label="Expiring <12mo"
-                value={data.kpis.expiring_12mo}
-                accent="warning"
-                marker="dot"
-                onClick={() => navigate("/leases?filter=expiring")}
-              />
+              {(data.kpis.deals_expiring ?? []).map((tile) => (
+                <KpiCard
+                  key={tile.year}
+                  testId={`kpi-expiring-${tile.year}`}
+                  label={`Deals Expiring ${tile.year}`}
+                  value={tile.count}
+                  subtext="Active OLs by governed expiration year"
+                  icon={CalendarDays}
+                  accent="warning"
+                  marker="dot"
+                  onClick={() =>
+                    navigate(
+                      accountListPath({
+                        manager: null,
+                        kpi: { kind: "year", year: tile.year },
+                        showInactive: false,
+                        search: "",
+                      })
+                    )
+                  }
+                />
+              ))}
               <KpiCard
                 testId="kpi-riders"
                 label="Active OLs"

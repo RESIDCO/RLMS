@@ -40,3 +40,13 @@ export async function countActiveCarsByRiderId(): Promise<Map<number, number>> {
   }
   return counts;
 }
+
+/** Riders with at least one active assigned car — Lease Management / Account Management inactive rule. */
+export async function countActiveOls(): Promise<number> {
+  const byRider = await countActiveCarsByRiderId();
+  let n = 0;
+  for (const c of byRider.values()) {
+    if (c > 0) n += 1;
+  }
+  return n;
+}

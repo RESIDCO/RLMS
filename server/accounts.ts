@@ -203,6 +203,12 @@ function expirationYear(iso: string | null | undefined): number | null {
   return Number(s.slice(0, 4));
 }
 
+/** Calendar years on Deals Expiring tiles (Dashboard + Account Management ALL). */
+export function dealsExpireYears(): number[] {
+  const y = new Date().getFullYear();
+  return [y, y + 1, y + 2, y + 3];
+}
+
 export type AccountOverviewRow = AccountListRow & {
   expire_years: number[];
   status_tags: StatusTag[];
@@ -221,7 +227,7 @@ export type AccountOverview = {
   manager_pills: AccountManagerPill[];
   unassigned_count: number;
   all_count: number;
-  expire_years: [number, number, number];
+  expire_years: number[];
   kpis: {
     expiring: { year: number; count: number }[];
     status: { good: number; watch: number; risk: number };
@@ -242,8 +248,7 @@ export async function listAccountManagementOverview(
   opts?: { includeInactive?: boolean },
 ): Promise<AccountOverview> {
   const includeInactive = opts?.includeInactive === true;
-  const nowYear = new Date().getFullYear();
-  const expireYears: [number, number, number] = [nowYear, nowYear + 1, nowYear + 2];
+  const expireYears = dealsExpireYears();
   const wantAm = String(accountManager ?? "").trim();
   const wantUnassigned = wantAm.toLowerCase() === "unassigned";
 

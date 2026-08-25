@@ -134,6 +134,7 @@ function TransitionList() {
   const { canEditAccountTransitions } = usePermissions();
   const qc = useQueryClient();
   const [am, setAm] = useState<string | null>(null);
+  const [method, setMethod] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [pick, setPick] = useState("");
   const [acctQ, setAcctQ] = useState("");
@@ -152,6 +153,34 @@ function TransitionList() {
   });
 
   const already = useMemo(() => new Set((data?.records ?? []).map((r) => r.account_id)), [data?.records]);
+  const methodPills = useMemo(() => {
+    const rows = data?.records ?? [];
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const m = String(r.communication_method ?? "").trim();
+      if (!m) continue;
+      counts.set(m, (counts.get(m) ?? 0) + 1);
+    }
+    const keys = ["in_person", "call", "email"];
+    for (const k of counts.keys()) {
+      if (!keys.includes(k)) keys.push(k);
+    }
+    return keys.map((key) => {
+      const tag = methodListTag(key);
+      return {
+        key,
+        label: tag?.label ?? key,
+        count: counts.get(key) ?? 0,
+        rowStyle: tag?.rowStyle,
+      };
+    });
+  }, [data?.records]);
+  const visibleRecords = useMemo(() => {
+    const rows = data?.records ?? [];
+    const want = String(method ?? "").trim();
+    if (!want) return rows;
+    return rows.filter((r) => String(r.communication_method ?? "").trim() === want);
+  }, [data?.records, method]);
   const filteredAccounts = useMemo(() => {
     const q = acctQ.trim();
     const list = q ? accounts.filter((a) => matchesSearchQuery([a.name], q)) : accounts;
@@ -198,31 +227,60 @@ function TransitionList() {
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-4">
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">AM</span>
-          <button
-            type="button"
-            className={cn(
-              "h-7 px-3 rounded-full text-xs border",
-              !am ? "bg-primary/15 border-primary/40 text-foreground" : "border-border text-muted-foreground",
-            )}
-            onClick={() => setAm(null)}
-          >
-            ALL{data ? ` · ${data.all_count}` : ""}
-          </button>
-          {(data?.pills ?? []).map((p) => (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">AM</span>
             <button
-              key={p.name}
               type="button"
               className={cn(
                 "h-7 px-3 rounded-full text-xs border",
-                am === p.name ? "bg-primary/15 border-primary/40 text-foreground" : "border-border text-muted-foreground",
+                !am ? "bg-primary/15 border-primary/40 text-foreground" : "border-border text-muted-foreground",
               )}
-              onClick={() => setAm(p.name)}
+              onClick={() => setAm(null)}
             >
-              {p.name} · {p.count}
+              ALL{data ? ` · ${data.all_count}` : ""}
             </button>
-          ))}
+            {(data?.pills ?? []).map((p) => (
+              <button
+                key={p.name}
+                type="button"
+                className={cn(
+                  "h-7 px-3 rounded-full text-xs border",
+                  am === p.name ? "bg-primary/15 border-primary/40 text-foreground" : "border-border text-muted-foreground",
+                )}
+                onClick={() => setAm(p.name)}
+              >
+                {p.name} · {p.count}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">Method</span>
+            <button
+              type="button"
+              className={cn(
+                "h-7 px-3 rounded-full text-xs border",
+                !method ? "bg-primary/15 border-primary/40 text-foreground" : "border-border text-muted-foreground",
+              )}
+              onClick={() => setMethod(null)}
+            >
+              ALL{data ? ` · ${data.records.length}` : ""}
+            </button>
+            {methodPills.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className={cn(
+                  "h-7 px-3 rounded-full text-xs border",
+                  method === p.key ? "border-foreground/30 text-foreground" : "border-border text-muted-foreground",
+                )}
+                style={method === p.key ? p.rowStyle : undefined}
+                onClick={() => setMethod(p.key)}
+              >
+                {p.label} · {p.count}
+              </button>
+            ))}
+          </div>
         </div>
 
         {isLoading ? (
@@ -243,7 +301,7 @@ function TransitionList() {
                 </tr>
               </thead>
               <tbody>
-                {(data?.records ?? []).map((r) => {
+                {visibleRecords.map((r) => {
                   const tag = methodListTag(r.communication_method);
                   const pct = r.pct_complete ?? accountHandoffPct(r);
                   return (
@@ -300,10 +358,12 @@ function TransitionList() {
                   </tr>
                   );
                 })}
-                {(data?.records ?? []).length === 0 && (
+                {visibleRecords.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-2 py-10 text-center text-muted-foreground">
-                      No transition records yet. Add an account to start a handoff.
+                      {(data?.records ?? []).length === 0
+                        ? "No transition records yet. Add an account to start a handoff."
+                        : "No accounts match this filter."}
                     </td>
                   </tr>
                 )}

@@ -6,6 +6,7 @@ import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { applySearchFilter } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
+import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachLatestAmNotes, latestAmNotesByRiderIds } from "./rider-account-comments";
 
 const CAR_LIMIT = 500;

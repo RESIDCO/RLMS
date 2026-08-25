@@ -27,7 +27,7 @@ import {
 import { crossesInactiveBoundary, fieldsImpliedByCarStatus, statusAlignedToActiveFlag } from "@shared/car-lifecycle-status";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import { applyCarFinancialsFromSummary, loadFinancialSummaryRows } from "./refresh-car-financials";
-import { assertRiderImporterPatch } from "@shared/rider-import-guard";
+import { assertRailcarImporterPatch, assertRiderImporterPatch } from "@shared/rider-import-guard";
 import {
   addCarsToProgram,
   buildProgramReport,
@@ -2595,7 +2595,12 @@ export async function registerRoutes(
         } = r;
         return rest;
       };
-      const carInserts = validRows.map(stripPreviewOnly);
+      const carInserts = validRows.map((r) => {
+        const rest = stripPreviewOnly(r);
+        delete (rest as any).equipment_type_code;
+        assertRailcarImporterPatch(rest);
+        return rest;
+      });
 
       let importedCount = 0;
       // Map composite key (marks|number) → railcar id
@@ -2892,6 +2897,7 @@ export async function registerRoutes(
                 );
               }
             }
+            assertRailcarImporterPatch(updatePayload);
             const { error } = await supabase.from("railcars").update(updatePayload).eq("id", existingId);
             if (error) throw error;
             updated += 1;
@@ -2978,7 +2984,7 @@ export async function registerRoutes(
             historyRows += 1;
             continue; // skip the shared AH/CNH loops below for this car
           } else {
-            const { data: ins, error } = await supabase.from("railcars").insert({
+            const insertPayload = {
               ...payload,
               status: statusAlignedToActiveFlag(null, payload.active === true),
               fleet_status: autoFleetStatusFromLegacyText({
@@ -2989,7 +2995,9 @@ export async function registerRoutes(
               }),
               fleet_status_source: "auto",
               active_source: "auto",
-            }).select("id").single();
+            };
+            assertRailcarImporterPatch(insertPayload);
+            const { data: ins, error } = await supabase.from("railcars").insert(insertPayload).select("id").single();
             if (error) throw error;
             railcarId = ins!.id;
             keyToId.set(car.carKey, railcarId);

@@ -6,7 +6,14 @@
 export const RIDER_IMPORT_NEVER_WRITE = [
   "account_manager",
   "status_tag",
+  "owner_entity",
 ] as const;
+
+/**
+ * Railcar columns that importers must never write.
+ * One-time loads (and later manual edits) are the only writers.
+ */
+export const RAILCAR_IMPORT_NEVER_WRITE = ["equipment_type_code"] as const;
 
 /**
  * Account columns that importers must never write.
@@ -42,6 +49,17 @@ type NeverWrite = (typeof RIDER_IMPORT_NEVER_WRITE)[number];
 
 function isNeverWrite(key: string): key is NeverWrite {
   return (RIDER_IMPORT_NEVER_WRITE as readonly string[]).includes(key);
+}
+
+/** Throws if a railcar insert/update payload includes a never-write column. */
+export function assertRailcarImporterPatch(patch: Record<string, unknown>): void {
+  for (const key of Object.keys(patch)) {
+    if ((RAILCAR_IMPORT_NEVER_WRITE as readonly string[]).includes(key)) {
+      throw new Error(
+        `Importer refused to write railcars.${key} — one-time loaded fields cannot be written by importers.`,
+      );
+    }
+  }
 }
 
 /** Throws if a rider insert/update payload includes a never-write column. */

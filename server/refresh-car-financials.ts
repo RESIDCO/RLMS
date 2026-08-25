@@ -11,6 +11,7 @@ import {
   type ActiveCarForJoin,
   type SummaryRowForRefresh,
 } from "@shared/financial-import";
+import { assertRailcarImporterPatch } from "@shared/rider-import-guard";
 
 const CAR_SELECT =
   "id, rider_external_id, car_type, mechanical_designation, general_description, entity, nbv, oec, monthly_rent_per_car, monthly_depr_per_car, financial_snapshot_month";
@@ -70,6 +71,7 @@ export async function applyCarFinancialsFromSummary(
       slice.map((u) => {
         const payload: Record<string, unknown> = {};
         for (const f of RAILCAR_FINANCIAL_REFRESH_FIELDS) payload[f] = u[f];
+        assertRailcarImporterPatch(payload);
         return sb.from("railcars").update(payload).eq("id", u.id);
       })
     );

@@ -9,7 +9,7 @@ import { attachLatestAmNotes } from "./rider-account-comments";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
 export const RAILCAR_LIST_SELECT = `
-id, car_number, reporting_marks, car_type, status, fleet_status, fleet_status_source, entity, active, sold_to,
+id, car_number, reporting_marks, car_type, equipment_type_code, status, fleet_status, fleet_status_source, entity, active, sold_to,
 rider_external_id, assignment_label, managed_category, lessee_name,
 lease_start_date, lease_end_date, lease_expiry, estimated_lease_expiry, lease_expiry_snapshot_month, lease_date_source, transit_status, transit_label,
 nbv, oac, oec, monthly_rent_per_car, monthly_depr_per_car, build_year, build_date,

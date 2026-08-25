@@ -679,6 +679,12 @@ export default function LeaseManagement() {
                                       </span>
                                     </>
                                   )}
+                                  {(rider as any).owner_entity ? (
+                                    <>
+                                      {" · "}
+                                      <span title="Owner Entity">{(rider as any).owner_entity}</span>
+                                    </>
+                                  ) : null}
                                   {(rider as any).sold_to && (
                                     <> · <span className="text-amber-400">→ {(rider as any).sold_to}</span></>
                                   )}
@@ -1438,6 +1444,7 @@ function RiderForm({
         lessors_cost: rider?.lessors_cost ?? "",
         base_term_months: rider?.base_term_months ?? "",
         monthly_rent_per_car: rider?.monthly_rent_per_car ?? "",
+        owner_entity: rider?.owner_entity ?? "",
         sold_to: rider?.sold_to ?? "",
         notes: rider?.notes ?? "",
       });
@@ -1452,6 +1459,7 @@ function RiderForm({
         lessors_cost: form.lessors_cost === "" ? null : Number(form.lessors_cost),
         base_term_months: form.base_term_months === "" ? null : Number(form.base_term_months),
         monthly_rent_per_car: form.monthly_rent_per_car === "" ? null : Number(form.monthly_rent_per_car),
+        owner_entity: form.owner_entity?.trim() || null,
         sold_to: form.sold_to?.trim() || null,
       };
       delete (body as any).notes;
@@ -1571,6 +1579,17 @@ function RiderForm({
               onChange={(e) => setForm({ ...form, monthly_rent_per_car: e.target.value })}
             />
             <p className="text-xs text-muted-foreground mt-1">Typical range: $100 – $850 per car / month</p>
+          </div>
+          <div>
+            <Label>Owner Entity</Label>
+            <Input
+              value={form.owner_entity ?? ""}
+              onChange={(e) => setForm({ ...form, owner_entity: e.target.value })}
+              placeholder="e.g. ALF P-I, RPS LLC"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Legal owning entity for this OL. Loaded once from the Asset Report — not overwritten by imports.
+            </p>
           </div>
           <div>
             <Label>Account Manager</Label>

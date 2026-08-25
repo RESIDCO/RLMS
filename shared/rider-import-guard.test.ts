@@ -3,9 +3,11 @@
 
 import {
   ACCOUNT_IMPORT_NEVER_WRITE,
+  RAILCAR_IMPORT_NEVER_WRITE,
   RIDER_FINANCIAL_FILL_BLANK_FIELDS,
   RIDER_IMPORT_NEVER_WRITE,
   assertAccountImporterPatch,
+  assertRailcarImporterPatch,
   assertRiderImporterPatch,
   riderFinancialFillBlankPayload,
   riderVcfExpirationSyncPayload,
@@ -23,6 +25,8 @@ function ok(cond: boolean, label: string) {
 }
 
 ok(RIDER_IMPORT_NEVER_WRITE.includes("status_tag"), "status_tag is named never-write");
+ok(RIDER_IMPORT_NEVER_WRITE.includes("owner_entity"), "owner_entity is named never-write");
+ok(RAILCAR_IMPORT_NEVER_WRITE.includes("equipment_type_code"), "equipment_type_code is named never-write");
 ok(!(RIDER_IMPORT_NEVER_WRITE as readonly string[]).includes("account_mgmt_comment"), "dropped riders.account_mgmt_comment is not a rider column");
 let tagThrew = false;
 try {
@@ -43,6 +47,23 @@ try {
   threw = true;
 }
 ok(threw, "assert rejects riders.account_manager");
+
+let ownerThrew = false;
+try {
+  assertRiderImporterPatch({ owner_entity: "ALF P-I" });
+} catch {
+  ownerThrew = true;
+}
+ok(ownerThrew, "assert rejects riders.owner_entity");
+
+let equipThrew = false;
+try {
+  assertRailcarImporterPatch({ equipment_type_code: "C112" });
+} catch {
+  equipThrew = true;
+}
+ok(equipThrew, "assert rejects railcars.equipment_type_code");
+assertRailcarImporterPatch({ nbv: 1 });
 
 ok(ACCOUNT_IMPORT_NEVER_WRITE.includes("account_manager"), "accounts.account_manager is named never-write");
 let acctThrew = false;

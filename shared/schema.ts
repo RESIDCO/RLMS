@@ -41,6 +41,11 @@ export type Rider = {
   account_manager: string | null;
   /** OL relationship status. Written only from Account Management. */
   status_tag: "good" | "watch" | "risk" | null;
+  /**
+   * Legal owning entity for this OL (Asset Report Owner Entity).
+   * One-time load — importers must never write it.
+   */
+  owner_entity?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -60,6 +65,8 @@ export type Railcar = {
   car_number: string;
   reporting_marks: string | null;
   car_type: string | null;
+  /** AAR/Railinc mechanical type (e.g. C112). One-time load — importers never write it. */
+  equipment_type_code?: string | null;
   capacity_cf: number | null;
   tare_weight_lbs: number | null;
   load_limit_lbs: number | null;
@@ -247,6 +254,7 @@ export const insertRiderSchema = z.object({
   sold_to: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
   account_manager: z.string().nullable().optional(),
+  owner_entity: z.string().nullable().optional(),
 });
 export type InsertRider = z.infer<typeof insertRiderSchema>;
 
@@ -261,6 +269,7 @@ export const insertRailcarSchema = z.object({
   car_number: z.string().min(1),
   reporting_marks: z.string().nullable().optional(),
   car_type: z.string().nullable().optional(),
+  equipment_type_code: z.string().nullable().optional(),
   capacity_cf: z.coerce.number().int().nullable().optional(),
   tare_weight_lbs: z.coerce.number().int().nullable().optional(),
   load_limit_lbs: z.coerce.number().int().nullable().optional(),

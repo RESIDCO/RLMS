@@ -287,6 +287,8 @@ function renderOptTd(key: string, r: any) {
       return <td key={key} className={`${text} max-w-[180px] truncate`}>{r.general_description || r.description || "—"}</td>;
     case "mech_designation":
       return <td key={key} className={text}>{r.mechanical_designation || r.mech_designation || "—"}</td>;
+    case "equipment_type_code":
+      return <td key={key} className={text}>{r.equipment_type_code ?? "—"}</td>;
     case "commodity":
       return <td key={key} className={text}>{r.commodity ?? "—"}</td>;
     case "commodity_family":
@@ -563,7 +565,7 @@ export default function FleetRegistry() {
   // ── Optional column visibility ─────────────────────────────────────────────
   type OptCol =
     | "nbv" | "oac" | "oec" | "capacity_cf" | "lining" | "build_year"
-    | "description" | "mech_designation"
+    | "description" | "mech_designation" | "equipment_type_code"
     | "monthly_rent_per_car" | "monthly_depr_per_car"
     | "commodity" | "commodity_family"
     | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
@@ -579,6 +581,7 @@ export default function FleetRegistry() {
     { key: "lining",              label: "Lining" },
     { key: "description",         label: "Description" },
     { key: "mech_designation",    label: "Mech Desig." },
+    { key: "equipment_type_code", label: "Equip. Type" },
     { key: "commodity",           label: "Commodity" },
     { key: "commodity_family",    label: "Commodity Family" },
     { key: "dot_code",            label: "DOT Code" },
@@ -2021,7 +2024,9 @@ export function CarDetail({
           </div>
           <SheetTitle className="font-mono-num">{[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}</SheetTitle>
           <SheetDescription>
-            {r.car_type ?? "—"}{(r as any).mechanical_designation ? ` · ${(r as any).mechanical_designation}` : ""}
+            {r.car_type ?? "—"}
+            {(r as any).equipment_type_code ? ` · ${(r as any).equipment_type_code}` : ""}
+            {(r as any).mechanical_designation ? ` · ${(r as any).mechanical_designation}` : ""}
           </SheetDescription>
         </SheetHeader>
       ) : null}
@@ -2124,6 +2129,7 @@ export function CarDetail({
         <DetailRow label="Rental Status" value={displayRailcarStatus(displayStatusInputFromRailcar(r))} />
         <DetailRow label="Car Status" value={r.status ?? "—"} />
         <DetailRow label="Car Type" value={r.car_type ?? "—"} />
+        <DetailRow label="Equipment Type Code" value={(r as any).equipment_type_code ?? "—"} />
         <DetailRow label="Mech. Designation" value={(r as any).mechanical_designation ?? "—"} />
         <DetailRow label="General Desc." value={(r as any).general_description ?? "—"} />
         <DetailRow label="AAR" value={r.aar_designation ?? "—"} />
@@ -2546,6 +2552,7 @@ export function RailcarFormDialog({
     car_number: car?.car_number ?? "",
     reporting_marks: car?.reporting_marks ?? "HWCX",
     car_type: car?.car_type ?? "Hopper",
+    equipment_type_code: (car as any)?.equipment_type_code ?? "",
     status: car?.status ?? "Active/In-Service",
     fleet_status: ((car as any)?.fleet_status as FleetStatus | undefined) ?? "Leased",
     entity: (car as any)?.entity ?? "",
@@ -2720,6 +2727,18 @@ export function RailcarFormDialog({
               value={form.car_type}
               onChange={(e) => setForm({ ...form, car_type: e.target.value })}
             />
+          </div>
+          <div>
+            <Label>Equipment Type Code</Label>
+            <Input
+              value={form.equipment_type_code ?? ""}
+              onChange={(e) => setForm({ ...form, equipment_type_code: e.target.value.toUpperCase() })}
+              placeholder="e.g. C112"
+              className="font-mono uppercase"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              AAR/Railinc mechanical type. One-time load — not overwritten by VCF or Master Car List.
+            </p>
           </div>
           <div>
             <Label>Ownership Entity</Label>
@@ -2967,6 +2986,7 @@ function useMemoReset(
         car_number: car?.car_number ?? "",
         reporting_marks: car?.reporting_marks ?? "HWCX",
         car_type: car?.car_type ?? "Hopper",
+        equipment_type_code: (car as any)?.equipment_type_code ?? "",
         status: car?.status ?? "Active/In-Service",
         fleet_status: ((car as any)?.fleet_status as FleetStatus | undefined) ?? "Leased",
         transit_status: (car as any)?.transit_status ?? "",

@@ -1,8 +1,16 @@
 /**
  * Rider columns that importers must never write.
- * Lease Management (Edit Rider) is the only writer of these fields.
+ * riders.account_manager is deprecated (unused) but still named here so a
+ * stale payload cannot write it.
  */
 export const RIDER_IMPORT_NEVER_WRITE = ["account_manager"] as const;
+
+/**
+ * Account columns that importers must never write.
+ * Account Management is the only writer of accounts.account_manager.
+ * Master Car List may insert accounts (name only) via ensureAccountForLessee.
+ */
+export const ACCOUNT_IMPORT_NEVER_WRITE = ["account_manager"] as const;
 
 /**
  * Only these rider columns may be filled by Financial Data Refresh fill-if-blank.
@@ -27,7 +35,18 @@ export function assertRiderImporterPatch(patch: Record<string, unknown>): void {
   for (const key of Object.keys(patch)) {
     if (isNeverWrite(key)) {
       throw new Error(
-        `Importer refused to write riders.${key} — Lease Management is the only writer.`,
+        `Importer refused to write riders.${key} — that column is unused; set accounts.account_manager instead.`,
+      );
+    }
+  }
+}
+
+/** Throws if an accounts insert/update payload includes a never-write column. */
+export function assertAccountImporterPatch(patch: Record<string, unknown>): void {
+  for (const key of Object.keys(patch)) {
+    if ((ACCOUNT_IMPORT_NEVER_WRITE as readonly string[]).includes(key)) {
+      throw new Error(
+        `Importer refused to write accounts.${key} — Account Management is the only writer.`,
       );
     }
   }

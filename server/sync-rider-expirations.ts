@@ -6,7 +6,7 @@
  * the riders table as source of truth for Dashboard KPIs.
  *
  * Patch allowlist is RIDER_VCF_EXPIRATION_SYNC_FIELDS (expiration_date / effective_date).
- * account_manager is named in RIDER_IMPORT_NEVER_WRITE — not merely omitted.
+ * riders.account_manager and accounts.account_manager are never written.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "./fetch-all";

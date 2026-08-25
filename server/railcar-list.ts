@@ -246,7 +246,8 @@ function applyOpsFlagFilter(query: any, flag: string | undefined, fallback?: boo
 }
 
 /**
- * Live join: railcars.rider_external_id → riders.schedule_number → account_manager.
+ * Live join: railcars.rider_external_id → riders.schedule_number →
+ * riders.master_lease_id → master_leases.account_id → accounts.account_manager.
  * Never stored on railcars — importers have nothing to clobber.
  */
 export async function attachAccountManagerInitials<T extends { rider_external_id?: string | null }>(
@@ -255,28 +256,63 @@ export async function attachAccountManagerInitials<T extends { rider_external_id
   const keys = [
     ...new Set(rows.map((r) => String(r.rider_external_id ?? "").trim()).filter(Boolean)),
   ];
-  const map = new Map<string, string>();
+  const bySchedule = new Map<string, string | null>();
   for (let i = 0; i < keys.length; i += 200) {
     const slice = keys.slice(i, i + 200);
-    const { data, error } = await supabaseAdmin
+    const { data: riders, error } = await supabaseAdmin
       .from("riders")
-      .select("schedule_number, account_manager")
+      .select("schedule_number, master_lease_id")
       .in("schedule_number", slice);
-    if (error) {
-      if (/account_manager|schema cache|does not exist|could not find/i.test(error.message)) {
-        return rows.map((r) => ({ ...r, account_manager_initials: null }));
+    if (error) throw error;
+    const mlaIds = [
+      ...new Set((riders ?? []).map((r) => r.master_lease_id).filter((id): id is number => id != null)),
+    ];
+    const accountIdByMla = new Map<number, number | null>();
+    for (let j = 0; j < mlaIds.length; j += 200) {
+      const mlaSlice = mlaIds.slice(j, j + 200);
+      const { data: leases, error: lErr } = await supabaseAdmin
+        .from("master_leases")
+        .select("id, account_id")
+        .in("id", mlaSlice);
+      if (lErr) {
+        if (/account_id|schema cache|does not exist|could not find/i.test(lErr.message)) {
+          return rows.map((r) => ({ ...r, account_manager_initials: null }));
+        }
+        throw lErr;
       }
-      throw error;
+      for (const l of leases ?? []) accountIdByMla.set(l.id, l.account_id ?? null);
     }
-    for (const row of data ?? []) {
+    const accountIds = [
+      ...new Set([...accountIdByMla.values()].filter((id): id is number => id != null)),
+    ];
+    const amByAccount = new Map<number, string>();
+    for (let j = 0; j < accountIds.length; j += 200) {
+      const aSlice = accountIds.slice(j, j + 200);
+      const { data: accounts, error: aErr } = await supabaseAdmin
+        .from("accounts")
+        .select("id, account_manager")
+        .in("id", aSlice);
+      if (aErr) {
+        if (/account_manager|schema cache|does not exist|could not find/i.test(aErr.message)) {
+          return rows.map((r) => ({ ...r, account_manager_initials: null }));
+        }
+        throw aErr;
+      }
+      for (const a of accounts ?? []) {
+        const t = String(a.account_manager ?? "").trim();
+        if (t) amByAccount.set(a.id, t);
+      }
+    }
+    for (const row of riders ?? []) {
       const k = String(row.schedule_number ?? "").trim().toUpperCase();
       if (!k) continue;
-      map.set(k, String(row.account_manager ?? "").trim());
+      const aid = accountIdByMla.get(row.master_lease_id);
+      bySchedule.set(k, aid != null ? amByAccount.get(aid) ?? null : null);
     }
   }
   return rows.map((r) => {
     const k = String(r.rider_external_id ?? "").trim().toUpperCase();
-    const v = k ? map.get(k) : "";
+    const v = k ? bySchedule.get(k) : "";
     return { ...r, account_manager_initials: v || null };
   });
 }

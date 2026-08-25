@@ -3,7 +3,8 @@
  * Preview/review is dry-run; commit is a separate step.
  *
  * Write scope (commit): railcars, assignment_history, car_number_history.
- * Does not insert riders or master_leases. Does not write riders.account_manager.
+ * Does not insert riders or master_leases. Does not write accounts.account_manager
+ * or riders.account_manager (deprecated).
  * See docs/IMPORT_WRITE_BOUNDARIES.md.
  */
 

@@ -19,7 +19,7 @@ type AccountListRow = {
   id: number;
   name: string;
   notes: string | null;
-  account_managers: string;
+  account_manager: string | null;
   program_count: number;
 };
 
@@ -27,7 +27,8 @@ type AccountDetail = {
   id: number;
   name: string;
   notes: string | null;
-  account_managers: string;
+  account_manager: string | null;
+  leases: { id: number; lease_number: string | null; lessee: string | null }[];
   programs: { id: number; name: string; status: string | null; account_manager: string | null }[];
 };
 
@@ -51,7 +52,7 @@ function AccountListView() {
     const q = search.trim().toLowerCase();
     if (!q) return accounts;
     return accounts.filter((a) => {
-      const blob = `${a.name} ${a.account_managers} ${a.notes ?? ""}`.toLowerCase();
+      const blob = `${a.name} ${a.account_manager ?? ""} ${a.notes ?? ""}`.toLowerCase();
       return blob.includes(q);
     });
   }, [accounts, search]);
@@ -71,7 +72,7 @@ function AccountListView() {
       />
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-4 sm:px-8 py-4 gap-3">
         <ClearableSearchInput
-          className="relative w-full max-w-sm"
+          className="relative w-full max-w-sm shrink-0 flex-none"
           inputClassName="h-9"
           placeholder="Search accounts…"
           value={search}
@@ -85,7 +86,7 @@ function AccountListView() {
               <thead className="sticky top-0 bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="text-left font-medium px-4 py-2">Name</th>
-                  <th className="text-left font-medium px-4 py-2">OL account managers</th>
+                  <th className="text-left font-medium px-4 py-2">Account Manager</th>
                   <th className="text-left font-medium px-4 py-2 hidden sm:table-cell">Programs</th>
                 </tr>
               </thead>
@@ -97,7 +98,7 @@ function AccountListView() {
                         {a.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-muted-foreground">{a.account_managers || ""}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{a.account_manager || ""}</td>
                     <td className="px-4 py-2 text-muted-foreground hidden sm:table-cell">{a.program_count || ""}</td>
                   </tr>
                 ))}
@@ -135,14 +136,17 @@ function AccountDetailView({ id }: { id: number }) {
   });
   const [name, setName] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  const [accountManager, setAccountManager] = useState<string | null>(null);
   const displayName = name ?? data?.name ?? "";
   const displayNotes = notes ?? data?.notes ?? "";
+  const displayManager = accountManager ?? data?.account_manager ?? "";
 
   const save = useMutation({
     mutationFn: () =>
       apiRequest("PATCH", `/api/accounts/${id}`, {
         name: displayName,
         notes: displayNotes,
+        account_manager: displayManager.trim() || null,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
@@ -185,6 +189,18 @@ function AccountDetailView({ id }: { id: number }) {
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
+          <div>
+            <Label className="text-xs">Account Manager</Label>
+            <Input
+              value={displayManager}
+              readOnly={!canEdit}
+              onChange={(e) => setAccountManager(e.target.value)}
+              placeholder="Initials, e.g. GS"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Applies to every OL under this account. This is the only place this field is set.
+            </p>
+          </div>
           {canEdit && (
             <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? "Saving…" : "Save"}
@@ -193,11 +209,19 @@ function AccountDetailView({ id }: { id: number }) {
         </div>
 
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">OL account managers</div>
-          <p className="text-sm">{data.account_managers || ""}</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Reporting only — set on each rider in Lease Management.
-          </p>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Linked OLs</div>
+          {(data.leases ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">None yet.</p>
+          ) : (
+            <ul className="space-y-1 text-sm text-muted-foreground">
+              {data.leases.map((l) => (
+                <li key={l.id} className="font-mono-num">
+                  {l.lease_number || "—"}
+                  {l.lessee ? <span> · {l.lessee}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div>

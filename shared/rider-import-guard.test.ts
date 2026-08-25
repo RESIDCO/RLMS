@@ -2,8 +2,10 @@
 /** Run: npx tsx shared/rider-import-guard.test.ts */
 
 import {
+  ACCOUNT_IMPORT_NEVER_WRITE,
   RIDER_FINANCIAL_FILL_BLANK_FIELDS,
   RIDER_IMPORT_NEVER_WRITE,
+  assertAccountImporterPatch,
   assertRiderImporterPatch,
   riderFinancialFillBlankPayload,
   riderVcfExpirationSyncPayload,
@@ -32,7 +34,17 @@ try {
 } catch {
   threw = true;
 }
-ok(threw, "assert rejects account_manager");
+ok(threw, "assert rejects riders.account_manager");
+
+ok(ACCOUNT_IMPORT_NEVER_WRITE.includes("account_manager"), "accounts.account_manager is named never-write");
+let acctThrew = false;
+try {
+  assertAccountImporterPatch({ name: "Acme", account_manager: "ZZ" });
+} catch {
+  acctThrew = true;
+}
+ok(acctThrew, "assert rejects accounts.account_manager");
+assertAccountImporterPatch({ name: "Acme" });
 
 const fill = riderFinancialFillBlankPayload("monthly_rent_per_car", 100);
 ok(fill.monthly_rent_per_car === 100 && !("account_manager" in fill), "fill-blank payload is rent only");

@@ -5,7 +5,7 @@ import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, attachAccountManagerInitials } from "./railcar-list";
-import { listAccounts, getAccount, createAccount, updateAccount } from "./accounts";
+import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds } from "./accounts";
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
@@ -293,9 +293,11 @@ export async function registerRoutes(
 
       // 1. Create MLA (lease_type only if human set it in the wizard — never invent a default)
       const mlaRow = { ...mla };
+      delete mlaRow.account_id;
       if (mlaRow.lease_type != null && String(mlaRow.lease_type).trim() === "") {
         mlaRow.lease_type = null;
       }
+      mlaRow.account_id = await ensureAccountForLessee(mlaRow.lessee ?? null);
       const { data: newMla, error: mlaErr } = await supabase
         .from("master_leases")
         .insert(mlaRow)
@@ -307,11 +309,12 @@ export async function registerRoutes(
       const riderResults: any[] = [];
 
       for (const rp of riderPayloads ?? []) {
-        // 2. Create rider under this MLA
+        // 2. Create rider under this MLA (do not write deprecated riders.account_manager)
+        const riderInsert = { ...rp.rider, master_lease_id: newMla.id };
+        delete riderInsert.account_manager;
         const { data: newRider, error: rErr } = await supabase
           .from("riders")
-          .insert({ ...rp.rider, master_lease_id: newMla.id })
-          // account_manager is not sent by New Lease Setup — left null until Lease Management
+          .insert(riderInsert)
           .select()
           .single();
         if (rErr) throw rErr;
@@ -1612,13 +1615,18 @@ export async function registerRoutes(
       const riders = (ridersRes.data ?? []).map((r) => {
         const car_count = countByRider.get(r.id) ?? 0;
         const active_car_count = activeByRider.get(r.id) ?? 0;
+        const { account_manager: _deprecatedRiderAm, ...rest } = r as any;
         return {
-          ...r,
+          ...rest,
           car_count,
           active_car_count,
           is_inactive: active_car_count === 0,
         };
       });
+
+      const amByAccount = await accountManagerByAccountIds(
+        (leasesRes.data ?? []).map((l: any) => Number(l.account_id)).filter((n) => n > 0),
+      );
 
       const result = (leasesRes.data ?? []).map((l) => {
         const leaseRiders = riders.filter((r) => r.master_lease_id === l.id);
@@ -1628,7 +1636,14 @@ export async function registerRoutes(
         );
         const is_inactive =
           leaseRiders.length === 0 || leaseRiders.every((r) => r.is_inactive);
-        return { ...l, riders: leaseRiders, car_count, is_inactive };
+        const accountId = (l as any).account_id ?? null;
+        return {
+          ...l,
+          account_manager: accountId ? amByAccount.get(accountId) ?? null : null,
+          riders: leaseRiders,
+          car_count,
+          is_inactive,
+        };
       });
 
       res.json(result);
@@ -1667,9 +1682,10 @@ export async function registerRoutes(
       if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
         parsed.lease_type = null;
       }
+      const accountId = await ensureAccountForLessee(parsed.lessee ?? null);
       const { data, error } = await supabase
         .from("master_leases")
-        .insert(parsed)
+        .insert({ ...parsed, account_id: accountId })
         .select()
         .single();
       if (error) throw error;
@@ -1688,9 +1704,13 @@ export async function registerRoutes(
       if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
         parsed.lease_type = null;
       }
+      const leasePatch: Record<string, unknown> = { ...parsed };
+      if (parsed.lessee !== undefined) {
+        leasePatch.account_id = await ensureAccountForLessee(parsed.lessee ?? null);
+      }
       const { data, error } = await supabase
         .from("master_leases")
-        .update(parsed)
+        .update(leasePatch)
         .eq("id", id)
         .select()
         .single();
@@ -1790,6 +1810,7 @@ export async function registerRoutes(
             lease_number: AD_HOC_LEASE,
             lessor: "RESIDCO",
             lessee: "Ad Hoc / Free-text OL",
+            account_id: await ensureAccountForLessee("Ad Hoc / Free-text OL"),
             // lease_type left null — set in Lease Management
           })
           .select("id")
@@ -1804,7 +1825,7 @@ export async function registerRoutes(
           master_lease_id: mla!.id,
           rider_name: raw,
           schedule_number: raw,
-          // account_manager left null — Lease Management is the only writer
+          // riders.account_manager is deprecated / unused
         })
         .select("id, rider_name")
         .single();
@@ -1820,9 +1841,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertRiderSchema.parse(req.body);
-      if (parsed.account_manager !== undefined) {
-        parsed.account_manager = parsed.account_manager?.trim() || null;
-      }
+      delete (parsed as { account_manager?: unknown }).account_manager;
       const { data, error } = await supabase
         .from("riders")
         .insert(parsed)
@@ -1841,9 +1860,7 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRiderSchema.partial().parse(req.body);
-      if (parsed.account_manager !== undefined) {
-        parsed.account_manager = parsed.account_manager?.trim() || null;
-      }
+      delete (parsed as { account_manager?: unknown }).account_manager;
       const { data, error } = await supabase
         .from("riders")
         .update(parsed)
@@ -2292,6 +2309,8 @@ export async function registerRoutes(
   });
 
   app.post("/api/import/commit", async (req: Request, res: Response) => {
+    // Do-not-touch: accounts.account_manager (ensureAccountForLessee inserts name only).
+    // riders.account_manager is deprecated and still excluded via assertRiderImporterPatch.
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
@@ -2324,7 +2343,7 @@ export async function registerRoutes(
       // (including a legacy VCF- prefix from the original load).
       const lesseeToMlaId = new Map<string, number>();
       const { data: existingMlas, error: mlaErr } = await supabase
-        .from("master_leases").select("id, lease_number, lessee");
+        .from("master_leases").select("id, lease_number, lessee, account_id");
       if (mlaErr) throw mlaErr;
       const leaseNumberToId = new Map<string, number>();
       for (const m of existingMlas ?? []) {
@@ -2343,8 +2362,15 @@ export async function registerRoutes(
         if (id) lesseeToMlaId.set(lessee, id);
       }
 
+      const lesseeToAccountId = new Map<string, number>();
+      for (const lessee of lesseeSet) {
+        const accountId = await ensureAccountForLessee(lessee);
+        if (accountId) lesseeToAccountId.set(lessee, accountId);
+      }
+
       // Insert any missing MLAs. lease_type is intentionally omitted —
       // Lease Management is the sole writer of that field (left null for Bruce).
+      // account_id is set; account_manager on the account is left null.
       const newMlaPayloads = Array.from(lesseeSet)
         .filter((lessee) => !lesseeToMlaId.has(lessee))
         .map((lessee) => ({
@@ -2352,6 +2378,7 @@ export async function registerRoutes(
           lessee,
           lessor: "RESIDCO",
           notes: "Auto-created by RESIDCO Master Car List import",
+          account_id: lesseeToAccountId.get(lessee) ?? null,
         }));
       let mlasCreated = 0;
       for (let i = 0; i < newMlaPayloads.length; i += BATCH) {
@@ -2363,6 +2390,19 @@ export async function registerRoutes(
           if (m.lessee) lesseeToMlaId.set(m.lessee.trim(), m.id);
         }
         mlasCreated += ins?.length ?? 0;
+      }
+
+      for (const m of existingMlas ?? []) {
+        if (m.account_id) continue;
+        const lessee = String(m.lessee ?? "").trim();
+        if (!lessee || !lesseeSet.has(lessee)) continue;
+        const accountId = lesseeToAccountId.get(lessee);
+        if (!accountId) continue;
+        const { error: linkErr } = await supabase
+          .from("master_leases")
+          .update({ account_id: accountId })
+          .eq("id", m.id);
+        if (linkErr) throw linkErr;
       }
 
       // Distinct riders. A rider is identified by (Rider ID OR rider_name) per
@@ -2589,9 +2629,10 @@ export async function registerRoutes(
 
   // VCF commit — gated. Requires confirmProductionImport === true after Bruce review.
   // Not used for the non-prod gate run; kept ready for the signed-off production load.
-  // Do-not-touch: riders.account_manager. VCF writes railcars + assignment_history
-  // + car_number_history. It does not insert riders. Post-commit expiration sync
-  // may patch riders.expiration_date / effective_date only.
+  // Do-not-touch: accounts.account_manager, riders.account_manager (deprecated).
+  // VCF writes railcars + assignment_history + car_number_history. It does not
+  // insert riders or accounts. Post-commit expiration sync may patch
+  // riders.expiration_date / effective_date only.
   // See docs/IMPORT_WRITE_BOUNDARIES.md.
   app.post("/api/import/vcf/commit", async (req: Request, res: Response) => {
     try {
@@ -3024,9 +3065,10 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  // Do-not-touch: riders.account_manager, car_number, entity, active, lessee,
-  // rider assignment. Writes rider_financial_summary + RAILCAR_FINANCIAL_REFRESH_FIELDS
-  // on railcars. fillBlankRiderMonthlyRent may fill blank riders.monthly_rent_per_car.
+  // Do-not-touch: accounts.account_manager, riders.account_manager (deprecated),
+  // car_number, entity, active, lessee, rider assignment. Writes
+  // rider_financial_summary + RAILCAR_FINANCIAL_REFRESH_FIELDS on railcars.
+  // fillBlankRiderMonthlyRent may fill blank riders.monthly_rent_per_car.
   // See docs/IMPORT_WRITE_BOUNDARIES.md.
   app.post("/api/import/financial/commit", async (req: Request, res: Response) => {
     try {
@@ -4604,6 +4646,7 @@ export async function registerRoutes(
       const row = await updateAccount(Number(req.params.id), {
         name: req.body.name,
         notes: req.body.notes,
+        account_manager: req.body.account_manager,
       });
       if (!row) return res.status(404).json({ message: "Account not found" });
       res.json(row);

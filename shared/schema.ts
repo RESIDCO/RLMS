@@ -8,6 +8,7 @@ export type MasterLease = {
   agreement_number: string | null;
   lessor: string | null;
   lessee: string | null;
+  account_id: number | null;
   lease_type: string | null;
   effective_date: string | null;
   sold_to: string | null;          // buyer company if this MLA was sold/transferred
@@ -30,7 +31,10 @@ export type Rider = {
   monthly_rent_per_car: number | null;  // monthly rent charged per car (USD)
   sold_to: string | null;               // buyer if this rider was sold/transferred
   notes: string | null;
-  /** Free-text initials. Written only in Lease Management — never by importers. */
+  /**
+   * DEPRECATED. Unused. Prefer accounts.account_manager via master_leases.account_id.
+   * Column is not dropped. Importers must never write it.
+   */
   account_manager: string | null;
   created_at?: string;
   updated_at?: string;
@@ -40,6 +44,8 @@ export type Account = {
   id: number;
   name: string;
   notes: string | null;
+  /** Free-text initials. Written only in Account Management — never by importers. */
+  account_manager: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -240,6 +246,7 @@ export type InsertRider = z.infer<typeof insertRiderSchema>;
 export const insertAccountSchema = z.object({
   name: z.string().min(1),
   notes: z.string().nullable().optional(),
+  account_manager: z.string().nullable().optional(),
 });
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
 
@@ -355,6 +362,8 @@ export type MasterLeaseWithRiders = MasterLease & {
   car_count: number;
   /** True when every rider under this MLA is inactive (or there are no riders). */
   is_inactive: boolean;
+  /** From accounts.account_manager via master_leases.account_id — not stored on the lease. */
+  account_manager?: string | null;
 };
 
 export type HistoryRow = AssignmentHistory & {

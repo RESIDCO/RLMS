@@ -651,9 +651,9 @@ export default function LeaseManagement() {
                                   <span title="Expiration Date">Expires: {fmtDate(rider.expiration_date)}</span>
                                   {" · "}
                                   <span title="Monthly Rate %">Rate: {fmtPct(rider.monthly_rate_pct)}</span>
-                                  {rider.account_manager ? (
-                                    <> · <span title="Account Manager">Acct Mgr: {rider.account_manager}</span></>
-                                  ) : null}
+                  {lease.account_manager ? (
+                    <> · <span title="Account Manager">Acct Mgr: {lease.account_manager}</span></>
+                  ) : null}
                                   {" · "}
                                   <span title="Lessor's Cost">Lessor's Cost: {fmtMoney(rider.lessors_cost)}</span>
                                   {(rider as any).monthly_rent_per_car != null && (
@@ -747,6 +747,10 @@ export default function LeaseManagement() {
         }}
         masterLeaseId={addRiderFor}
         rider={editRider}
+        accountManager={
+          (leases ?? []).find((l) => l.id === (editRider?.master_lease_id ?? addRiderFor))
+            ?.account_manager ?? null
+        }
       />
     </div>
   );
@@ -1389,11 +1393,13 @@ function RiderForm({
   onClose,
   masterLeaseId,
   rider,
+  accountManager,
 }: {
   open: boolean;
   onClose: () => void;
   masterLeaseId: number | null;
   rider: any | null;
+  accountManager?: string | null;
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState<any>({});
@@ -1413,7 +1419,6 @@ function RiderForm({
         monthly_rent_per_car: rider?.monthly_rent_per_car ?? "",
         sold_to: rider?.sold_to ?? "",
         notes: rider?.notes ?? "",
-        account_manager: rider?.account_manager ?? "",
       });
     }
   }, [open, rider, masterLeaseId]);
@@ -1427,9 +1432,9 @@ function RiderForm({
         base_term_months: form.base_term_months === "" ? null : Number(form.base_term_months),
         monthly_rent_per_car: form.monthly_rent_per_car === "" ? null : Number(form.monthly_rent_per_car),
         sold_to: form.sold_to?.trim() || null,
-        account_manager: form.account_manager?.trim() || null,
       };
       delete (body as any).notes;
+      delete (body as any).account_manager;
       if (rider) await apiRequest("PATCH", `/api/riders/${rider.id}`, body);
       else await apiRequest("POST", `/api/riders`, body);
     },
@@ -1547,13 +1552,9 @@ function RiderForm({
           </div>
           <div>
             <Label>Account Manager</Label>
-            <Input
-              value={form.account_manager ?? ""}
-              onChange={(e) => setForm({ ...form, account_manager: e.target.value })}
-              placeholder="Initials, e.g. GS"
-            />
+            <Input value={accountManager?.trim() ? accountManager : "—"} readOnly />
             <p className="text-xs text-muted-foreground mt-1">
-              Free-text initials. This is the only place this field is set.
+              Set on the Account in Account Management — applies to every OL under this customer.
             </p>
           </div>
           <div>

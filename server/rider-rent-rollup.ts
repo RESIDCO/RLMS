@@ -8,7 +8,7 @@
  * confirmed meaning as a sum of OEC/NBV.
  *
  * Write allowlist is RIDER_FINANCIAL_FILL_BLANK_FIELDS (monthly_rent_per_car only).
- * account_manager is named in RIDER_IMPORT_NEVER_WRITE — not merely omitted.
+ * riders.account_manager and accounts.account_manager are never written.
  */
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";

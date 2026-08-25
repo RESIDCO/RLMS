@@ -322,51 +322,34 @@ export async function loadTurning50Export(
   return { year, build_year: year - 50, riders };
 }
 
-/** Leased (assigned) active cars that sit on an open Program. Zero is correct until programs have cars. */
+/** Distinct cars on any non-completed program. Fleet status / active is ignored. */
 export async function countInProgram(): Promise<number> {
   const { data: programs, error: pErr } = await supabaseAdmin
     .from("programs")
     .select("id")
-    .eq("status", "open");
+    .neq("status", "complete");
   if (pErr) throw pErr;
-  const programIds = (programs ?? []).map((p: any) => p.id).filter((id: number) => Number.isFinite(id));
+  const programIds = (programs ?? [])
+    .map((p: any) => Number(p.id))
+    .filter((id: number) => Number.isFinite(id) && id > 0);
   if (!programIds.length) return 0;
 
-  const links = await fetchAllRows<{ railcar_id: number }>((from, to) =>
-    supabaseAdmin
-      .from("program_cars")
-      .select("railcar_id")
-      .in("program_id", programIds)
-      .is("exited_date", null)
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
-  const carIds: number[] = [];
-  const seenCar: Record<number, true> = {};
-  for (const l of links) {
-    const id = Number(l.railcar_id);
-    if (!Number.isFinite(id) || id <= 0 || seenCar[id]) continue;
-    seenCar[id] = true;
-    carIds.push(id);
-  }
-  if (!carIds.length) return 0;
-
-  let count = 0;
+  const seen = new Set<number>();
   const CHUNK = 200;
-  for (let i = 0; i < carIds.length; i += CHUNK) {
-    const slice = carIds.slice(i, i + CHUNK);
-    const { data, error } = await supabaseAdmin
-      .from("railcars")
-      .select("id, active, fleet_status, rider_external_id, assignment_label, managed_category")
-      .in("id", slice)
-      .eq("active", true);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      if (!operatingCar(row)) continue;
-      const assigned = Boolean(carOlCode(row));
-      const leased = String(row.fleet_status ?? "") === "Leased" || String(row.fleet_status ?? "") === "Abatement";
-      if (assigned || leased) count += 1;
+  for (let i = 0; i < programIds.length; i += CHUNK) {
+    const slice = programIds.slice(i, i + CHUNK);
+    const links = await fetchAllRows<{ railcar_id: number }>((from, to) =>
+      supabaseAdmin
+        .from("program_cars")
+        .select("railcar_id")
+        .in("program_id", slice)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    for (const l of links) {
+      const id = Number(l.railcar_id);
+      if (Number.isFinite(id) && id > 0) seen.add(id);
     }
   }
-  return count;
+  return seen.size;
 }

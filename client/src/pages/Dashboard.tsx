@@ -27,7 +27,7 @@ import {
   FolderOpen,
   CalendarDays,
 } from "lucide-react";
-import { openAppTab, lesseePath, olPath, entityPath, turning50Path, olKeyFromLabel } from "@/lib/browse-nav";
+import { openAppTab, lesseePath, olPath, entityPath, turning50Path, olKeyFromLabel, programsListPath } from "@/lib/browse-nav";
 import { accountListPath } from "@/lib/account-mgmt-nav";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -504,9 +504,9 @@ export default function Dashboard() {
                 testId="kpi-in-program"
                 label="In Program"
                 value={data.kpis.in_program_count ?? data.kpis.in_transit_leased_count ?? 0}
-                subtext="Leased cars currently in an open Program (shop work, inspection, etc.)."
+                subtext="Distinct cars on any open or on-hold Program — Sold/Idle/inactive still count."
                 icon={FolderOpen}
-                onClick={() => navigate("/programs")}
+                onClick={() => navigate(programsListPath("active"))}
               />
               {/* Utilization — special card with ring */}
               <button

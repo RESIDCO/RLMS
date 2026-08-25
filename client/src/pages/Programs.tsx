@@ -15,7 +15,8 @@ import ClearableSearchInput from "@/components/ClearableSearchInput";
 import PageHeader from "@/components/PageHeader";
 import { FolderOpen, Plus, Download, Trash2, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { openAppTab, programPath } from "@/lib/browse-nav";
+import { openAppTab, programPath, programsListPath } from "@/lib/browse-nav";
+import { hashSearchParams, navigateHash } from "@/lib/hash-location";
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import AccountCombobox from "@/components/AccountCombobox";
 import {
@@ -51,12 +52,19 @@ async function downloadReport(url: string) {
   await downloadXlsx(url, "RLMS_Program_Status_Report.xlsx");
 }
 
+const STATUS_FILTERS = new Set(["all", "active", "open", "on_hold", "complete"]);
+
+function statusFromHash(): string {
+  const s = hashSearchParams().get("status")?.trim().toLowerCase() ?? "";
+  return STATUS_FILTERS.has(s) ? s : "all";
+}
+
 export default function ProgramsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const canEdit = useCanEdit();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(statusFromHash);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [entityFilter, setEntityFilter] = useState("all");
   const [managerFilter, setManagerFilter] = useState("all");
@@ -85,7 +93,9 @@ export default function ProgramsPage() {
     const rows = programs.filter((p) => {
       const blob = `${p.name} ${p.status_narrative ?? ""} ${p.description ?? ""}`.toLowerCase();
       if (q && !blob.includes(q)) return false;
-      if (statusFilter !== "all" && p.status !== statusFilter) return false;
+      if (statusFilter === "active") {
+        if (p.status === "complete") return false;
+      } else if (statusFilter !== "all" && p.status !== statusFilter) return false;
       if (categoryFilter !== "all" && String(p.category_id) !== categoryFilter) return false;
       if (entityFilter !== "all" && p.entity !== entityFilter) return false;
       if (managerFilter !== "all" && (p.account_manager ?? "") !== managerFilter) return false;
@@ -187,10 +197,17 @@ export default function ProgramsPage() {
             value={search}
             onChange={setSearch}
           />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-9 w-36 text-sm"><SelectValue placeholder="Status" /></SelectTrigger>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => {
+              setStatusFilter(v);
+              navigateHash(programsListPath(v), { replace: true });
+            }}
+          >
+            <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active (not complete)</SelectItem>
               <SelectItem value="open">Open</SelectItem>
               <SelectItem value="on_hold">On Hold</SelectItem>
               <SelectItem value="complete">Complete</SelectItem>

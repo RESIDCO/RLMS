@@ -39,6 +39,10 @@ export type Rider = {
    * Column is not dropped. Importers must never write it.
    */
   account_manager: string | null;
+  /** OL relationship status. Written only from Account Management. */
+  status_tag: "good" | "watch" | "risk" | null;
+  /** OL note. Written only from Account Management. */
+  account_mgmt_comment: string | null;
   created_at?: string;
   updated_at?: string;
 };

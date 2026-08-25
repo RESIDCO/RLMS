@@ -235,6 +235,8 @@ export function usePermissions() {
     canDeleteFleet: canEditFleet,
     canEditContacts: !!role,
     canDeleteContacts: canEditFleet,
+    canEditAccountMgmtTags: !!role,
+    canEditAccountMgmtComments: !!role,
     canUseDv: !!role,
     canUsePhotoSearch: !!role,
   };

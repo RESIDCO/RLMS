@@ -3,7 +3,11 @@
  * riders.account_manager is deprecated (unused) but still named here so a
  * stale payload cannot write it.
  */
-export const RIDER_IMPORT_NEVER_WRITE = ["account_manager"] as const;
+export const RIDER_IMPORT_NEVER_WRITE = [
+  "account_manager",
+  "status_tag",
+  "account_mgmt_comment",
+] as const;
 
 /**
  * Account columns that importers must never write.
@@ -46,7 +50,7 @@ export function assertRiderImporterPatch(patch: Record<string, unknown>): void {
   for (const key of Object.keys(patch)) {
     if (isNeverWrite(key)) {
       throw new Error(
-        `Importer refused to write riders.${key} — that column is unused; set accounts.account_manager instead.`,
+        `Importer refused to write riders.${key} — Account Management / unused rider columns cannot be written by importers.`,
       );
     }
   }

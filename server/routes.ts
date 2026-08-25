@@ -5,7 +5,7 @@ import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, attachAccountManagerInitials } from "./railcar-list";
-import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds } from "./accounts";
+import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, patchRiderAccountMgmtComment, listRiderCarsForAccountMgmt } from "./accounts";
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
@@ -52,6 +52,7 @@ import {
   requireUser,
   requireContactsWrite,
   requireContactsDelete,
+  requireAccountMgmtWrite,
   isValidRole,
   type AppRole,
 } from "./auth";
@@ -1860,6 +1861,8 @@ export async function registerRoutes(
       if (!writerId) return;
       const parsed = insertRiderSchema.parse(req.body);
       delete (parsed as { account_manager?: unknown }).account_manager;
+      delete (parsed as { status_tag?: unknown }).status_tag;
+      delete (parsed as { account_mgmt_comment?: unknown }).account_mgmt_comment;
       const { data, error } = await supabase
         .from("riders")
         .insert(parsed)
@@ -1879,6 +1882,8 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const parsed = insertRiderSchema.partial().parse(req.body);
       delete (parsed as { account_manager?: unknown }).account_manager;
+      delete (parsed as { status_tag?: unknown }).status_tag;
+      delete (parsed as { account_mgmt_comment?: unknown }).account_mgmt_comment;
       const { data, error } = await supabase
         .from("riders")
         .update(parsed)
@@ -4629,6 +4634,59 @@ export async function registerRoutes(
   });
 
   // ── ACCOUNTS ─────────────────────────────────────────────────────────────────
+
+  app.get("/api/account-management/overview", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const am = typeof req.query.account_manager === "string" ? req.query.account_manager : "";
+      res.json(await listAccountManagementOverview(am || null));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.patch("/api/account-management/riders/:riderId/status-tag", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const riderId = Number(req.params.riderId);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      const raw = req.body?.status_tag;
+      const statusTag = raw === null || raw === "" ? null : raw;
+      if (statusTag != null && !isStatusTag(statusTag)) {
+        return res.status(400).json({ message: "status_tag must be good, watch, or risk" });
+      }
+      const row = await patchRiderStatusTag(riderId, statusTag);
+      if (!row) return res.status(404).json({ message: "Rider not found" });
+      res.json(row);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.patch("/api/account-management/riders/:riderId/comment", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const riderId = Number(req.params.riderId);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      const comment = req.body?.account_mgmt_comment == null
+        ? null
+        : String(req.body.account_mgmt_comment).trim() || null;
+      const row = await patchRiderAccountMgmtComment(riderId, comment);
+      if (!row) return res.status(404).json({ message: "Rider not found" });
+      res.json(row);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/account-management/riders/:riderId/cars", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const riderId = Number(req.params.riderId);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      res.json({ cars: await listRiderCarsForAccountMgmt(riderId) });
+    } catch (err) { errHandler(res, err); }
+  });
 
   app.get("/api/accounts", async (req, res) => {
     try {

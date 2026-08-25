@@ -8,7 +8,7 @@
 
 Named never-write lists in `shared/rider-import-guard.ts`:
 
-- `RIDER_IMPORT_NEVER_WRITE` currently `["account_manager"]` — every importer rider insert/update runs `assertRiderImporterPatch`.
+- `RIDER_IMPORT_NEVER_WRITE` currently `["account_manager", "status_tag", "account_mgmt_comment"]` — every importer rider insert/update runs `assertRiderImporterPatch`.
 - `ACCOUNT_IMPORT_NEVER_WRITE` currently `["account_manager"]` — Master Car List account bootstrap uses `assertAccountImporterPatch` (name only; manager stays null).
 
 ## Two different importers
@@ -19,7 +19,19 @@ Named never-write lists in `shared/rider-import-guard.ts`:
 | **Master Car List** | `POST /api/import/commit` | **Yes**, for an OL/lessee not already in `riders`. New rider rows go through `assertRiderImporterPatch`. New `master_leases` rows get `account_id` via `ensureAccountForLessee` (match or create `accounts` by lessee name; `account_manager` left null). |
 | **Financial Data Refresh** | `POST /api/import/financial/commit` | **No.** Writes `rider_financial_summary` + listed car financial fields. Fill-if-blank on riders is allowlisted to `monthly_rent_per_car` only. |
 
-Do-not-touch for all three: **`accounts.account_manager`** and **`riders.account_manager`**.
+Do-not-touch for all three: **`accounts.account_manager`**, **`riders.account_manager`** (deprecated), **`riders.status_tag`**, and **`riders.account_mgmt_comment`**.
+
+`status_tag` and `account_mgmt_comment` are written only by:
+
+- `PATCH /api/account-management/riders/:riderId/status-tag`
+- `PATCH /api/account-management/riders/:riderId/comment`
+
+Those routes use `requireAccountMgmtWrite` (any role, including Viewer). Lease Management `POST`/`PATCH /api/riders` strips both fields before update.
+
+Named never-write lists in `shared/rider-import-guard.ts`:
+
+- `RIDER_IMPORT_NEVER_WRITE` currently `["account_manager", "status_tag", "account_mgmt_comment"]`. Master Car List new-rider inserts go through `assertRiderImporterPatch`. Financial fill-blank uses `riderFinancialFillBlankPayload` (`monthly_rent_per_car` only). VCF/Asset Report date governance uses `riderLeaseGovernancePayload` (`expiration_date` / `expiration_source` / `expiration_snapshot_month` only).
+- `ACCOUNT_IMPORT_NEVER_WRITE` currently `["account_manager"]`.
 
 ## Valid Car File (`POST /api/import/vcf/commit`)
 

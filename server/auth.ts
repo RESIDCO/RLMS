@@ -151,6 +151,10 @@ export async function requireUser(req: Request, res: Response): Promise<string |
   return auth.user.id;
 }
 
+/** All roles may set Account Management OL status tags and comments. */
+export async function requireAccountMgmtWrite(req: Request, res: Response): Promise<string | null> {
+  return requireUser(req, res);
+}
 /** All roles may add/edit contacts (Viewer carve-out). */
 export async function requireContactsWrite(req: Request, res: Response): Promise<string | null> {
   return requireUser(req, res);

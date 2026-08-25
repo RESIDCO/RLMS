@@ -87,6 +87,8 @@ export default function AccountsPage() {
   return <AccountListView />;
 }
 
+const UNASSIGNED_AM = "unassigned";
+
 function AccountListView() {
   const { toast } = useToast();
   const canEdit = useCanEdit();
@@ -129,6 +131,12 @@ function AccountListView() {
 
   const kpiLabel =
     kpi?.kind === "year" ? `Expiring ${kpi.year}` : kpi?.kind === "tag" ? TAG_LABEL[kpi.tag] : null;
+  const showingLabel =
+    manager === UNASSIGNED_AM
+      ? "Unassigned accounts"
+      : manager
+        ? manager
+        : "All accounts";
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -152,6 +160,20 @@ function AccountListView() {
               {m}
             </FilterPill>
           ))}
+          <button
+            type="button"
+            onClick={() => setManager(UNASSIGNED_AM)}
+            className={cn(
+              "h-7 px-3 rounded-full text-xs border border-dashed transition-colors",
+              manager === UNASSIGNED_AM
+                ? "bg-amber-500/15 text-amber-200 border-amber-500/50"
+                : "border-amber-500/35 text-amber-400/90 hover:text-amber-200 hover:border-amber-500/50",
+            )}
+            title="Accounts with no account manager set"
+            data-testid="filter-unassigned-am"
+          >
+            Unassigned
+          </button>
         </div>
 
         <div>
@@ -213,8 +235,9 @@ function AccountListView() {
           <Skeleton className="h-40 w-full" />
         ) : (
           <div className="rounded-xl border border-card-border bg-card overflow-hidden">
-            <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border">
-              Account-level status rollup — coming soon
+            <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border flex flex-wrap items-center justify-between gap-2">
+              <span>Showing: {showingLabel}</span>
+              <span>Account-level status rollup — coming soon</span>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">

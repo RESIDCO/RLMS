@@ -4645,7 +4645,7 @@ export async function registerRoutes(
     try {
       if (!(await requireUser(req, res))) return;
       const am = typeof req.query.account_manager === "string" ? req.query.account_manager : "";
-      res.json(await listAccountManagementOverview(am || null));
+      res.json(await listAccountManagementOverview(am.trim() || null));
     } catch (err) { errHandler(res, err); }
   });
 

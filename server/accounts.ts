@@ -224,6 +224,7 @@ export async function listAccountManagementOverview(accountManager?: string | nu
   const nowYear = new Date().getFullYear();
   const expireYears: [number, number, number] = [nowYear, nowYear + 1, nowYear + 2];
   const wantAm = String(accountManager ?? "").trim();
+  const wantUnassigned = wantAm.toLowerCase() === "unassigned";
 
   const [accounts, leases, riders] = await Promise.all([
     listAccounts(),
@@ -264,7 +265,12 @@ export async function listAccountManagementOverview(accountManager?: string | nu
 
   const scopedAccountIds = new Set(
     accounts
-      .filter((a) => !wantAm || String(a.account_manager ?? "").trim() === wantAm)
+      .filter((a) => {
+        const am = String(a.account_manager ?? "").trim();
+        if (!wantAm) return true;
+        if (wantUnassigned) return !am;
+        return am === wantAm;
+      })
       .map((a) => a.id),
   );
 

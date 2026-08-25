@@ -87,7 +87,6 @@ type OlCar = {
   reporting_marks: string | null;
   car_type: string | null;
   expiration_date: string | null;
-  active?: boolean;
 };
 
 const TAG_LABEL: Record<StatusTag, string> = { good: "Good", watch: "Watch", risk: "Risk" };
@@ -673,7 +672,7 @@ function OlRows({
             {cars.isLoading ? (
               <p className="text-xs text-muted-foreground">Loading cars…</p>
             ) : (cars.data?.cars ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">No cars on this OL.</p>
+              <p className="text-xs text-muted-foreground">No active cars on this OL.</p>
             ) : (
               <table className="w-full text-xs">
                 <thead className="text-muted-foreground">
@@ -695,11 +694,6 @@ function OlRows({
                         >
                           {(c.reporting_marks || "") + (c.car_number || "")}
                         </button>
-                        {c.active === false ? (
-                          <span className="ml-2">
-                            <InactiveFleetBadge active={false} />
-                          </span>
-                        ) : null}
                       </td>
                       <td className="py-0.5 text-muted-foreground">{c.car_type || ""}</td>
                       <td className="py-0.5 text-muted-foreground">

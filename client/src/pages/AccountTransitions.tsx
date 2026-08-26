@@ -28,6 +28,7 @@ import {
 } from "@shared/account-transitions";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import { BriefingFormPanel } from "@/components/BriefingFormPanel";
+import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { ArrowLeft, Download, Loader2, Plus, Trash2 } from "lucide-react";
 import { displayAmAuthor } from "@/components/AmCommentThread";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
@@ -185,6 +186,7 @@ function TransitionList() {
   const qc = useQueryClient();
   const [am, setAm] = useState<string | null>(null);
   const [method, setMethod] = useState<string | null>(null);
+  const [listQ, setListQ] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [pick, setPick] = useState("");
   const [acctQ, setAcctQ] = useState("");
@@ -203,10 +205,15 @@ function TransitionList() {
   });
 
   const already = useMemo(() => new Set((data?.records ?? []).map((r) => r.account_id)), [data?.records]);
-  const methodPills = useMemo(() => {
+  const amSearchRecords = useMemo(() => {
     const rows = data?.records ?? [];
+    const q = listQ.trim();
+    if (!q) return rows;
+    return rows.filter((r) => matchesSearchQuery([r.account_name], q));
+  }, [data?.records, listQ]);
+  const methodPills = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const r of rows) {
+    for (const r of amSearchRecords) {
       const m = String(r.communication_method ?? "").trim();
       if (!m) continue;
       counts.set(m, (counts.get(m) ?? 0) + 1);
@@ -224,13 +231,12 @@ function TransitionList() {
         rowStyle: tag?.rowStyle,
       };
     });
-  }, [data?.records]);
+  }, [amSearchRecords]);
   const visibleRecords = useMemo(() => {
-    const rows = data?.records ?? [];
     const want = String(method ?? "").trim();
-    if (!want) return rows;
-    return rows.filter((r) => String(r.communication_method ?? "").trim() === want);
-  }, [data?.records, method]);
+    if (!want) return amSearchRecords;
+    return amSearchRecords.filter((r) => String(r.communication_method ?? "").trim() === want);
+  }, [amSearchRecords, method]);
   const filteredAccounts = useMemo(() => {
     const q = acctQ.trim();
     const list = q ? accounts.filter((a) => matchesSearchQuery([a.name], q)) : accounts;
@@ -295,6 +301,14 @@ function TransitionList() {
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-4">
+        <ClearableSearchInput
+          className="relative w-full max-w-sm shrink-0 flex-none"
+          inputClassName="h-9"
+          placeholder="Search accounts…"
+          value={listQ}
+          onChange={setListQ}
+          testId="input-account-transitions-search"
+        />
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">AM</span>
@@ -332,7 +346,7 @@ function TransitionList() {
               )}
               onClick={() => setMethod(null)}
             >
-              ALL{data ? ` · ${data.records.length}` : ""}
+              ALL{data ? ` · ${amSearchRecords.length}` : ""}
             </button>
             {methodPills.map((p) => (
               <button

@@ -38,6 +38,12 @@ import {
   riderBelongsToAccount,
 } from "./attachments";
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
+import {
+  MASTER_LEASE_DATE_KEYS,
+  RAILCAR_DATE_KEYS,
+  RIDER_DATE_KEYS,
+  nullifyEmptyDateStrings,
+} from "./sanitize";
 import { buildLeaseReport } from "./lease-export";
 import { runGlobalSearch } from "./global-search";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
@@ -1506,6 +1512,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertRailcarSchema.parse(req.body);
+      nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RAILCAR_DATE_KEYS]);
       const flag = parsed.ops_flag;
       const insertRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
       if (parsed.fleet_status) {
@@ -1539,6 +1546,7 @@ export async function registerRoutes(
           ? req.body.inactive_change_reason
           : null;
       const parsed = insertRailcarSchema.partial().parse(req.body);
+      nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RAILCAR_DATE_KEYS]);
       const flag = parsed.ops_flag;
       const updateRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
 
@@ -1803,6 +1811,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertMasterLeaseSchema.parse(req.body);
+      nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...MASTER_LEASE_DATE_KEYS]);
       if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
         parsed.lease_type = null;
       }
@@ -1825,6 +1834,7 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertMasterLeaseSchema.partial().parse(req.body);
+      nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...MASTER_LEASE_DATE_KEYS]);
       if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
         parsed.lease_type = null;
       }
@@ -1965,6 +1975,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertRiderSchema.parse(req.body);
+      nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RIDER_DATE_KEYS]);
       delete (parsed as { account_manager?: unknown }).account_manager;
       delete (parsed as { status_tag?: unknown }).status_tag;
       delete (parsed as { account_mgmt_comment?: unknown }).account_mgmt_comment;
@@ -1986,6 +1997,7 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const parsed = insertRiderSchema.partial().parse(req.body);
+      nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RIDER_DATE_KEYS]);
       delete (parsed as { account_manager?: unknown }).account_manager;
       delete (parsed as { status_tag?: unknown }).status_tag;
       delete (parsed as { account_mgmt_comment?: unknown }).account_mgmt_comment;

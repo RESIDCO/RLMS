@@ -1361,7 +1361,7 @@ function MasterLeaseForm({
                 type="date"
                 value={form.effective_date ?? ""}
                 onChange={(e) =>
-                  setForm({ ...form, effective_date: e.target.value })
+                  setForm({ ...form, effective_date: e.target.value === "" ? null : e.target.value })
                 }
               />
             </div>
@@ -1511,7 +1511,7 @@ function RiderForm({
                 type="date"
                 value={form.effective_date ?? ""}
                 onChange={(e) =>
-                  setForm({ ...form, effective_date: e.target.value })
+                  setForm({ ...form, effective_date: e.target.value === "" ? null : e.target.value })
                 }
               />
             </div>
@@ -1521,7 +1521,7 @@ function RiderForm({
                 type="date"
                 value={form.expiration_date ?? ""}
                 onChange={(e) =>
-                  setForm({ ...form, expiration_date: e.target.value })
+                  setForm({ ...form, expiration_date: e.target.value === "" ? null : e.target.value })
                 }
               />
               {rider ? <p className="text-[11px] text-muted-foreground mt-1"><ExpirationSourceTag rider={rider as any} /></p> : null}

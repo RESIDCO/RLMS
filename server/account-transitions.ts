@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "./supabase";
 import { getAccount } from "./accounts";
+import { deleteAccountTransitionModuleAttachments } from "./attachments";
 import {
   accountHandoffPct,
   flaggedHandoffAvgPct,
@@ -367,4 +368,18 @@ export async function addComment(opts: {
 export async function deleteComment(id: number) {
   const { error } = await supabaseAdmin.from("account_transition_comments").delete().eq("id", id);
   if (error) throw error;
+}
+
+export async function deleteTransitionRecord(recordId: number): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("account_transition_records")
+    .select("id, account_id")
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return false;
+  await deleteAccountTransitionModuleAttachments(Number(data.account_id));
+  const { error: delErr } = await supabaseAdmin.from("account_transition_records").delete().eq("id", recordId);
+  if (delErr) throw delErr;
+  return true;
 }

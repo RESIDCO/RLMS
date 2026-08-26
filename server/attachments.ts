@@ -124,4 +124,55 @@ export async function listAccountScopedAttachments(accountId: number) {
   return rows;
 }
 
+/** Remove Documents uploaded from Account Transitions for this account (not Lease/Programs files). */
+export async function deleteAccountTransitionModuleAttachments(accountId: number) {
+  const { data: leases, error: lErr } = await supabaseAdmin
+    .from("master_leases")
+    .select("id")
+    .eq("account_id", accountId);
+  if (lErr) throw lErr;
+  const leaseIds = (leases ?? []).map((l) => Number(l.id)).filter((n) => n > 0);
+
+  let riderIds: number[] = [];
+  if (leaseIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from("riders")
+      .select("id")
+      .in("master_lease_id", leaseIds);
+    if (error) throw error;
+    riderIds = (data ?? []).map((r) => Number(r.id)).filter((n) => n > 0);
+  }
+
+  const { data: accountAtt, error: aErr } = await supabaseAdmin
+    .from("attachments")
+    .select("id, storage_path")
+    .eq("entity_type", "account")
+    .eq("entity_id", accountId)
+    .eq("source_module", ACCOUNT_TRANSITIONS_SOURCE);
+  if (aErr) throw aErr;
+
+  let riderAtt: { id: number; storage_path: string | null }[] = [];
+  if (riderIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from("attachments")
+      .select("id, storage_path")
+      .eq("entity_type", "rider")
+      .in("entity_id", riderIds)
+      .eq("source_module", ACCOUNT_TRANSITIONS_SOURCE);
+    if (error) throw error;
+    riderAtt = data ?? [];
+  }
+
+  const rows = [...(accountAtt ?? []), ...riderAtt];
+  const paths = rows.map((r) => r.storage_path).filter((p): p is string => Boolean(p));
+  if (paths.length) {
+    await supabaseAdmin.storage.from(STORAGE_BUCKET).remove(paths);
+  }
+  const ids = rows.map((r) => r.id);
+  if (ids.length) {
+    const { error } = await supabaseAdmin.from("attachments").delete().in("id", ids);
+    if (error) throw error;
+  }
+}
+
 export { ACCOUNT_TRANSITIONS_SOURCE };

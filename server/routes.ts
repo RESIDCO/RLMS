@@ -18,6 +18,7 @@ import {
   createTransitionRecord,
   deleteComment as deleteTransitionComment,
   deleteMilestone,
+  deleteTransitionRecord,
   getTransitionDetail,
   listTransitionRecords,
   listTransitionSummary,
@@ -5002,6 +5003,17 @@ export async function registerRoutes(
       if (err?.status) return res.status(err.status).json({ message: err.message });
       errHandler(res, err);
     }
+  });
+
+  app.delete("/api/account-transitions/:id", async (req, res) => {
+    try {
+      if (!(await requireAccountMgmtWrite(req, res))) return;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "Invalid record" });
+      const ok = await deleteTransitionRecord(id);
+      if (!ok) return res.status(404).json({ message: "Not found" });
+      res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
   });
 
   app.get("/api/account-transitions/:id/briefing", async (req, res) => {

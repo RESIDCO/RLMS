@@ -132,6 +132,15 @@ function yesNo(v: boolean) {
   return v ? "yes" : "no";
 }
 
+function confirmRemoveFromModule(accountName: string) {
+  return confirmDelete({
+    title: `Remove ${accountName} from Account Transitions?`,
+    description:
+      "This deletes its transition record, comments, milestones, briefing form, and any attached documents. The account itself, its OLs, and its cars are not affected anywhere else in RLMS. This cannot be undone.",
+    confirmLabel: "Remove",
+  });
+}
+
 function downloadVisibleTransitionsCsv(rows: RecordRow[]) {
   const headers = [
     "Account",
@@ -255,6 +264,20 @@ function TransitionList() {
     },
     onError: (e: Error) => toast({ title: "Could not add account", description: e.message, variant: "destructive" }),
   });
+
+  const removeRow = useMutation({
+    mutationFn: (recordId: number) => apiRequest("DELETE", `/api/account-transitions/${recordId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/account-transitions"] });
+      qc.invalidateQueries({ queryKey: ["/api/account-transitions/summary"] });
+    },
+    onError: (e: Error) => toast({ title: "Could not remove account", description: e.message, variant: "destructive" }),
+  });
+
+  async function onRemoveRow(r: RecordRow) {
+    if (!(await confirmRemoveFromModule(r.account_name))) return;
+    removeRow.mutate(r.id);
+  }
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -380,6 +403,7 @@ function TransitionList() {
                   <th className="text-center font-medium px-2 py-1.5 w-16">Briefing</th>
                   <th className="text-right font-medium px-2 py-1.5 w-12">%</th>
                   <th className="text-left font-medium px-2 py-1.5 w-[5.5rem]">Status</th>
+                  {canEditAccountTransitions ? <th className="w-10" aria-label="Remove" /> : null}
                 </tr>
               </thead>
               <tbody>
@@ -437,12 +461,29 @@ function TransitionList() {
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono-num tabular-nums">{pct}%</td>
                     <td className="px-2 py-1.5 capitalize whitespace-nowrap">{r.status}</td>
+                    {canEditAccountTransitions ? (
+                      <td className="px-1 py-1.5 text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          aria-label={`Remove ${r.account_name} from Account Transitions`}
+                          title="Remove from Account Transitions"
+                          data-testid={`button-remove-transition-row-${r.id}`}
+                          disabled={removeRow.isPending}
+                          onClick={() => onRemoveRow(r)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                   );
                 })}
                 {visibleRecords.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-2 py-10 text-center text-muted-foreground">
+                    <td colSpan={canEditAccountTransitions ? 9 : 8} className="px-2 py-10 text-center text-muted-foreground">
                       {(data?.records ?? []).length === 0
                         ? "No transition records yet. Add an account to start a handoff."
                         : "No accounts match this filter."}
@@ -646,8 +687,23 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
     mutationFn: (cid: number) => apiRequest("DELETE", `/api/account-transitions/${id}/comments/${cid}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/account-transitions", id] }),
   });
+  const removeRecord = useMutation({
+    mutationFn: () => apiRequest("DELETE", `/api/account-transitions/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/account-transitions"] });
+      qc.invalidateQueries({ queryKey: ["/api/account-transitions/summary"] });
+      qc.removeQueries({ queryKey: ["/api/account-transitions", id] });
+      navigate("/account-transitions");
+    },
+    onError: (e: Error) => toast({ title: "Could not remove account", description: e.message, variant: "destructive" }),
+  });
 
   const acct = data.account;
+  async function onRemoveFromModule() {
+    if (!(await confirmRemoveFromModule(acct.name))) return;
+    removeRecord.mutate();
+  }
+
   const flagged = isFlaggedTransition(draft.to_account_manager);
   const score = handoffScoreParts({
     to_account_manager: draft.to_account_manager,
@@ -669,6 +725,24 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
         subtitle="Account transition"
         actions={
           <div className="flex items-center gap-2">
+            {canWrite && (
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={removeRecord.isPending}
+                onClick={onRemoveFromModule}
+                data-testid="button-remove-transition"
+              >
+                {removeRecord.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Removing…
+                  </>
+                ) : (
+                  "Remove from Account Transitions"
+                )}
+              </Button>
+            )}
             {canWrite && (
               <Button size="sm" disabled={!dirty || save.isPending} onClick={onSave} data-testid="button-save-transition">
                 {save.isPending ? (

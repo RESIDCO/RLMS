@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { apiGet } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -431,8 +432,9 @@ function UtilRing({ pct }: { pct: number }) {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { data, isLoading } = useQuery<DashboardData>({
+  const { data, isLoading, isError, error, refetch } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
+    queryFn: ({ signal }) => apiGet<DashboardData>("/api/dashboard", { timeoutMs: 15_000, signal }),
     staleTime: 45_000,
     refetchOnMount: true,
   });
@@ -451,6 +453,14 @@ export default function Dashboard() {
       />
 
       <div className="px-4 sm:px-8 py-5 sm:py-7 space-y-7">
+        {isError ? (
+          <div className="text-sm text-red-400">
+            Couldn't load dashboard — {(error as Error)?.message || "request failed"}.{" "}
+            <button type="button" className="underline text-foreground" onClick={() => refetch()}>
+              Retry
+            </button>
+          </div>
+        ) : null}
         {/* KPIs — Total Fleet = Idle + Abatement + Active Cars + Unassigned; Sold is outside operating fleet */}
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0">
           {isLoading ? (

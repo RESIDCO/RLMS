@@ -873,9 +873,10 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
   const pageSize = 25;
   const { data: cars, isLoading, isError, error, refetch } = useQuery<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>({
     queryKey: ["/api/railcars", { all: "1", rider_id: riderId, active: activeFilter }],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       apiGet<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>(
-        railcarsQs({ all: "1", rider_id: riderId, active: activeFilter })
+        railcarsQs({ all: "1", rider_id: riderId, active: activeFilter }),
+        { timeoutMs: 15_000, signal },
       ),
     staleTime: 45_000,
   });

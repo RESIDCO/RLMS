@@ -11,7 +11,7 @@ export async function fetchAllRows<T = any>(
   makeQuery: (from: number, to: number) => any
 ): Promise<T[]> {
   const out: T[] = [];
-  const CONCURRENCY = 8;
+  const CONCURRENCY = 3;
   let from = 0;
   for (let wave = 0; wave < MAX_PAGES; wave += CONCURRENCY) {
     const jobs = Array.from({ length: CONCURRENCY }, (_, i) => {

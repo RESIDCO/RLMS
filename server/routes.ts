@@ -504,33 +504,41 @@ export async function registerRoutes(
       const rpsUtil = rpsCars.length > 0 ? Math.round((rpsAssigned / rpsCars.length) * 1000) / 10 : 0;
       const ownedUtil = ownedCars.length > 0 ? Math.round((ownedAssigned / ownedCars.length) * 1000) / 10 : 0;
 
-      // Off Rent — rent_events only (never riders.expiration_date)
-      const [rentEvents, finRows] = await Promise.all([
-        fetchAllRows((from, to) =>
-          supabaseAdmin
-            .from("rent_events")
-            .select("car_id, event_type, event_date")
-            .order("event_date", { ascending: false })
-            .range(from, to)
-        ),
-        fetchAllRows((from, to) =>
-          supabaseAdmin
-            .from("rider_financial_summary")
-            .select(
-              "snapshot_month, rider_id, entity, lessee, months_until_lease_exp, lease_exp_date, count_cars"
-            )
-            .order("id", { ascending: true })
-            .range(from, to)
-        ).catch(async () =>
+      // Off Rent — rent_events only (never riders.expiration_date).
+      // When the SQL KPI RPC succeeded, off_rent / financial / rider timeline / fleet age
+      // are already aggregated in Postgres — do not fetchAllRows those tables again.
+      let rentEvents: any[] = [];
+      let finRows: any[] = [];
+      if (!sqlKpis) {
+        const fetched = await Promise.all([
+          fetchAllRows((from, to) =>
+            supabaseAdmin
+              .from("rent_events")
+              .select("car_id, event_type, event_date")
+              .order("event_date", { ascending: false })
+              .range(from, to)
+          ),
           fetchAllRows((from, to) =>
             supabaseAdmin
               .from("rider_financial_summary")
-              .select("snapshot_month, rider_id, entity, lessee, months_until_lease_exp, count_cars")
+              .select(
+                "snapshot_month, rider_id, entity, lessee, months_until_lease_exp, lease_exp_date, count_cars"
+              )
               .order("id", { ascending: true })
               .range(from, to)
-          )
-        ),
-      ]);
+          ).catch(async () =>
+            fetchAllRows((from, to) =>
+              supabaseAdmin
+                .from("rider_financial_summary")
+                .select("snapshot_month, rider_id, entity, lessee, months_until_lease_exp, count_cars")
+                .order("id", { ascending: true })
+                .range(from, to)
+            )
+          ),
+        ]);
+        rentEvents = fetched[0] as any[];
+        finRows = fetched[1] as any[];
+      }
       const latestRentByCarId = new Map<number, string>();
       const activeCarIds = new Set(activeCars.map((r: any) => r.id));
       for (const ev of rentEvents as any[]) {
@@ -554,7 +562,28 @@ export async function registerRoutes(
       const sixMo = new Date(now);
       sixMo.setMonth(sixMo.getMonth() + 6);
 
-      const { latestSnap, byOl: assetByOl } = buildAssetReportExpirations(finRows as any[]);
+      const { latestSnap, byOl: assetByOl } = sqlKpis
+        ? (() => {
+            const byOl = new Map<string, any>();
+            const snap = fleetSql.financial_snapshot_month
+              ? String(fleetSql.financial_snapshot_month).slice(0, 10)
+              : null;
+            for (const f of fleetSql.financial_timeline || []) {
+              const ol = String(f.ol ?? "").trim();
+              const expiration_date = String(f.expiration_date ?? "").trim().slice(0, 10);
+              if (!ol || !/^\d{4}-\d{2}-\d{2}$/.test(expiration_date)) continue;
+              byOl.set(ol.toUpperCase(), {
+                ol,
+                expiration_date,
+                source: "asset_report",
+                snapshot_month: snap,
+                months_until: f.months_until != null ? Number(f.months_until) : null,
+                lessee: f.lessee ? String(f.lessee) : null,
+              });
+            }
+            return { latestSnap: snap, byOl };
+          })()
+        : buildAssetReportExpirations(finRows as any[]);
       const carFallbackByOl = sqlKpis
         ? (() => {
             const m = new Map<string, string>();
@@ -791,68 +820,86 @@ export async function registerRoutes(
       const sqlUtil = (op: number, leased: number) =>
         op > 0 ? Math.round((leased / op) * 1000) / 10 : 0;
 
-      let ageCars = activeCars as any[];
-      if (sqlKpis) {
-        ageCars = await fetchAllRows<any>((from, to) =>
-          db
-            .from("railcars")
-            .select("id, active, build_year")
-            .eq("active", true)
-            .order("id", { ascending: true })
-            .range(from, to)
-        );
-      }
-      const fleet_age = turning50ByYear(ageCars);
+      const fleet_age = sqlKpis && fleetSql.fleet_age
+        ? {
+            tiles: fleetSql.fleet_age.tiles || [],
+            unknown_count: Number(fleetSql.fleet_age.unknown_count) || 0,
+            known_count: Number(fleetSql.fleet_age.known_count) || 0,
+            operating_count: Number(fleetSql.fleet_age.operating_count) || 0,
+          }
+        : turning50ByYear(activeCars as any[]);
 
-      let in_program_count = 0;
-      try {
-        in_program_count = await countInProgram();
-      } catch (e: any) {
-        console.warn("[dashboard] in_program_count unavailable:", e?.message ?? e);
+      let in_program_count = sqlKpis && sqlKpis.in_program_count != null
+        ? Number(sqlKpis.in_program_count) || 0
+        : 0;
+      if (!sqlKpis || sqlKpis.in_program_count == null) {
+        try {
+          in_program_count = await countInProgram();
+        } catch (e: any) {
+          console.warn("[dashboard] in_program_count unavailable:", e?.message ?? e);
+        }
       }
       const in_transit_leased_count = in_program_count;
 
-      const [activeByRider, amOverview, riderExpRows] = await Promise.all([
-        countActiveCarsByRiderId(),
-        listAccountManagementOverview(null, { includeInactive: false }),
-        fetchAllRows<{
-          id: number;
-          rider_name: string;
-          schedule_number: string | null;
-          expiration_date: string | null;
-          master_lease: { lessee: string | null; lease_number: string | null } | { lessee: string | null; lease_number: string | null }[] | null;
-        }>((from, to) =>
-          supabaseAdmin
-            .from("riders")
-            .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(lessee, lease_number)")
-            .order("id", { ascending: true })
-            .range(from, to)
-        ),
-      ]);
-      let activeOlCount = 0;
-      for (const n of activeByRider.values()) {
-        if (n > 0) activeOlCount += 1;
-      }
-      const dealsExpiring = amOverview.kpis.expiring;
-      const riderExpirationTimeline = riderExpRows
-        .filter((r) => (activeByRider.get(r.id) ?? 0) > 0 && String(r.expiration_date ?? "").trim())
-        .map((r) => {
-          const ml = Array.isArray(r.master_lease) ? r.master_lease[0] : r.master_lease;
-          return {
-            rider_id: r.id,
+      let activeOlCount = sqlKpis ? Number(sqlKpis.riders_count) || 0 : 0;
+      let dealsExpiring: { year: number; count: number }[] = Array.isArray(fleetSql?.deals_expiring)
+        ? fleetSql.deals_expiring.map((d: any) => ({ year: Number(d.year), count: Number(d.count) || 0 }))
+        : [];
+      let riderExpirationTimeline: any[] = Array.isArray(fleetSql?.rider_expiration_timeline)
+        ? fleetSql.rider_expiration_timeline.map((r: any) => ({
+            rider_id: r.rider_id,
             rider_name: r.rider_name,
             schedule_number: r.schedule_number,
-            expiration_date: String(r.expiration_date).trim().slice(0, 10),
-            lease_number: ml?.lease_number ?? ml?.lessee ?? null,
-            car_count: activeByRider.get(r.id) ?? 0,
+            expiration_date: String(r.expiration_date ?? "").trim().slice(0, 10),
+            lease_number: r.lease_number ?? null,
+            car_count: Number(r.car_count) || 0,
             source: "financial" as const,
-            months_until_lease_exp: null as number | null,
-          };
-        })
-        .sort(
-          (a, b) =>
-            a.expiration_date.localeCompare(b.expiration_date) || a.rider_name.localeCompare(b.rider_name)
-        );
+            months_until_lease_exp: r.months_until_lease_exp ?? null,
+          }))
+        : [];
+      if (!sqlKpis) {
+        const [activeByRider, amOverview, riderExpRows] = await Promise.all([
+          countActiveCarsByRiderId(),
+          listAccountManagementOverview(null, { includeInactive: false }),
+          fetchAllRows<{
+            id: number;
+            rider_name: string;
+            schedule_number: string | null;
+            expiration_date: string | null;
+            master_lease: { lessee: string | null; lease_number: string | null } | { lessee: string | null; lease_number: string | null }[] | null;
+          }>((from, to) =>
+            supabaseAdmin
+              .from("riders")
+              .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(lessee, lease_number)")
+              .order("id", { ascending: true })
+              .range(from, to)
+          ),
+        ]);
+        activeOlCount = 0;
+        for (const n of activeByRider.values()) {
+          if (n > 0) activeOlCount += 1;
+        }
+        dealsExpiring = amOverview.kpis.expiring;
+        riderExpirationTimeline = riderExpRows
+          .filter((r) => (activeByRider.get(r.id) ?? 0) > 0 && String(r.expiration_date ?? "").trim())
+          .map((r) => {
+            const ml = Array.isArray(r.master_lease) ? r.master_lease[0] : r.master_lease;
+            return {
+              rider_id: r.id,
+              rider_name: r.rider_name,
+              schedule_number: r.schedule_number,
+              expiration_date: String(r.expiration_date).trim().slice(0, 10),
+              lease_number: ml?.lease_number ?? ml?.lessee ?? null,
+              car_count: activeByRider.get(r.id) ?? 0,
+              source: "financial" as const,
+              months_until_lease_exp: null as number | null,
+            };
+          })
+          .sort(
+            (a, b) =>
+              a.expiration_date.localeCompare(b.expiration_date) || a.rider_name.localeCompare(b.rider_name)
+          );
+      }
 
       let fleetKpis = sqlKpis
         ? {

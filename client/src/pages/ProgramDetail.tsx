@@ -19,7 +19,7 @@ import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker"
 import ShopCombobox, { type ShopOption } from "@/components/ShopCombobox";
 import AccountCombobox from "@/components/AccountCombobox";
 import { cn } from "@/lib/utils";
-import { Download, History, Plus, Paperclip, UserMinus } from "lucide-react";
+import { Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
@@ -117,6 +117,39 @@ function carLabelOf(c: ProgramCar): string {
   return [c.railcar?.reporting_marks, c.railcar?.car_number].filter(Boolean).join(" ") || `#${c.railcar_id}`;
 }
 
+function mergeCarPatch(cur: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...cur, ...patch };
+  if (patch.custom_fields && typeof patch.custom_fields === "object") {
+    next.custom_fields = {
+      ...((cur.custom_fields && typeof cur.custom_fields === "object" ? cur.custom_fields : {}) as Record<string, unknown>),
+      ...(patch.custom_fields as Record<string, unknown>),
+    };
+  }
+  return next;
+}
+
+function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefined, shops: ShopOption[]): ProgramCar {
+  if (!patch) return car;
+  const next: ProgramCar = { ...car, custom_fields: { ...(car.custom_fields ?? {}) } };
+  if (patch.completed !== undefined) next.completed = Boolean(patch.completed);
+  if (patch.status !== undefined) next.status = patch.status === "" ? null : String(patch.status);
+  if (patch.flag_tag !== undefined) next.flag_tag = patch.flag_tag === "" ? null : String(patch.flag_tag);
+  if (patch.notes !== undefined) next.notes = patch.notes === "" ? null : String(patch.notes);
+  if (patch.shop_id !== undefined) {
+    const shopId = patch.shop_id === "" || patch.shop_id == null ? null : Number(patch.shop_id);
+    next.shop_id = shopId;
+    next.shop = shopId == null ? null : shops.find((s) => s.id === shopId) ?? car.shop;
+  }
+  if (patch.repair_cost_total !== undefined) {
+    const n = patch.repair_cost_total === "" || patch.repair_cost_total == null ? null : Number(patch.repair_cost_total);
+    next.repair_cost_total = n != null && Number.isFinite(n) ? n : null;
+  }
+  if (patch.custom_fields && typeof patch.custom_fields === "object") {
+    next.custom_fields = { ...next.custom_fields, ...(patch.custom_fields as Record<string, unknown>) };
+  }
+  return next;
+}
+
 const PD_EMPTY_COLS = new Set<string>();
 const PD_CORE = ["status", "flag", "comment", "ol_entry", "ol_now", "shop", "repair"] as const;
 const PD_LABELS: Record<string, string> = {
@@ -171,6 +204,13 @@ export default function ProgramDetailPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [header, setHeader] = useState<HeaderDraft | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [carDrafts, setCarDrafts] = useState<Record<number, Record<string, unknown>>>({});
+  const [carSaving, setCarSaving] = useState(false);
+  const [carSavedFlash, setCarSavedFlash] = useState(false);
+  const [carSaveError, setCarSaveError] = useState<string | null>(null);
+  const leaveDirtyRef = useRef(false);
+  const heldHashRef = useRef(typeof window !== "undefined" ? window.location.hash : "");
+  const skipHashRef = useRef(false);
 
   const { data: program, isLoading, error } = useQuery<Program>({
     queryKey: ["/api/programs", id],
@@ -221,26 +261,48 @@ export default function ProgramDetailPage() {
     if (!program || !header) return false;
     return JSON.stringify(header) !== JSON.stringify(headerFrom(program));
   }, [program, header]);
+  const gridDirty = Object.keys(carDrafts).length > 0;
+  leaveDirtyRef.current = dirty || gridDirty;
 
   const patchProgram = useMutation({
     mutationFn: (body: Record<string, unknown>) => apiRequest("PATCH", `/api/programs/${id}`, body).then((r) => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/programs", id] });
-      qc.invalidateQueries({ queryKey: ["/api/programs"] });
+      qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+      qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
     },
     onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
 
-  const patchCar = useMutation({
-    mutationFn: ({ linkId, body }: { linkId: number; body: Record<string, unknown> }) =>
-      apiRequest("PATCH", `/api/programs/${id}/cars/${linkId}`, body).then((r) => r.json()),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: carsKey });
-      qc.invalidateQueries({ queryKey: ["/api/programs", id] });
-      qc.invalidateQueries({ queryKey: ["/api/programs"] });
-      qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
-    },
-  });
+  useEffect(() => {
+    heldHashRef.current = window.location.hash;
+    const onHash = () => {
+      if (skipHashRef.current) {
+        skipHashRef.current = false;
+        return;
+      }
+      if (!leaveDirtyRef.current) {
+        heldHashRef.current = window.location.hash;
+        return;
+      }
+      if (window.confirm("You have unsaved changes. Leave anyway?")) {
+        heldHashRef.current = window.location.hash;
+        return;
+      }
+      skipHashRef.current = true;
+      window.location.hash = heldHashRef.current;
+    };
+    const onBefore = (e: BeforeUnloadEvent) => {
+      if (!leaveDirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("hashchange", onHash);
+    window.addEventListener("beforeunload", onBefore);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("beforeunload", onBefore);
+    };
+  }, []);
 
   const defs = program?.field_defs ?? [];
   const catName = program?.category?.name ?? "";
@@ -256,9 +318,13 @@ export default function ProgramDetailPage() {
     return [...pinnedStart, ...mergeColOrder(movable, colOrder), "_actions"];
   }, [canEdit, defs, colOrder]);
   const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "complete" && k !== "_actions");
+  const draftedCars = useMemo(
+    () => cars.map((c) => applyCarDraft(c, carDrafts[c.id], shops)),
+    [cars, carDrafts, shops],
+  );
   const sortedCars = useMemo(
-    () => [...cars].sort((a, b) => Number(Boolean(a.completed)) - Number(Boolean(b.completed))),
-    [cars],
+    () => [...draftedCars].sort((a, b) => Number(Boolean(a.completed)) - Number(Boolean(b.completed))),
+    [draftedCars],
   );
   const tableW = tableWidthFor(displayKeys, colWidths, PD_WIDTHS, 120);
   const gridW = Math.max(1100, tableW);
@@ -270,6 +336,38 @@ export default function ProgramDetailPage() {
     if (!top || !body) return;
     if (from === "top") body.scrollLeft = top.scrollLeft;
     else top.scrollLeft = body.scrollLeft;
+  }
+
+  function queueCarPatch(linkId: number, patch: Record<string, unknown>) {
+    setCarDrafts((prev) => ({ ...prev, [linkId]: mergeCarPatch(prev[linkId] ?? {}, patch) }));
+  }
+
+  async function saveCarDrafts() {
+    const entries = Object.entries(carDrafts);
+    if (!entries.length || !canEdit) return;
+    setCarSaving(true);
+    setCarSaveError(null);
+    try {
+      await Promise.all(
+        entries.map(([linkId, body]) => apiRequest("PATCH", `/api/programs/${id}/cars/${linkId}`, body)),
+      );
+      setCarDrafts({});
+      setCarSavedFlash(true);
+      window.setTimeout(() => setCarSavedFlash(false), 2500);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: carsKey }),
+        qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true }),
+        qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true }),
+      ]);
+      if (tab === "activity" || historyFor) {
+        await qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
+      }
+    } catch (e: any) {
+      setCarSaveError(e.message || "Save failed");
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setCarSaving(false);
+    }
   }
 
   function pdHeader(key: string) {
@@ -314,7 +412,7 @@ export default function ProgramDetailPage() {
             def={def}
             value={c.custom_fields?.[def.field_key]}
             readOnly={!canEdit || exited}
-            onSave={(v) => patchCar.mutate({ linkId: c.id, body: { custom_fields: { [def.field_key]: v } } })}
+            onSave={(v) => queueCarPatch(c.id, { custom_fields: { [def.field_key]: v } })}
           />
         </td>
       );
@@ -341,7 +439,7 @@ export default function ProgramDetailPage() {
             <Checkbox
               checked={Boolean(c.completed)}
               disabled={!canEdit || exited}
-              onCheckedChange={(v) => patchCar.mutate({ linkId: c.id, body: { completed: v === true } })}
+              onCheckedChange={(v) => queueCarPatch(c.id, { completed: v === true })}
               aria-label={`Mark ${label} complete in this program`}
             />
           </td>
@@ -353,7 +451,7 @@ export default function ProgramDetailPage() {
               value={c.status ?? ""}
               options={statusOptions}
               readOnly={!canEdit || exited}
-              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { status: v } })}
+              onSave={(v) => queueCarPatch(c.id, { status: v })}
             />
           </td>
         );
@@ -364,7 +462,7 @@ export default function ProgramDetailPage() {
               readOnly={!canEdit || exited}
               value={c.flag_tag ?? ""}
               placeholder="Watch, Priority…"
-              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { flag_tag: v } })}
+              onSave={(v) => queueCarPatch(c.id, { flag_tag: v })}
             />
           </td>
         );
@@ -374,7 +472,7 @@ export default function ProgramDetailPage() {
             <CellInput
               readOnly={!canEdit || exited}
               value={c.notes ?? ""}
-              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { notes: v } })}
+              onSave={(v) => queueCarPatch(c.id, { notes: v })}
             />
           </td>
         );
@@ -390,7 +488,7 @@ export default function ProgramDetailPage() {
                 compact
                 shops={shops}
                 value={c.shop_id}
-                onChange={(shopId) => patchCar.mutate({ linkId: c.id, body: { shop_id: shopId } })}
+                onChange={(shopId) => queueCarPatch(c.id, { shop_id: shopId })}
               />
             ) : (
               c.shop?.name ?? "—"
@@ -404,7 +502,7 @@ export default function ProgramDetailPage() {
               readOnly={!canEdit || exited}
               className="text-right"
               value={c.repair_cost_total != null ? String(c.repair_cost_total) : ""}
-              onSave={(v) => patchCar.mutate({ linkId: c.id, body: { repair_cost_total: v } })}
+              onSave={(v) => queueCarPatch(c.id, { repair_cost_total: v })}
             />
           </td>
         );
@@ -443,11 +541,17 @@ export default function ProgramDetailPage() {
                     confirmLabel: "Remove from program",
                   });
                   if (!ok) return;
+                  if (carDrafts[c.id] && !window.confirm("This car has unsaved edits. Remove anyway?")) return;
                   await apiRequest("DELETE", `/api/programs/${id}/cars/${c.id}`);
+                  setCarDrafts((prev) => {
+                    if (!prev[c.id]) return prev;
+                    const next = { ...prev };
+                    delete next[c.id];
+                    return next;
+                  });
                   qc.invalidateQueries({ queryKey: carsKey });
-                  qc.invalidateQueries({ queryKey: ["/api/programs", id] });
-                  qc.invalidateQueries({ queryKey: ["/api/programs"] });
-                  qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
+                  qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+                  qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
                 }}
               >
                 <UserMinus className="h-3.5 w-3.5" />
@@ -647,6 +751,20 @@ export default function ProgramDetailPage() {
               {canEdit && (
                 <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> Add cars</Button>
               )}
+              {canEdit && (
+                <Button size="sm" disabled={!gridDirty || carSaving} onClick={() => void saveCarDrafts()} data-testid="button-save-program-cars">
+                  {carSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+              )}
+              {carSavedFlash && !gridDirty ? <span className="text-xs text-emerald-400">Saved</span> : null}
+              {carSaveError ? <span className="text-xs text-destructive">{carSaveError}</span> : null}
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Checkbox checked={includeExited} onCheckedChange={(v) => setIncludeExited(v === true)} />
                 Show exited cars
@@ -674,11 +792,15 @@ export default function ProgramDetailPage() {
                     link_ids: Array.from(selected),
                     updates,
                   });
+                  setCarDrafts((prev) => {
+                    const next = { ...prev };
+                    for (const linkId of selected) delete next[linkId];
+                    return next;
+                  });
                   setSelected(new Set());
                   qc.invalidateQueries({ queryKey: carsKey });
-                  qc.invalidateQueries({ queryKey: ["/api/programs", id] });
-                  qc.invalidateQueries({ queryKey: ["/api/programs"] });
-                  qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
+                  qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+                  qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
                   toast({ title: `Updated ${selected.size} car${selected.size === 1 ? "" : "s"}` });
                 }}
               />
@@ -715,7 +837,15 @@ export default function ProgramDetailPage() {
                     const exited = Boolean(c.exited_date);
                     const done = Boolean(c.completed);
                     return (
-                      <tr key={c.id} className={cn("border-t border-border/50", exited && "opacity-60", done && !exited && "bg-muted/20")}>
+                      <tr
+                        key={c.id}
+                        className={cn(
+                          "border-t border-border/50",
+                          exited && "opacity-60",
+                          done && !exited && !carDrafts[c.id] && "bg-muted/20",
+                          carDrafts[c.id] && "border-l-2 border-l-primary bg-primary/5",
+                        )}
+                      >
                         {displayKeys.map((k) => pdCell(k, c, label, exited))}
                       </tr>
                     );
@@ -749,9 +879,8 @@ export default function ProgramDetailPage() {
         onAdded={() => {
           setAddOpen(false);
           qc.invalidateQueries({ queryKey: carsKey });
-          qc.invalidateQueries({ queryKey: ["/api/programs", id] });
-          qc.invalidateQueries({ queryKey: ["/api/programs"] });
-          qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
+          qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+          qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
         }}
       />
 
@@ -841,7 +970,11 @@ function CellInput({
       value={v}
       readOnly={readOnly}
       placeholder={placeholder}
-      onChange={(e) => setV(e.target.value)}
+      onChange={(e) => {
+        const next = e.target.value;
+        setV(next);
+        if (next !== value) onSave(next);
+      }}
       onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === "Tab") commit((e.target as HTMLInputElement).value);

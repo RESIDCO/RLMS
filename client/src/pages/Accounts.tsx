@@ -45,6 +45,8 @@ type OverviewAccount = {
   ol_count: number;
   active_car_count: number;
   is_inactive: boolean;
+  sold_ol_count?: number;
+  sold_ol_total?: number;
 };
 
 type Overview = {
@@ -70,6 +72,7 @@ type AccountOl = {
   status_tag: StatusTag | null;
   active_car_count: number;
   is_inactive: boolean;
+  sold?: boolean;
 };
 
 type AccountDetail = {
@@ -316,6 +319,7 @@ function AccountListView() {
                       <Link href={accountDetailPath(a.id, listState)} className="font-medium text-foreground hover:underline">
                         {a.name}
                       </Link>
+                      <SoldRollupBadge sold={a.sold_ol_count ?? 0} total={a.sold_ol_total ?? 0} />
                       {a.is_inactive && (
                         <span className="ml-2">
                           <InactiveFleetBadge active={false} />
@@ -349,6 +353,35 @@ function AccountListView() {
         }}
       />
     </div>
+  );
+}
+
+function SoldBadge({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex align-middle text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30",
+        className,
+      )}
+    >
+      SOLD
+    </span>
+  );
+}
+
+function SoldRollupBadge({ sold, total }: { sold: number; total: number }) {
+  if (total <= 0 || sold <= 0) return null;
+  if (sold >= total) {
+    return (
+      <span className="ml-2">
+        <SoldBadge />
+      </span>
+    );
+  }
+  return (
+    <span className="ml-2 inline-flex align-middle text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded border border-umler-amber/25 text-umler-amber/80">
+      {sold}/{total} SOLD
+    </span>
   );
 }
 
@@ -653,6 +686,7 @@ function OlRows({
       <tr className="border-t border-border align-top">
         <td className="px-4 py-2 font-mono-num">
           {ol.schedule_number || ol.rider_name}
+          {ol.sold ? <SoldBadge className="ml-2" /> : null}
           {ol.is_inactive ? (
             <span className="ml-2">
               <InactiveFleetBadge active={false} />

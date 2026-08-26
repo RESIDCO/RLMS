@@ -197,6 +197,10 @@ export function isStatusTag(v: unknown): v is StatusTag {
   return typeof v === "string" && (STATUS_TAGS as readonly string[]).includes(v);
 }
 
+function hasSoldTo(v: unknown): boolean {
+  return Boolean(String(v ?? "").trim());
+}
+
 function expirationYear(iso: string | null | undefined): number | null {
   const s = String(iso ?? "").trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
@@ -215,6 +219,8 @@ export type AccountOverviewRow = AccountListRow & {
   ol_count: number;
   active_car_count: number;
   is_inactive: boolean;
+  sold_ol_count: number;
+  sold_ol_total: number;
 };
 
 export type AccountManagerPill = {
@@ -254,10 +260,10 @@ export async function listAccountManagementOverview(
 
   const [accounts, leases, riders, activeByRider] = await Promise.all([
     listAccounts(),
-    fetchAllRows<{ id: number; account_id: number | null }>((from, to) =>
+    fetchAllRows<{ id: number; account_id: number | null; sold_to: string | null }>((from, to) =>
       supabaseAdmin
         .from("master_leases")
-        .select("id, account_id")
+        .select("id, account_id, sold_to")
         .order("id", { ascending: true })
         .range(from, to)
     ),
@@ -278,7 +284,9 @@ export async function listAccountManagementOverview(
 
   const accountById = new Map(accounts.map((a) => [a.id, a]));
   const accountIdByLease = new Map<number, number>();
+  const leaseSold = new Map<number, boolean>();
   for (const l of leases) {
+    leaseSold.set(l.id, hasSoldTo(l.sold_to));
     if (l.account_id == null) continue;
     accountIdByLease.set(l.id, l.account_id);
   }
@@ -289,12 +297,22 @@ export async function listAccountManagementOverview(
     activeCars: number;
     expireYears: Set<number>;
     tags: Set<StatusTag>;
+    soldOls: number;
+    totalOls: number;
   };
   const aggByAccount = new Map<number, AccAgg>();
   function agg(id: number): AccAgg {
     let a = aggByAccount.get(id);
     if (!a) {
-      a = { liveOls: 0, deadOls: 0, activeCars: 0, expireYears: new Set(), tags: new Set() };
+      a = {
+        liveOls: 0,
+        deadOls: 0,
+        activeCars: 0,
+        expireYears: new Set(),
+        tags: new Set(),
+        soldOls: 0,
+        totalOls: 0,
+      };
       aggByAccount.set(id, a);
     }
     return a;
@@ -318,6 +336,8 @@ export async function listAccountManagementOverview(
     if (accountId == null) continue;
     const inactive = riderIsInactive(r.id, activeByRider);
     const a = agg(accountId);
+    a.totalOls += 1;
+    if (leaseSold.get(r.master_lease_id)) a.soldOls += 1;
     if (inactive) a.deadOls += 1;
     else {
       a.liveOls += 1;
@@ -376,6 +396,8 @@ export async function listAccountManagementOverview(
       ol_count: includeInactive ? live + dead : live,
       active_car_count: a?.activeCars ?? 0,
       is_inactive: live === 0 && dead > 0,
+      sold_ol_count: a?.soldOls ?? 0,
+      sold_ol_total: a?.totalOls ?? 0,
     };
   });
 
@@ -405,6 +427,7 @@ export type AccountOlRow = {
   status_tag: StatusTag | null;
   active_car_count: number;
   is_inactive: boolean;
+  sold: boolean;
 };
 
 export async function getAccount(id: number) {
@@ -418,13 +441,14 @@ export async function getAccount(id: number) {
 
   const { data: leases, error: lErr } = await supabaseAdmin
     .from("master_leases")
-    .select("id, lease_number, lessee")
+    .select("id, lease_number, lessee, sold_to")
     .eq("account_id", id)
     .order("lease_number");
   if (lErr) throw lErr;
 
   const leaseIds = (leases ?? []).map((l) => l.id);
   const leaseNumberById = new Map((leases ?? []).map((l) => [l.id, l.lease_number]));
+  const leaseSoldById = new Map((leases ?? []).map((l) => [l.id, hasSoldTo((l as { sold_to?: string | null }).sold_to)]));
   let riderRows: {
     id: number;
     rider_name: string;
@@ -456,6 +480,7 @@ export async function getAccount(id: number) {
       status_tag: isStatusTag(r.status_tag) ? r.status_tag : null,
       active_car_count,
       is_inactive: active_car_count === 0,
+      sold: leaseSoldById.get(r.master_lease_id) === true,
     };
   });
 

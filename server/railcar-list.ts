@@ -21,8 +21,8 @@ acquisition_batch_id, acquisition_date, purchase_price, needs_completion, ops_fl
 assignment:railcar_assignments(
   id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
-    id, rider_name, schedule_number, expiration_date, master_lease_id,
-    master_lease:master_leases(id, lease_number, lessor, lease_type)
+    id, rider_name, schedule_number, effective_date, expiration_date, monthly_rate_pct, lessors_cost, master_lease_id,
+    master_lease:master_leases(id, lease_number, agreement_number, lessor, lessee, lease_type, sold_to)
   )
 )
 `.replace(/\s+/g, " ").trim();
@@ -321,8 +321,11 @@ export async function attachAccountManagerInitials<T extends { rider_external_id
 async function attachAccountJoins<T extends { rider_external_id?: string | null; assignment?: unknown }>(
   rows: T[],
 ) {
-  const withAm = await attachAccountManagerInitials(rows);
-  return attachLatestAmNotes(withAm);
+  const [withAm, withNotes] = await Promise.all([
+    attachAccountManagerInitials(rows),
+    attachLatestAmNotes(rows),
+  ]);
+  return withAm.map((r, i) => ({ ...r, am_note: withNotes[i]?.am_note ?? null }));
 }
 
 function mapRow(r: any) {
@@ -462,7 +465,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   const to = from + p.pageSize! - 1;
   let q = db
     .from("railcars")
-    .select(select, { count: "exact" })
+    .select(select, { count: "estimated" })
     .order(orderCol, { ascending: p.dir !== "desc" })
     .range(from, to);
   q = applyRailcarFilters(q, p);

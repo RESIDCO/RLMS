@@ -458,7 +458,16 @@ function InvoiceDetailSheet({
       if (!r.ok) throw new Error("Upload failed");
       return r.json();
     },
-    onSuccess: () => { invalidate(); toast({ title: "PDF uploaded" }); },
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/invoices", invoiceId], exact: true });
+      const pdfUrl = data?.pdf_url;
+      if (pdfUrl) {
+        qc.setQueryData(["/api/invoices-all"], (old: Invoice[] | undefined) =>
+          (old ?? []).map((row) => (String(row.id) === String(invoiceId) ? { ...row, pdf_url: pdfUrl } : row)),
+        );
+      }
+      toast({ title: "PDF uploaded" });
+    },
     onError: () => toast({ title: "Upload failed", variant: "destructive" }),
   });
 

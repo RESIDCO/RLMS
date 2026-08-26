@@ -68,6 +68,7 @@ import ActivityTimeline from "@/components/ActivityTimeline";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { confirmDelete, confirmSave, confirmWithReason } from "@/components/ConfirmActionDialog";
+import { LeaseGlanceSheet, glanceRiderFromCar, type LeaseGlanceRider } from "@/components/LeaseGlanceSheet";
 import {
   CAR_STATUS_EDIT_OPTIONS,
   crossesInactiveBoundary,
@@ -504,6 +505,7 @@ export default function FleetRegistry() {
     dir: "asc",
   });
   const [openCarId, setOpenCarId] = useState<number | null>(null);
+  const [leaseGlance, setLeaseGlance] = useState<LeaseGlanceRider | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [transitFilter, setTransitFilter] = useState<string>(initQ.transit);
   const [entityFilter, setEntityFilter] = useState<string>(initQ.entity);
@@ -635,9 +637,10 @@ export default function FleetRegistry() {
   };
 
   type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
-  const { data: pageData, isLoading } = useQuery<RailcarPage>({
+  const { data: pageData, isLoading, isError, error, refetch } = useQuery<RailcarPage>({
     queryKey: ["/api/railcars", listParams],
-    queryFn: () => apiGet<RailcarPage>(railcarsQs(listParams)),
+    queryFn: ({ signal }) =>
+      apiGet<RailcarPage>(railcarsQs(listParams), { timeoutMs: 15_000, signal }),
     staleTime: 45_000,
     // Don't keep the unfiltered page on screen while a search request is in flight —
     // that made mark/lessee queries look like they matched unrelated cars (or didn't fire).
@@ -776,6 +779,14 @@ export default function FleetRegistry() {
 
   const bulkUpdateOpsFlag = async (ops_flag: string | null, label: string) => {
     const ids = Array.from(selectedIds);
+    const ok = await confirmSave({
+      title: `Set flag on ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
+      description:
+        ops_flag == null
+          ? "This clears the exception flag. It does not change rental status or assignments."
+          : `Flag as “${label.replace(/^flagged\s+/i, "")}”. This does not change rental status or assignments.`,
+    });
+    if (!ok) return;
     setBulkFlagPending(true);
     try {
       await apiRequest("POST", "/api/railcars/bulk-ops-flag", { ids, ops_flag });
@@ -876,14 +887,6 @@ export default function FleetRegistry() {
         reason: reason ?? undefined,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
-      queryClient.invalidateQueries({
-        predicate: (q) =>
-          Array.isArray(q.queryKey) &&
-          (String(q.queryKey[0] ?? "").startsWith("/api/car-status-history") ||
-            q.queryKey[0] === "/api/railcars"),
-      });
       toast({ title: `${n} car${n !== 1 ? "s" : ""} updated to "${newStatus}"` });
       clearSelection();
     } catch (e: any) {
@@ -1128,13 +1131,43 @@ export default function FleetRegistry() {
       case "rider":
         return (
           <td key={key} className="px-4 py-3 text-muted-foreground">
-            {r.assignment?.rider?.rider_name ?? "—"}
+            {r.assignment?.rider ? (
+              <button
+                type="button"
+                className="text-left hover:text-primary hover:underline"
+                data-testid={`link-railcar-ol-${r.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const glance = glanceRiderFromCar(r);
+                  if (glance) setLeaseGlance(glance);
+                }}
+              >
+                {r.assignment?.rider?.rider_name ?? "—"}
+              </button>
+            ) : (
+              "—"
+            )}
           </td>
         );
       case "lease":
         return (
           <td key={key} className="px-4 py-3 font-mono-num text-muted-foreground">
-            {displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}
+            {r.assignment?.rider?.master_lease ? (
+              <button
+                type="button"
+                className="text-left hover:text-primary hover:underline"
+                data-testid={`link-railcar-lease-${r.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const glance = glanceRiderFromCar(r);
+                  if (glance) setLeaseGlance(glance);
+                }}
+              >
+                {displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"}
+              </button>
+            ) : (
+              displayLeaseNumber(r.assignment?.rider?.master_lease?.lease_number) || "—"
+            )}
           </td>
         );
       case "expires":
@@ -1614,6 +1647,15 @@ export default function FleetRegistry() {
                       ))}
                     </tr>
                   ))
+                ) : isError ? (
+                  <tr>
+                    <td colSpan={displayKeys.length} className="px-4 py-16 text-center text-sm text-red-400">
+                      Couldn't load railcars — {(error as Error)?.message || "request failed"}.{" "}
+                      <button type="button" className="underline text-foreground" onClick={() => refetch()}>
+                        Retry
+                      </button>
+                    </td>
+                  </tr>
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={displayKeys.length} className="px-4 py-16 text-center text-muted-foreground">
@@ -1783,6 +1825,7 @@ export default function FleetRegistry() {
       </Dialog>
 
       <RailcarDetailSheet carId={openCarId} onClose={() => setOpenCarId(null)} />
+      <LeaseGlanceSheet rider={leaseGlance} onClose={() => setLeaseGlance(null)} />
 
       <RailcarFormDialog
         open={addOpen}

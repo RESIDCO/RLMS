@@ -28,6 +28,7 @@ import {
   shouldRestoreSearchSession,
 } from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
+import { LeaseGlanceSheet, glanceRiderFromCar, type LeaseGlanceRider } from "@/components/LeaseGlanceSheet";
 import { formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { useState, useRef, useEffect, useMemo } from "react";
 
@@ -47,7 +48,15 @@ interface Rider {
   schedule_number: string | null;
   expiration_date: string | null;
   car_count: number;
-  master_lease: { id: number; lease_number: string; lessee: string | null; lease_type?: string | null } | null;
+  master_lease: {
+    id: number;
+    lease_number: string;
+    lessor?: string | null;
+    lessee: string | null;
+    lease_type?: string | null;
+    sold_to?: string | null;
+    agreement_number?: string | null;
+  } | null;
 }
 
 interface RailcarResult {
@@ -76,12 +85,18 @@ interface RailcarResult {
       rider_name: string;
       schedule_number: string | null;
       expiration_date: string | null;
+      effective_date?: string | null;
+      monthly_rate_pct?: number | null;
+      lessors_cost?: number | null;
+      car_count?: number | null;
       master_lease: {
         id: number;
         lease_number: string;
         lessor: string | null;
         lessee: string | null;
         lease_type?: string | null;
+        sold_to?: string | null;
+        agreement_number?: string | null;
       } | null;
     } | null;
   } | null;
@@ -168,10 +183,12 @@ function RailcarRow({
   car,
   onEdit,
   onHistory,
+  onOpenLease,
 }: {
   car: RailcarResult;
   onEdit: () => void;
   onHistory: () => void;
+  onOpenLease: (rider: LeaseGlanceRider) => void;
 }) {
   const rider = asOne(car.assignment?.rider);
   const lease = asOne(rider?.master_lease);
@@ -213,11 +230,47 @@ function RailcarRow({
           </div>
           <div>
             <div className="text-muted-foreground mb-0.5">Rider</div>
-            <div className="text-foreground">{rider?.rider_name ?? car.rider_external_id ?? "—"}</div>
+            <div className="text-foreground">
+              {rider ? (
+                <button
+                  type="button"
+                  className="text-left hover:text-primary hover:underline"
+                  data-testid={`link-search-ol-${car.id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const glance = glanceRiderFromCar(car);
+                    if (glance) onOpenLease(glance);
+                  }}
+                >
+                  {rider.rider_name ?? car.rider_external_id ?? "—"}
+                </button>
+              ) : (
+                car.rider_external_id ?? "—"
+              )}
+            </div>
           </div>
           <div>
             <div className="text-muted-foreground mb-0.5">Master Lease</div>
-            <div className="text-foreground">{displayLeaseNumber(lease?.lease_number) || "—"}</div>
+            <div className="text-foreground">
+              {lease ? (
+                <button
+                  type="button"
+                  className="text-left hover:text-primary hover:underline"
+                  data-testid={`link-search-lease-${car.id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const glance = glanceRiderFromCar(car);
+                    if (glance) onOpenLease(glance);
+                  }}
+                >
+                  {displayLeaseNumber(lease.lease_number) || "—"}
+                </button>
+              ) : (
+                "—"
+              )}
+            </div>
           </div>
           <div>
             <div className="text-muted-foreground mb-0.5">Lease Type</div>
@@ -349,6 +402,7 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editCarId, setEditCarId] = useState<number | null>(null);
+  const [leaseGlance, setLeaseGlance] = useState<LeaseGlanceRider | null>(null);
   const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const [rentalFilter, setRentalFilter] = useState<string>("all");
   const [lesseeFilter, setLesseeFilter] = useState<string>("all");
@@ -721,6 +775,13 @@ export default function SearchPage() {
                     car={car}
                     onEdit={() => setEditCarId(car.id)}
                     onHistory={() => openAppTab(historyPath(carLabel(car)))}
+                    onOpenLease={(glance) => {
+                      const fromSearch = results.riders.find((r) => r.id === glance.id)?.car_count;
+                      setLeaseGlance({
+                        ...glance,
+                        car_count: glance.car_count ?? fromSearch ?? null,
+                      });
+                    }}
                   />
                 ))}
               </div>
@@ -779,6 +840,7 @@ export default function SearchPage() {
         </div>
       )}
       <RailcarDetailSheet carId={editCarId} onClose={() => setEditCarId(null)} />
+      <LeaseGlanceSheet rider={leaseGlance} onClose={() => setLeaseGlance(null)} />
     </div>
   );
 }

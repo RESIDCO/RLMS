@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLocation } from "wouter";
+import { useHashLocation } from "wouter/use-hash-location";
 import {
   ChevronRight,
   ChevronDown,
@@ -172,6 +173,12 @@ export default function LeaseManagement() {
   const canEdit = useCanEdit();
   const isAdmin = useIsAdmin();
   const [, navigate] = useLocation();
+  const [hashLoc] = useHashLocation();
+  const hashQs = new URLSearchParams(hashLoc.includes("?") ? hashLoc.slice(hashLoc.indexOf("?") + 1) : "");
+  const targetRiderId = Number(hashQs.get("rider")) || null;
+  const filterRiders = hashQs.get("filter") === "riders";
+  const filterExpiring = hashQs.get("filter") === "expiring";
+  const filterExpiring6 = hashQs.get("filter") === "expiring6";
   const [expandedLeases, setExpandedLeases] = useState<Set<number>>(new Set());
   const [expandedRiders, setExpandedRiders] = useState<Set<number>>(new Set());
   const [addLeaseOpen, setAddLeaseOpen] = useState(false);
@@ -184,20 +191,6 @@ export default function LeaseManagement() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
   const { toast } = useToast();
-
-  // Parse deep-link params
-  const targetRiderId = typeof window !== "undefined"
-    ? Number(new URLSearchParams(window.location.search).get("rider")) || null
-    : null;
-  const filterRiders = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("filter") === "riders"
-    : false;
-  const filterExpiring = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("filter") === "expiring"
-    : false;
-  const filterExpiring6 = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("filter") === "expiring6"
-    : false;
 
   const { data: leases, isLoading } = useQuery<MasterLeaseWithRiders[]>({
     queryKey: ["/api/leases"],

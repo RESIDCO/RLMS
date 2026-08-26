@@ -18,8 +18,8 @@ lessee_name, rider_external_id, assignment_label, managed_category, lease_type, 
 assignment:railcar_assignments(
   id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
-    id, rider_name, schedule_number, expiration_date,
-    master_lease:master_leases(id, lease_number, lessor, lessee, lease_type)
+    id, rider_name, schedule_number, effective_date, expiration_date, monthly_rate_pct, lessors_cost,
+    master_lease:master_leases(id, lease_number, agreement_number, lessor, lessee, lease_type, sold_to)
   )
 )
 `.replace(/\s+/g, " ").trim();

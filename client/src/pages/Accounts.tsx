@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
@@ -92,6 +92,15 @@ type OlCar = {
   car_type: string | null;
   expiration_date: string | null;
 };
+
+let overviewInvalidateTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleOverviewInvalidate(qc: QueryClient) {
+  if (overviewInvalidateTimer) clearTimeout(overviewInvalidateTimer);
+  overviewInvalidateTimer = setTimeout(() => {
+    overviewInvalidateTimer = null;
+    qc.invalidateQueries({ queryKey: ["/api/account-management/overview"] });
+  }, 600);
+}
 
 const TAG_LABEL: Record<StatusTag, string> = { good: "Good", watch: "Watch", risk: "Risk" };
 const TAG_CLASS: Record<StatusTag, string> = {
@@ -670,11 +679,25 @@ function OlRows({
   const tagMut = useMutation({
     mutationFn: (status_tag: StatusTag | null) =>
       apiRequest("PATCH", `/api/account-management/riders/${ol.id}/status-tag`, { status_tag }),
+    onMutate: async (status_tag) => {
+      await qc.cancelQueries({ queryKey: ["/api/accounts", accountId] });
+      const prev = qc.getQueryData<AccountDetail>(["/api/accounts", accountId]);
+      if (prev) {
+        qc.setQueryData<AccountDetail>(["/api/accounts", accountId], {
+          ...prev,
+          ols: prev.ols.map((row) => (row.id === ol.id ? { ...row, status_tag } : row)),
+        });
+      }
+      return { prev };
+    },
+    onError: (e: Error, _tag, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["/api/accounts", accountId], ctx.prev);
+      toast({ title: "Could not save status", description: e.message, variant: "destructive" });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/accounts", accountId] });
-      qc.invalidateQueries({ queryKey: ["/api/account-management/overview"] });
+      scheduleOverviewInvalidate(qc);
     },
-    onError: (e: Error) => toast({ title: "Could not save status", description: e.message, variant: "destructive" }),
   });
 
   function setTag(next: StatusTag) {

@@ -878,7 +878,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
   const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const [page, setPage] = useState(0);
   const pageSize = 25;
-  const { data: cars, isLoading } = useQuery<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>({
+  const { data: cars, isLoading, isError, error, refetch } = useQuery<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>({
     queryKey: ["/api/railcars", { all: "1", rider_id: riderId, active: activeFilter }],
     queryFn: () =>
       apiGet<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>(
@@ -916,6 +916,13 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
     <div className="px-5 pb-5 bg-muted/20 border-t border-border/60">
       {isLoading ? (
         <Skeleton className="h-10 mt-3 rounded" />
+      ) : isError ? (
+        <div className="text-sm text-red-400 flex items-center gap-2 px-2 py-3">
+          Couldn't load cars for this rider — {(error as Error)?.message || "request failed"}.
+          <button type="button" className="underline" onClick={() => refetch()}>
+            Retry
+          </button>
+        </div>
       ) : (
         <>
           <div className="pt-3 flex items-center justify-between mb-2 gap-2 flex-wrap">

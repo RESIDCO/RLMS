@@ -4,7 +4,7 @@ import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
-import { queryRailcars, queryRailcarIds, parseRailcarListParams, attachAccountManagerInitials } from "./railcar-list";
+import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials } from "./railcar-list";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
   attachLatestAmNotes,
@@ -3686,7 +3686,10 @@ export async function registerRoutes(
     try {
       const raw = (req.query.q as string | undefined)?.trim() ?? "";
       if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], terms: [], counts: { railcars: 0, riders: 0, leases: 0, total: 0 } });
-      res.json(await runGlobalSearch(raw));
+      res.json(await runGlobalSearch(raw, {
+        active: typeof req.query.active === "string" ? req.query.active : "active",
+        searchScope: parseSearchScope(req.query as Record<string, unknown>),
+      }));
     } catch (err) {
       errHandler(res, err);
     }
@@ -3696,7 +3699,11 @@ export async function registerRoutes(
     try {
       const raw = String((req.body as any)?.q ?? "").trim();
       if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], terms: [], counts: { railcars: 0, riders: 0, leases: 0, total: 0 } });
-      res.json(await runGlobalSearch(raw));
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      res.json(await runGlobalSearch(raw, {
+        active: typeof body.active === "string" ? body.active : "active",
+        searchScope: parseSearchScope(body),
+      }));
     } catch (err) {
       errHandler(res, err);
     }

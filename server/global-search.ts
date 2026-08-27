@@ -1,10 +1,10 @@
-import { displayLeaseNumber, splitCarNumber } from "@shared/residco-import";
+import { splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag } from "@shared/ops-flag";
 import { carListSearchTokens } from "@shared/programs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
-import { applySearchFilter } from "./railcar-list";
+import { applySearchFilter, parseSearchScope, type SearchScope } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachLatestAmNotes, latestAmNotesByRiderIds } from "./rider-account-comments";
@@ -13,8 +13,8 @@ const CAR_LIMIT = 500;
 const SIDE_LIMIT = 100;
 
 const SEARCH_CAR_SELECT = `
-id, car_number, reporting_marks, car_type, status, fleet_status, entity, active, mechanical_designation,
-lessee_name, rider_external_id, assignment_label, managed_category, lease_type, comment_event_note,
+id, car_number, reporting_marks, car_type, equipment_type_code, status, fleet_status, entity, active, mechanical_designation,
+general_description, lessee_name, rider_external_id, assignment_label, managed_category, lease_type, comment_event_note,
 assignment:railcar_assignments(
   id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(
@@ -39,24 +39,6 @@ export type GlobalSearchResult = {
   counts: { railcars: number; riders: number; leases: number; total: number };
 };
 
-function scoreBlob(blob: string, group: string): number | null {
-  const phrase = group.toLowerCase();
-  const tokens = phrase.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return null;
-  if (!tokens.every((t) => blob.includes(t))) return null;
-  return blob.includes(phrase) ? 0 : 1;
-}
-
-function bestScore(blob: string, groups: string[]): number | null {
-  let best: number | null = null;
-  for (const g of groups) {
-    const s = scoreBlob(blob, g);
-    if (s == null) continue;
-    best = best == null ? s : Math.min(best, s);
-  }
-  return best;
-}
-
 function mapCar(r: any) {
   const assignment = asOne(r.assignment);
   const rider = asOne(assignment?.rider);
@@ -67,44 +49,6 @@ function mapCar(r: any) {
       ? { ...assignment, rider: rider ? { ...rider, master_lease } : null }
       : null,
   });
-}
-
-function carBlob(c: any) {
-  return [
-    c.car_number,
-    c.reporting_marks,
-    `${c.reporting_marks ?? ""}${c.car_number ?? ""}`,
-    c.lessee_name,
-    c.rider_external_id,
-    c.assignment_label,
-    c.assignment?.fleet_name,
-    c.assignment?.rider?.rider_name,
-    c.assignment?.rider?.master_lease?.lessee,
-    displayLeaseNumber(c.assignment?.rider?.master_lease?.lease_number),
-    c.assignment?.sub_lease_number,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function riderBlob(r: any) {
-  return [
-    r.rider_name,
-    r.schedule_number,
-    r.master_lease?.lessee,
-    displayLeaseNumber(r.master_lease?.lease_number),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function leaseBlob(l: any) {
-  return [displayLeaseNumber(l.lease_number), l.lease_number, l.lessee, l.lessor, l.agreement_number]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
 }
 
 async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
@@ -120,11 +64,23 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function fetchCarsByText(groups: string[]): Promise<any[]> {
+function applyActiveFilter(q: any, active?: string) {
+  const mode = !active || active === "active" ? "active" : active;
+  if (mode === "inactive") return q.eq("active", false);
+  if (mode === "all") return q;
+  return q.neq("active", false);
+}
+
+async function fetchCarsByText(
+  groups: string[],
+  scope: SearchScope,
+  active?: string,
+): Promise<any[]> {
   const pages = await Promise.all(
     groups.map(async (group) => {
       let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT);
-      q = applySearchFilter(q, group);
+      q = applySearchFilter(q, group, scope);
+      q = applyActiveFilter(q, active);
       const { data, error } = await q.order("id", { ascending: true }).limit(CAR_LIMIT);
       if (error) throw error;
       return (data ?? []).map(mapCar);
@@ -136,10 +92,12 @@ async function fetchCarsByText(groups: string[]): Promise<any[]> {
 async function fetchCarsByFk(
   column: "railcar_assignments.rider_id" | "railcar_assignments.rider.master_lease_id",
   ids: number[],
+  active?: string,
 ): Promise<any[]> {
   if (!ids.length) return [];
   let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT_INNER);
   q = q.in(column, ids.slice(0, 80));
+  q = applyActiveFilter(q, active);
   const { data, error } = await q.limit(CAR_LIMIT);
   if (error) {
     console.log(`[search] extra cars via ${column} skipped: ${error.message}`);
@@ -159,21 +117,52 @@ function dedupeCars(rows: any[]): any[] {
   return out;
 }
 
-async function fetchRiders(): Promise<any[]> {
-  const rows = await fetchAllRows((from, to) =>
-    supabaseAdmin
-      .from("riders")
-      .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(id, lease_number, lessor, lessee, lease_type)")
-      .order("id", { ascending: true })
-      .range(from, to),
+async function fetchRidersMatching(groups: string[]): Promise<any[]> {
+  const pages = await Promise.all(
+    groups.map(async (group) => {
+      const t = group.replace(/[%_,()]/g, "").trim();
+      if (!t) return [];
+      const { data, error } = await supabaseAdmin
+        .from("riders")
+        .select("id, rider_name, schedule_number, expiration_date, master_lease:master_leases(id, lease_number, lessor, lessee, lease_type)")
+        .or(`rider_name.ilike.%${t}%,schedule_number.ilike.%${t}%`)
+        .limit(SIDE_LIMIT);
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({ ...r, master_lease: asOne(r.master_lease) }));
+    }),
   );
-  return rows.map((r: any) => ({ ...r, master_lease: asOne(r.master_lease) }));
+  const seen = new Set<number>();
+  const out: any[] = [];
+  for (const r of pages.flat()) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out.slice(0, SIDE_LIMIT);
 }
 
-async function fetchLeases(): Promise<any[]> {
-  return fetchAllRows((from, to) =>
-    supabaseAdmin.from("master_leases").select("*").order("id", { ascending: true }).range(from, to),
+async function fetchLeasesMatching(groups: string[]): Promise<any[]> {
+  const pages = await Promise.all(
+    groups.map(async (group) => {
+      const t = group.replace(/[%_,()]/g, "").trim();
+      if (!t) return [];
+      const { data, error } = await supabaseAdmin
+        .from("master_leases")
+        .select("*")
+        .or(`lease_number.ilike.%${t}%,lessee.ilike.%${t}%,lessor.ilike.%${t}%,agreement_number.ilike.%${t}%`)
+        .limit(SIDE_LIMIT);
+      if (error) throw error;
+      return data ?? [];
+    }),
   );
+  const seen = new Set<number>();
+  const out: any[] = [];
+  for (const l of pages.flat()) {
+    if (seen.has(l.id)) continue;
+    seen.add(l.id);
+    out.push(l);
+  }
+  return out.slice(0, SIDE_LIMIT);
 }
 
 async function activeCarCountsByRider(riderIds: number[]): Promise<Map<number, number>> {
@@ -213,16 +202,15 @@ async function activeCarCountsByRider(riderIds: number[]): Promise<Map<number, n
   }
 }
 
-async function fetchCarsByIds(ids: number[]): Promise<any[]> {
+async function fetchCarsByIds(ids: number[], active?: string): Promise<any[]> {
   const uniq = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
   if (!uniq.length) return [];
   const pages: any[] = [];
   for (let i = 0; i < uniq.length; i += 80) {
     const slice = uniq.slice(i, i + 80);
-    const { data, error } = await supabaseAdmin
-      .from("railcars")
-      .select(SEARCH_CAR_SELECT)
-      .in("id", slice);
+    let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT).in("id", slice);
+    q = applyActiveFilter(q, active);
+    const { data, error } = await q;
     if (error) throw error;
     pages.push(...(data ?? []).map(mapCar));
   }
@@ -230,7 +218,7 @@ async function fetchCarsByIds(ids: number[]): Promise<any[]> {
   return uniq.map((id) => byId.get(id)).filter(Boolean);
 }
 
-async function runCarListSearch(raw: string, tokens: string[]): Promise<GlobalSearchResult> {
+async function runCarListSearch(raw: string, tokens: string[], active?: string): Promise<GlobalSearchResult> {
   const capped = tokens.slice(0, CAR_LIMIT);
   const resolved = await timed("railcars-paste-resolve", () =>
     resolveProgramCars({ text: capped.join("\n") }),
@@ -248,7 +236,7 @@ async function runCarListSearch(raw: string, tokens: string[]): Promise<GlobalSe
     if (splitCarNumber(a.token).reporting_marks) continue;
     for (const m of a.matches) pushId(m.railcar_id);
   }
-  const railcars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds));
+  const railcars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds, active));
   const railcarsWithNotes = await attachLatestAmNotes(railcars);
   const not_found = [
     ...resolved.not_found.map((n) => n.token),
@@ -272,11 +260,16 @@ async function runCarListSearch(raw: string, tokens: string[]): Promise<GlobalSe
   };
 }
 
-export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> {
+export async function runGlobalSearch(
+  raw: string,
+  opts?: { active?: string; searchScope?: SearchScope },
+): Promise<GlobalSearchResult> {
   const tAll = Date.now();
+  const active = opts?.active ?? "active";
+  const scope = opts?.searchScope ?? parseSearchScope({});
   const pasteCars = carListSearchTokens(raw);
   if (pasteCars) {
-    const out = await runCarListSearch(raw, pasteCars);
+    const out = await runCarListSearch(raw, pasteCars, active);
     console.log(
       `[search] total ${Date.now() - tAll}ms paste-cars=${pasteCars.length} found=${out.railcars.length} missing=${out.not_found.length}`,
     );
@@ -286,60 +279,38 @@ export async function runGlobalSearch(raw: string): Promise<GlobalSearchResult> 
   const groups = raw.split(/[\n\r,;]+/).map((g) => g.trim()).filter(Boolean);
   const terms = groups.flatMap((g) => g.split(/\s+/).filter(Boolean));
 
-  const [textCars, priorIds, allRiders, allLeases] = await Promise.all([
-    timed("railcars-text-query", () => fetchCarsByText(groups)),
+  const [textCars, priorIds, matchedRiders, matchedLeases] = await Promise.all([
+    timed("railcars-text-query", () => fetchCarsByText(groups, scope, active)),
     timed("railcars-prior-identity", () => resolveRailcarsByAnyIdentity(raw)),
-    timed("riders-fetch", fetchRiders),
-    timed("leases-fetch", fetchLeases),
+    timed("riders-query", () => (scope.leases ? fetchRidersMatching(groups) : Promise.resolve([]))),
+    timed("leases-query", () => (scope.leases ? fetchLeasesMatching(groups) : Promise.resolve([]))),
   ]);
 
-  const tScore = Date.now();
-  const matchedRiders = (allRiders ?? [])
-    .map((r: any) => ({ r, score: bestScore(riderBlob(r), groups) }))
-    .filter((x) => x.score != null)
-    .sort((a, b) => a.score! - b.score!)
-    .map((x) => x.r)
-    .slice(0, SIDE_LIMIT);
-  const matchedLeases = (allLeases ?? [])
-    .map((l: any) => ({ l, score: bestScore(leaseBlob(l), groups) }))
-    .filter((x) => x.score != null)
-    .sort((a, b) => a.score! - b.score!)
-    .map((x) => x.l)
-    .slice(0, SIDE_LIMIT);
-  console.log(
-    `[search] score-riders-leases ${Date.now() - tScore}ms riders=${matchedRiders.length} leases=${matchedLeases.length}`,
-  );
-
   const priorCars = await timed("railcars-prior-hydrate", () =>
-    fetchCarsByIds(priorIds.filter((id) => !textCars.some((c) => c.id === id))),
+    fetchCarsByIds(priorIds.filter((id) => !textCars.some((c) => c.id === id)), active),
   );
   const have = new Set([...textCars, ...priorCars].map((c) => c.id));
   const riderIds = matchedRiders.map((r: any) => r.id).filter(Boolean);
   const leaseIds = matchedLeases.map((l: any) => l.id).filter(Boolean);
 
-  const extraCars = await timed("railcars-via-rider-lease", async () => {
-    const [byRider, byLease] = await Promise.all([
-      fetchCarsByFk("railcar_assignments.rider_id", riderIds),
-      fetchCarsByFk("railcar_assignments.rider.master_lease_id", leaseIds),
-    ]);
-    return dedupeCars([...byRider, ...byLease].filter((c) => !have.has(c.id)));
-  });
+  const extraCars = scope.leases
+    ? await timed("railcars-via-rider-lease", async () => {
+        const [byRider, byLease] = await Promise.all([
+          fetchCarsByFk("railcar_assignments.rider_id", riderIds, active),
+          fetchCarsByFk("railcar_assignments.rider.master_lease_id", leaseIds, active),
+        ]);
+        return dedupeCars([...byRider, ...byLease].filter((c) => !have.has(c.id)));
+      })
+    : [];
 
-  const tCarScore = Date.now();
   const priorSet = new Set(priorIds);
   const matchedCars = dedupeCars([...priorCars, ...textCars, ...extraCars])
-    .map((c) => ({
-      c,
-      score: priorSet.has(Number(c.id)) ? 0 : bestScore(carBlob(c), groups),
-    }))
-    .filter((x) => x.score != null)
     .sort(
       (a, b) =>
-        a.score! - b.score! || String(a.c.car_number).localeCompare(String(b.c.car_number)),
+        Number(priorSet.has(Number(b.id))) - Number(priorSet.has(Number(a.id))) ||
+        String(a.car_number).localeCompare(String(b.car_number)),
     )
-    .map((x) => x.c)
     .slice(0, CAR_LIMIT);
-  console.log(`[search] score-railcars ${Date.now() - tCarScore}ms rows=${matchedCars.length}`);
 
   const countByRider = await timed("rider-car-counts", () =>
     activeCarCountsByRider(matchedRiders.map((r: any) => r.id)),

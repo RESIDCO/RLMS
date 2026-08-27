@@ -27,8 +27,19 @@ assignment:railcar_assignments(
 )
 `.replace(/\s+/g, " ").trim();
 
+export type SearchScope = {
+  cars: boolean;
+  leases: boolean;
+  carData: boolean;
+};
+
+const DEFAULT_SEARCH_SCOPE: SearchScope = { cars: true, leases: true, carData: false };
+
 export type RailcarListParams = {
   search?: string;
+  searchScope?: SearchScope;
+  searchRiderIds?: number[];
+  searchLeaseIds?: number[];
   status?: string;
   entity?: string;
   active?: string;
@@ -76,6 +87,7 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
   const truthy = (v: unknown) => v === "1" || v === "true" || v === 1 || v === true;
   return {
     search: str(query.search),
+    searchScope: parseSearchScope(query),
     status: str(query.status),
     entity,
     active: turning50 ? "active" : activeRaw === "all" ? "all" : (str(query.active) ?? activeDefault),
@@ -141,34 +153,114 @@ export function railcarSearchTokens(raw: string): string[] {
   return out;
 }
 
-const SEARCH_TEXT_FIELDS = [
-  "reporting_marks",
-  "car_initial",
-  "car_number",
-  "lessee_name",
-  "rider_external_id",
-  "assignment_label",
+const CAR_NUMBER_FIELDS = ["reporting_marks", "car_initial", "car_number"] as const;
+const LEASE_OL_FIELDS = ["lessee_name", "rider_external_id", "assignment_label"] as const;
+const CAR_DATA_FIELDS = [
+  "car_type",
+  "equipment_type_code",
+  "general_description",
+  "mechanical_designation",
 ] as const;
 
-export function applySearchFilter(query: any, rawSearch: string | undefined) {
+export function parseSearchScope(query: Record<string, unknown> | undefined): SearchScope {
+  const flag = (key: string, fallback: boolean) => {
+    const v = query?.[key];
+    if (v == null || v === "") return fallback;
+    if (v === "0" || v === "false" || v === false || v === 0) return false;
+    if (v === "1" || v === "true" || v === true || v === 1) return true;
+    return fallback;
+  };
+  const cars = flag("search_cars", true);
+  const leases = flag("search_leases", true);
+  const carData = flag("search_car_data", false);
+  if (!cars && !leases && !carData) return { ...DEFAULT_SEARCH_SCOPE };
+  return { cars, leases, carData };
+}
+
+function scopeOrDefault(scope?: SearchScope): SearchScope {
+  if (!scope) return { ...DEFAULT_SEARCH_SCOPE };
+  if (!scope.cars && !scope.leases && !scope.carData) return { ...DEFAULT_SEARCH_SCOPE };
+  return scope;
+}
+
+async function matchingLeaseAndRiderIds(tokens: string[]): Promise<{ leaseIds: number[]; riderIds: number[] }> {
+  let leaseIds: number[] | null = null;
+  let riderIds: number[] | null = null;
+  for (const t of tokens) {
+    const [{ data: leases, error: lErr }, { data: riders, error: rErr }] = await Promise.all([
+      supabaseAdmin
+        .from("master_leases")
+        .select("id")
+        .or(`lease_number.ilike.%${t}%,agreement_number.ilike.%${t}%,lessee.ilike.%${t}%`)
+        .limit(80),
+      supabaseAdmin
+        .from("riders")
+        .select("id")
+        .or(`rider_name.ilike.%${t}%,schedule_number.ilike.%${t}%`)
+        .limit(80),
+    ]);
+    if (lErr) throw lErr;
+    if (rErr) throw rErr;
+    const nextLeases = (leases ?? []).map((row) => Number(row.id)).filter((n) => n > 0);
+    const nextRiders = (riders ?? []).map((row) => Number(row.id)).filter((n) => n > 0);
+    leaseIds = leaseIds == null ? nextLeases : leaseIds.filter((id) => nextLeases.includes(id));
+    riderIds = riderIds == null ? nextRiders : riderIds.filter((id) => nextRiders.includes(id));
+  }
+  return { leaseIds: leaseIds ?? [], riderIds: riderIds ?? [] };
+}
+
+export function applySearchFilter(
+  query: any,
+  rawSearch: string | undefined,
+  scope?: SearchScope,
+  extra?: { riderIds?: number[]; leaseIds?: number[] },
+) {
   if (!rawSearch) return query;
   const tokens = railcarSearchTokens(rawSearch);
+  const sc = scopeOrDefault(scope);
+  const riderIn =
+    extra?.riderIds?.length ? `railcar_assignments.rider_id.in.(${extra.riderIds.join(",")})` : "";
+  const leaseIn =
+    extra?.leaseIds?.length
+      ? `railcar_assignments.rider.master_lease_id.in.(${extra.leaseIds.join(",")})`
+      : "";
   for (const t of tokens) {
+    const ors: string[] = [];
     const hasLetter = /[a-z]/i.test(t);
     const hasDigit = /\d/.test(t);
-    if (hasDigit && !hasLetter) {
-      query = query.ilike("car_number", `%${t}%`);
-    } else {
-      query = query.or(SEARCH_TEXT_FIELDS.map((col) => `${col}.ilike.%${t}%`).join(","));
+    if (sc.cars) {
+      if (hasDigit && !hasLetter) {
+        ors.push(`car_number.ilike.%${t}%`);
+      } else {
+        for (const col of CAR_NUMBER_FIELDS) ors.push(`${col}.ilike.%${t}%`);
+      }
     }
+    if (sc.leases) {
+      for (const col of LEASE_OL_FIELDS) ors.push(`${col}.ilike.%${t}%`);
+    }
+    if (sc.carData) {
+      for (const col of CAR_DATA_FIELDS) ors.push(`${col}.ilike.%${t}%`);
+    }
+    if (riderIn) ors.push(riderIn);
+    if (leaseIn) ors.push(leaseIn);
+    if (!ors.length) continue;
+    query = query.or(ors.join(","));
   }
   return query;
 }
 
-function applyRailcarFilters(query: any, p: RailcarListParams) {
+async function applyRailcarFilters(query: any, p: RailcarListParams) {
+  const scope = scopeOrDefault(p.searchScope);
+  if (p.search && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
+    const extra = await matchingLeaseAndRiderIds(railcarSearchTokens(p.search));
+    p.searchRiderIds = extra.riderIds;
+    p.searchLeaseIds = extra.leaseIds;
+  }
+  const extra = { riderIds: p.searchRiderIds, leaseIds: p.searchLeaseIds };
+
   if (p.turning50) {
     query = query.eq("active", true).eq("build_year", p.turning50 - 50);
-    query = applySearchFilter(query, p.search);
+    query = applySearchFilter(query, p.search, scope, extra);
     return query;
   }
 
@@ -222,7 +314,7 @@ function applyRailcarFilters(query: any, p: RailcarListParams) {
     );
   }
 
-  query = applySearchFilter(query, p.search);
+  query = applySearchFilter(query, p.search, scope, extra);
   query = applyOpsFlagFilter(query, p.flag, p.opsFlagFallback);
   return query;
 }
@@ -399,9 +491,9 @@ async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]
     const result = await queryRailcarsWithSelect({ ...p, all: true, page: 1, pageSize: 1 }, slim);
     return result.rows.map((r: any) => r.id);
   }
-  const data = await fetchAllRows<{ id: number }>((from, to) => {
+  const data = await fetchAllRows<{ id: number }>(async (from, to) => {
     let q = supabaseAdmin.from("railcars").select(slim).order("id", { ascending: true }).range(from, to);
-    q = applyRailcarFilters(q, p);
+    q = await applyRailcarFilters(q, p);
     return q;
   });
   return data.map((r) => r.id);
@@ -412,7 +504,7 @@ async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, ha
   const ids = (await resolveRailcarsByAnyIdentity(p.search)).filter((id) => !haveIds.has(id));
   if (!ids.length) return [];
   let q = supabaseAdmin.from("railcars").select(select).in("id", ids.slice(0, 80));
-  q = applyRailcarFilters(q, { ...p, search: undefined });
+  q = await applyRailcarFilters(q, { ...p, search: undefined });
   const { data, error } = await q;
   if (error) {
     console.log(`[railcars] prior-identity hydrate skipped: ${error.message}`);
@@ -431,9 +523,9 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
       db.from("railcar_assignments").select("railcar_id").order("railcar_id").range(from, to)
     );
     const assignedSet = new Set(assigned.map((a) => a.railcar_id));
-    const all = await fetchAllRows((from, to) => {
+    const all = await fetchAllRows(async (from, to) => {
       let q = db.from("railcars").select(select).order(orderCol, { ascending: p.dir !== "desc" }).range(from, to);
-      q = applyRailcarFilters(q, { ...p, assigned: undefined });
+      q = await applyRailcarFilters(q, { ...p, assigned: undefined });
       return q;
     });
     const rows = all.map(mapRow).filter((r: any) => !assignedSet.has(r.id) && !r.assignment);
@@ -450,9 +542,9 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   }
 
   if (p.all) {
-    const data = await fetchAllRows((from, to) => {
+    const data = await fetchAllRows(async (from, to) => {
       let q = db.from("railcars").select(select).order(orderCol, { ascending: p.dir !== "desc" }).range(from, to);
-      q = applyRailcarFilters(q, p);
+      q = await applyRailcarFilters(q, p);
       return q;
     });
     const rows = data.map(mapRow);
@@ -468,7 +560,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     .select(select, { count: "estimated" })
     .order(orderCol, { ascending: p.dir !== "desc" })
     .range(from, to);
-  q = applyRailcarFilters(q, p);
+  q = await applyRailcarFilters(q, p);
   const { data, error, count } = await q;
   if (error) throw error;
   const rows = (data ?? []).map(mapRow);

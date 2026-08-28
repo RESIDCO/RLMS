@@ -33,6 +33,7 @@ import { LeaseGlanceSheet, glanceRiderFromCar, type LeaseGlanceRider } from "@/c
 import { formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { downloadRailcarsCsv } from "@/lib/railcar-csv";
 import { useToast } from "@/hooks/use-toast";
+import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { useQuery } from "@tanstack/react-query";

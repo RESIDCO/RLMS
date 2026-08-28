@@ -39,6 +39,7 @@ import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, H
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { AmCommentThread, formatAmNoteSnippet } from "@/components/AmCommentThread";
+import { downloadRailcarsCsv } from "@/lib/railcar-csv";
 import { OpsFlagPicker } from "@/components/OpsFlagPicker";
 import { OPS_FLAG_PRESETS, composeOpsFlag } from "@shared/ops-flag";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
@@ -337,89 +338,6 @@ function renderOptTd(key: string, r: any) {
     default:
       return <td key={key} className={text}>—</td>;
   }
-}
-
-function downloadRailcarsCsv(rows: RailcarWithAssignment[]) {
-  // Headers mirror the RESIDCO Master Car List workbook so an exported file can
-  // be re-imported through Bulk Import without manual remapping. Internal
-  // assignment/lease join fields are appended after the workbook columns.
-  const headers = [
-    "Car Number", "Rider ID", "Lessee", "Entity", "Active", "Data Source",
-    "Car Type", "Description", "Assignment", "Lease Type",
-    "Start Date", "End Date", "Lease Expiry",
-    "NBV Per Car ($)", "OEC Per Car ($)",
-    "Monthly Rent P/C ($)", "Monthly Depr P/C ($)",
-    "Total BV — Rider ($)", "Cars on Rider (AR)",
-    "Commodity Family", "Commodity",
-    "Build Year", "Lining", "Mech Desig.", "DOT Code",
-    "Comment / Event Note",
-    "Acct Mgr",
-    "Latest AM Note",
-    // Internal columns (post-workbook)
-    "Managed Category", "Reporting Marks", "Car Status", "Rental Status", "Flag", "Transit Status", "Transit Label",
-    "Rider Name", "Schedule #", "MLA Lease #", "Lessor", "Expiration Date",
-    "OAC",
-  ];
-  const escape = (v: unknown) => {
-    const s = v == null ? "" : String(v);
-    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const get = (r: any, k: string) => (r[k] == null ? "" : String(r[k]));
-  const rows_data = rows.map((r: any) => [
-    // Combine marks + number so the export round-trips with the workbook
-    // ("TFOX" + "88031" -> "TFOX88031"). The "Reporting Marks" column below
-    // still carries marks alone for users who want them split.
-    `${r.reporting_marks ?? ""}${r.car_number ?? ""}`,
-    get(r, "rider_external_id"),
-    r.lessee_name ?? r.assignment?.fleet_name ?? "",
-    r.entity ?? "",
-    fleetActiveLabel(r.active) || (r.active_status ?? ""),
-    get(r, "data_source"),
-    r.car_type ?? "",
-    r.description ?? r.general_description ?? "",
-    get(r, "assignment_label"),
-    r.lease_type ?? "",
-    get(r, "lease_start_date"),
-    get(r, "lease_end_date"),
-    get(r, "lease_expiry"),
-    r.nbv != null ? String(r.nbv) : "",
-    r.oec != null ? String(r.oec) : "",
-    r.monthly_rent_per_car != null ? String(r.monthly_rent_per_car) : "",
-    r.monthly_depr_per_car != null ? String(r.monthly_depr_per_car) : "",
-    r.total_bv_rider != null ? String(r.total_bv_rider) : "",
-    r.cars_on_rider_ar != null ? String(r.cars_on_rider_ar) : "",
-    get(r, "commodity_family"),
-    get(r, "commodity"),
-    r.build_year ?? r.built_year ?? "",
-    r.lining ?? r.lining_material ?? "",
-    r.mechanical_designation ?? "",
-    r.dot_code ?? r.dot_specification ?? "",
-    get(r, "comment_event_note"),
-    r.account_manager_initials ?? "",
-    formatAmNoteSnippet(r.am_note),
-    // Internal
-    r.managed_category ?? "",
-    r.reporting_marks ?? "",
-    r.status ?? "",
-    displayRailcarStatus(displayStatusInputFromRailcar(r)),
-    r.ops_flag ?? "",
-    r.transit_status ?? "",
-    r.transit_label ?? "",
-    r.assignment?.rider?.rider_name ?? "",
-    r.assignment?.rider?.schedule_number ?? "",
-    r.assignment?.rider?.master_lease?.lease_number ?? "",
-    r.assignment?.rider?.master_lease?.lessor ?? "",
-    r.assignment?.rider?.expiration_date ?? "",
-    r.oac != null ? String(r.oac) : "",
-  ].map(escape).join(","));
-  const csv = [headers.map(escape).join(","), ...rows_data].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `railcars-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 function parseFleetQuery(searchStr: string): {

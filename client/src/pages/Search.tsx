@@ -1,6 +1,6 @@
-import { Search as SearchIcon, Loader2, X, Pencil, History, Columns3, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search as SearchIcon, Loader2, X, Pencil, History, Columns3, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { apiGet, apiRequest, railcarsQs } from "@/lib/queryClient";
+import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
 import { carListSearchTokens } from "@shared/programs";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate, carLeaseEndDate } from "@shared/lease-authority";
@@ -31,7 +31,8 @@ import {
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 import { LeaseGlanceSheet, glanceRiderFromCar, type LeaseGlanceRider } from "@/components/LeaseGlanceSheet";
 import { formatAmNoteSnippet } from "@/components/AmCommentThread";
-import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { downloadRailcarsCsv } from "@/lib/railcar-csv";
+import { useToast } from "@/hooks/use-toast";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { useQuery } from "@tanstack/react-query";
@@ -204,6 +205,8 @@ export default function SearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [editCarId, setEditCarId] = useState<number | null>(null);
   const [leaseGlance, setLeaseGlance] = useState<LeaseGlanceRider | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const { toast } = useToast();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pageSize = 75;
 
@@ -360,6 +363,33 @@ export default function SearchPage() {
     const nextScope = { ...scope, [key]: next };
     setScope(nextScope);
     if (committed) void runSearch(committed, nextScope, showInactive);
+  }
+
+  async function exportResults() {
+    if (totalCount === 0) return;
+    setExporting(true);
+    try {
+      const filename = `search_results_${new Date().toISOString().slice(0, 10)}.csv`;
+      let rows: any[];
+      if (isPaste) {
+        const ids = (pasteRows ?? []).map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0);
+        rows = ids.length
+          ? asRailcarList(await apiGet(railcarsQs({ all: 1, ids: ids.join(","), active: "all" }), { timeoutMs: 60_000 }))
+          : [];
+      } else {
+        rows = asRailcarList(
+          await apiGet(
+            railcarsQs({ ...listParams, page: undefined, pageSize: undefined, all: 1 }),
+            { timeoutMs: 60_000 },
+          ),
+        );
+      }
+      downloadRailcarsCsv(rows, filename);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message ?? "Could not export search results", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
   }
 
   const parsedCars = carListSearchTokens(query);
@@ -596,6 +626,20 @@ export default function SearchPage() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            {totalCount > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs"
+                disabled={loading || exporting}
+                onClick={() => void exportResults()}
+                data-testid="button-export-search"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {exporting ? "Exporting…" : "Export"}
+              </Button>
+            )}
             <div className="text-xs text-muted-foreground">
               {loading ? "Searching…" : `${totalCount.toLocaleString()} car${totalCount !== 1 ? "s" : ""}`}
               {missing.length > 0 ? ` · ${missing.length} not in fleet` : ""}

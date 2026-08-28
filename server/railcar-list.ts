@@ -55,6 +55,7 @@ export type RailcarListParams = {
   page?: number;
   pageSize?: number;
   all?: boolean;
+  ids?: number[];
   acquisition_batch_id?: number;
   needs_completion?: "yes" | "no";
   flag?: string;
@@ -80,6 +81,11 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
         : entityRaw;
   const rider_id = num(query.rider_id);
   const lease_id = num(query.lease_id);
+  const ids = String(query.ids ?? "")
+    .split(/[,\s]+/)
+    .map((s) => Number(s))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .slice(0, 20_000);
   const turning50 = num(query.turning50);
   // Rider/lease pickers need every assigned car, including active=false.
   const activeDefault = rider_id || lease_id ? "all" : "active";
@@ -96,6 +102,7 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
     rider: str(query.rider),
     rider_id,
     lease_id,
+    ids: ids.length ? ids : undefined,
     transit: str(query.transit),
     sort: str(query.sort) ?? "car_number",
     dir: query.dir === "desc" ? "desc" : "asc",
@@ -251,7 +258,7 @@ export function applySearchFilter(
 
 async function applyRailcarFilters(query: any, p: RailcarListParams) {
   const scope = scopeOrDefault(p.searchScope);
-  if (p.search && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
+  if (p.search && !p.ids?.length && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
     const extra = await matchingLeaseAndRiderIds(railcarSearchTokens(p.search));
     p.searchRiderIds = extra.riderIds;
     p.searchLeaseIds = extra.leaseIds;
@@ -301,6 +308,10 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
     query = query.eq("status", p.status);
   }
 
+  if (p.ids?.length) {
+    query = query.in("id", p.ids);
+  }
+
   if (p.rider_id) {
     query = query.eq("railcar_assignments.rider_id", p.rider_id);
   }
@@ -314,7 +325,7 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
     );
   }
 
-  query = applySearchFilter(query, p.search, scope, extra);
+  query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, extra);
   query = applyOpsFlagFilter(query, p.flag, p.opsFlagFallback);
   return query;
 }

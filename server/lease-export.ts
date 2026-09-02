@@ -43,7 +43,7 @@ const CAR_HEADERS = [
   "Entity",
   "NBV",
   "OAC",
-  "OEC",
+  "Net Equip. Cost",
   "Capacity",
   "Lining",
   "Build Year",

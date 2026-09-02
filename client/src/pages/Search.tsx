@@ -56,7 +56,7 @@ type OptCol =
 const OPT_COLS: { key: OptCol; label: string }[] = [
   { key: "nbv", label: "NBV" },
   { key: "oac", label: "OAC" },
-  { key: "oec", label: "OEC" },
+  { key: "oec", label: "Net Equip. Cost" },
   { key: "monthly_rent_per_car", label: "Monthly Rent P/C" },
   { key: "monthly_depr_per_car", label: "Monthly Depr P/C" },
   { key: "build_year", label: "Build Year" },

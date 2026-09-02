@@ -18,7 +18,7 @@ const CAR_HEADERS = [
   "Build Year",
   "NBV",
   "OAC",
-  "OEC",
+  "Net Equip. Cost",
   "Capacity",
   "Lining",
 ] as const;

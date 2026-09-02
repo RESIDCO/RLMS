@@ -83,7 +83,8 @@ const HEADER_ALIASES: Record<string, CanonicalRailcarField> = (() => {
   add("nbv",
       "nbv", "NBV", "NBV Per Car ($)", "NBV Per Car", "Net Book Value", "NBV/Car");
   add("oec",
-      "oec", "OEC", "OEC Per Car ($)", "OEC Per Car", "Original Equipment Cost", "OEC/Car");
+      "oec", "OEC", "OEC Per Car ($)", "OEC Per Car", "Original Equipment Cost", "OEC/Car",
+      "Net Equipment Cost", "Net Equipment Cost Per Car ($)", "Net Equip. Cost");
   add("monthly_rent_per_car",
       "monthly_rent_per_car", "Monthly Rent P/C ($)", "Monthly Rent P/C",
       "Monthly Rent Per Car", "Rent P/C", "Rent Per Car");

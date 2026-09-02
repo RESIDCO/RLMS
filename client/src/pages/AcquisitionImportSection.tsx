@@ -260,7 +260,7 @@ export default function AcquisitionImportSection() {
             </div>
           </div>
           <div className="text-xs text-muted-foreground mt-3">
-            Existing cars were not updated. Financials (NBV, OEC, rent, depreciation) were not written.
+            Existing cars were not updated. Financials (NBV, Net Equipment Cost, rent, depreciation) were not written.
           </div>
           <div className="flex flex-wrap gap-2 mt-4">
             {committed.batch?.id && committed.inserted > 0 && (

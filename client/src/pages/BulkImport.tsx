@@ -760,7 +760,7 @@ export default function BulkImportPage() {
                   ["End Date", "Optional · YYYY-MM-DD or M/D/YYYY"],
                   ["Lease Expiry", "Optional · YYYY-MM-DD"],
                   ["NBV Per Car ($)", "Optional · numeric, $ and commas allowed"],
-                  ["OEC Per Car ($)", "Optional · numeric"],
+                  ["OEC Per Car ($)", "Net Equipment Cost · optional · numeric"],
                   ["Monthly Rent P/C ($)", "Optional · numeric"],
                   ["Monthly Depr P/C ($)", "Optional · numeric"],
                   ["Total BV — Rider ($)", "Optional · numeric (rider-level, retained per-row)"],
@@ -907,7 +907,7 @@ export default function BulkImportPage() {
           <header className="mb-4">
             <h2 className="text-base font-semibold">Financial Data Refresh (Asset Report)</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Writes <span className="font-mono">rider_financial_summary</span> plus per-car NBV, OEC, Monthly Rent P/C, Monthly Depr P/C. Then governs lease/OL dates from the Asset Report onto riders and every car on that OL (V_Valid fills only OLs the report omits). Never changes car number, entity, active, lessee, or assignments.
+              Writes <span className="font-mono">rider_financial_summary</span> plus per-car NBV, Net Equipment Cost, Monthly Rent P/C, Monthly Depr P/C. Then governs lease/OL dates from the Asset Report onto riders and every car on that OL (V_Valid fills only OLs the report omits). Never changes car number, entity, active, lessee, or assignments.
             </p>
           </header>
           <div
@@ -950,7 +950,7 @@ export default function BulkImportPage() {
                   ["Count", "Cars in this batch"],
                   ["Asset", "COV HOPPER, TANK CARS, …"],
                   ["Air/Rail/Power", "Main sheet — only Rail rows are kept"],
-                  ["Net Equipment Cost / per car", "OEC source"],
+                  ["Net Equipment Cost / per car", "railcars.oec"],
                   ["BV per Asset / Total Book Value", "NBV source"],
                   ["Monthly Rent P/C / Total", "Rent source"],
                   ["Monthly Depreciation per asset", "Depr source"],

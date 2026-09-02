@@ -8,7 +8,7 @@ export function downloadRailcarsCsv(rows: any[], filename?: string) {
     "Car Number", "Rider ID", "Lessee", "Entity", "Active", "Data Source",
     "Car Type", "Description", "Assignment", "Lease Type",
     "Start Date", "End Date", "Lease Expiry",
-    "NBV Per Car ($)", "OEC Per Car ($)",
+    "NBV Per Car ($)", "Net Equipment Cost Per Car ($)",
     "Monthly Rent P/C ($)", "Monthly Depr P/C ($)",
     "Total BV — Rider ($)", "Cars on Rider (AR)",
     "Commodity Family", "Commodity",

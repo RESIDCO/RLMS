@@ -493,7 +493,7 @@ export default function FleetRegistry() {
   const OPT_COLS: { key: OptCol; label: string }[] = [
     { key: "nbv",                 label: "NBV" },
     { key: "oac",                 label: "OAC" },
-    { key: "oec",                 label: "OEC" },
+    { key: "oec",                 label: "Net Equip. Cost" },
     { key: "monthly_rent_per_car", label: "Monthly Rent P/C" },
     { key: "monthly_depr_per_car", label: "Monthly Depr P/C" },
     { key: "build_year",          label: "Build Year" },
@@ -846,7 +846,7 @@ export default function FleetRegistry() {
     const ids = Array.from(selectedIds);
     const ok = await confirmSave({
       title: `Update values for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
-      description: "NBV/OAC/OEC fields will be overwritten on the selected cars.",
+      description: "NBV, OAC, and Net Equipment Cost fields will be overwritten on the selected cars.",
     });
     if (!ok) return;
     setBulkValuesPending(true);
@@ -1524,7 +1524,7 @@ export default function FleetRegistry() {
                 onClick={() => { setBulkNbv(""); setBulkOac(""); setBulkOec(""); setBulkValuesOpen(true); }}
                 data-testid="bulk-values-btn"
               >
-                Edit NBV / OAC / OEC
+                Edit NBV / OAC / Net Equip. Cost
               </Button>
             </div>
             <Button
@@ -1671,7 +1671,7 @@ export default function FleetRegistry() {
       <Dialog open={bulkValuesOpen} onOpenChange={setBulkValuesOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Edit NBV / OAC / OEC</DialogTitle>
+            <DialogTitle>Edit NBV / OAC / Net Equipment Cost</DialogTitle>
             <DialogDescription>
               Updating {selectedIds.size} car{selectedIds.size !== 1 ? "s" : ""}. Leave any field blank to keep existing values.
             </DialogDescription>
@@ -1701,7 +1701,7 @@ export default function FleetRegistry() {
               />
             </div>
             <div>
-              <Label>OEC — Original Est. Build Cost</Label>
+              <Label>Net Equipment Cost</Label>
               <Input
                 type="number"
                 min="0"
@@ -2106,9 +2106,9 @@ export function CarDetail({
         <DetailRow label="Purchase Price" value={(r as any).purchase_price != null ? `$${Number((r as any).purchase_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         <DetailRow label="Acquisition Date" value={fmtDate((r as any).acquisition_date) || "—"} />
         <DetailRow label="NBV" value={(r as any).nbv != null ? `$${Number((r as any).nbv).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
-        {/* OAC = Original Acquired Cost — distinct from OEC (Original Est. Build Cost). Often blank when Master Car List import only supplies OEC. */}
         <DetailRow label="OAC (Acquired Cost)" value={(r as any).oac != null ? `$${Number((r as any).oac).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
-        <DetailRow label="OEC (Est. Build Cost)" value={(r as any).oec != null ? `$${Number((r as any).oec).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
+        <DetailRow label="Net Equipment Cost" value={(r as any).oec != null ? `$${Number((r as any).oec).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
+        <DetailRow label="OEC (Original Estimated Cost)" value={(r as any).railinc_oec != null ? `$${Number((r as any).railinc_oec).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         <DetailRow label="Monthly Rent P/C" value={(r as any).monthly_rent_per_car != null ? `$${Number((r as any).monthly_rent_per_car).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         <DetailRow label="Monthly Depr P/C" value={(r as any).monthly_depr_per_car != null ? `$${Number((r as any).monthly_depr_per_car).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"} />
         <DetailRow label="Total BV (Rider)" value={(r as any).total_bv_rider != null ? `$${Number((r as any).total_bv_rider).toLocaleString()}` : "—"} />
@@ -2822,7 +2822,7 @@ export function RailcarFormDialog({
               />
             </div>
             <div>
-              <Label>OEC <span className="text-muted-foreground font-normal text-xs">(Original Est. Build Cost)</span></Label>
+              <Label>Net Equipment Cost <span className="text-muted-foreground font-normal text-xs">(internal net equipment cost basis, batch-averaged monthly from the Asset Report — not a per-car original cost)</span></Label>
               <Input
                 type="number"
                 min="0"

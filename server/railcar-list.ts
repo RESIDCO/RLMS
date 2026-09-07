@@ -56,6 +56,8 @@ export type RailcarListParams = {
   pageSize?: number;
   all?: boolean;
   ids?: number[];
+  /** Resolved from rider_id / lease_id so the railcars query can filter on PK. */
+  assignedRailcarIds?: number[];
   acquisition_batch_id?: number;
   needs_completion?: "yes" | "no";
   flag?: string;
@@ -216,6 +218,54 @@ async function matchingLeaseAndRiderIds(tokens: string[]): Promise<{ leaseIds: n
   return { leaseIds: leaseIds ?? [], riderIds: riderIds ?? [] };
 }
 
+function uniquePositiveIds(vals: unknown[]): number[] {
+  return [...new Set(vals.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0))];
+}
+
+async function railcarIdsForRider(riderId: number): Promise<number[]> {
+  const { data, error } = await supabaseAdmin
+    .from("railcar_assignments")
+    .select("railcar_id")
+    .eq("rider_id", riderId);
+  if (error) throw error;
+  return uniquePositiveIds((data ?? []).map((a: { railcar_id: number }) => a.railcar_id));
+}
+
+async function railcarIdsForLease(leaseId: number): Promise<number[]> {
+  const { data: riders, error: rErr } = await supabaseAdmin
+    .from("riders")
+    .select("id")
+    .eq("master_lease_id", leaseId);
+  if (rErr) throw rErr;
+  const riderIds = uniquePositiveIds((riders ?? []).map((r: { id: number }) => r.id));
+  if (!riderIds.length) return [];
+  const ids: number[] = [];
+  for (let i = 0; i < riderIds.length; i += 200) {
+    const { data, error } = await supabaseAdmin
+      .from("railcar_assignments")
+      .select("railcar_id")
+      .in("rider_id", riderIds.slice(i, i + 200));
+    if (error) throw error;
+    for (const a of data ?? []) ids.push(Number((a as { railcar_id: number }).railcar_id));
+  }
+  return uniquePositiveIds(ids);
+}
+
+/** PK ids to restrict the railcars-rooted query. Nested embed filters cannot. */
+async function railcarIdsForAssignmentFilter(p: RailcarListParams): Promise<number[] | undefined> {
+  if (!p.rider_id && !p.lease_id) return p.ids?.length ? p.ids : undefined;
+  if (!p.assignedRailcarIds) {
+    p.assignedRailcarIds = p.rider_id
+      ? await railcarIdsForRider(p.rider_id)
+      : await railcarIdsForLease(p.lease_id!);
+  }
+  if (p.ids?.length) {
+    const want = new Set(p.ids);
+    return p.assignedRailcarIds.filter((id) => want.has(id));
+  }
+  return p.assignedRailcarIds;
+}
+
 export function applySearchFilter(
   query: any,
   rawSearch: string | undefined,
@@ -308,15 +358,9 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
     query = query.eq("status", p.status);
   }
 
-  if (p.ids?.length) {
-    query = query.in("id", p.ids);
-  }
-
-  if (p.rider_id) {
-    query = query.eq("railcar_assignments.rider_id", p.rider_id);
-  }
-  if (p.lease_id) {
-    query = query.eq("railcar_assignments.rider.master_lease_id", p.lease_id);
+  const restrictIds = await railcarIdsForAssignmentFilter(p);
+  if (restrictIds) {
+    query = query.in("id", restrictIds.length ? restrictIds : [-1]);
   }
   if (p.rider) {
     const ol = sanitizeOrValue(p.rider).toUpperCase();
@@ -445,14 +489,9 @@ function mapRow(r: any) {
 }
 
 function assignmentEmbed(p: RailcarListParams, select = RAILCAR_LIST_SELECT) {
-  const inner = p.assigned === "assigned" || p.rider_id || p.lease_id;
+  const inner = p.assigned === "assigned";
   const rel = inner ? "railcar_assignments!inner" : "railcar_assignments";
-  let out = select.replace("assignment:railcar_assignments(", `assignment:${rel}(`);
-  // Nested filter on rider.master_lease_id 500s unless riders is an inner embed.
-  if (p.lease_id) {
-    out = out.replace("rider:riders(", "rider:riders!inner(");
-  }
-  return out;
+  return select.replace("assignment:railcar_assignments(", `assignment:${rel}(`);
 }
 
 function selectWithoutOptionalDateCols(select: string) {

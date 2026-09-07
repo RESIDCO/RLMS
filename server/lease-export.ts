@@ -98,15 +98,29 @@ function mapExportCar(r: any) {
 async function fetchCarsForRiders(riderIds: number[]): Promise<any[]> {
   const ids = [...new Set(riderIds.filter((n) => Number.isFinite(n) && n > 0))];
   if (!ids.length) return [];
+  const assignedIds: number[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabaseAdmin
+      .from("railcar_assignments")
+      .select("railcar_id")
+      .in("rider_id", ids.slice(i, i + 200));
+    if (error) throw error;
+    for (const a of data ?? []) {
+      const id = Number((a as { railcar_id: number }).railcar_id);
+      if (Number.isFinite(id) && id > 0) assignedIds.push(id);
+    }
+  }
+  const carIds = [...new Set(assignedIds)];
+  if (!carIds.length) return [];
   const chunks: number[][] = [];
-  for (let i = 0; i < ids.length; i += 80) chunks.push(ids.slice(i, i + 80));
+  for (let i = 0; i < carIds.length; i += 200) chunks.push(carIds.slice(i, i + 200));
   const pages = await Promise.all(
     chunks.map((chunk) =>
       fetchAllRows((from, to) =>
         supabaseAdmin
           .from("railcars")
           .select(EXPORT_CAR_SELECT)
-          .in("railcar_assignments.rider_id", chunk)
+          .in("id", chunk)
           .order("id", { ascending: true })
           .range(from, to),
       ),

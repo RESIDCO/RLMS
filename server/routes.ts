@@ -4,7 +4,7 @@ import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
-import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials } from "./railcar-list";
+import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
   attachLatestAmNotes,
@@ -2225,6 +2225,19 @@ export async function registerRoutes(
   });
 
   // ---------- Rider Contacts ----------
+  app.get("/api/riders/:id/cars", async (req, res) => {
+    try {
+      const riderId = Number(req.params.id);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      const active = String(req.query.active ?? "active");
+      res.json(await listCarsAssignedToRider(riderId, active));
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
   app.get("/api/riders/:id/contacts", async (req, res) => {
     try {
       const riderId = Number(req.params.id);
@@ -3751,6 +3764,7 @@ export async function registerRoutes(
         riderId: Number.isFinite(riderId) ? riderId : undefined,
         q,
         includeVcfNoise: includeVcf,
+        limit: Number.isFinite(riderId) && !Number.isFinite(railcarId) ? 80 : undefined,
       });
       res.json(result);
     } catch (err) {

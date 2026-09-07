@@ -659,3 +659,44 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     pageSize: p.pageSize,
   };
 }
+
+const RIDER_ASSIGNED_CAR_SELECT = `
+id, rider_id, fleet_name,
+rider:riders(id, rider_name, schedule_number, master_lease_id,
+  master_lease:master_leases(id, lease_number, lessee, lease_type, sold_to)),
+railcar:railcars(
+  id, car_number, reporting_marks, car_type, status, fleet_status,
+  entity, active, lease_type, lessee_name, rider_external_id, assignment_label,
+  nbv, oac, oec, capacity_cf, lining_material, lining, coating, build_year, built_year,
+  comment_event_note
+)
+`.replace(/\s+/g, " ").trim();
+
+/** Assignment-rooted list: indexed rider_id lookup, then PK embed of those cars. */
+export async function listCarsAssignedToRider(riderId: number, active: string = "active") {
+  const { data, error } = await supabaseAdmin
+    .from("railcar_assignments")
+    .select(RIDER_ASSIGNED_CAR_SELECT)
+    .eq("rider_id", riderId);
+  if (error) throw error;
+  const rows = (data ?? [])
+    .map((row: any) => {
+      const car = asOne(row.railcar);
+      const rider = asOne(row.rider);
+      if (!car?.id) return null;
+      return hydrateOpsFlag({
+        ...car,
+        assignment: {
+          id: row.id,
+          rider_id: row.rider_id,
+          fleet_name: row.fleet_name,
+          rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null,
+        },
+        fleet_status: parseFleetStatus(car.fleet_status) ?? car.fleet_status ?? null,
+      });
+    })
+    .filter(Boolean);
+  if (active === "inactive") return rows.filter((r: any) => r.active === false);
+  if (active === "all") return rows;
+  return rows.filter((r: any) => r.active !== false);
+}

@@ -101,7 +101,7 @@ export default function ActivityTimeline({
 
   const { data, isLoading } = useQuery<{ events: ActivityEvent[] }>({
     queryKey: ["/api/activity", { railcarId, riderId, q: q ?? "" }],
-    queryFn: () => apiRequest("GET", path).then((r) => r.json()),
+    queryFn: ({ signal }) => apiRequest("GET", path, undefined, undefined, { timeoutMs: 12_000, signal }).then((r) => r.json()),
   });
 
   const events = useMemo(() => {

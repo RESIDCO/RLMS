@@ -69,7 +69,7 @@ export function AmCommentThread({
   const { data, isLoading } = useQuery<{ comments: AmComment[] }>({
     queryKey: qk,
     queryFn: () =>
-      apiRequest("GET", `/api/account-management/riders/${riderId}/comments`).then((r) => r.json()),
+      apiRequest("GET", `/api/account-management/riders/${riderId}/comments`, undefined, undefined, { timeoutMs: 12_000 }).then((r) => r.json()),
     enabled: Number.isFinite(riderId) && riderId > 0,
   });
   const comments = data?.comments ?? [];

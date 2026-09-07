@@ -660,37 +660,54 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   };
 }
 
-const RIDER_ASSIGNED_CAR_SELECT = `
-id, rider_id, fleet_name,
-rider:riders(id, rider_name, schedule_number, master_lease_id,
-  master_lease:master_leases(id, lease_number, lessee, lease_type, sold_to)),
-railcar:railcars(
-  id, car_number, reporting_marks, car_type, status, fleet_status,
-  entity, active, lease_type, lessee_name, rider_external_id, assignment_label,
-  nbv, oac, oec, capacity_cf, lining_material, lining, coating, build_year, built_year,
-  comment_event_note
-)
-`.replace(/\s+/g, " ").trim();
+const RIDER_CAR_FLAT_SELECT = [
+  "id", "car_number", "reporting_marks", "car_type", "status", "fleet_status",
+  "entity", "active", "lease_type", "lessee_name", "rider_external_id", "assignment_label",
+  "nbv", "oac", "oec", "capacity_cf", "lining_material", "lining", "coating",
+  "build_year", "built_year", "comment_event_note",
+].join(", ");
 
-/** Assignment-rooted list: indexed rider_id lookup, then PK embed of those cars. */
+/** Two indexed lookups — no PostgREST nested embed (those still seq-scan under load). */
 export async function listCarsAssignedToRider(riderId: number, active: string = "active") {
-  const { data, error } = await supabaseAdmin
-    .from("railcar_assignments")
-    .select(RIDER_ASSIGNED_CAR_SELECT)
-    .eq("rider_id", riderId);
-  if (error) throw error;
-  const rows = (data ?? [])
-    .map((row: any) => {
-      const car = asOne(row.railcar);
-      const rider = asOne(row.rider);
-      if (!car?.id) return null;
+  const [{ data: assigns, error: aErr }, { data: riderRow, error: rErr }] = await Promise.all([
+    supabaseAdmin
+      .from("railcar_assignments")
+      .select("id, rider_id, fleet_name, railcar_id")
+      .eq("rider_id", riderId),
+    supabaseAdmin
+      .from("riders")
+      .select("id, rider_name, schedule_number, master_lease_id, master_lease:master_leases(id, lease_number, lessee, lease_type, sold_to)")
+      .eq("id", riderId)
+      .maybeSingle(),
+  ]);
+  if (aErr) throw aErr;
+  if (rErr) throw rErr;
+  const ids = uniquePositiveIds((assigns ?? []).map((a: { railcar_id: number }) => a.railcar_id));
+  if (!ids.length) return [];
+  const cars: any[] = [];
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await supabaseAdmin
+      .from("railcars")
+      .select(RIDER_CAR_FLAT_SELECT)
+      .in("id", ids.slice(i, i + 150));
+    if (error) throw error;
+    cars.push(...(data ?? []));
+  }
+  const byId = new Map(cars.map((c) => [c.id, c]));
+  const rider = riderRow
+    ? { ...riderRow, master_lease: asOne((riderRow as any).master_lease) }
+    : null;
+  const rows = (assigns ?? [])
+    .map((a: any) => {
+      const car = byId.get(a.railcar_id);
+      if (!car) return null;
       return hydrateOpsFlag({
         ...car,
         assignment: {
-          id: row.id,
-          rider_id: row.rider_id,
-          fleet_name: row.fleet_name,
-          rider: rider ? { ...rider, master_lease: asOne(rider.master_lease) } : null,
+          id: a.id,
+          rider_id: a.rider_id,
+          fleet_name: a.fleet_name,
+          rider,
         },
         fleet_status: parseFleetStatus(car.fleet_status) ?? car.fleet_status ?? null,
       });

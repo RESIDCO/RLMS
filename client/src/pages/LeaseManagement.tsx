@@ -246,13 +246,13 @@ export default function LeaseManagement() {
     });
     if (!matched.length) return;
     setExpandedLeases(new Set(matched.map((l) => l.id)));
-    const rids = new Set<number>();
+    const rids: number[] = [];
     for (const l of matched) {
       for (const r of visibleRidersForLease(l, showInactive, q, targetRiderId)) {
-        if (riderMatchesSearch(r, q) || isExactOlMatch(r, q)) rids.add(r.id);
+        if (riderMatchesSearch(r, q) || isExactOlMatch(r, q)) rids.push(r.id);
       }
     }
-    setExpandedRiders(rids);
+    setExpandedRiders(new Set(rids.slice(0, 3)));
   }, [leaseSearch, sortedLeases, showInactive, targetRiderId]);
 
   // Auto-expand: deep-link rider > ?filter=riders (all) > default first lease
@@ -272,9 +272,8 @@ export default function LeaseManagement() {
         }, 300);
       }
     } else if (filterRiders) {
-      // Expand all leases and all riders so every active rider is visible
       setExpandedLeases(new Set(leases.map((l) => l.id)));
-      setExpandedRiders(new Set(leases.flatMap((l) => (l.riders ?? []).map((r: any) => r.id))));
+      setExpandedRiders(new Set());
     } else if (filterExpiring) {
       // Expand only MLAs/riders expiring within 12 months, sorted by closest expiration
       const now = new Date();
@@ -289,9 +288,8 @@ export default function LeaseManagement() {
         })
         .sort((a, b) => new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime());
       const parentLeaseIds = new Set(expiringRiders.map((r) => r.leaseId));
-      const riderIds = new Set(expiringRiders.map((r) => r.id));
       setExpandedLeases(parentLeaseIds);
-      setExpandedRiders(riderIds);
+      setExpandedRiders(new Set());
     } else if (filterExpiring6) {
       // Expand only MLAs/riders expiring within 6 months, sorted by closest expiration
       const now = new Date();
@@ -306,9 +304,8 @@ export default function LeaseManagement() {
         })
         .sort((a, b) => new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime());
       const parentLeaseIds6 = new Set(expiring6Riders.map((r) => r.leaseId));
-      const riderIds6 = new Set(expiring6Riders.map((r) => r.id));
       setExpandedLeases(parentLeaseIds6);
-      setExpandedRiders(riderIds6);
+      setExpandedRiders(new Set());
     } else if (expandedLeases.size === 0) {
       const firstActive = leases.find((l) => !l.is_inactive) ?? leases[0];
       if (firstActive) setExpandedLeases(new Set([firstActive.id]));
@@ -718,22 +715,7 @@ export default function LeaseManagement() {
                               </div>
                             </div>
                             {open && (
-                              <>
-                                <RiderCars riderId={rider.id} leaseType={lease.lease_type} />
-                                <RiderContactsPanel riderId={rider.id} />
-                                <div className="px-5 pb-3">
-                                  <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
-                                    Account Management notes
-                                  </div>
-                                  <AmCommentThread riderId={rider.id} canCompose={false} canDelete={false} compact />
-                                </div>
-                                <div className="px-5 pb-2">
-                                  <ActivityTimeline riderId={rider.id} canEdit={canEdit} title="Rider activity" />
-                                </div>
-                                <div className="px-5 py-4 border-t border-border/50">
-                                  <AttachmentsPanel entityType="rider" entityId={rider.id} compact />
-                                </div>
-                              </>
+                              <RiderDetailPanels riderId={rider.id} leaseType={lease.lease_type} canEdit={canEdit} />
                             )}
                           </div>
                         );
@@ -866,6 +848,46 @@ function renderRcTd(key: string, c: any, leaseType: string | null | undefined) {
   }
 }
 
+function RiderDetailPanels({
+  riderId,
+  leaseType,
+  canEdit,
+}: {
+  riderId: number;
+  leaseType?: string | null;
+  canEdit: boolean;
+}) {
+  const cars = useQuery({
+    queryKey: ["/api/riders", riderId, "cars", "active"],
+    queryFn: ({ signal }) =>
+      apiGet(`/api/riders/${riderId}/cars?active=active`, { timeoutMs: 45_000, signal }),
+    staleTime: 45_000,
+  });
+  const restReady = cars.isFetched || cars.isError;
+  return (
+    <>
+      <RiderCars riderId={riderId} leaseType={leaseType} />
+      <RiderContactsPanel riderId={riderId} />
+      <div className="px-5 pb-3">
+        <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
+          Account Management notes
+        </div>
+        <AmCommentThread riderId={riderId} canCompose={false} canDelete={false} compact />
+      </div>
+      {restReady && (
+        <>
+          <div className="px-5 pb-2">
+            <ActivityTimeline riderId={riderId} canEdit={canEdit} title="Rider activity" />
+          </div>
+          <div className="px-5 py-4 border-t border-border/50">
+            <AttachmentsPanel entityType="rider" entityId={riderId} compact />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string | null }) {
   const [, navigate] = useLocation();
   const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
@@ -876,7 +898,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
     queryFn: ({ signal }) =>
       apiGet<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>(
         `/api/riders/${riderId}/cars?active=${encodeURIComponent(activeFilter)}`,
-        { timeoutMs: 15_000, signal },
+        { timeoutMs: 45_000, signal },
       ),
     staleTime: 45_000,
   });

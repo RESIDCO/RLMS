@@ -7,33 +7,32 @@ const MAX_PAGES = 200;
  * Paginate a PostgREST query. The default max is 1000 rows per request —
  * a single .select() will silently stop there and every KPI will be wrong.
  */
+async function page<T>(makeQuery: (from: number, to: number) => any, from: number): Promise<{ from: number; data: T[] }> {
+  const result: any = await Promise.resolve(makeQuery(from, from + PAGE - 1));
+  if (result?.error) throw result.error;
+  return { from, data: (result?.data ?? []) as T[] };
+}
+
 export async function fetchAllRows<T = any>(
   makeQuery: (from: number, to: number) => any
 ): Promise<T[]> {
-  const out: T[] = [];
+  const first = await page<T>(makeQuery, 0);
+  if (first.data.length < PAGE) return first.data;
+  const out: T[] = [...first.data];
   const CONCURRENCY = 3;
-  let from = 0;
+  let from = PAGE;
   for (let wave = 0; wave < MAX_PAGES; wave += CONCURRENCY) {
-    const jobs = Array.from({ length: CONCURRENCY }, (_, i) => {
-      const f = from + i * PAGE;
-      return Promise.resolve(makeQuery(f, f + PAGE - 1)).then((result: any) => ({
-        f,
-        data: result?.data,
-        error: result?.error,
-      }));
-    });
+    const jobs = Array.from({ length: CONCURRENCY }, (_, i) => page<T>(makeQuery, from + i * PAGE));
     const results = await Promise.all(jobs);
-    results.sort((a, b) => a.f - b.f);
+    results.sort((a, b) => a.from - b.from);
     let done = false;
     for (const r of results) {
-      if (r.error) throw r.error;
-      const chunk = (r.data ?? []) as T[];
-      if (chunk.length === 0) {
+      if (r.data.length === 0) {
         done = true;
         break;
       }
-      out.push(...chunk);
-      if (chunk.length < PAGE) {
+      out.push(...r.data);
+      if (r.data.length < PAGE) {
         done = true;
         break;
       }

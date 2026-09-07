@@ -514,6 +514,13 @@ function isMissingOptionalDateColumn(err: unknown) {
 }
 
 export async function queryRailcars(p: RailcarListParams) {
+  // Rider/lease lists: never hit the fat select (those columns 400) or fetchAllRows
+  // (3 concurrent OFFSET pages). Those two together re-introduced 15s timeouts after
+  // the ID-first filter landed.
+  if (p.rider_id || p.lease_id) {
+    const slim = assignmentEmbed(p, selectWithoutOptionalDateCols(RAILCAR_LIST_SELECT));
+    return await queryRailcarsByAssignedIds({ ...p, opsFlagFallback: true }, slim);
+  }
   try {
     return await queryRailcarsWithSelect(p, assignmentEmbed(p));
   } catch (err) {
@@ -547,6 +554,35 @@ async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]
     return q;
   });
   return data.map((r) => r.id);
+}
+
+async function queryRailcarsByAssignedIds(p: RailcarListParams, select: string) {
+  const ids = await railcarIdsForAssignmentFilter(p);
+  if (!ids?.length) {
+    return { rows: [] as any[], total_count: 0, page: 1, pageSize: p.pageSize ?? 0 };
+  }
+  const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
+  const rows: any[] = [];
+  for (let i = 0; i < ids.length; i += 150) {
+    const slice = ids.slice(i, i + 150);
+    let q = supabaseAdmin
+      .from("railcars")
+      .select(select)
+      .order(orderCol, { ascending: p.dir !== "desc" });
+    q = await applyRailcarFilters(q, { ...p, assignedRailcarIds: slice });
+    const { data, error } = await q;
+    if (error) throw error;
+    rows.push(...(data ?? []).map(mapRow));
+  }
+  const merged = await attachAccountJoins(rows);
+  if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
+  const start = ((p.page ?? 1) - 1) * (p.pageSize ?? merged.length);
+  return {
+    rows: merged.slice(start, start + (p.pageSize ?? merged.length)),
+    total_count: merged.length,
+    page: p.page ?? 1,
+    pageSize: p.pageSize ?? merged.length,
+  };
 }
 
 async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, haveIds: Set<number>) {

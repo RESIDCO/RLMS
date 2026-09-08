@@ -172,7 +172,7 @@ function riderCarCountCopy(
   }
   return { figure: String(total), unit: plural(total, "car", "cars") };
 }
-}
+
 function fmtMoney(n: number | null) {
   if (n == null) return "—";
   return Number(n).toLocaleString(undefined, {

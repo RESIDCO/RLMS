@@ -148,6 +148,31 @@ function ExpirationSourceTag({ rider }: { rider: { expiration_source?: string | 
 function fmtPct(n: number | null) {
   return n == null ? "—" : `${Number(n).toFixed(3)}%`;
 }
+
+function plural(n: number, one: string, many: string) {
+  return n === 1 ? one : many;
+}
+
+/** Rider-row copy: active-only unless “Show inactive” is on, then include the split. */
+function riderCarCountCopy(
+  rider: { car_count?: number | null; active_car_count?: number | null },
+  showInactive: boolean,
+) {
+  const total = Number(rider.car_count) || 0;
+  const active = Number(rider.active_car_count ?? rider.car_count) || 0;
+  const inactive = Math.max(0, total - active);
+  if (!showInactive) {
+    return { figure: String(active), unit: plural(active, "active car", "active cars") };
+  }
+  if (inactive > 0) {
+    return {
+      figure: `${active} active + ${inactive} inactive`,
+      unit: "cars",
+    };
+  }
+  return { figure: String(total), unit: plural(total, "car", "cars") };
+}
+}
 function fmtMoney(n: number | null) {
   if (n == null) return "—";
   return Number(n).toLocaleString(undefined, {
@@ -553,11 +578,12 @@ export default function LeaseManagement() {
                   </div>
                   <div className="text-right">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Cars / Riders
+                      Total cars / riders
                     </div>
                     <div className="font-mono-num text-sm">
-                      {lease.car_count} <span className="text-muted-foreground">/</span>{" "}
-                      {lease.riders.length}
+                      {lease.car_count} total {plural(lease.car_count, "car", "cars")}
+                      <span className="text-muted-foreground"> / </span>
+                      {lease.riders.length} {plural(lease.riders.length, "rider", "riders")}
                     </div>
                   </div>
                   <div
@@ -615,6 +641,7 @@ export default function LeaseManagement() {
                       )}
                       {ridersShown.map((rider) => {
                         const open = expandedRiders.has(rider.id);
+                        const carsCopy = riderCarCountCopy(rider, showInactive);
                         return (
                           <div key={rider.id}>
                             <div
@@ -681,9 +708,9 @@ export default function LeaseManagement() {
                                 </div>
                               </div>
                               <div className="text-right text-sm font-mono-num">
-                                {rider.active_car_count ?? rider.car_count}
+                                {carsCopy.figure}
                                 <span className="text-muted-foreground text-xs ml-1">
-                                  cars
+                                  {carsCopy.unit}
                                 </span>
                               </div>
                               <div

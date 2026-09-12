@@ -4,6 +4,7 @@ import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
+import { pointCurrentAssignmentAt } from "./current-assignment";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
@@ -395,10 +396,15 @@ export async function registerRoutes(
                 .from("railcar_assignments")
                 .update({ rider_id: newRider.id, fleet_name: rp.fleet_name ?? null, assigned_at: now })
                 .eq("id", existingId);
+              await pointCurrentAssignmentAt(supabase, [{ id: existingId, railcar_id: carId }]);
             } else {
-              await supabase
+              const { data: ins, error: iErr } = await supabase
                 .from("railcar_assignments")
-                .insert({ railcar_id: carId, rider_id: newRider.id, fleet_name: rp.fleet_name ?? null, assigned_at: now });
+                .insert({ railcar_id: carId, rider_id: newRider.id, fleet_name: rp.fleet_name ?? null, assigned_at: now })
+                .select("id, railcar_id")
+                .single();
+              if (iErr) throw iErr;
+              await pointCurrentAssignmentAt(supabase, ins ? [ins] : []);
             }
           }
         }
@@ -2147,16 +2153,20 @@ export async function registerRoutes(
             })
             .eq("id", prev.id);
           if (uErr) throw uErr;
+          await pointCurrentAssignmentAt(supabase, [{ id: prev.id, railcar_id: carId }]);
         } else {
-          const { error: iErr } = await supabase
+          const { data: ins, error: iErr } = await supabase
             .from("railcar_assignments")
             .insert({
               railcar_id: carId,
               rider_id: to_rider_id,
               fleet_name: targetFleet,
               assigned_at: movedAt,
-            });
+            })
+            .select("id, railcar_id")
+            .single();
           if (iErr) throw iErr;
+          await pointCurrentAssignmentAt(supabase, ins ? [ins] : []);
         }
 
         historyRows.push({
@@ -2696,6 +2706,7 @@ export async function registerRoutes(
       const carInserts = validRows.map((r) => {
         const rest = stripPreviewOnly(r);
         delete (rest as any).equipment_type_code;
+        delete (rest as any).current_assignment_id;
         assertRailcarImporterPatch(rest);
         return rest;
       });
@@ -2765,8 +2776,12 @@ export async function registerRoutes(
       if (assignments.length > 0) {
         for (let i = 0; i < assignments.length; i += BATCH) {
           const slice = assignments.slice(i, i + BATCH);
-          const { error: aErr } = await supabase.from("railcar_assignments").insert(slice);
+          const { data: insertedAssigns, error: aErr } = await supabase
+            .from("railcar_assignments")
+            .insert(slice)
+            .select("id, railcar_id");
           if (aErr) throw aErr;
+          await pointCurrentAssignmentAt(supabase, insertedAssigns ?? []);
         }
       }
 

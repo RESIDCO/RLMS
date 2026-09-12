@@ -11,9 +11,10 @@ export const RIDER_IMPORT_NEVER_WRITE = [
 
 /**
  * Railcar columns that importers must never write.
- * One-time loads (and later manual edits) are the only writers.
+ * equipment_type_code: one-time / Fleet Registry only.
+ * current_assignment_id: set from railcar_assignments.id on assign/move, never from VCF.
  */
-export const RAILCAR_IMPORT_NEVER_WRITE = ["equipment_type_code"] as const;
+export const RAILCAR_IMPORT_NEVER_WRITE = ["equipment_type_code", "current_assignment_id"] as const;
 
 /**
  * Account columns that importers must never write.

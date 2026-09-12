@@ -137,6 +137,7 @@ export type Railcar = {
   legal_owner: string | null;
   update_made: string | null;
   update_needed_next_vcf: string | null;
+  /** Internal `railcar_assignments.id` as text — not the VCF ASSIGNMENT_ID. */
   current_assignment_id: string | null;
   created_at?: string;
   updated_at?: string;

@@ -9,7 +9,7 @@
 Named never-write lists in `shared/rider-import-guard.ts`:
 
 - `RIDER_IMPORT_NEVER_WRITE` currently `["account_manager", "status_tag", "owner_entity"]` — every importer rider insert/update runs `assertRiderImporterPatch`. `riders.owner_entity` is a one-time Asset Report copy; Lease Management may edit it; Financial Data Refresh never writes it.
-- `RAILCAR_IMPORT_NEVER_WRITE` currently `["equipment_type_code"]` — VCF / Master Car List / Financial Data Refresh railcar writes run `assertRailcarImporterPatch`. Manual Fleet Registry edits may still patch it.
+- `RAILCAR_IMPORT_NEVER_WRITE` currently `["equipment_type_code", "current_assignment_id"]` — VCF / Master Car List / Financial Data Refresh railcar writes run `assertRailcarImporterPatch`. Manual Fleet Registry edits may still patch equipment_type_code. `current_assignment_id` is the internal `railcar_assignments.id`; VCF `ASSIGNMENT_ID` is stored on `assignment_history.assignment_id_ext` only.
 - `ACCOUNT_IMPORT_NEVER_WRITE` currently `["account_manager"]` — Master Car List account bootstrap uses `assertAccountImporterPatch` (name only; manager stays null).
 
 ## Two different importers
@@ -20,7 +20,7 @@ Named never-write lists in `shared/rider-import-guard.ts`:
 | **Master Car List** | `POST /api/import/commit` | **Yes**, for an OL/lessee not already in `riders`. New rider rows go through `assertRiderImporterPatch`. New `master_leases` rows get `account_id` via `ensureAccountForLessee` (match or create `accounts` by lessee name; `account_manager` left null). |
 | **Financial Data Refresh** | `POST /api/import/financial/commit` | **No.** Writes `rider_financial_summary` + listed car financial fields. Fill-if-blank on riders is allowlisted to `monthly_rent_per_car` only. |
 
-Do-not-touch for all three: **`accounts.account_manager`**, **`riders.account_manager`** (deprecated), **`riders.status_tag`**, **`riders.owner_entity`**, **`railcars.equipment_type_code`**, and **`rider_account_comments`** (append-only AM notes; not part of any import payload).
+Do-not-touch for all three: **`accounts.account_manager`**, **`riders.account_manager`** (deprecated), **`riders.status_tag`**, **`riders.owner_entity`**, **`railcars.equipment_type_code`**, **`railcars.current_assignment_id`**, and **`rider_account_comments`** (append-only AM notes; not part of any import payload).
 
 `riders.status_tag` is written only by `PATCH /api/account-management/riders/:riderId/status-tag`. OL notes are written only by `POST /api/account-management/riders/:riderId/comments` (session author; body `body` only). Admin-only `DELETE /api/account-management/comments/:commentId` is the escape hatch. No importer references `rider_account_comments`. Lease Management `POST`/`PATCH /api/riders` still strips `status_tag` / leftover `account_mgmt_comment` keys.
 
@@ -29,7 +29,7 @@ Those write routes use `requireAccountMgmtWrite` (any role, including Viewer), e
 Named never-write lists in `shared/rider-import-guard.ts`:
 
 - `RIDER_IMPORT_NEVER_WRITE` currently `["account_manager", "status_tag", "owner_entity"]`. Master Car List new-rider inserts go through `assertRiderImporterPatch`. Financial fill-blank uses `riderFinancialFillBlankPayload` (`monthly_rent_per_car` only). VCF/Asset Report date governance uses `riderLeaseGovernancePayload` (`expiration_date` / `expiration_source` / `expiration_snapshot_month` only).
-- `RAILCAR_IMPORT_NEVER_WRITE` currently `["equipment_type_code"]`.
+- `RAILCAR_IMPORT_NEVER_WRITE` currently `["equipment_type_code", "current_assignment_id"]`.
 - `ACCOUNT_IMPORT_NEVER_WRITE` currently `["account_manager"]`.
 
 ## Valid Car File (`POST /api/import/vcf/commit`)

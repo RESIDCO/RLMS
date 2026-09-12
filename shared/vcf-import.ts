@@ -4,7 +4,8 @@
  *
  * Write scope (commit): railcars, assignment_history, car_number_history.
  * Does not insert riders or master_leases. Does not write accounts.account_manager
- * or riders.account_manager (deprecated).
+ * or riders.account_manager (deprecated). Does not write railcars.current_assignment_id
+ * (that column is railcar_assignments.id; VCF ASSIGNMENT_ID is assignment_id_ext).
  * See docs/IMPORT_WRITE_BOUNDARIES.md.
  */
 
@@ -466,7 +467,6 @@ export function railcarPayloadFromCurrent(
     legal_owner: current.legal_owner,
     update_made: current.update_made,
     update_needed_next_vcf: current.update_needed_next_vcf,
-    current_assignment_id: current.assignment_id,
     data_source: "V_VALID_CARS",
     // Do NOT set old_car_initial / old_car_number — remarks go to car_number_history only
   };

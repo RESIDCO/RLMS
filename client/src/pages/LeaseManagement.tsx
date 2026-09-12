@@ -941,7 +941,9 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
   } = useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
   const visibleCols = visibleColsRaw as Set<RCOptCol>;
 
-  const filtered = asRailcarList(cars).filter((c) => c.assignment?.rider_id === riderId);
+  const filtered = asRailcarList(cars).filter(
+    (c) => c.assignment == null || Number(c.assignment.rider_id) === Number(riderId),
+  );
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const slice = filtered.slice(page * pageSize, (page + 1) * pageSize);

@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "./supabase";
 import { parseFleetStatus } from "@shared/fleet-status";
-import { splitCarNumber } from "@shared/residco-import";
+import { isOlNumberToken, splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag, OPS_FLAG_FALLBACK_PREFIX } from "@shared/ops-flag";
 import { fetchAllRows } from "./fetch-all";
@@ -138,6 +138,10 @@ function safeIlikeToken(s: string) {
 export function railcarSearchTokens(raw: string): string[] {
   const tokens: string[] = [];
   for (const part of String(raw ?? "").trim().split(/\s+/).filter(Boolean)) {
+    if (isOlNumberToken(part)) {
+      tokens.push(part.replace(/\s+/g, "").toUpperCase());
+      continue;
+    }
     const split = splitCarNumber(part);
     if (split.reporting_marks && split.car_number) {
       tokens.push(split.reporting_marks, split.car_number);
@@ -192,7 +196,7 @@ function scopeOrDefault(scope?: SearchScope): SearchScope {
   return scope;
 }
 
-async function matchingLeaseAndRiderIds(tokens: string[]): Promise<{ leaseIds: number[]; riderIds: number[] }> {
+export async function matchingLeaseAndRiderIds(tokens: string[]): Promise<{ leaseIds: number[]; riderIds: number[] }> {
   let leaseIds: number[] | null = null;
   let riderIds: number[] | null = null;
   for (const t of tokens) {
@@ -222,13 +226,23 @@ function uniquePositiveIds(vals: unknown[]): number[] {
   return [...new Set(vals.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0))];
 }
 
+async function railcarIdsForRiders(riderIds: number[]): Promise<number[]> {
+  const uniq = uniquePositiveIds(riderIds);
+  if (!uniq.length) return [];
+  const ids: number[] = [];
+  for (let i = 0; i < uniq.length; i += 200) {
+    const { data, error } = await supabaseAdmin
+      .from("railcar_assignments")
+      .select("railcar_id")
+      .in("rider_id", uniq.slice(i, i + 200));
+    if (error) throw error;
+    for (const a of data ?? []) ids.push(Number((a as { railcar_id: number }).railcar_id));
+  }
+  return uniquePositiveIds(ids);
+}
+
 async function railcarIdsForRider(riderId: number): Promise<number[]> {
-  const { data, error } = await supabaseAdmin
-    .from("railcar_assignments")
-    .select("railcar_id")
-    .eq("rider_id", riderId);
-  if (error) throw error;
-  return uniquePositiveIds((data ?? []).map((a: { railcar_id: number }) => a.railcar_id));
+  return railcarIdsForRiders([riderId]);
 }
 
 async function railcarIdsForLease(leaseId: number): Promise<number[]> {
@@ -237,18 +251,37 @@ async function railcarIdsForLease(leaseId: number): Promise<number[]> {
     .select("id")
     .eq("master_lease_id", leaseId);
   if (rErr) throw rErr;
-  const riderIds = uniquePositiveIds((riders ?? []).map((r: { id: number }) => r.id));
-  if (!riderIds.length) return [];
+  return railcarIdsForRiders((riders ?? []).map((r: { id: number }) => r.id));
+}
+
+/** Cars on matched riders/leases — filter railcars by PK, never by embed path. */
+export async function railcarIdsForSearchMatches(extra: {
+  riderIds?: number[];
+  leaseIds?: number[];
+}): Promise<number[]> {
   const ids: number[] = [];
-  for (let i = 0; i < riderIds.length; i += 200) {
-    const { data, error } = await supabaseAdmin
-      .from("railcar_assignments")
-      .select("railcar_id")
-      .in("rider_id", riderIds.slice(i, i + 200));
-    if (error) throw error;
-    for (const a of data ?? []) ids.push(Number((a as { railcar_id: number }).railcar_id));
+  if (extra.riderIds?.length) ids.push(...(await railcarIdsForRiders(extra.riderIds)));
+  if (extra.leaseIds?.length) {
+    const leaseIds = uniquePositiveIds(extra.leaseIds);
+    for (let i = 0; i < leaseIds.length; i += 80) {
+      const { data: riders, error } = await supabaseAdmin
+        .from("riders")
+        .select("id")
+        .in("master_lease_id", leaseIds.slice(i, i + 80));
+      if (error) throw error;
+      ids.push(...(await railcarIdsForRiders((riders ?? []).map((r: { id: number }) => r.id))));
+    }
   }
   return uniquePositiveIds(ids);
+}
+
+function idInOrClauses(ids: number[]): string[] {
+  if (!ids.length) return [];
+  const out: string[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    out.push(`id.in.(${ids.slice(i, i + 200).join(",")})`);
+  }
+  return out;
 }
 
 /** PK ids to restrict the railcars-rooted query. Nested embed filters cannot. */
@@ -270,17 +303,12 @@ export function applySearchFilter(
   query: any,
   rawSearch: string | undefined,
   scope?: SearchScope,
-  extra?: { riderIds?: number[]; leaseIds?: number[] },
+  extra?: { railcarIds?: number[] },
 ) {
   if (!rawSearch) return query;
   const tokens = railcarSearchTokens(rawSearch);
   const sc = scopeOrDefault(scope);
-  const riderIn =
-    extra?.riderIds?.length ? `railcar_assignments.rider_id.in.(${extra.riderIds.join(",")})` : "";
-  const leaseIn =
-    extra?.leaseIds?.length
-      ? `railcar_assignments.rider.master_lease_id.in.(${extra.leaseIds.join(",")})`
-      : "";
+  const railcarIns = idInOrClauses(extra?.railcarIds ?? []);
   for (const t of tokens) {
     const ors: string[] = [];
     const hasLetter = /[a-z]/i.test(t);
@@ -298,8 +326,7 @@ export function applySearchFilter(
     if (sc.carData) {
       for (const col of CAR_DATA_FIELDS) ors.push(`${col}.ilike.%${t}%`);
     }
-    if (riderIn) ors.push(riderIn);
-    if (leaseIn) ors.push(leaseIn);
+    ors.push(...railcarIns);
     if (!ors.length) continue;
     query = query.or(ors.join(","));
   }
@@ -309,11 +336,18 @@ export function applySearchFilter(
 async function applyRailcarFilters(query: any, p: RailcarListParams) {
   const scope = scopeOrDefault(p.searchScope);
   if (p.search && !p.ids?.length && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
-    const extra = await matchingLeaseAndRiderIds(railcarSearchTokens(p.search));
-    p.searchRiderIds = extra.riderIds;
-    p.searchLeaseIds = extra.leaseIds;
+    const matched = await matchingLeaseAndRiderIds(railcarSearchTokens(p.search));
+    p.searchRiderIds = matched.riderIds;
+    p.searchLeaseIds = matched.leaseIds;
   }
-  const extra = { riderIds: p.searchRiderIds, leaseIds: p.searchLeaseIds };
+  let searchRailcarIds: number[] | undefined;
+  if (p.searchRiderIds?.length || p.searchLeaseIds?.length) {
+    searchRailcarIds = await railcarIdsForSearchMatches({
+      riderIds: p.searchRiderIds,
+      leaseIds: p.searchLeaseIds,
+    });
+  }
+  const extra = { railcarIds: searchRailcarIds };
 
   if (p.turning50) {
     query = query.eq("active", true).eq("build_year", p.turning50 - 50);

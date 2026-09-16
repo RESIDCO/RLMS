@@ -247,6 +247,14 @@ export function displayLeaseNumber(n: string | null | undefined): string {
  * Whitespace and an optional space/dash between the prefix and number are
  * tolerated. The output is uppercased.
  */
+/**
+ * Rider/OL schedule tokens like OL1248 or xOL1248. splitCarNumber would
+ * otherwise split these into marks "OL" + number, which is wrong for search.
+ */
+export function isOlNumberToken(raw: unknown): boolean {
+  return /^X?OL\d+$/i.test(String(raw ?? "").trim().replace(/\s+/g, ""));
+}
+
 export function splitCarNumber(raw: unknown): {
   reporting_marks: string | null;
   car_number: string;

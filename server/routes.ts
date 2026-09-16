@@ -2730,10 +2730,13 @@ export async function registerRoutes(
       // ---- 3. Build railcar_assignments using the rider map we just built ----
       // Prefer the rider we created from this row; fall back to a workbook
       // rider_name match for rows that had no Lessee but did name a rider.
-      const { data: legacyRiders } = await supabase.from("riders").select("id, rider_name");
-      const legacyRiderByName = new Map<string, number>();
+      const { data: legacyRiders } = await supabase
+        .from("riders")
+        .select("id, rider_name, master_lease_id");
+      const legacyRiderByKey = new Map<string, number>();
       for (const r of legacyRiders ?? []) {
-        legacyRiderByName.set(r.rider_name.trim().toUpperCase(), r.id);
+        if (r.master_lease_id == null || !String(r.rider_name ?? "").trim()) continue;
+        legacyRiderByKey.set(riderKeyOf(r.master_lease_id, r.rider_name), r.id);
       }
 
       const assignments: Array<{
@@ -2749,15 +2752,15 @@ export async function registerRoutes(
         if (!cid) continue;
         let riderId: number | null = null;
         const lessee = deriveLeaseKey(r.lessee_name);
-        if (lessee) {
-          const mlaId = lesseeToMlaId.get(lessee);
-          if (mlaId) {
-            const rname = (r.rider_external_id || r.assignment_label || lessee).toString().trim();
-            riderId = riderKeyToId.get(riderKeyOf(mlaId, rname)) ?? null;
-          }
+        const mlaId = lessee ? lesseeToMlaId.get(lessee) : undefined;
+        if (mlaId) {
+          const rname = (r.rider_external_id || r.assignment_label || lessee || "").toString().trim();
+          riderId = riderKeyToId.get(riderKeyOf(mlaId, rname)) ?? null;
         }
-        if (!riderId && r.rider_name) {
-          riderId = legacyRiderByName.get(r.rider_name.trim().toUpperCase()) ?? null;
+        // Same-lessee / same-MLA only. Never match a bare rider_name across lessees
+        // (stale OL#### text on another lessee's rows would attach to the live rider).
+        if (!riderId && r.rider_name && mlaId) {
+          riderId = legacyRiderByKey.get(riderKeyOf(mlaId, r.rider_name)) ?? null;
         }
         if (!riderId && r.rider_id) {
           riderId = r.rider_id;

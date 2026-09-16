@@ -16,6 +16,7 @@ import {
   parseNumberCell,
   parseIntCell,
   splitCarNumber,
+  isOlNumberToken,
   deriveLeaseKey,
   synthesizeLeaseNumber,
 } from "../shared/residco-import";
@@ -191,6 +192,23 @@ eq(splitCarNumber("TFOX"), { reporting_marks: "TFOX", car_number: "", car_initia
 eq(splitCarNumber(""), { reporting_marks: null, car_number: "", car_initial: null }, "split: empty");
 eq(splitCarNumber(null), { reporting_marks: null, car_number: "", car_initial: null }, "split: null");
 eq(splitCarNumber("  TFOX88031  "), { reporting_marks: "TFOX", car_number: "88031", car_initial: "TFOX" }, "split: surrounding whitespace");
+eq(isOlNumberToken("OL1248"), true, "isOlNumberToken OL1248");
+eq(isOlNumberToken("xOL1248"), true, "isOlNumberToken xOL1248");
+eq(isOlNumberToken("TFOX12345"), false, "isOlNumberToken car mark is not an OL");
+eq(isOlNumberToken("OL"), false, "isOlNumberToken OL without digits");
+
+{
+  // Importer must never attach via a global rider_name map.
+  const riderKeyOf = (mlaId: number, name: string) => `${mlaId}|${name.trim().toUpperCase()}`;
+  const oeneusMla = 225;
+  const americanCoalMla = 99;
+  const legacyRiderByKey = new Map<string, number>([[riderKeyOf(oeneusMla, "OL1248"), 335]]);
+  const scoped = (mlaId: number | undefined, riderName: string) =>
+    mlaId ? (legacyRiderByKey.get(riderKeyOf(mlaId, riderName)) ?? null) : null;
+  eq(scoped(oeneusMla, "OL1248"), 335, "legacy rider lookup hits same MLA");
+  eq(scoped(americanCoalMla, "OL1248"), null, "legacy rider lookup does not cross lessee/MLA");
+  eq(scoped(undefined, "OL1248"), null, "legacy rider lookup needs known MLA");
+}
 
 // --- deriveLeaseKey ----------------------------------------------------------
 eq(deriveLeaseKey("Trinity Industries"), "Trinity Industries", "lease key from lessee");

@@ -4,7 +4,14 @@ import { hydrateOpsFlag } from "@shared/ops-flag";
 import { carListSearchTokens } from "@shared/programs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
-import { applySearchFilter, parseSearchScope, type SearchScope } from "./railcar-list";
+import {
+  applySearchFilter,
+  matchingLeaseAndRiderIds,
+  parseSearchScope,
+  railcarIdsForSearchMatches,
+  railcarSearchTokens,
+  type SearchScope,
+} from "./railcar-list";
 import { resolveProgramCars } from "./programs";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachLatestAmNotes, latestAmNotesByRiderIds } from "./rider-account-comments";
@@ -23,11 +30,6 @@ assignment:railcar_assignments(
   )
 )
 `.replace(/\s+/g, " ").trim();
-
-const SEARCH_CAR_SELECT_INNER = SEARCH_CAR_SELECT.replace(
-  "assignment:railcar_assignments(",
-  "assignment:railcar_assignments!inner(",
-);
 
 export type GlobalSearchResult = {
   query: string;
@@ -78,8 +80,11 @@ async function fetchCarsByText(
 ): Promise<any[]> {
   const pages = await Promise.all(
     groups.map(async (group) => {
+      const railcarIds = scope.leases
+        ? await railcarIdsForSearchMatches(await matchingLeaseAndRiderIds(railcarSearchTokens(group)))
+        : [];
       let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT);
-      q = applySearchFilter(q, group, scope);
+      q = applySearchFilter(q, group, scope, { railcarIds });
       q = applyActiveFilter(q, active);
       const { data, error } = await q.order("id", { ascending: true }).limit(CAR_LIMIT);
       if (error) throw error;
@@ -87,23 +92,6 @@ async function fetchCarsByText(
     }),
   );
   return dedupeCars(pages.flat());
-}
-
-async function fetchCarsByFk(
-  column: "railcar_assignments.rider_id" | "railcar_assignments.rider.master_lease_id",
-  ids: number[],
-  active?: string,
-): Promise<any[]> {
-  if (!ids.length) return [];
-  let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT_INNER);
-  q = q.in(column, ids.slice(0, 80));
-  q = applyActiveFilter(q, active);
-  const { data, error } = await q.limit(CAR_LIMIT);
-  if (error) {
-    console.log(`[search] extra cars via ${column} skipped: ${error.message}`);
-    return [];
-  }
-  return (data ?? []).map(mapCar);
 }
 
 function dedupeCars(rows: any[]): any[] {
@@ -295,11 +283,11 @@ export async function runGlobalSearch(
 
   const extraCars = scope.leases
     ? await timed("railcars-via-rider-lease", async () => {
-        const [byRider, byLease] = await Promise.all([
-          fetchCarsByFk("railcar_assignments.rider_id", riderIds, active),
-          fetchCarsByFk("railcar_assignments.rider.master_lease_id", leaseIds, active),
-        ]);
-        return dedupeCars([...byRider, ...byLease].filter((c) => !have.has(c.id)));
+        const extraIds = await railcarIdsForSearchMatches({ riderIds, leaseIds });
+        return (await fetchCarsByIds(extraIds.filter((id) => !have.has(id)), active)).slice(
+          0,
+          CAR_LIMIT,
+        );
       })
     : [];
 

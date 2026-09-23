@@ -47,7 +47,8 @@ import {
   nullifyEmptyDateStrings,
 } from "./sanitize";
 import { buildLeaseReport } from "./lease-export";
-import { runGlobalSearch } from "./global-search";
+import { commitMarkContacts, previewMarkContacts } from "./mark-contacts-import";
+import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts } from "./directory";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
@@ -5620,6 +5621,40 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.get("/api/companies", async (req: Request, res: Response) => {
+    try {
+      res.json(await listCompanies(req.query as Record<string, unknown>));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/companies/:id", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "Invalid company" });
+      const row = await getCompany(id);
+      if (!row) return res.status(404).json({ message: "Company not found" });
+      res.json(row);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/company-contacts", async (req: Request, res: Response) => {
+    try {
+      res.json(await listCompanyContacts(req.query as Record<string, unknown>));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/directory-search", async (req: Request, res: Response) => {
+    try {
+      res.json(await directorySearch(req.query as Record<string, unknown>));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/directory-facets", async (_req: Request, res: Response) => {
+    try {
+      res.json(await directoryFacets());
+    } catch (err) { errHandler(res, err); }
+  });
+
   app.get("/api/railcars/:id/programs", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
@@ -5627,6 +5662,31 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+
+  app.post("/api/import/mark-contacts/preview", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const { rows } = req.body as { rows: Record<string, unknown>[] };
+      if (!Array.isArray(rows) || rows.length === 0)
+        return res.status(400).json({ message: "No rows provided" });
+      const preview = await previewMarkContacts(rows);
+      const { companies: _omit, ...rest } = preview;
+      res.json(rest);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/import/mark-contacts/commit", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const { rows } = req.body as { rows: Record<string, unknown>[] };
+      if (!Array.isArray(rows) || rows.length === 0)
+        return res.status(400).json({ message: "No rows provided" });
+      const result = await commitMarkContacts(rows);
+      res.json(result);
+    } catch (err) { errHandler(res, err); }
+  });
 
   return httpServer;
 }

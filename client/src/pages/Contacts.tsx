@@ -1,558 +1,429 @@
-import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { apiRequest } from "@/lib/queryClient";
+import { apiGet } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
-  Phone, Mail, User, StickyNote, Building2, FileText,
-  Zap, ArrowRightLeft, ExternalLink, Plus, Pencil, Trash2, MoreHorizontal,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Phone, Mail, Building2, ChevronLeft, ChevronRight, MapPin,
 } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
-import { usePermissions } from "@/lib/AuthContext";
-import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
+import { COMPANY_CONTACT_CUSTOM_FIELD_LABELS } from "@shared/mark-contacts-import";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type DirectoryBadge = "customer" | "prospect" | "lessor" | "lease_ol" | "unclassified";
 
-type Contact = {
-  id: number;
-  rider_id: number;
-  name: string;
+type DirectoryRow = {
+  total_count?: number;
+  badge: DirectoryBadge;
+  result_kind: string;
+  company_id: number | null;
+  company_name: string | null;
+  relationship_type: string | null;
+  account_id: number | null;
+  reporting_marks: string[] | null;
+  source: string | null;
+  contact_id: number | null;
+  contact_name: string | null;
   title: string | null;
-  phone: string | null;
   email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  city: string | null;
+  state: string | null;
+  rider_id: number | null;
+};
+
+type DirectoryPage = {
+  rows: DirectoryRow[];
+  total_count: number;
+  page: number;
+  pageSize: number;
+};
+
+type Facets = {
+  relationship_type: string[];
+  priority_tier: string[];
+  status: string[];
+  source: string[];
+  state: string[];
+};
+
+type CompanyDetail = {
+  id: number;
+  name: string;
+  relationship_type: string;
+  account_id: number | null;
+  priority_tier: string | null;
+  status: string | null;
+  source: string;
   notes: string | null;
-  rider: {
+  reporting_marks: string[] | null;
+  contacts: Array<{
     id: number;
-    rider_name: string;
-    schedule_number: string | null;
-    master_lease: {
-      id: number;
-      lease_number: string;
-      lessee: string | null;
-    } | null;
-  } | null;
+    name: string;
+    title: string | null;
+    department: string | null;
+    email: string | null;
+    phone: string | null;
+    mobile: string | null;
+    alt_phone: string | null;
+    street: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    function_role: string | null;
+    custom_fields: Record<string, string> | null;
+    source: string;
+  }>;
+  company_products: Array<{
+    id: number;
+    commodity_family: string | null;
+    product: string | null;
+    estimated_railcars: number | null;
+    car_type: string | null;
+  }>;
 };
 
-type MasterLease = {
-  id: number;
-  lease_number: string;
-  lessee: string | null;
-  riders: Rider[];
+const BADGE: Record<DirectoryBadge, { label: string; cls: string }> = {
+  customer: { label: "Customer", cls: "bg-umler-teal/15 text-umler-teal border-umler-teal/30" },
+  prospect: { label: "Prospect", cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30" },
+  lessor: { label: "Lessor", cls: "bg-umler-faint/15 text-umler-faint border-umler-faint/30" },
+  lease_ol: { label: "Lease OL", cls: "bg-primary/10 text-primary border-primary/20" },
+  unclassified: { label: "Unreviewed", cls: "bg-muted text-muted-foreground border-border" },
 };
 
-type Rider = {
-  id: number;
-  rider_name: string;
-  schedule_number: string | null;
-  master_lease_id: number | null;
-};
-
-// ─── Contact Form Dialog ──────────────────────────────────────────────────────
-
-const EMPTY_FORM = { name: "", title: "", phone: "", email: "", notes: "" };
-
-function ContactFormDialog({
-  open,
-  initial,
-  initialRiderId,
-  leases,
-  riders,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  initial?: Contact;
-  initialRiderId?: number;
-  leases: MasterLease[];
-  riders: Rider[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { toast } = useToast();
-  const isEdit = !!initial;
-
-  // Pre-select MLA from existing contact or passed-in rider
-  const getInitialLeaseId = () => {
-    // From an existing contact: the rider's MLA id is on contact.rider.master_lease.id
-    if (initial?.rider?.master_lease?.id) return String(initial.rider.master_lease.id);
-    // From a rider id passed directly: find which MLA that rider belongs to
-    const lookupId = initialRiderId ?? (initial ? initial.rider_id : undefined);
-    if (lookupId) {
-      const r = riders.find(r => r.id === lookupId);
-      return r?.master_lease_id ? String(r.master_lease_id) : "";
-    }
-    return "";
-  };
-
-  const [selectedLeaseId, setSelectedLeaseId] = useState<string>(getInitialLeaseId);
-  const [selectedRiderId, setSelectedRiderId] = useState<string>(
-    initial ? String(initial.rider_id) : initialRiderId ? String(initialRiderId) : ""
-  );
-  const [form, setForm] = useState({
-    name: initial?.name ?? "",
-    title: initial?.title ?? "",
-    phone: initial?.phone ?? "",
-    email: initial?.email ?? "",
-    notes: initial?.notes ?? "",
-  });
-  const [saving, setSaving] = useState(false);
-
-  const set = (k: keyof typeof EMPTY_FORM, v: string) => setForm(prev => ({ ...prev, [k]: v }));
-
-  // Riders filtered by selected MLA
-  const ridersForLease = useMemo(() =>
-    selectedLeaseId
-      ? riders.filter(r => r.master_lease_id === Number(selectedLeaseId))
-      : riders,
-    [riders, selectedLeaseId]
-  );
-
-  // When MLA changes, reset rider selection if it no longer belongs to this MLA
-  function handleLeaseChange(leaseId: string) {
-    setSelectedLeaseId(leaseId);
-    const stillValid = riders.find(
-      r => r.id === Number(selectedRiderId) && r.master_lease_id === Number(leaseId)
-    );
-    if (!stillValid) setSelectedRiderId("");
-  }
-
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-    if (!selectedRiderId) return;
-    if (isEdit) {
-      const ok = await confirmSave({
-        title: `Save changes to ${form.name.trim()}?`,
-        description: "Updates will be written to this contact record.",
-      });
-      if (!ok) return;
-    }
-    setSaving(true);
-    try {
-      const payload = {
-        rider_id: Number(selectedRiderId),
-        name: form.name.trim(),
-        title: form.title || null,
-        phone: form.phone || null,
-        email: form.email || null,
-        notes: form.notes || null,
-      };
-      if (isEdit) {
-        await apiRequest("PATCH", `/api/contacts/${initial!.id}`, payload);
-      } else {
-        await apiRequest("POST", "/api/contacts", payload);
-      }
-      onSaved();
-      onClose();
-      toast({ title: isEdit ? "Contact updated" : "Contact created" });
-    } catch {
-      toast({ title: "Failed to save contact", variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const field = (label: string, key: keyof typeof EMPTY_FORM, type = "text", placeholder = "") => (
-    <div className="space-y-1.5">
-      <label className="text-xs font-medium text-muted-foreground">{label}</label>
-      <Input type={type} value={form[key]} placeholder={placeholder}
-        onChange={e => set(key, e.target.value)} className="h-9 text-sm" />
-    </div>
-  );
-
+function DirectoryBadgeChip({ badge }: { badge: DirectoryBadge }) {
+  const style = BADGE[badge] ?? BADGE.unclassified;
   return (
-    <Dialog open={open} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Contact" : "New Contact"}</DialogTitle>
-          <DialogDescription>
-            {isEdit
-              ? "Update contact details. You can also reassign to a different rider."
-              : "Add a contact and link them to an MLA and Rider."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSave} className="space-y-4 pt-1">
-          {/* MLA selector */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Master Lease Agreement <span className="text-muted-foreground/60">(filters riders below)</span>
-            </label>
-            <SearchableSelect
-              value={selectedLeaseId}
-              onChange={handleLeaseChange}
-              options={leases.map((l) => ({
-                value: String(l.id),
-                label: l.lease_number,
-                hint: l.lessee ?? undefined,
-                keywords: [l.lease_number, l.lessee].filter(Boolean).join(" "),
-              }))}
-              placeholder="Select an MLA…"
-              searchPlaceholder="Type lessee or lease…"
-              emptyText="No master leases match."
-            />
-          </div>
-
-          {/* Rider selector */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Rider <span className="text-destructive">*</span>
-            </label>
-            <SearchableSelect
-              value={selectedRiderId}
-              onChange={setSelectedRiderId}
-              disabled={ridersForLease.length === 0}
-              options={ridersForLease.map(riderToOption)}
-              placeholder={
-                ridersForLease.length === 0
-                  ? (selectedLeaseId ? "No riders under this MLA" : "Select a rider…")
-                  : "Select a rider…"
-              }
-              searchPlaceholder="Type OL number or rider…"
-              emptyText="No riders match."
-            />
-            {!selectedRiderId && (
-              <p className="text-[11px] text-muted-foreground">
-                Every contact must be linked to a rider. Select an MLA above to filter the list.
-              </p>
-            )}
-          </div>
-
-          <div className="border-t border-border pt-3 space-y-3">
-            {field("Full Name *", "name", "text", "Jane Smith")}
-            <div className="grid grid-cols-2 gap-3">
-              {field("Title / Role", "title", "text", "Operations Manager")}
-              {field("Phone", "phone", "tel", "+1 (555) 000-0000")}
-            </div>
-            {field("Email", "email", "email", "jane@example.com")}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Notes</label>
-              <Textarea value={form.notes} onChange={e => set("notes", e.target.value)}
-                placeholder="Any additional context about this contact…"
-                className="text-sm min-h-[72px] resize-none" />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button type="submit" size="sm"
-              disabled={saving || !form.name.trim() || !selectedRiderId}>
-              {saving ? "Saving…" : isEdit ? "Update Contact" : "Create Contact"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <span className={cn("text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border", style.cls)}>
+      {style.label}
+    </span>
   );
 }
 
-// ─── Contact Card ─────────────────────────────────────────────────────────────
-
-function ContactCard({
-  contact,
-  onNavigate,
-  onEdit,
-  onDelete,
-  canDelete,
+function FacetSelect({
+  label,
+  value,
+  options,
+  onChange,
 }: {
-  contact: Contact;
-  onNavigate: (path: string) => void;
-  onEdit: (c: Contact) => void;
-  onDelete: (c: Contact) => void;
-  canDelete: boolean;
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const lessee = contact.rider?.master_lease?.lessee ?? null;
-  const leaseNumber = contact.rider?.master_lease?.lease_number ?? null;
-  const riderName = contact.rider?.rider_name ?? null;
-
+  if (!options.length) return null;
   return (
-    <div
-      className="rounded-lg border border-card-border bg-card px-4 py-3 hover:border-primary/30 transition-colors cursor-pointer"
-      onClick={() => setExpanded(e => !e)}
-    >
-      <div className="flex items-start gap-3">
-        <div className="h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-          <User className="h-4 w-4 text-primary" />
-        </div>
-
-        <div className="flex-1 min-w-0">
-          {/* Action buttons — top right */}
-          <div className="float-right ml-2 flex items-center gap-1" onClick={e => e.stopPropagation()}>
-            {/* Quick Actions */}
-            {contact.rider && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground">
-                    <Zap className="h-3 w-3" />
-                    Quick Actions
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuItem onSelect={() => onNavigate(`/leases?rider=${contact.rider_id}`)} className="gap-2">
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    Open Lease Detail
-                    {leaseNumber && <span className="ml-auto text-xs text-muted-foreground font-mono">{leaseNumber}</span>}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => onNavigate(`/move?rider=${contact.rider_id}`)} className="gap-2">
-                    <ArrowRightLeft className="h-3.5 w-3.5" />
-                    Move Cars
-                    {riderName && <span className="ml-auto text-xs text-muted-foreground truncate max-w-[80px]">{riderName}</span>}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-
-            {/* Edit / Delete */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="ghost" className="h-6 w-6"
-                  data-testid={`button-contact-menu-${contact.id}`}>
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => onEdit(contact)} className="gap-2">
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </DropdownMenuItem>
-                {canDelete && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive gap-2"
-                      onSelect={() => onDelete(contact)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" /> Delete
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm">{contact.name}</span>
-            {contact.title && <span className="text-xs text-muted-foreground">{contact.title}</span>}
-          </div>
-
-          {/* Lease / rider context */}
-          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            {lessee && (
-              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Building2 className="h-3 w-3" />{lessee}
-              </span>
-            )}
-            {leaseNumber && (
-              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                <FileText className="h-3 w-3" />{leaseNumber}
-              </span>
-            )}
-            {riderName && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{riderName}</Badge>
-            )}
-          </div>
-
-          {/* Contact details */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-            {contact.phone && (
-              <a href={`tel:${contact.phone}`} onClick={e => e.stopPropagation()}
-                className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                <Phone className="h-3 w-3" />{contact.phone}
-              </a>
-            )}
-            {contact.email && (
-              <a href={`mailto:${contact.email}`} onClick={e => e.stopPropagation()}
-                className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                <Mail className="h-3 w-3" />{contact.email}
-              </a>
-            )}
-          </div>
-
-          {/* Notes — expandable */}
-          {contact.notes && (
-            <div className={cn(
-              "mt-2 text-xs text-muted-foreground overflow-hidden transition-all",
-              expanded ? "max-h-96" : "max-h-8"
-            )}>
-              <div className="flex items-start gap-1">
-                <StickyNote className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground/60" />
-                <span className={cn(!expanded && "line-clamp-1")}>{contact.notes}</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="min-w-[140px]">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">{label}</div>
+      <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
+        <SelectTrigger className="h-9 text-sm">
+          <SelectValue placeholder={label} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__all__">All</SelectItem>
+          {options.map((o) => (
+            <SelectItem key={o} value={o}>{o}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+function labeledCustomFields(cf: Record<string, string> | null | undefined) {
+  if (!cf) return [];
+  return Object.entries(cf)
+    .filter(([, v]) => v != null && String(v).trim() !== "")
+    .map(([k, v]) => ({
+      label: COMPANY_CONTACT_CUSTOM_FIELD_LABELS[k] || k.replace(/_/g, " "),
+      value: String(v),
+    }));
+}
 
 export default function Contacts() {
   const [, navigate] = useLocation();
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  const { canDeleteContacts } = usePermissions();
-  const [search, setSearch] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editContact, setEditContact] = useState<Contact | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [includeIndustry, setIncludeIndustry] = useState(false);
+  const [relationshipType, setRelationshipType] = useState("");
+  const [priorityTier, setPriorityTier] = useState("");
+  const [status, setStatus] = useState("");
+  const [source, setSource] = useState("");
+  const [state, setState] = useState("");
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const pageSize = 50;
 
-  const { data: contacts = [], isLoading } = useQuery<Contact[]>({
-    queryKey: ["/api/contacts"],
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setQ(searchInput.trim());
+      setPage(1);
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [includeIndustry, relationshipType, priorityTier, status, source, state]);
+
+  const params = useMemo(() => {
+    const sp = new URLSearchParams();
+    if (q) sp.set("q", q);
+    sp.set("page", String(page));
+    sp.set("pageSize", String(pageSize));
+    if (includeIndustry) sp.set("include_industry", "true");
+    if (relationshipType) sp.set("relationship_type", relationshipType);
+    if (priorityTier) sp.set("priority_tier", priorityTier);
+    if (status) sp.set("status", status);
+    if (source) sp.set("source", source);
+    if (state) sp.set("state", state);
+    return sp.toString();
+  }, [q, page, includeIndustry, relationshipType, priorityTier, status, source, state]);
+
+  const { data, isLoading } = useQuery<DirectoryPage>({
+    queryKey: ["/api/directory-search", params],
+    queryFn: () => apiGet<DirectoryPage>(`/api/directory-search?${params}`),
   });
 
-  // Fetch MLAs (with nested riders) for the create/edit form dropdowns
-  // /api/leases returns a flat array of MLAs, each with a nested riders[] array
-  const { data: leasesData = [] } = useQuery<MasterLease[]>({
-    queryKey: ["/api/leases"],
-  });
-  const leases: MasterLease[] = leasesData;
-  // Flatten all riders out of the MLA array, injecting master_lease_id
-  const riders: Rider[] = leases.flatMap(l =>
-    (l.riders ?? []).map(r => ({ ...r, master_lease_id: l.id }))
-  );
-
-  const deleteMut = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/contacts/${id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/contacts"] });
-      toast({ title: "Contact deleted" });
-    },
-    onError: () => toast({ title: "Failed to delete contact", variant: "destructive" }),
+  const { data: facets } = useQuery<Facets>({
+    queryKey: ["/api/directory-facets"],
+    queryFn: () => apiGet<Facets>("/api/directory-facets"),
   });
 
-  async function handleDelete(c: Contact) {
-    const ok = await confirmDelete({
-      title: `Delete contact "${c.name}"?`,
-      description: "This can't be undone.",
-    });
-    if (ok) deleteMut.mutate(c.id);
-  }
+  const { data: detail, isLoading: detailLoading } = useQuery<CompanyDetail>({
+    queryKey: ["/api/companies", companyId],
+    queryFn: () => apiGet<CompanyDetail>(`/api/companies/${companyId}`),
+    enabled: companyId != null,
+  });
 
-  function handleSaved() {
-    qc.invalidateQueries({ queryKey: ["/api/contacts"] });
-  }
+  const rows = data?.rows ?? [];
+  const total = data?.total_count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return contacts;
-    return contacts.filter(c =>
-      [c.name, c.title, c.phone, c.email, c.notes,
-        c.rider?.rider_name, c.rider?.master_lease?.lessee, c.rider?.master_lease?.lease_number]
-        .filter(Boolean)
-        .some(v => v!.toLowerCase().includes(q))
-    );
-  }, [contacts, search]);
-
-  const grouped = useMemo(() => {
-    const map = new Map<string, Contact[]>();
-    for (const c of filtered) {
-      const letter = c.name.charAt(0).toUpperCase();
-      if (!map.has(letter)) map.set(letter, []);
-      map.get(letter)!.push(c);
+  function openRow(row: DirectoryRow) {
+    if (row.company_id) {
+      setCompanyId(row.company_id);
+      return;
     }
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [filtered]);
+    if (row.rider_id) navigate(`/leases?rider=${row.rider_id}`);
+  }
 
   return (
     <div>
       <PageHeader
         title="Contacts"
-        subtitle="All rider contacts across every lease — searchable in one place"
-        note="Additional features and functionality coming soon — this page is under active development and will change."
+        subtitle="Companies and people directory — MARK Contacts and later CRM imports. Lease OL contacts stay on each rider."
       />
 
-      <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-5">
-        {/* Search + New Contact */}
+      <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-4">
         <div className="flex items-center gap-3 flex-wrap">
           <ClearableSearchInput
-            placeholder="Search name, lessee, phone, email…"
-            value={search}
-            onChange={setSearch}
-            testId="contacts-search"
+            placeholder="Search company, person, mark, email…"
+            value={searchInput}
+            onChange={setSearchInput}
+            testId="directory-search"
           />
-          <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}
-            data-testid="button-new-contact">
-            <Plus className="h-4 w-4" /> New Contact
-          </Button>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <Checkbox
+              checked={includeIndustry}
+              onCheckedChange={(v) => setIncludeIndustry(v === true)}
+            />
+            Include industry / competitors
+          </label>
         </div>
 
-        {/* Count */}
-        {!isLoading && (
-          <div className="text-xs text-muted-foreground font-mono-num">
-            {filtered.length} / {contacts.length} contacts
-          </div>
-        )}
+        <div className="flex flex-wrap gap-3">
+          <FacetSelect label="Relationship" value={relationshipType} options={facets?.relationship_type ?? []} onChange={setRelationshipType} />
+          <FacetSelect label="Priority" value={priorityTier} options={facets?.priority_tier ?? []} onChange={setPriorityTier} />
+          <FacetSelect label="Status" value={status} options={facets?.status ?? []} onChange={setStatus} />
+          <FacetSelect label="State" value={state} options={facets?.state ?? []} onChange={setState} />
+          <FacetSelect label="Source" value={source} options={facets?.source ?? []} onChange={setSource} />
+        </div>
+
+        <div className="text-xs text-muted-foreground font-mono-num">
+          {isLoading ? "Loading…" : `${total.toLocaleString()} result${total === 1 ? "" : "s"}`}
+          {q ? ` for “${q}”` : " · alphabetical"}
+        </div>
 
         {isLoading && (
           <div className="space-y-2">
             {Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} className="h-[72px] rounded-lg" />
+              <Skeleton key={i} className="h-[76px] rounded-lg" />
             ))}
           </div>
         )}
 
-        {!isLoading && filtered.length === 0 && (
+        {!isLoading && rows.length === 0 && (
           <div className="text-sm text-muted-foreground italic py-8 text-center">
-            {search ? "No contacts match that search." : "No contacts yet — create one with the button above."}
+            {q ? "No directory matches." : "No companies in the directory yet."}
           </div>
         )}
 
-        {!isLoading && grouped.map(([letter, items]) => (
-          <div key={letter}>
-            <div className="text-[11px] uppercase tracking-[0.15em] text-muted-foreground font-medium mb-2 pb-1 border-b border-border">
-              {letter}
+        {!isLoading && rows.map((row) => (
+          <button
+            key={`${row.result_kind}-${row.company_id ?? "x"}-${row.contact_id ?? "x"}-${row.rider_id ?? "x"}`}
+            type="button"
+            className="w-full text-left rounded-lg border border-card-border bg-card px-4 py-3 hover:border-primary/30 transition-colors"
+            onClick={() => openRow(row)}
+            data-testid={`directory-row-${row.contact_id ?? row.company_id}`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <DirectoryBadgeChip badge={row.badge} />
+                  <span className="font-medium text-sm">{row.company_name || "Lease OL contact"}</span>
+                  {row.reporting_marks && row.reporting_marks.length > 0 && (
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      {row.reporting_marks.slice(0, 6).join(" · ")}
+                      {row.reporting_marks.length > 6 ? "…" : ""}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 text-sm">
+                  {row.contact_name || "—"}
+                  {row.title ? <span className="text-muted-foreground"> · {row.title}</span> : null}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                  {row.email && (
+                    <a href={`mailto:${row.email}`} onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                      <Mail className="h-3 w-3" />{row.email}
+                    </a>
+                  )}
+                  {(row.phone || row.mobile) && (
+                    <a href={`tel:${row.phone || row.mobile}`} onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                      <Phone className="h-3 w-3" />{row.phone || row.mobile}
+                    </a>
+                  )}
+                  {(row.city || row.state) && (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <MapPin className="h-3 w-3" />{[row.city, row.state].filter(Boolean).join(", ")}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              {items.map(c => (
-                <ContactCard
-                  key={c.id}
-                  contact={c}
-                  onNavigate={navigate}
-                  onEdit={setEditContact}
-                  onDelete={handleDelete}
-                  canDelete={canDeleteContacts}
-                />
-              ))}
-            </div>
-          </div>
+          </button>
         ))}
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <div className="text-xs text-muted-foreground font-mono-num">Page {page} / {totalPages}</div>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Create dialog */}
-      <ContactFormDialog
-        open={createOpen}
-        leases={leases}
-        riders={riders}
-        onClose={() => setCreateOpen(false)}
-        onSaved={handleSaved}
-      />
-
-      {/* Edit dialog */}
-      {editContact && (
-        <ContactFormDialog
-          open={!!editContact}
-          initial={editContact}
-          leases={leases}
-          riders={riders}
-          onClose={() => setEditContact(null)}
-          onSaved={handleSaved}
-        />
-      )}
+      <Sheet open={companyId != null} onOpenChange={(o) => { if (!o) setCompanyId(null); }}>
+        <SheetContent side="right" className="sm:max-w-xl overflow-y-auto">
+          {detailLoading && <Skeleton className="h-40 rounded-lg" />}
+          {detail && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{detail.name}</SheetTitle>
+                <SheetDescription className="flex flex-wrap gap-2 items-center">
+                  <DirectoryBadgeChip
+                    badge={
+                      detail.account_id ? "customer"
+                        : detail.relationship_type === "prospect" ? "prospect"
+                        : detail.relationship_type === "lessor" || detail.relationship_type === "railroad" ? "lessor"
+                        : "unclassified"
+                    }
+                  />
+                  <span>{detail.source}</span>
+                  {detail.status ? <span>· {detail.status}</span> : null}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="mt-4 space-y-5 text-sm">
+                {detail.reporting_marks && detail.reporting_marks.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Reporting marks</div>
+                    <div className="font-mono text-xs">{detail.reporting_marks.join(" · ")}</div>
+                  </div>
+                )}
+                {detail.notes && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Notes</div>
+                    <p className="text-muted-foreground whitespace-pre-wrap">{detail.notes}</p>
+                  </div>
+                )}
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                    Contacts ({detail.contacts.length})
+                  </div>
+                  <div className="space-y-3">
+                    {detail.contacts.map((c) => (
+                      <div key={c.id} className="rounded-md border border-border p-3">
+                        <div className="font-medium">{c.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {[c.title, c.department, c.function_role].filter(Boolean).join(" · ")}
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
+                          {c.email && <a className="text-primary hover:underline" href={`mailto:${c.email}`}>{c.email}</a>}
+                          {c.phone && <a className="text-primary hover:underline" href={`tel:${c.phone}`}>{c.phone}</a>}
+                          {c.mobile && <a className="text-primary hover:underline" href={`tel:${c.mobile}`}>{c.mobile}</a>}
+                        </div>
+                        {(c.street || c.city) && (
+                          <div className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
+                            {[c.street, [c.city, c.state, c.zip].filter(Boolean).join(", ")].filter(Boolean).join("\n")}
+                          </div>
+                        )}
+                        {labeledCustomFields(c.custom_fields).length > 0 && (
+                          <dl className="mt-2 grid grid-cols-1 gap-1 text-xs">
+                            {labeledCustomFields(c.custom_fields).map((f) => (
+                              <div key={f.label} className="grid grid-cols-[9rem_1fr] gap-2">
+                                <dt className="text-muted-foreground">{f.label}</dt>
+                                <dd>{f.value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {detail.company_products.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Products</div>
+                    <ul className="text-xs space-y-1">
+                      {detail.company_products.map((p) => (
+                        <li key={p.id}>{[p.product, p.commodity_family, p.car_type].filter(Boolean).join(" · ")}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

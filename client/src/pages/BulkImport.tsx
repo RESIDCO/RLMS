@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import AcquisitionImportSection from "./AcquisitionImportSection";
+import MarkContactsImportSection from "./MarkContactsImportSection";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Loose shape — server returns the full normalized row alongside derived fields.
@@ -536,7 +537,7 @@ export default function BulkImportPage() {
     <div className="p-6 max-w-5xl mx-auto space-y-8">
       <PageHeader
         title="Bulk Import"
-        subtitle="Three separate importers — car files never write financials, the Asset Report never touches car identity or assignments, and New Acquisitions only inserts cars that do not already exist."
+        subtitle="Four importers — car files never write financials, the Asset Report never touches car identity or assignments, New Acquisitions only inserts cars that do not already exist, and MARK Contacts writes companies/company_contacts only."
       />
 
       {finCommitted && (
@@ -1088,6 +1089,7 @@ export default function BulkImportPage() {
         </section>
       )}
 
+      <MarkContactsImportSection />
       <AcquisitionImportSection />
     </div>
   );

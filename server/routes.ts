@@ -48,7 +48,7 @@ import {
 } from "./sanitize";
 import { buildLeaseReport } from "./lease-export";
 import { commitMarkContacts, previewMarkContacts } from "./mark-contacts-import";
-import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts } from "./directory";
+import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts, createCompany, updateCompany, deleteCompany, getCompanyContact, createCompanyContact, updateCompanyContact, deleteCompanyContact, listContactLeaseLinks, listCompanyLeaseLinks, listLeaseContactLinks, createContactLeaseLink, deleteContactLeaseLink } from "./directory";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
@@ -4112,13 +4112,15 @@ export async function registerRoutes(
     upload.single("file"),
     async (req: Request & { file?: Express.Multer.File }, res: Response) => {
       try {
-        const writerId = await requireWrite(req, res);
+        const { entityType, entityId } = req.params;
+        const writerId = (entityType === "company" || entityType === "company_contact")
+          ? await requireContactsWrite(req, res)
+          : await requireWrite(req, res);
         if (!writerId) return;
         const user = await getAuthUser(req);
         if (!user) return;
         if (!req.file) return res.status(400).json({ error: "No file provided" });
-        const { entityType, entityId } = req.params;
-        const validTypes = ["master_lease", "rider", "railcar"];
+        const validTypes = ["master_lease", "rider", "railcar", "company", "company_contact"];
         if (!validTypes.includes(entityType) || !isAttachmentEntityType(entityType)) {
           return res.status(400).json({ error: "Invalid entity type" });
         }
@@ -4141,7 +4143,7 @@ export async function registerRoutes(
         let data;
         try {
           data = await insertAttachmentRow({
-            entity_type: entityType as "master_lease" | "rider" | "railcar",
+            entity_type: entityType as any,
             entity_id: parseInt(entityId, 10),
             file_name: req.file.originalname,
             file_size: req.file.size,
@@ -5637,9 +5639,161 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.post("/api/companies", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireContactsWrite(req, res))) return;
+      res.status(201).json(await createCompany((req.body ?? {}) as Record<string, unknown>));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.patch("/api/companies/:id", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireContactsWrite(req, res))) return;
+      const id = Number(req.params.id);
+      const row = await updateCompany(id, (req.body ?? {}) as Record<string, unknown>);
+      if (!row) return res.status(404).json({ message: "Company not found" });
+      res.json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/companies/:id", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireContactsDelete(req, res))) return;
+      await deleteCompany(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/companies/:id/lease-links", async (req: Request, res: Response) => {
+    try {
+      res.json(await listCompanyLeaseLinks(Number(req.params.id)));
+    } catch (err) { errHandler(res, err); }
+  });
+
   app.get("/api/company-contacts", async (req: Request, res: Response) => {
     try {
       res.json(await listCompanyContacts(req.query as Record<string, unknown>));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/company-contacts", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireContactsWrite(req, res))) return;
+      res.status(201).json(await createCompanyContact((req.body ?? {}) as Record<string, unknown>));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/company-contacts/:id", async (req: Request, res: Response) => {
+    try {
+      const row = await getCompanyContact(Number(req.params.id));
+      if (!row) return res.status(404).json({ message: "Contact not found" });
+      res.json(row);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.patch("/api/company-contacts/:id", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireContactsWrite(req, res))) return;
+      const row = await updateCompanyContact(Number(req.params.id), (req.body ?? {}) as Record<string, unknown>);
+      if (!row) return res.status(404).json({ message: "Contact not found" });
+      res.json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/company-contacts/:id", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireContactsDelete(req, res))) return;
+      await deleteCompanyContact(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/company-contacts/:id/lease-links", async (req: Request, res: Response) => {
+    try {
+      res.json(await listContactLeaseLinks(Number(req.params.id)));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/company-contacts/:id/lease-links", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireContactsWrite(req, res);
+      if (!writerId) return;
+      res.status(201).json(await createContactLeaseLink(Number(req.params.id), (req.body ?? {}) as Record<string, unknown>, writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/contact-lease-links/:id", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireContactsWrite(req, res))) return;
+      await deleteContactLeaseLink(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/leases/:id/contact-links", async (req: Request, res: Response) => {
+    try {
+      res.json(await listLeaseContactLinks({ masterLeaseId: Number(req.params.id) }));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/leases/:id/contact-links", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const contactId = Number((req.body as any)?.company_contact_id);
+      res.status(201).json(await createContactLeaseLink(contactId, { master_lease_id: Number(req.params.id), relationship_note: (req.body as any)?.relationship_note }, writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/leases/:id/contact-links/:linkId", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      await deleteContactLeaseLink(Number(req.params.linkId));
+      res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/riders/:id/contact-links", async (req: Request, res: Response) => {
+    try {
+      res.json(await listLeaseContactLinks({ riderId: Number(req.params.id) }));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/riders/:id/contact-links", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const contactId = Number((req.body as any)?.company_contact_id);
+      res.status(201).json(await createContactLeaseLink(contactId, { rider_id: Number(req.params.id), relationship_note: (req.body as any)?.relationship_note }, writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.delete("/api/riders/:id/contact-links/:linkId", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      await deleteContactLeaseLink(Number(req.params.linkId));
+      res.json({ ok: true });
     } catch (err) { errHandler(res, err); }
   });
 

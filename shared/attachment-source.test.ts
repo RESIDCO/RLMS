@@ -19,7 +19,8 @@ function ok(cond: boolean, label: string) {
 
 ok(stampGenericAttachmentSource("rider") === "lease_management", "OL uploads via generic route stamp lease_management");
 ok(stampGenericAttachmentSource("master_lease") === "lease_management", "MLA uploads stamp lease_management");
-ok(stampGenericAttachmentSource("railcar") === "manual", "railcar uploads stamp manual");
+ok(stampGenericAttachmentSource("company") === "contacts_directory", "company uploads stamp contacts_directory");
+ok(stampGenericAttachmentSource("company_contact") === "contacts_directory", "company_contact uploads stamp contacts_directory");
 ok(ACCOUNT_TRANSITIONS_SOURCE === "account_transitions", "AT source is account_transitions");
 
 const spoof = { source_module: "lease_management" };

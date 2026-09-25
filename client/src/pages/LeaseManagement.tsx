@@ -60,6 +60,7 @@ import { formatCalendarDate } from "@shared/lease-authority";
 import { leaseExpirationSourceLabel } from "@shared/lease-governance";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import ContactLeaseLinks from "@/components/ContactLeaseLinks";
 import ActivityTimeline from "@/components/ActivityTimeline";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
@@ -748,8 +749,8 @@ export default function LeaseManagement() {
                         );
                       })}
                     </div>
-                    {/* MLA-level attachments */}
-                    <div className="px-5 py-4 border-t border-border/50 bg-background/20">
+                    <div className="px-5 py-4 border-t border-border/50 bg-background/20 space-y-4">
+                      <ContactLeaseLinks mode="lease" masterLeaseId={lease.id} canAdd={canEdit} canRemove={canEdit} />
                       <AttachmentsPanel entityType="master_lease" entityId={lease.id} compact />
                     </div>
                   </div>
@@ -895,6 +896,9 @@ function RiderDetailPanels({
     <>
       <RiderCars riderId={riderId} leaseType={leaseType} />
       <RiderContactsPanel riderId={riderId} />
+      <div className="px-5 pb-3">
+        <ContactLeaseLinks mode="rider" riderId={riderId} canAdd={canEdit} canRemove={canEdit} />
+      </div>
       <div className="px-5 pb-3">
         <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
           Account Management notes

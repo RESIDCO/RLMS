@@ -3,6 +3,7 @@ export const ATTACHMENT_SOURCE_MODULES = [
   "account_transitions",
   "lease_management",
   "programs",
+  "contacts_directory",
 ] as const;
 
 export type AttachmentSourceModule = (typeof ATTACHMENT_SOURCE_MODULES)[number];
@@ -12,6 +13,7 @@ export const ATTACHMENT_SOURCE_LABEL: Record<AttachmentSourceModule, string> = {
   account_transitions: "Account Transitions",
   lease_management: "Lease Management",
   programs: "Programs",
+  contacts_directory: "Contacts",
 };
 
 export function attachmentSourceLabel(raw: string | null | undefined): string {
@@ -35,6 +37,7 @@ export function formatAttachmentProvenance(
  */
 export function stampGenericAttachmentSource(entityType: string): AttachmentSourceModule {
   if (entityType === "master_lease" || entityType === "rider") return "lease_management";
+  if (entityType === "company" || entityType === "company_contact") return "contacts_directory";
   return "manual";
 }
 

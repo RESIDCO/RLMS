@@ -7,7 +7,7 @@ import {
 
 export const STORAGE_BUCKET = "rlms-attachments";
 
-export const ATTACHMENT_ENTITY_TYPES = ["master_lease", "rider", "railcar", "account"] as const;
+export const ATTACHMENT_ENTITY_TYPES = ["master_lease", "rider", "railcar", "account", "company", "company_contact"] as const;
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
 
 export function isAttachmentEntityType(v: string): v is AttachmentEntityType {

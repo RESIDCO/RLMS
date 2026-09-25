@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { apiGet } from "@/lib/queryClient";
+import { apiGet, apiRequest } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -21,11 +22,24 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  Phone, Mail, Building2, ChevronLeft, ChevronRight, MapPin,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Phone, Mail, Building2, ChevronLeft, ChevronRight, MapPin, Plus, Pencil, User,
 } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { COMPANY_CONTACT_CUSTOM_FIELD_LABELS } from "@shared/mark-contacts-import";
+import AttachmentsPanel from "@/components/AttachmentsPanel";
+import NotesSaveField from "@/components/NotesSaveField";
+import ContactLeaseLinks from "@/components/ContactLeaseLinks";
+import { usePermissions } from "@/lib/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import SearchableSelect from "@/components/SearchableSelect";
 
 type DirectoryBadge = "customer" | "prospect" | "lessor" | "lease_ol" | "unclassified";
 
@@ -90,6 +104,7 @@ type CompanyDetail = {
     zip: string | null;
     function_role: string | null;
     custom_fields: Record<string, string> | null;
+    notes?: string | null;
     source: string;
   }>;
   company_products: Array<{
@@ -99,6 +114,34 @@ type CompanyDetail = {
     estimated_railcars: number | null;
     car_type: string | null;
   }>;
+  company_fleet_stats?: Array<{
+    id: number;
+    car_type: string;
+    fleet_size: number;
+    as_of_date: string | null;
+  }>;
+};
+
+type ContactDetail = {
+  id: number;
+  company_id: number;
+  name: string;
+  title: string | null;
+  department: string | null;
+  email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  alt_phone: string | null;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  linkedin_url: string | null;
+  linkedin_job_title: string | null;
+  function_role: string | null;
+  notes: string | null;
+  custom_fields: Record<string, string> | null;
+  company?: CompanyDetail | null;
 };
 
 const BADGE: Record<DirectoryBadge, { label: string; cls: string }> = {
@@ -160,6 +203,9 @@ function labeledCustomFields(cf: Record<string, string> | null | undefined) {
 
 export default function Contacts() {
   const [, navigate] = useLocation();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const { canEditContacts } = usePermissions();
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -170,6 +216,10 @@ export default function Contacts() {
   const [source, setSource] = useState("");
   const [state, setState] = useState("");
   const [companyId, setCompanyId] = useState<number | null>(null);
+  const [contactId, setContactId] = useState<number | null>(null);
+  const [addCompanyOpen, setAddCompanyOpen] = useState(false);
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [editCompanyOpen, setEditCompanyOpen] = useState(false);
   const pageSize = 50;
 
   useEffect(() => {
@@ -214,12 +264,30 @@ export default function Contacts() {
     enabled: companyId != null,
   });
 
+  const { data: person, isLoading: personLoading } = useQuery<ContactDetail>({
+    queryKey: ["/api/company-contacts", contactId],
+    queryFn: () => apiGet<ContactDetail>(`/api/company-contacts/${contactId}`),
+    enabled: contactId != null,
+  });
+
   const rows = data?.rows ?? [];
   const total = data?.total_count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  function invalidateDir() {
+    qc.invalidateQueries({ queryKey: ["/api/directory-search"] });
+    qc.invalidateQueries({ queryKey: ["/api/companies", companyId] });
+    qc.invalidateQueries({ queryKey: ["/api/company-contacts", contactId] });
+  }
+
   function openRow(row: DirectoryRow) {
+    if (row.result_kind !== "lease_ol" && row.contact_id) {
+      setCompanyId(row.company_id);
+      setContactId(row.contact_id);
+      return;
+    }
     if (row.company_id) {
+      setContactId(null);
       setCompanyId(row.company_id);
       return;
     }
@@ -241,6 +309,12 @@ export default function Contacts() {
             onChange={setSearchInput}
             testId="directory-search"
           />
+          {canEditContacts && (
+            <>
+              <Button size="sm" className="gap-1" onClick={() => setAddCompanyOpen(true)}><Plus className="h-3.5 w-3.5" /> Add company</Button>
+              <Button size="sm" variant="outline" className="gap-1" onClick={() => setAddContactOpen(true)}><Plus className="h-3.5 w-3.5" /> Add contact</Button>
+            </>
+          )}
           <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
             <Checkbox
               checked={includeIndustry}
@@ -341,7 +415,10 @@ export default function Contacts() {
         )}
       </div>
 
-      <Sheet open={companyId != null} onOpenChange={(o) => { if (!o) setCompanyId(null); }}>
+      <Sheet
+        open={companyId != null && contactId == null}
+        onOpenChange={(o) => { if (!o) setCompanyId(null); }}
+      >
         <SheetContent side="right" className="sm:max-w-xl overflow-y-auto">
           {detailLoading && <Skeleton className="h-40 rounded-lg" />}
           {detail && (
@@ -358,72 +435,554 @@ export default function Contacts() {
                     }
                   />
                   <span>{detail.source}</span>
+                  {detail.priority_tier ? <span>· {detail.priority_tier}</span> : null}
                   {detail.status ? <span>· {detail.status}</span> : null}
                 </SheetDescription>
               </SheetHeader>
-              <div className="mt-4 space-y-5 text-sm">
+              {canEditContacts && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditCompanyOpen(true)}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit company
+                  </Button>
+                  <Button size="sm" className="gap-1" onClick={() => setAddContactOpen(true)}>
+                    <Plus className="h-3.5 w-3.5" /> Add contact
+                  </Button>
+                </div>
+              )}
+              <div className="mt-4 space-y-6 text-sm">
                 {detail.reporting_marks && detail.reporting_marks.length > 0 && (
                   <div>
                     <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Reporting marks</div>
                     <div className="font-mono text-xs">{detail.reporting_marks.join(" · ")}</div>
                   </div>
                 )}
-                {detail.notes && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Notes</div>
-                    <p className="text-muted-foreground whitespace-pre-wrap">{detail.notes}</p>
-                  </div>
-                )}
+                <NotesSaveField
+                  value={detail.notes}
+                  disabled={!canEditContacts}
+                  onSave={async (v) => {
+                    await apiRequest("PATCH", `/api/companies/${detail.id}`, { notes: v });
+                    invalidateDir();
+                    toast({ title: "Notes saved" });
+                  }}
+                />
                 <div>
                   <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
                     Contacts ({detail.contacts.length})
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {detail.contacts.map((c) => (
-                      <div key={c.id} className="rounded-md border border-border p-3">
-                        <div className="font-medium">{c.name}</div>
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="w-full text-left rounded-md border border-border p-3 hover:bg-muted/40"
+                        onClick={() => setContactId(c.id)}
+                      >
+                        <div className="font-medium flex items-center gap-2"><User className="h-3.5 w-3.5" /> {c.name}</div>
                         <div className="text-xs text-muted-foreground">
                           {[c.title, c.department, c.function_role].filter(Boolean).join(" · ")}
                         </div>
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
-                          {c.email && <a className="text-primary hover:underline" href={`mailto:${c.email}`}>{c.email}</a>}
-                          {c.phone && <a className="text-primary hover:underline" href={`tel:${c.phone}`}>{c.phone}</a>}
-                          {c.mobile && <a className="text-primary hover:underline" href={`tel:${c.mobile}`}>{c.mobile}</a>}
+                          {c.email && <span>{c.email}</span>}
+                          {c.phone && <span>{c.phone}</span>}
                         </div>
-                        {(c.street || c.city) && (
-                          <div className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
-                            {[c.street, [c.city, c.state, c.zip].filter(Boolean).join(", ")].filter(Boolean).join("\n")}
-                          </div>
-                        )}
-                        {labeledCustomFields(c.custom_fields).length > 0 && (
-                          <dl className="mt-2 grid grid-cols-1 gap-1 text-xs">
-                            {labeledCustomFields(c.custom_fields).map((f) => (
-                              <div key={f.label} className="grid grid-cols-[9rem_1fr] gap-2">
-                                <dt className="text-muted-foreground">{f.label}</dt>
-                                <dd>{f.value}</dd>
-                              </div>
-                            ))}
-                          </dl>
-                        )}
-                      </div>
+                      </button>
                     ))}
+                    {detail.contacts.length === 0 && (
+                      <p className="text-xs text-muted-foreground italic">No people on this company yet.</p>
+                    )}
                   </div>
                 </div>
-                {detail.company_products.length > 0 && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Products</div>
-                    <ul className="text-xs space-y-1">
-                      {detail.company_products.map((p) => (
-                        <li key={p.id}>{[p.product, p.commodity_family, p.car_type].filter(Boolean).join(" · ")}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                <FleetProductsSection
+                  products={detail.company_products}
+                  fleet={detail.company_fleet_stats ?? []}
+                />
+                <ContactLeaseLinks
+                  mode="company"
+                  companyId={detail.id}
+                  contacts={detail.contacts.map((c) => ({ id: c.id, name: c.name }))}
+                  canAdd={canEditContacts}
+                  canRemove={canEditContacts}
+                />
+                <AttachmentsPanel entityType="company" entityId={detail.id} />
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
+
+      <Sheet
+        open={contactId != null}
+        onOpenChange={(o) => { if (!o) setContactId(null); }}
+      >
+        <SheetContent side="right" className="sm:max-w-xl overflow-y-auto">
+          {personLoading && <Skeleton className="h-40 rounded-lg" />}
+          {person && (
+            <ContactDetailSheet
+              person={person}
+              canEdit={canEditContacts}
+              onBackToCompany={() => {
+                setCompanyId(person.company_id);
+                setContactId(null);
+              }}
+              onSaved={invalidateDir}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+
+      <AddCompanyDialog
+        open={addCompanyOpen}
+        onOpenChange={setAddCompanyOpen}
+        onCreated={(id) => {
+          invalidateDir();
+          setAddCompanyOpen(false);
+          setContactId(null);
+          setCompanyId(id);
+        }}
+      />
+      <AddContactDialog
+        open={addContactOpen}
+        onOpenChange={setAddContactOpen}
+        defaultCompanyId={companyId}
+        onCreated={(id, cid) => {
+          invalidateDir();
+          setAddContactOpen(false);
+          setCompanyId(cid);
+          setContactId(id);
+        }}
+      />
+      {detail && (
+        <EditCompanyDialog
+          open={editCompanyOpen}
+          onOpenChange={setEditCompanyOpen}
+          company={detail}
+          onSaved={() => {
+            invalidateDir();
+            setEditCompanyOpen(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function FleetProductsSection({
+  products,
+  fleet,
+}: {
+  products: CompanyDetail["company_products"];
+  fleet: NonNullable<CompanyDetail["company_fleet_stats"]>;
+}) {
+  const empty = products.length === 0 && fleet.length === 0;
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Fleet &amp; Products</div>
+      {empty && (
+        <p className="text-xs text-muted-foreground italic">
+          No product lines or fleet stats yet. These fill in after the Company &amp; Product and Lessors imports.
+        </p>
+      )}
+      {products.length > 0 && (
+        <table className="w-full text-xs mb-3">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="py-1 font-normal">Commodity</th>
+              <th className="py-1 font-normal">Product</th>
+              <th className="py-1 font-normal">Car type</th>
+              <th className="py-1 font-normal text-right">Est. cars</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((p) => (
+              <tr key={p.id} className="border-t border-border">
+                <td className="py-1">{p.commodity_family || "—"}</td>
+                <td className="py-1">{p.product || "—"}</td>
+                <td className="py-1">{p.car_type || "—"}</td>
+                <td className="py-1 text-right font-mono-num">{p.estimated_railcars ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {fleet.length > 0 && (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="py-1 font-normal">Car type</th>
+              <th className="py-1 font-normal text-right">Fleet size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {fleet.map((f) => (
+              <tr key={f.id} className="border-t border-border">
+                <td className="py-1">{f.car_type}</td>
+                <td className="py-1 text-right font-mono-num">{f.fleet_size}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function ContactDetailSheet({
+  person,
+  canEdit,
+  onBackToCompany,
+  onSaved,
+}: {
+  person: ContactDetail;
+  canEdit: boolean;
+  onBackToCompany: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [form, setForm] = useState({
+    name: person.name ?? "",
+    title: person.title ?? "",
+    department: person.department ?? "",
+    email: person.email ?? "",
+    phone: person.phone ?? "",
+    mobile: person.mobile ?? "",
+    alt_phone: person.alt_phone ?? "",
+    street: person.street ?? "",
+    city: person.city ?? "",
+    state: person.state ?? "",
+    zip: person.zip ?? "",
+    function_role: person.function_role ?? "",
+    linkedin_url: person.linkedin_url ?? "",
+    linkedin_job_title: person.linkedin_job_title ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      name: person.name ?? "",
+      title: person.title ?? "",
+      department: person.department ?? "",
+      email: person.email ?? "",
+      phone: person.phone ?? "",
+      mobile: person.mobile ?? "",
+      alt_phone: person.alt_phone ?? "",
+      street: person.street ?? "",
+      city: person.city ?? "",
+      state: person.state ?? "",
+      zip: person.zip ?? "",
+      function_role: person.function_role ?? "",
+      linkedin_url: person.linkedin_url ?? "",
+      linkedin_job_title: person.linkedin_job_title ?? "",
+    });
+  }, [person.id]);
+
+  async function saveFields() {
+    setSaving(true);
+    try {
+      await apiRequest("PATCH", `/api/company-contacts/${person.id}`, form);
+      onSaved();
+      toast({ title: "Contact saved" });
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fields: Array<{ key: keyof typeof form; label: string }> = [
+    { key: "name", label: "Name" },
+    { key: "title", label: "Title" },
+    { key: "department", label: "Department" },
+    { key: "function_role", label: "Function / role" },
+    { key: "email", label: "Email" },
+    { key: "phone", label: "Phone" },
+    { key: "mobile", label: "Mobile" },
+    { key: "alt_phone", label: "Alt phone" },
+    { key: "street", label: "Street" },
+    { key: "city", label: "City" },
+    { key: "state", label: "State" },
+    { key: "zip", label: "ZIP" },
+    { key: "linkedin_job_title", label: "LinkedIn title" },
+    { key: "linkedin_url", label: "LinkedIn URL" },
+  ];
+
+  return (
+    <>
+      <SheetHeader>
+        <SheetTitle>{person.name}</SheetTitle>
+        <SheetDescription>
+          {person.company?.name ?? "Contact"}
+          {person.title ? ` · ${person.title}` : ""}
+        </SheetDescription>
+      </SheetHeader>
+      <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={onBackToCompany}>
+        ← Back to company
+      </Button>
+      <div className="mt-4 space-y-5 text-sm">
+        <div className="grid grid-cols-1 gap-3">
+          {fields.map((f) => (
+            <label key={f.key} className="block">
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">{f.label}</div>
+              <Input
+                value={form[f.key]}
+                disabled={!canEdit}
+                onChange={(e) => setForm((p) => ({ ...p, [f.key]: e.target.value }))}
+              />
+            </label>
+          ))}
+        </div>
+        {canEdit && (
+          <Button size="sm" onClick={() => void saveFields()} disabled={saving}>
+            {saving ? "Saving…" : "Save fields"}
+          </Button>
+        )}
+        {labeledCustomFields(person.custom_fields).length > 0 && (
+          <dl className="grid grid-cols-1 gap-1 text-xs">
+            {labeledCustomFields(person.custom_fields).map((f) => (
+              <div key={f.label} className="grid grid-cols-[9rem_1fr] gap-2">
+                <dt className="text-muted-foreground">{f.label}</dt>
+                <dd>{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <NotesSaveField
+          value={person.notes}
+          disabled={!canEdit}
+          onSave={async (v) => {
+            await apiRequest("PATCH", `/api/company-contacts/${person.id}`, { notes: v });
+            onSaved();
+            toast({ title: "Notes saved" });
+          }}
+        />
+        <ContactLeaseLinks mode="contact" contactId={person.id} canAdd={canEdit} canRemove={canEdit} />
+        <AttachmentsPanel entityType="company_contact" entityId={person.id} />
+      </div>
+    </>
+  );
+}
+
+function AddCompanyDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onCreated: (id: number) => void;
+}) {
+  const { toast } = useToast();
+  const [name, setName] = useState("");
+  const [relationship, setRelationship] = useState("unclassified");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const res = await apiRequest("POST", "/api/companies", { name, relationship_type: relationship });
+      const row = await res.json();
+      onCreated(row.id);
+      setName("");
+    } catch (e: any) {
+      toast({ title: "Could not create company", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Add company</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Name</div>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Relationship</div>
+            <Select value={relationship} onValueChange={setRelationship}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {["unclassified", "prospect", "lessor", "railroad", "vendor", "other"].map((r) => (
+                  <SelectItem key={r} value={r}>{r}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+        <DialogFooter>
+          <Button disabled={!name.trim() || busy} onClick={() => void submit()}>Create</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddContactDialog({
+  open,
+  onOpenChange,
+  defaultCompanyId,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  defaultCompanyId: number | null;
+  onCreated: (id: number, companyId: number) => void;
+}) {
+  const { toast } = useToast();
+  const [name, setName] = useState("");
+  const [companySearch, setCompanySearch] = useState("");
+  const [companyId, setCompanyId] = useState(defaultCompanyId ? String(defaultCompanyId) : "");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) setCompanyId(defaultCompanyId ? String(defaultCompanyId) : "");
+  }, [open, defaultCompanyId]);
+
+  const { data: companies } = useQuery<{ rows: Array<{ id: number; name: string }> }>({
+    queryKey: ["/api/companies", companySearch],
+    queryFn: () => apiGet(`/api/companies?page=1&pageSize=40${companySearch ? `&search=${encodeURIComponent(companySearch)}` : ""}`),
+    enabled: open,
+  });
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const res = await apiRequest("POST", "/api/company-contacts", {
+        name,
+        company_id: Number(companyId),
+      });
+      const row = await res.json();
+      onCreated(row.id, Number(companyId));
+      setName("");
+    } catch (e: any) {
+      toast({ title: "Could not create contact", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Add contact</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Name</div>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Company</div>
+            <Input
+              className="mb-2 h-8 text-xs"
+              placeholder="Filter companies…"
+              value={companySearch}
+              onChange={(e) => setCompanySearch(e.target.value)}
+            />
+            <SearchableSelect
+              value={companyId}
+              onChange={setCompanyId}
+              options={(companies?.rows ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
+              placeholder="Select company…"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button disabled={!name.trim() || !companyId || busy} onClick={() => void submit()}>Create</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditCompanyDialog({
+  open,
+  onOpenChange,
+  company,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  company: CompanyDetail;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [name, setName] = useState(company.name);
+  const [relationship, setRelationship] = useState(
+    company.relationship_type === "customer" ? "customer" : company.relationship_type,
+  );
+  const [priority, setPriority] = useState(company.priority_tier || "");
+  const [status, setStatus] = useState(company.status || "target");
+  const [busy, setBusy] = useState(false);
+  const isCustomer = company.relationship_type === "customer" || company.account_id != null;
+
+  useEffect(() => {
+    setName(company.name);
+    setRelationship(company.relationship_type);
+    setPriority(company.priority_tier || "");
+    setStatus(company.status || "target");
+  }, [company.id, open]);
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = { name, priority_tier: priority || null, status };
+      if (!isCustomer) body.relationship_type = relationship;
+      await apiRequest("PATCH", `/api/companies/${company.id}`, body);
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Could not save company", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit company</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Name</div>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Relationship</div>
+            <Select value={relationship} onValueChange={setRelationship} disabled={isCustomer}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(isCustomer ? ["customer"] : ["unclassified", "prospect", "lessor", "railroad", "vendor", "other"]).map((r) => (
+                  <SelectItem key={r} value={r}>{r}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Priority</div>
+            <Select value={priority || "__none__"} onValueChange={(v) => setPriority(v === "__none__" ? "" : v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                {["A", "B", "C", "D"].map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Status</div>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {["target", "contacted", "in_discussion", "lost", "won"].map((r) => (
+                  <SelectItem key={r} value={r}>{r}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+        <DialogFooter>
+          <Button disabled={!name.trim() || busy} onClick={() => void submit()}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

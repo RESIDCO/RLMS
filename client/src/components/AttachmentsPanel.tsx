@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useCanEdit } from "@/lib/AuthContext";
+import { useCanEdit, usePermissions } from "@/lib/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatAttachmentProvenance } from "@shared/attachment-source";
+import { confirmDelete } from "@/components/ConfirmActionDialog";
 
 type Attachment = {
   id: number;
@@ -32,7 +33,16 @@ type Attachment = {
   source_module?: string | null;
 };
 
-type EntityType = "master_lease" | "rider" | "railcar";
+type EntityType = "master_lease" | "rider" | "railcar" | "company" | "company_contact";
+
+interface Props {
+  entityType: EntityType;
+  entityId: number;
+  /** compact=true renders as a small inline section (for use inside detail panels) */
+  compact?: boolean;
+  /** Hide upload/delete even for editors (context-gated, e.g. Account Management). */
+  readOnly?: boolean;
+}
 
 interface Props {
   entityType: EntityType;
@@ -56,7 +66,12 @@ function formatBytes(bytes: number): string {
 }
 
 export default function AttachmentsPanel({ entityType, entityId, compact = false, readOnly = false }: Props) {
-  const canEdit = useCanEdit() && !readOnly;
+  const perms = usePermissions();
+  const fleetEdit = useCanEdit();
+  const contactsEntity = entityType === "company" || entityType === "company_contact";
+  const canUpload = !readOnly && (contactsEntity ? perms.canEditContacts : fleetEdit);
+  const canDelete = !readOnly && (contactsEntity ? perms.canDeleteContacts : fleetEdit);
+  const canEdit = canUpload;
   const qc = useQueryClient();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -178,7 +193,9 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
               ref={fileInputRef}
               type="file"
               className="hidden"
-              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"
+              accept={contactsEntity
+                ? ".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.eml,.msg,.txt"
+                : ".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"}
               onChange={handleFileChange}
               data-testid="attachment-file-input"
             />
@@ -249,7 +266,7 @@ export default function AttachmentsPanel({ entityType, entityId, compact = false
                     <Download className="h-3 w-3" />
                   )}
                 </Button>
-                {canEdit && (
+                {canDelete && (
                   <Button
                     size="icon"
                     variant="ghost"

@@ -6,6 +6,7 @@ import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import {
   applySearchFilter,
+  leaseSearchTokenValues,
   matchingLeaseAndRiderIds,
   parseSearchScope,
   railcarIdsForSearchMatches,
@@ -81,7 +82,7 @@ async function fetchCarsByText(
   const pages = await Promise.all(
     groups.map(async (group) => {
       const railcarIds = scope.leases
-        ? await railcarIdsForSearchMatches(await matchingLeaseAndRiderIds(railcarSearchTokens(group)))
+        ? await railcarIdsForSearchMatches(await matchingLeaseAndRiderIds(leaseSearchTokenValues(railcarSearchTokens(group))))
         : [];
       let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT);
       q = applySearchFilter(q, group, scope, { railcarIds });

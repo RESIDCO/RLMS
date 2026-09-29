@@ -134,36 +134,62 @@ function safeIlikeToken(s: string) {
  * Railcars search tokens. "OFOX 6829" / "OFOX006829" / "OFOX 006829" all become
  * mark + number ANDed across fields. Digit-only tokens match car_number only
  * (not build year / NBV). Letter tokens match marks, lessee, rider/OL, assignment label.
+ * The number half of an explicit mark+number pair is tagged carNumberOnly so it
+ * never matches through lease/OL free text.
  */
-export function railcarSearchTokens(raw: string): string[] {
-  const tokens: string[] = [];
-  for (const part of String(raw ?? "").trim().split(/\s+/).filter(Boolean)) {
+export type SearchToken = { value: string; carNumberOnly?: boolean };
+
+function isMarkOnlyPart(part: string | undefined): boolean {
+  if (!part || isOlNumberToken(part)) return false;
+  const split = splitCarNumber(part);
+  return Boolean(split.reporting_marks && !split.car_number);
+}
+
+export function railcarSearchTokens(raw: string): SearchToken[] {
+  const tokens: SearchToken[] = [];
+  const parts = String(raw ?? "").trim().split(/\s+/).filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
     if (isOlNumberToken(part)) {
-      tokens.push(part.replace(/\s+/g, "").toUpperCase());
+      tokens.push({ value: part.replace(/\s+/g, "").toUpperCase() });
       continue;
     }
     const split = splitCarNumber(part);
     if (split.reporting_marks && split.car_number) {
-      tokens.push(split.reporting_marks, split.car_number);
+      tokens.push({ value: split.reporting_marks });
+      tokens.push({ value: split.car_number, carNumberOnly: true });
     } else if (split.reporting_marks) {
-      tokens.push(split.reporting_marks);
+      tokens.push({ value: split.reporting_marks });
     } else if (split.car_number) {
-      tokens.push(split.car_number);
+      const paired = isMarkOnlyPart(parts[i - 1]) || isMarkOnlyPart(parts[i + 1]);
+      tokens.push({ value: split.car_number, carNumberOnly: paired || undefined });
     } else {
-      tokens.push(part);
+      tokens.push({ value: part });
     }
   }
-  const seen = new Set<string>();
-  const out: string[] = [];
+  const seen = new Map<string, SearchToken>();
   for (const t of tokens) {
-    const s = safeIlikeToken(t);
+    const s = safeIlikeToken(t.value);
     if (!s) continue;
     const key = s.toUpperCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(s);
+    const prev = seen.get(key);
+    if (prev) {
+      if (t.carNumberOnly) prev.carNumberOnly = true;
+      continue;
+    }
+    seen.set(key, { value: s, carNumberOnly: t.carNumberOnly });
   }
-  return out;
+  return Array.from(seen.values());
+}
+
+export function searchTokenValues(tokens: SearchToken[], opts?: { excludeCarNumberOnly?: boolean }): string[] {
+  return tokens
+    .filter((t) => !(opts?.excludeCarNumberOnly && t.carNumberOnly))
+    .map((t) => t.value);
+}
+
+export function leaseSearchTokenValues(tokens: SearchToken[]): string[] {
+  return searchTokenValues(tokens, { excludeCarNumberOnly: true });
 }
 
 const CAR_NUMBER_FIELDS = ["reporting_marks", "car_initial", "car_number"] as const;
@@ -309,8 +335,16 @@ export function applySearchFilter(
   const tokens = railcarSearchTokens(rawSearch);
   const sc = scopeOrDefault(scope);
   const railcarIns = idInOrClauses(extra?.railcarIds ?? []);
-  for (const t of tokens) {
+  for (const tok of tokens) {
+    const t = tok.value;
     const ors: string[] = [];
+    if (tok.carNumberOnly) {
+      // Never widen a mark-paired number through lease/OL fields or rider/lease id lists.
+      ors.push(`car_number.ilike.%${t}%`);
+      ors.push(...railcarIns);
+      query = query.or(ors.join(","));
+      continue;
+    }
     const hasLetter = /[a-z]/i.test(t);
     const hasDigit = /\d/.test(t);
     if (sc.cars) {
@@ -336,7 +370,7 @@ export function applySearchFilter(
 async function applyRailcarFilters(query: any, p: RailcarListParams) {
   const scope = scopeOrDefault(p.searchScope);
   if (p.search && !p.ids?.length && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
-    const matched = await matchingLeaseAndRiderIds(railcarSearchTokens(p.search));
+    const matched = await matchingLeaseAndRiderIds(leaseSearchTokenValues(railcarSearchTokens(p.search)));
     p.searchRiderIds = matched.riderIds;
     p.searchLeaseIds = matched.leaseIds;
   }

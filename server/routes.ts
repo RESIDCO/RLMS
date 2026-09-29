@@ -6,6 +6,7 @@ import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { pointCurrentAssignmentAt } from "./current-assignment";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
+import { runGlobalSearch } from "./global-search";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
   attachLatestAmNotes,

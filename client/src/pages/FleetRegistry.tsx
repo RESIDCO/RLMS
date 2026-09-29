@@ -6,6 +6,7 @@ import PageHeader from "@/components/PageHeader";
 import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, FLEET_STATUSES, type FleetStatus } from "@shared/fleet-status";
+import { carListSearchTokens } from "@shared/programs";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList, ExternalLink } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
+import { searchPagePath } from "@/lib/search-query";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { AmCommentThread, formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { downloadRailcarsCsv } from "@/lib/railcar-csv";
@@ -405,6 +407,11 @@ function parseFleetQuery(searchStr: string): {
   };
 }
 
+function isMultiCarListQuery(raw: string): boolean {
+  const cars = carListSearchTokens(raw);
+  return Boolean(cars && cars.length >= 2);
+}
+
 export default function FleetRegistry() {
   const canEdit = useCanEdit();
   const wouterSearch = useSearch();
@@ -461,10 +468,24 @@ export default function FleetRegistry() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const openCarListSearch = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!isMultiCarListQuery(trimmed)) return false;
+    setLocation(searchPagePath(trimmed));
+    return true;
+  }, [setLocation]);
+
+  // Paste or typed lists of 2+ cars belong on /search, not the single-string fleet filter.
+  useEffect(() => {
+    if (!debouncedSearch) return;
+    openCarListSearch(debouncedSearch);
+  }, [debouncedSearch, openCarListSearch]);
+
   // Dashboard tiles land on ?filter=sold (etc.). A car-number search should look up
   // that car, not stay trapped in Sold / Idle / Leased.
   useEffect(() => {
     if (!debouncedSearch || !/\d/.test(debouncedSearch)) return;
+    if (isMultiCarListQuery(debouncedSearch)) return;
     setAssignedFilter("all");
     setStatusFilter("all");
     const qIndex = location.indexOf("?");
@@ -537,6 +558,7 @@ export default function FleetRegistry() {
   }, [turning50Year, visibleCols]);
 
   const carLookup = Boolean(debouncedSearch && /\d/.test(debouncedSearch));
+  const carListLookup = isMultiCarListQuery(debouncedSearch);
   const listParams = {
     page,
     pageSize,
@@ -560,6 +582,7 @@ export default function FleetRegistry() {
     queryFn: ({ signal }) =>
       apiGet<RailcarPage>(railcarsQs(listParams), { timeoutMs: 15_000, signal }),
     staleTime: 45_000,
+    enabled: !carListLookup,
     // Don't keep the unfiltered page on screen while a search request is in flight —
     // that made mark/lessee queries look like they matched unrelated cars (or didn't fire).
     placeholderData: debouncedSearch ? undefined : keepPreviousData,
@@ -1162,8 +1185,16 @@ export default function FleetRegistry() {
           <ClearableSearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Search marks, car number, lessee, rider / OL…"
+            placeholder="Search marks, car number, lessee, rider / OL… or paste a car list"
             testId="input-search-railcars"
+            onPaste={(e) => {
+              const text = e.clipboardData.getData("text");
+              if (openCarListSearch(text)) e.preventDefault();
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              if (openCarListSearch(search)) e.preventDefault();
+            }}
           />
           <Select value={fleetActiveFilter} onValueChange={(v) => setFleetActiveFilter(v as "active" | "inactive" | "all")}>
             <SelectTrigger className="w-[150px]" data-testid="filter-fleet-active">

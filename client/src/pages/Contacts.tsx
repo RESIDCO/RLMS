@@ -474,6 +474,7 @@ export default function Contacts() {
     qc.invalidateQueries({ queryKey: ["/api/directory-search"] });
     qc.invalidateQueries({ queryKey: ["/api/companies", companyId] });
     qc.invalidateQueries({ queryKey: ["/api/company-contacts", contactId] });
+    qc.invalidateQueries({ queryKey: ["/api/contacts"] });
   }
 
   function openRow(row: DirectoryRow) {
@@ -1203,10 +1204,16 @@ function AddContactDialog({
   const [phone, setPhone] = useState("");
   const [companySearch, setCompanySearch] = useState("");
   const [companyId, setCompanyId] = useState(defaultCompanyId ? String(defaultCompanyId) : "");
+  const [mlaId, setMlaId] = useState("");
+  const [olId, setOlId] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) setCompanyId(defaultCompanyId ? String(defaultCompanyId) : "");
+    if (open) {
+      setCompanyId(defaultCompanyId ? String(defaultCompanyId) : "");
+      setMlaId("");
+      setOlId("");
+    }
   }, [open, defaultCompanyId]);
 
   const { data: companies } = useQuery<{ rows: Array<{ id: number; name: string }> }>({
@@ -1214,6 +1221,17 @@ function AddContactDialog({
     queryFn: () => apiGet(`/api/companies?page=1&pageSize=40${companySearch ? `&search=${encodeURIComponent(companySearch)}` : ""}`),
     enabled: open,
   });
+
+  const { data: leases = [] } = useQuery<Array<{
+    id: number;
+    lease_number: string | null;
+    lessee: string | null;
+    riders?: Array<{ id: number; rider_name: string | null; schedule_number: string | null }>;
+  }>>({
+    queryKey: ["/api/leases"],
+    enabled: open,
+  });
+  const riders = leases.find((l) => String(l.id) === mlaId)?.riders ?? [];
 
   async function submit() {
     setBusy(true);
@@ -1226,6 +1244,12 @@ function AddContactDialog({
         company_id: Number(companyId),
       });
       const row = await res.json();
+      if (mlaId) {
+        await apiRequest("POST", `/api/company-contacts/${row.id}/lease-links`, {
+          master_lease_id: Number(mlaId),
+          rider_id: olId ? Number(olId) : null,
+        });
+      }
       onCreated(row.id, Number(companyId));
       setName("");
       setTitle("");
@@ -1240,7 +1264,7 @@ function AddContactDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Add contact</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <label className="block text-sm">
@@ -1273,6 +1297,33 @@ function AddContactDialog({
               options={(companies?.rows ?? []).map((c) => ({ value: String(c.id), label: c.name }))}
               placeholder="Select company…"
             />
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Lease (optional)</div>
+            <SearchableSelect
+              value={mlaId}
+              onChange={(v) => { setMlaId(v); setOlId(""); }}
+              options={leases.map((l) => ({
+                value: String(l.id),
+                label: displayLeaseNumber(l.lease_number) || `MLA ${l.id}`,
+                hint: l.lessee ?? undefined,
+                keywords: [l.lease_number, l.lessee].filter(Boolean).join(" "),
+              }))}
+              placeholder="MLA…"
+              searchPlaceholder="Lessee or lease…"
+            />
+            <div className="mt-2">
+              <SearchableSelect
+                value={olId}
+                onChange={setOlId}
+                options={riders.map((r) => ({
+                  value: String(r.id),
+                  label: r.rider_name || r.schedule_number || `OL ${r.id}`,
+                }))}
+                placeholder="OL (optional)…"
+                disabled={!mlaId}
+              />
+            </div>
           </div>
         </div>
         <DialogFooter>

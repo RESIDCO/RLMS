@@ -451,11 +451,20 @@ export async function createContactLeaseLink(
   body: Record<string, unknown>,
   createdBy: string | null,
 ) {
-  const master_lease_id = body.master_lease_id != null ? Number(body.master_lease_id) : null;
+  let master_lease_id = body.master_lease_id != null ? Number(body.master_lease_id) : null;
   const rider_id = body.rider_id != null ? Number(body.rider_id) : null;
   const company_id = body.company_id != null ? Number(body.company_id) : null;
   const cid = contactId != null && Number.isFinite(contactId) && contactId > 0 ? contactId : null;
   if (!master_lease_id && !rider_id) throw Object.assign(new Error("Pick an MLA or an OL"), { status: 400 });
+  if (rider_id && Number.isFinite(rider_id) && rider_id > 0 && !(Number.isFinite(master_lease_id) && master_lease_id > 0)) {
+    const { data: rider, error: rErr } = await supabaseAdmin
+      .from("riders")
+      .select("master_lease_id")
+      .eq("id", rider_id)
+      .maybeSingle();
+    if (rErr) throw rErr;
+    if (rider?.master_lease_id) master_lease_id = Number(rider.master_lease_id);
+  }
   if ((cid && company_id) || (!cid && !company_id)) {
     throw Object.assign(new Error("Link either a contact or a company, not both"), { status: 400 });
   }

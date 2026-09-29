@@ -436,7 +436,7 @@ export default function SearchPage() {
   const pasteCount = committed ? carListSearchTokens(committed)?.length ?? 0 : 0;
   const committedLabel = pasteCount > 1 ? `${pasteCount} cars` : `"${committed}"`;
   const hasResults = Boolean(committed) && (totalCount > 0 || missing.length > 0 || peopleRows.length > 0);
-  const noResults = Boolean(committed) && !loading && !peopleQuery.isFetching && totalCount === 0 && missing.length === 0 && peopleRows.length === 0;
+  const noResults = Boolean(committed) && !loading && !peopleQuery.isFetching && !peopleQuery.isError && totalCount === 0 && missing.length === 0 && peopleRows.length === 0;
   const loadError = !isPaste && textQuery.isError ? ((textQuery.error as Error)?.message || "Search failed") : error;
 
   function cell(key: string, r: any) {
@@ -697,12 +697,14 @@ export default function SearchPage() {
                     contactId: null,
                     people: true,
                     leaseTied: false,
-                    addContact: peopleRows.length === 0 && !peopleQuery.isFetching,
+                    addContact: peopleRows.length === 0 && !peopleQuery.isFetching && !peopleQuery.isError,
                   }))}
                 >
                   {peopleQuery.isFetching
                     ? "Open in Contacts"
-                    : peopleRows.length === 0
+                    : peopleQuery.isError
+                      ? "Open in Contacts"
+                      : peopleRows.length === 0
                       ? "Add to directory"
                       : peopleTotal > peopleRows.length
                         ? `Open all ${peopleTotal.toLocaleString()} in Contacts`
@@ -711,6 +713,10 @@ export default function SearchPage() {
               </div>
               {peopleQuery.isFetching && peopleRows.length === 0 ? (
                 <div className="text-xs text-muted-foreground">Looking up directory…</div>
+              ) : peopleQuery.isError ? (
+                <div className="text-xs text-destructive">
+                  {(peopleQuery.error as Error)?.message || "Directory search failed."}
+                </div>
               ) : peopleRows.length === 0 ? (
                 <div className="text-xs text-muted-foreground">
                   No directory matches. Add them and optionally link an MLA or OL.

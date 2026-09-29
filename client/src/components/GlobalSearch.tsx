@@ -58,7 +58,7 @@ export default function GlobalSearch() {
           onChange={(e) => setQuery(e.target.value)}
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
-          placeholder="Search or paste a list of cars… (Enter)"
+          placeholder="Search cars, leases, people… (Enter)"
           autoComplete="off"
           data-testid="input-global-search"
           className="w-full bg-sidebar-accent/40 border border-sidebar-border rounded-md pl-8 pr-20 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"

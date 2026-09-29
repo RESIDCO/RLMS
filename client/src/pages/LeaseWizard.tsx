@@ -39,6 +39,7 @@ import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit } from "@/lib/AuthContext";
 import type { RailcarWithAssignment } from "@shared/schema";
+import { wizardRiderContactBody } from "@shared/directory-contacts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MlaForm = {
@@ -77,6 +78,10 @@ type RiderForm = {
   fleet_name: string;
   new_cars: NewCar[];
   existing_car_ids: number[];
+  contact_name: string;
+  contact_title: string;
+  contact_email: string;
+  contact_phone: string;
 };
 
 const ENTITY_OPTIONS = ["Main", "Rail Partners Select", "Coal"];
@@ -100,6 +105,10 @@ function blankRider(): RiderForm {
     fleet_name: "",
     new_cars: [],
     existing_car_ids: [],
+    contact_name: "",
+    contact_title: "",
+    contact_email: "",
+    contact_phone: "",
   };
 }
 
@@ -524,6 +533,7 @@ export default function LeaseWizard() {
           },
           fleet_name: r.fleet_name || null,
           existing_car_ids: r.existing_car_ids,
+          contact: wizardRiderContactBody(r),
           cars: r.new_cars.map((c) => ({
             car_number: c.car_number,
             reporting_marks: c.reporting_marks || null,
@@ -538,12 +548,14 @@ export default function LeaseWizard() {
       await apiRequest("POST", "/api/setup-lease", payload);
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/directory-search"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
 
       const totalCars = riders.reduce((s, r) => s + r.new_cars.length + r.existing_car_ids.length, 0);
+      const contactCount = riders.filter((r) => r.contact_name.trim()).length;
       toast({
         title: "Lease setup complete",
-        description: `MLA "${mla.lease_number}" created with ${riders.length} rider${riders.length !== 1 ? "s" : ""} and ${totalCars} car${totalCars !== 1 ? "s" : ""} assigned.`,
+        description: `MLA "${mla.lease_number}" created with ${riders.length} rider${riders.length !== 1 ? "s" : ""} and ${totalCars} car${totalCars !== 1 ? "s" : ""} assigned${contactCount ? `, ${contactCount} directory contact${contactCount !== 1 ? "s" : ""}` : ""}.`,
       });
       navigate("/leases");
     } catch (e: any) {
@@ -558,7 +570,7 @@ export default function LeaseWizard() {
     <div>
       <PageHeader
         title="New Lease Setup"
-        subtitle="Create a master lease, add riders, and assign cars — all in one flow"
+        subtitle="Create a master lease, add riders, assign cars, and optionally a lessee contact"
         actions={
           <Button variant="secondary" onClick={() => navigate("/leases")}>
             <X className="h-4 w-4 mr-1" /> Cancel
@@ -719,6 +731,28 @@ export default function LeaseWizard() {
               <div>
                 <Label>Notes</Label>
                 <Textarea rows={2} placeholder="Any notes about this rider…" value={activeRider.notes} onChange={(e) => updateRider(activeRiderIdx, { notes: e.target.value })} />
+              </div>
+              <div className="pt-2 border-t border-border space-y-3">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Lessee contact (optional)</div>
+                <p className="text-xs text-muted-foreground">Saved into the Contacts directory and linked to this OL.</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Name</Label>
+                    <Input placeholder="Jane Smith" value={activeRider.contact_name} onChange={(e) => updateRider(activeRiderIdx, { contact_name: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label>Title</Label>
+                    <Input placeholder="Fleet Manager" value={activeRider.contact_title} onChange={(e) => updateRider(activeRiderIdx, { contact_title: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label>Email</Label>
+                    <Input type="email" placeholder="jane@company.com" value={activeRider.contact_email} onChange={(e) => updateRider(activeRiderIdx, { contact_email: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label>Phone</Label>
+                    <Input type="tel" placeholder="+1 (555) 000-0000" value={activeRider.contact_phone} onChange={(e) => updateRider(activeRiderIdx, { contact_phone: e.target.value })} />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -882,6 +916,7 @@ export default function LeaseWizard() {
                   </div>
                   <span className="text-xs text-muted-foreground font-mono">
                     {r.new_cars.length + r.existing_car_ids.length} car{r.new_cars.length + r.existing_car_ids.length !== 1 ? "s" : ""}
+                    {r.contact_name.trim() ? ` · contact ${r.contact_name.trim()}` : ""}
                   </span>
                 </div>
                 <div className="grid grid-cols-4 gap-3 text-sm mb-3">

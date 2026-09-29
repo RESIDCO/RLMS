@@ -47,3 +47,5 @@ export function hashSearchParams(): URLSearchParams {
   const i = hash.indexOf("?");
   return new URLSearchParams(i >= 0 ? hash.slice(i + 1) : "");
 }
+
+export { isDirectoryLeaseReviewTab } from "./directory-review-tab";

@@ -18,6 +18,8 @@ import ProgramDocsPanel from "@/components/ProgramDocsPanel";
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import ShopCombobox, { type ShopOption } from "@/components/ShopCombobox";
 import AccountCombobox from "@/components/AccountCombobox";
+import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
+import { navigateHash } from "@/lib/hash-location";
 import { cn } from "@/lib/utils";
 import { Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
@@ -730,6 +732,12 @@ export default function ProgramDetailPage() {
             onChange={(e) => setHeader({ ...header, description: e.target.value })}
           />
         </div>
+        <AccountDirectoryPeople
+          accountId={header.account_id}
+          searchHint={program.name}
+          compact
+          onOpen={navigateHash}
+        />
         {canEdit && dirty && (
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={saveHeader} disabled={patchProgram.isPending}>

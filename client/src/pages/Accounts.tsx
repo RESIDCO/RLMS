@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { ArrowLeft, Building2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { programPath } from "@/lib/browse-nav";
+import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
 import { AmCommentThread } from "@/components/AmCommentThread";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
@@ -554,6 +555,8 @@ function AccountDetailView({ id }: { id: number }) {
           can set tags and post notes; notes are append-only. Car lists, dates, and other OL fields are Lease
           Management / Railcars data shown for reference only and are not editable here.
         </p>
+
+        <AccountDirectoryPeople accountId={id} searchHint={data.name} onOpen={navigate} />
 
         {canEdit && (
           <div className="space-y-3 max-w-xl">

@@ -11,38 +11,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { navigateHash } from "@/lib/hash-location";
-
-export type LeaseGlanceLease = {
-  id?: number | null;
-  lease_number?: string | null;
-  agreement_number?: string | null;
-  lessor?: string | null;
-  lessee?: string | null;
-  lease_type?: string | null;
-  sold_to?: string | null;
-};
-
-export type LeaseGlanceRider = {
-  id: number;
-  rider_name?: string | null;
-  schedule_number?: string | null;
-  effective_date?: string | null;
-  expiration_date?: string | null;
-  monthly_rate_pct?: number | string | null;
-  lessors_cost?: number | string | null;
-  car_count?: number | null;
-  master_lease?: LeaseGlanceLease | LeaseGlanceLease[] | null;
-};
-
-export function glanceRiderFromCar(car: any, carCount?: number | null): LeaseGlanceRider | null {
-  const rider = asOne(car?.assignment?.rider) as LeaseGlanceRider | null;
-  if (!rider?.id) return null;
-  return {
-    ...rider,
-    car_count: carCount ?? rider.car_count ?? car?.cars_on_rider_ar ?? null,
-    master_lease: asOne(rider.master_lease),
-  };
-}
+import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
+import { type LeaseGlanceRider } from "@/lib/glance-rider";
 
 function fmtPct(n: number | string | null | undefined) {
   if (n == null || n === "") return "—";
@@ -129,6 +99,11 @@ export function LeaseGlanceSheet({
                 </div>
               </dl>
             </div>
+            <OlDirectoryContacts
+              riderId={rider.id}
+              emptyHint="No directory people linked to this OL yet. Add them on the full lease page."
+              onPersonClick={onClose}
+            />
           </div>
         ) : null}
         <div className="shrink-0 px-6 py-4 border-t border-border">

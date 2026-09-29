@@ -49,7 +49,8 @@ import {
 } from "./sanitize";
 import { buildLeaseReport } from "./lease-export";
 import { commitMarkContacts, previewMarkContacts } from "./mark-contacts-import";
-import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts, createCompany, updateCompany, deleteCompany, getCompanyContact, createCompanyContact, updateCompanyContact, deleteCompanyContact, listContactLeaseLinks, listCompanyLeaseLinks, listLeaseContactLinks, createContactLeaseLink, deleteContactLeaseLink } from "./directory";
+import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts, createCompany, updateCompany, deleteCompany, getCompanyContact, createCompanyContact, updateCompanyContact, deleteCompanyContact, listContactLeaseLinks, listCompanyLeaseLinks, listLeaseContactLinks, createContactLeaseLink, deleteContactLeaseLink, listContactsForRider, createContactOnRider, promoteLegacyRiderContacts, listAllDirectoryLeasePeople, listDirectoryPeopleForAccount, listLeaseLinkGaps, linkLesseeCompanyToLease, linkUniqueUnmatchedLesseeCompanies, unmatchedLesseeExportCsv } from "./directory";
+import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates, dedupSummary } from "./directory-dedup";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
@@ -333,6 +334,7 @@ export async function registerRoutes(
           cars: Array<Record<string, any>>; // new car objects to create
           existing_car_ids: number[];        // already-in-DB cars to assign
           fleet_name?: string;
+          contact?: Record<string, unknown>;
         }>;
       };
 
@@ -412,10 +414,16 @@ export async function registerRoutes(
         }
 
         riderResults.push({ rider: newRider, car_count: carIds.length });
+
+        const contactName = String(rp.contact?.name ?? "").trim();
+        if (contactName) {
+          await createContactOnRider(newRider.id, rp.contact ?? {}, writerId);
+        }
       }
 
       res.json({ ok: true, mla: newMla, riders: riderResults });
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
       errHandler(res, err);
     }
   });
@@ -2218,21 +2226,23 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/contacts — all contacts across all riders, joined with rider + MLA info
-  app.get("/api/contacts", async (_req, res) => {
+  // GET /api/contacts — directory people linked to leases/OLs (plus leftover rider_contacts until promoted)
+  app.get("/api/contacts", async (req, res) => {
     try {
-      const { data, error } = await supabase
-        .from("rider_contacts")
-        .select(`
-          *,
-          rider:riders(
-            id, rider_name, schedule_number,
-            master_lease:master_leases(id, lease_number, lessee)
-          )
-        `)
-        .order("name");
-      if (error) throw error;
-      res.json(data ?? []);
+      if (!(await requireUser(req, res))) return;
+      res.json(await listAllDirectoryLeasePeople());
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/contacts/promote-legacy", async (req, res) => {
+    try {
+      const writerId = await requireContactsWrite(req, res);
+      if (!writerId) return;
+      const riderId = Number((req.body as any)?.rider_id);
+      res.json(await promoteLegacyRiderContacts({
+        riderId: Number.isFinite(riderId) && riderId > 0 ? riderId : undefined,
+        createdBy: writerId,
+      }));
     } catch (err) { errHandler(res, err); }
   });
 
@@ -2252,14 +2262,13 @@ export async function registerRoutes(
 
   app.get("/api/riders/:id/contacts", async (req, res) => {
     try {
+      if (!(await requireUser(req, res))) return;
       const riderId = Number(req.params.id);
-      const { data, error } = await supabase
-        .from("rider_contacts")
-        .select("*")
-        .eq("rider_id", riderId)
-        .order("name");
-      if (error) throw error;
-      res.json(data ?? []);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      await promoteLegacyRiderContacts({ riderId });
+      res.json(await listContactsForRider(riderId));
     } catch (err) { errHandler(res, err); }
   });
 
@@ -2268,25 +2277,30 @@ export async function registerRoutes(
       const writerId = await requireContactsWrite(req, res);
       if (!writerId) return;
       const riderId = Number(req.params.id);
-      const parsed = insertRiderContactSchema.parse({ ...req.body, rider_id: riderId });
-      const { data, error } = await supabase
-        .from("rider_contacts").insert(parsed).select().single();
-      if (error) throw error;
-      res.json(data);
-    } catch (err) { errHandler(res, err); }
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      res.status(201).json(await createContactOnRider(riderId, (req.body ?? {}) as Record<string, unknown>, writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
   });
 
-  // POST /api/contacts — create a contact directly (rider_id in body)
+  // POST /api/contacts — create a directory contact linked to a rider (rider_id in body)
   app.post("/api/contacts", async (req, res) => {
     try {
       const writerId = await requireContactsWrite(req, res);
       if (!writerId) return;
-      const parsed = insertRiderContactSchema.parse(req.body);
-      const { data, error } = await supabase
-        .from("rider_contacts").insert(parsed).select().single();
-      if (error) throw error;
-      res.json(data);
-    } catch (err) { errHandler(res, err); }
+      const riderId = Number((req.body as any)?.rider_id);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "rider_id is required" });
+      }
+      res.status(201).json(await createContactOnRider(riderId, (req.body ?? {}) as Record<string, unknown>, writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
   });
 
   app.patch("/api/contacts/:id", async (req, res) => {
@@ -2294,12 +2308,21 @@ export async function registerRoutes(
       const writerId = await requireContactsWrite(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
-      const parsed = insertRiderContactSchema.partial().parse(req.body);
-      const { data, error } = await supabase
-        .from("rider_contacts").update(parsed).eq("id", id).select().single();
-      if (error) throw error;
-      res.json(data);
-    } catch (err) { errHandler(res, err); }
+      const { data: legacy } = await supabaseAdmin.from("rider_contacts").select("id").eq("id", id).maybeSingle();
+      if (legacy) {
+        const parsed = insertRiderContactSchema.partial().parse(req.body);
+        const { data, error } = await supabaseAdmin
+          .from("rider_contacts").update(parsed).eq("id", id).select().single();
+        if (error) throw error;
+        return res.json(data);
+      }
+      const row = await updateCompanyContact(id, (req.body ?? {}) as Record<string, unknown>);
+      if (!row) return res.status(404).json({ message: "Contact not found" });
+      res.json(row);
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
   });
 
   app.delete("/api/contacts/:id", async (req, res) => {
@@ -2307,8 +2330,15 @@ export async function registerRoutes(
       const writerId = await requireContactsDelete(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
-      const { error } = await supabase.from("rider_contacts").delete().eq("id", id);
-      if (error) throw error;
+      const { data: legacy } = await supabaseAdmin.from("rider_contacts").select("id").eq("id", id).maybeSingle();
+      if (legacy) {
+        const { error } = await supabaseAdmin.from("rider_contacts").delete().eq("id", id);
+        if (error) throw error;
+        return res.json({ ok: true });
+      }
+      const existing = await getCompanyContact(id);
+      if (!existing) return res.status(404).json({ message: "Contact not found" });
+      await deleteCompanyContact(id);
       res.json({ ok: true });
     } catch (err) { errHandler(res, err); }
   });
@@ -5208,6 +5238,17 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.get("/api/accounts/:id/contacts", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const accountId = Number(req.params.id);
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        return res.status(400).json({ message: "Invalid account" });
+      }
+      res.json(await listDirectoryPeopleForAccount(accountId));
+    } catch (err) { errHandler(res, err); }
+  });
+
   app.patch("/api/accounts/:id", async (req, res) => {
     try {
       if (!(await requireWrite(req, res))) return;
@@ -5626,12 +5667,14 @@ export async function registerRoutes(
 
   app.get("/api/companies", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       res.json(await listCompanies(req.query as Record<string, unknown>));
     } catch (err) { errHandler(res, err); }
   });
 
   app.get("/api/companies/:id", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ message: "Invalid company" });
       const row = await getCompany(id);
@@ -5671,14 +5714,39 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.post("/api/companies/:id/lease-links", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireContactsWrite(req, res);
+      if (!writerId) return;
+      const companyId = Number(req.params.id);
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const contactId = Number(body.company_contact_id);
+      res.status(201).json(await createContactLeaseLink(
+        Number.isFinite(contactId) && contactId > 0 ? contactId : null,
+        {
+          master_lease_id: body.master_lease_id,
+          rider_id: body.rider_id,
+          relationship_note: body.relationship_note,
+          company_id: Number.isFinite(contactId) && contactId > 0 ? null : companyId,
+        },
+        writerId,
+      ));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
   app.get("/api/companies/:id/lease-links", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       res.json(await listCompanyLeaseLinks(Number(req.params.id)));
     } catch (err) { errHandler(res, err); }
   });
 
   app.get("/api/company-contacts", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       res.json(await listCompanyContacts(req.query as Record<string, unknown>));
     } catch (err) { errHandler(res, err); }
   });
@@ -5695,6 +5763,7 @@ export async function registerRoutes(
 
   app.get("/api/company-contacts/:id", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       const row = await getCompanyContact(Number(req.params.id));
       if (!row) return res.status(404).json({ message: "Contact not found" });
       res.json(row);
@@ -5723,6 +5792,7 @@ export async function registerRoutes(
 
   app.get("/api/company-contacts/:id/lease-links", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       res.json(await listContactLeaseLinks(Number(req.params.id)));
     } catch (err) { errHandler(res, err); }
   });
@@ -5748,6 +5818,7 @@ export async function registerRoutes(
 
   app.get("/api/leases/:id/contact-links", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       res.json(await listLeaseContactLinks({ masterLeaseId: Number(req.params.id) }));
     } catch (err) { errHandler(res, err); }
   });
@@ -5756,8 +5827,13 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const contactId = Number((req.body as any)?.company_contact_id);
-      res.status(201).json(await createContactLeaseLink(contactId, { master_lease_id: Number(req.params.id), relationship_note: (req.body as any)?.relationship_note }, writerId));
+      const body = (req.body as any) ?? {};
+      const contactId = Number(body.company_contact_id);
+      res.status(201).json(await createContactLeaseLink(
+        Number.isFinite(contactId) && contactId > 0 ? contactId : null,
+        { master_lease_id: Number(req.params.id), relationship_note: body.relationship_note, company_id: body.company_id },
+        writerId,
+      ));
     } catch (err: any) {
       if (err?.status) return res.status(err.status).json({ message: err.message });
       errHandler(res, err);
@@ -5774,6 +5850,7 @@ export async function registerRoutes(
 
   app.get("/api/riders/:id/contact-links", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       res.json(await listLeaseContactLinks({ riderId: Number(req.params.id) }));
     } catch (err) { errHandler(res, err); }
   });
@@ -5782,8 +5859,13 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const contactId = Number((req.body as any)?.company_contact_id);
-      res.status(201).json(await createContactLeaseLink(contactId, { rider_id: Number(req.params.id), relationship_note: (req.body as any)?.relationship_note }, writerId));
+      const body = (req.body as any) ?? {};
+      const contactId = Number(body.company_contact_id);
+      res.status(201).json(await createContactLeaseLink(
+        Number.isFinite(contactId) && contactId > 0 ? contactId : null,
+        { rider_id: Number(req.params.id), relationship_note: body.relationship_note, company_id: body.company_id },
+        writerId,
+      ));
     } catch (err: any) {
       if (err?.status) return res.status(err.status).json({ message: err.message });
       errHandler(res, err);
@@ -5798,14 +5880,95 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.post("/api/directory-lease-gaps/apply-unique", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireContactsWrite(req, res);
+      if (!writerId) return;
+      res.json(await linkUniqueUnmatchedLesseeCompanies(writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/directory-lease-gaps/link", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireContactsWrite(req, res);
+      if (!writerId) return;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const masterLeaseId = Number(body.master_lease_id);
+      const lessee = String(body.lessee ?? "");
+      res.json(await linkLesseeCompanyToLease(masterLeaseId, lessee, writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/directory-lease-gaps/export", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const csv = await unmatchedLesseeExportCsv();
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=\"unmatched-lessees.csv\"");
+      res.send(csv);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/directory-lease-gaps", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const limit = Number(req.query.limit);
+      const otherOffset = Number(req.query.other_offset);
+      res.json(await listLeaseLinkGaps(
+        Number.isFinite(limit) ? limit : 80,
+        Number.isFinite(otherOffset) ? otherOffset : 0,
+      ));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/directory-dedup", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await listDedupCandidates(req.query as Record<string, unknown>));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/directory-dedup/summary", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await dedupSummary());
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/directory-dedup/backfill", async (req: Request, res: Response) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      res.json(await backfillAgentAndFamilyCandidates());
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/directory-dedup/:id", async (req: Request, res: Response) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      res.json(await applyDedupAction(Number(req.params.id), (req.body ?? {}) as Record<string, unknown>, writerId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
+      errHandler(res, err);
+    }
+  });
+
   app.get("/api/directory-search", async (req: Request, res: Response) => {
     try {
+      if (!(await requireUser(req, res))) return;
       res.json(await directorySearch(req.query as Record<string, unknown>));
     } catch (err) { errHandler(res, err); }
   });
 
   app.get("/api/directory-facets", async (_req: Request, res: Response) => {
     try {
+      if (!(await requireUser(_req, res))) return;
       res.json(await directoryFacets());
     } catch (err) { errHandler(res, err); }
   });

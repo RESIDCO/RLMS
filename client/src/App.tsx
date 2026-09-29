@@ -18,6 +18,7 @@ import BulkImportPage from "@/pages/BulkImport";
 import LeaseWizard from "@/pages/LeaseWizard";
 import UserManagement from "@/pages/UserManagement";
 import Contacts from "@/pages/Contacts";
+import ContactsDedupReview from "@/pages/ContactsDedupReview";
 import Accounts from "@/pages/Accounts";
 import AccountTransitions from "@/pages/AccountTransitions";
 import APTracker from "@/pages/APTracker";
@@ -92,6 +93,7 @@ function AppRouter() {
       <Route path="/history" component={HistoryPage} />
       <Route path="/search" component={SearchPage} />
       <Route path="/import" component={BulkImportPage} />
+      <Route path="/contacts/review" component={ContactsDedupReview} />
       <Route path="/contacts" component={Contacts} />
       <Route path="/ap" component={APTracker} />
       <Route path="/photo-search" component={PhotoSearch} />

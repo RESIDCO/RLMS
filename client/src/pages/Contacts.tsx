@@ -29,17 +29,22 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Phone, Mail, Building2, ChevronLeft, ChevronRight, MapPin, Plus, Pencil, User,
+  Phone, Mail, Building2, ChevronLeft, ChevronRight, MapPin, Plus, Pencil, User, Trash2,
 } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { COMPANY_CONTACT_CUSTOM_FIELD_LABELS } from "@shared/mark-contacts-import";
+import { displayLeaseNumber } from "@shared/residco-import";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import NotesSaveField from "@/components/NotesSaveField";
 import ContactLeaseLinks from "@/components/ContactLeaseLinks";
 import { usePermissions } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import SearchableSelect from "@/components/SearchableSelect";
+import { confirmDelete } from "@/components/ConfirmActionDialog";
+import { hashSearchParams } from "@/lib/hash-location";
+import { readDirectoryNavState, replaceDirectoryHash } from "@/lib/directory-nav";
+import { groupDirectoryPeopleById } from "@/lib/directory-people-group";
 
 type DirectoryBadge = "customer" | "prospect" | "lessor" | "lease_ol" | "unclassified";
 
@@ -62,6 +67,13 @@ type DirectoryRow = {
   city: string | null;
   state: string | null;
   rider_id: number | null;
+  lease_lessee?: string | null;
+  lease_number?: string | null;
+  rider_name?: string | null;
+  is_agent_contact?: boolean;
+  agent_organization_name?: string | null;
+  family_parent_id?: number | null;
+  family_parent_name?: string | null;
 };
 
 type DirectoryPage = {
@@ -69,6 +81,20 @@ type DirectoryPage = {
   total_count: number;
   page: number;
   pageSize: number;
+};
+
+type LeaseTiedPerson = {
+  id: number;
+  name: string;
+  title: string | null;
+  email: string | null;
+  phone: string | null;
+  company_id: number | null;
+  company_name: string | null;
+  rider_id: number | null;
+  via_company?: boolean;
+  master_lease?: { lease_number: string | null; lessee: string | null } | null;
+  rider?: { rider_name: string | null; schedule_number: string | null } | null;
 };
 
 type Facets = {
@@ -106,6 +132,9 @@ type CompanyDetail = {
     custom_fields: Record<string, string> | null;
     notes?: string | null;
     source: string;
+    is_agent_contact?: boolean;
+    agent_organization_name?: string | null;
+    agent_home_company_id?: number | null;
   }>;
   company_products: Array<{
     id: number;
@@ -120,6 +149,9 @@ type CompanyDetail = {
     fleet_size: number;
     as_of_date: string | null;
   }>;
+  family_parent_id?: number | null;
+  family_parent?: { id: number; name: string } | null;
+  family_children?: Array<{ id: number; name: string; reporting_marks: string[] | null }>;
 };
 
 type ContactDetail = {
@@ -141,6 +173,9 @@ type ContactDetail = {
   function_role: string | null;
   notes: string | null;
   custom_fields: Record<string, string> | null;
+  is_agent_contact?: boolean;
+  agent_organization_name?: string | null;
+  agent_home_company_id?: number | null;
   company?: CompanyDetail | null;
 };
 
@@ -201,22 +236,126 @@ function labeledCustomFields(cf: Record<string, string> | null | undefined) {
     }));
 }
 
+function viaLabel(row: DirectoryRow) {
+  if (row.is_agent_contact) {
+    return row.agent_organization_name ? `via ${row.agent_organization_name}` : "agent / third-party";
+  }
+  const leaseBits = [row.lease_lessee, displayLeaseNumber(row.lease_number), row.rider_name].filter(Boolean);
+  if (leaseBits.length) return leaseBits.join(" · ");
+  if (row.result_kind !== "lease_ol" && row.rider_id) return "Linked to an OL";
+  return null;
+}
+
+function CompanyGroupedCards({
+  rows,
+  onOpenCompany,
+  onOpenRow,
+}: {
+  rows: DirectoryRow[];
+  onOpenCompany: (id: number) => void;
+  onOpenRow: (row: DirectoryRow) => void;
+}) {
+  const [openKids, setOpenKids] = useState<Record<number, boolean>>({});
+  const ol = rows.filter((r) => r.result_kind === "lease_ol");
+  const rest = rows.filter((r) => r.result_kind !== "lease_ol");
+  const by = new Map<number, DirectoryRow[]>();
+  for (const r of rest) {
+    if (!r.company_id) continue;
+    const list = by.get(r.company_id) ?? [];
+    list.push(r);
+    by.set(r.company_id, list);
+  }
+  const topIds: number[] = [];
+  by.forEach((list, id) => {
+    const parent = list[0]?.family_parent_id;
+    if (parent && by.has(parent)) return;
+    topIds.push(id);
+  });
+  return (
+    <>
+      {topIds.map((id) => {
+        const list = by.get(id) ?? [];
+        const head = list[0];
+        const childIds = Array.from(by.keys()).filter((cid) => by.get(cid)?.[0]?.family_parent_id === id);
+        const own = list.filter((r) => r.contact_id);
+        return (
+          <div key={id} className="rounded-lg border border-card-border bg-card px-4 py-3">
+            <button type="button" className="w-full text-left" onClick={() => onOpenCompany(id)}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+                <DirectoryBadgeChip badge={head.badge} />
+                <span className="font-medium text-sm">{head.company_name}</span>
+                {childIds.length > 0 && (
+                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {childIds.length + 1} entities
+                  </span>
+                )}
+              </div>
+            </button>
+            {head.family_parent_name && (
+              <div className="text-xs text-muted-foreground mt-1">Part of {head.family_parent_name}</div>
+            )}
+            <div className="mt-2 space-y-1">
+              {own.slice(0, 4).map((r) => (
+                <button key={r.contact_id} type="button" className="block text-left text-sm w-full hover:underline" onClick={() => onOpenRow(r)}>
+                  {r.contact_name}
+                  {r.title ? <span className="text-muted-foreground"> · {r.title}</span> : null}
+                  {viaLabel(r) ? <span className="text-muted-foreground"> · {viaLabel(r)}</span> : null}
+                </button>
+              ))}
+              {own.length > 4 && <div className="text-xs text-muted-foreground">+{own.length - 4} more</div>}
+            </div>
+            {childIds.length > 0 && (
+              <div className="mt-2">
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setOpenKids((s) => ({ ...s, [id]: !s[id] }))}>
+                  {openKids[id] ? "Hide locations" : `Locations (${childIds.length})`}
+                </Button>
+                {openKids[id] && childIds.map((cid) => {
+                  const cl = by.get(cid) ?? [];
+                  return (
+                    <button key={cid} type="button" className="block w-full text-left text-xs pl-4 py-1 hover:underline" onClick={() => onOpenCompany(cid)}>
+                      {cl[0]?.company_name} · {cl.filter((x) => x.contact_id).length} people
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {ol.map((row) => (
+        <button
+          key={`ol-${row.contact_id}-${row.rider_id}`}
+          type="button"
+          className="w-full text-left rounded-lg border border-card-border bg-card px-4 py-3"
+          onClick={() => onOpenRow(row)}
+        >
+          <DirectoryBadgeChip badge="lease_ol" /> {row.contact_name}
+        </button>
+      ))}
+    </>
+  );
+}
+
 export default function Contacts() {
   const [, navigate] = useLocation();
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { canEditContacts } = usePermissions();
-  const [searchInput, setSearchInput] = useState("");
-  const [q, setQ] = useState("");
+  const { canEditContacts, canDeleteContacts } = usePermissions();
+  const boot = useMemo(() => readDirectoryNavState(), []);
+  const [viewMode, setViewMode] = useState<"company" | "people">(boot.people ? "people" : "company");
+  const [searchInput, setSearchInput] = useState(boot.q);
+  const [q, setQ] = useState(boot.q);
   const [page, setPage] = useState(1);
   const [includeIndustry, setIncludeIndustry] = useState(false);
+  const [leaseTiedOnly, setLeaseTiedOnly] = useState(boot.leaseTied);
   const [relationshipType, setRelationshipType] = useState("");
   const [priorityTier, setPriorityTier] = useState("");
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
   const [state, setState] = useState("");
-  const [companyId, setCompanyId] = useState<number | null>(null);
-  const [contactId, setContactId] = useState<number | null>(null);
+  const [companyId, setCompanyId] = useState<number | null>(boot.companyId);
+  const [contactId, setContactId] = useState<number | null>(boot.contactId);
   const [addCompanyOpen, setAddCompanyOpen] = useState(false);
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [editCompanyOpen, setEditCompanyOpen] = useState(false);
@@ -233,6 +372,37 @@ export default function Contacts() {
   useEffect(() => {
     setPage(1);
   }, [includeIndustry, relationshipType, priorityTier, status, source, state]);
+
+  useEffect(() => {
+    replaceDirectoryHash({
+      q,
+      companyId,
+      contactId,
+      people: viewMode === "people",
+      leaseTied: leaseTiedOnly,
+    });
+  }, [q, companyId, contactId, viewMode, leaseTiedOnly]);
+
+  useEffect(() => {
+    const apply = () => {
+      const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+      const pathOnly = hash.split("?")[0] || "/";
+      if (pathOnly !== "/contacts") return;
+      const next = readDirectoryNavState(hashSearchParams());
+      setSearchInput(next.q);
+      setQ(next.q);
+      setCompanyId(next.companyId);
+      setContactId(next.contactId);
+      setViewMode(next.people ? "people" : "company");
+      setLeaseTiedOnly(next.leaseTied);
+    };
+    window.addEventListener("hashchange", apply);
+    window.addEventListener("popstate", apply);
+    return () => {
+      window.removeEventListener("hashchange", apply);
+      window.removeEventListener("popstate", apply);
+    };
+  }, []);
 
   const params = useMemo(() => {
     const sp = new URLSearchParams();
@@ -258,6 +428,17 @@ export default function Contacts() {
     queryFn: () => apiGet<Facets>("/api/directory-facets"),
   });
 
+  const { data: leaseTiedPeople = [], isLoading: leaseTiedLoading } = useQuery<LeaseTiedPerson[]>({
+    queryKey: ["/api/contacts"],
+    queryFn: () => apiGet<LeaseTiedPerson[]>("/api/contacts"),
+    enabled: leaseTiedOnly,
+  });
+
+  const { data: leaseGapSummary } = useQuery<{ linked_leases: number; unmatched_leases: number }>({
+    queryKey: ["/api/directory-lease-gaps", "banner"],
+    queryFn: () => apiGet("/api/directory-lease-gaps?limit=1"),
+  });
+
   const { data: detail, isLoading: detailLoading } = useQuery<CompanyDetail>({
     queryKey: ["/api/companies", companyId],
     queryFn: () => apiGet<CompanyDetail>(`/api/companies/${companyId}`),
@@ -273,6 +454,21 @@ export default function Contacts() {
   const rows = data?.rows ?? [];
   const total = data?.total_count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const leaseTiedFiltered = useMemo(() => {
+    const n = q.toLowerCase();
+    if (!n) return leaseTiedPeople;
+    return leaseTiedPeople.filter((p) =>
+      [p.name, p.company_name, p.email, p.title, p.master_lease?.lessee, p.master_lease?.lease_number, p.rider?.rider_name]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(n),
+    );
+  }, [leaseTiedPeople, q]);
+  const leaseTiedGrouped = useMemo(
+    () => groupDirectoryPeopleById(leaseTiedFiltered),
+    [leaseTiedFiltered],
+  );
 
   function invalidateDir() {
     qc.invalidateQueries({ queryKey: ["/api/directory-search"] });
@@ -298,7 +494,7 @@ export default function Contacts() {
     <div>
       <PageHeader
         title="Contacts"
-        subtitle="Companies and people directory — MARK Contacts and later CRM imports. Lease OL contacts stay on each rider."
+        subtitle="Searchable directory of companies and people. Add a contact on an OL and it lives here, linked to that lease."
       />
 
       <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-4">
@@ -315,12 +511,43 @@ export default function Contacts() {
               <Button size="sm" variant="outline" className="gap-1" onClick={() => setAddContactOpen(true)}><Plus className="h-3.5 w-3.5" /> Add contact</Button>
             </>
           )}
+          <div className="inline-flex rounded-md border border-border overflow-hidden">
+            <Button size="sm" variant={viewMode === "company" ? "default" : "ghost"} className="rounded-none h-8" onClick={() => setViewMode("company")}>By Company</Button>
+            <Button size="sm" variant={viewMode === "people" ? "default" : "ghost"} className="rounded-none h-8" onClick={() => setViewMode("people")}>By People</Button>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => navigate("/contacts/review")}>Review queue</Button>
+          <Button size="sm" variant="ghost" onClick={() => navigate("/contacts/review?tab=leases")}>Lease links</Button>
+          {canEditContacts && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                try {
+                  const res = await apiRequest("POST", "/api/contacts/promote-legacy", {});
+                  const out = await res.json();
+                  invalidateDir();
+                  toast({ title: `Moved ${out.promoted ?? 0} OL contacts into the directory` });
+                } catch (e: any) {
+                  toast({ title: "Promote failed", description: e.message, variant: "destructive" });
+                }
+              }}
+            >
+              Import leftover OL contacts
+            </Button>
+          )}
           <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
             <Checkbox
               checked={includeIndustry}
               onCheckedChange={(v) => setIncludeIndustry(v === true)}
             />
             Include industry / competitors
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <Checkbox
+              checked={leaseTiedOnly}
+              onCheckedChange={(v) => setLeaseTiedOnly(v === true)}
+            />
+            On a lease
           </label>
         </div>
 
@@ -332,12 +559,24 @@ export default function Contacts() {
           <FacetSelect label="Source" value={source} options={facets?.source ?? []} onChange={setSource} />
         </div>
 
+        {leaseGapSummary && leaseGapSummary.unmatched_leases > 0 && (
+          <button
+            type="button"
+            className="w-full text-left rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/30"
+            onClick={() => navigate("/contacts/review?tab=leases")}
+          >
+            {leaseGapSummary.linked_leases.toLocaleString()} leases tied to a directory company · {leaseGapSummary.unmatched_leases.toLocaleString()} still unmatched. Open lease links to attach people to the rest.
+          </button>
+        )}
+
         <div className="text-xs text-muted-foreground font-mono-num">
-          {isLoading ? "Loading…" : `${total.toLocaleString()} result${total === 1 ? "" : "s"}`}
-          {q ? ` for “${q}”` : " · alphabetical"}
+          {leaseTiedOnly
+            ? (leaseTiedLoading ? "Loading…" : `${leaseTiedGrouped.length.toLocaleString()} people on a linked lease`)
+            : (isLoading ? "Loading…" : `${total.toLocaleString()} result${total === 1 ? "" : "s"}`)}
+          {q ? ` for “${q}”` : leaseTiedOnly ? "" : " · alphabetical"}
         </div>
 
-        {isLoading && (
+        {leaseTiedOnly && leaseTiedLoading && (
           <div className="space-y-2">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="h-[76px] rounded-lg" />
@@ -345,13 +584,67 @@ export default function Contacts() {
           </div>
         )}
 
-        {!isLoading && rows.length === 0 && (
+        {leaseTiedOnly && !leaseTiedLoading && leaseTiedGrouped.length === 0 && (
+          <div className="text-sm text-muted-foreground italic py-8 text-center">
+            No directory people are linked to a lease yet.
+          </div>
+        )}
+
+        {leaseTiedOnly && !leaseTiedLoading && leaseTiedGrouped.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="w-full text-left rounded-lg border border-card-border bg-card px-4 py-3 hover:border-primary/30 transition-colors"
+              onClick={() => { setCompanyId(p.company_id); setContactId(p.id); }}
+            >
+              <div className="flex items-start gap-3">
+                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-sm">{p.name}</span>
+                    {p.via_company && <span className="text-[11px] text-muted-foreground">Via company on lease</span>}
+                  </div>
+                  <div className="mt-0.5 text-sm text-muted-foreground">
+                    {p.company_name || "Company"}
+                    {p.title ? ` · ${p.title}` : ""}
+                  </div>
+                  {p.leases.length > 0 ? (
+                    <div className="text-[11px] text-muted-foreground mt-1 space-y-0.5">
+                      {p.leases.map((l) => <div key={l}>{l}</div>)}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </button>
+        ))}
+
+        {!leaseTiedOnly && isLoading && (
+          <div className="space-y-2">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-[76px] rounded-lg" />
+            ))}
+          </div>
+        )}
+
+        {!leaseTiedOnly && !isLoading && rows.length === 0 && (
           <div className="text-sm text-muted-foreground italic py-8 text-center">
             {q ? "No directory matches." : "No companies in the directory yet."}
           </div>
         )}
 
-        {!isLoading && rows.map((row) => (
+        {!leaseTiedOnly && !isLoading && viewMode === "company" && rows.length > 0 && (
+          <div className="space-y-2">
+            <CompanyGroupedCards
+              rows={rows}
+              onOpenCompany={(id) => { setContactId(null); setCompanyId(id); }}
+              onOpenRow={openRow}
+            />
+          </div>
+        )}
+
+        {!leaseTiedOnly && !isLoading && viewMode === "people" && rows.map((row) => (
           <button
             key={`${row.result_kind}-${row.company_id ?? "x"}-${row.contact_id ?? "x"}-${row.rider_id ?? "x"}`}
             type="button"
@@ -361,21 +654,18 @@ export default function Contacts() {
           >
             <div className="flex items-start gap-3">
               <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
-                <Building2 className="h-4 w-4 text-muted-foreground" />
+                <User className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <DirectoryBadgeChip badge={row.badge} />
-                  <span className="font-medium text-sm">{row.company_name || "Lease OL contact"}</span>
-                  {row.reporting_marks && row.reporting_marks.length > 0 && (
-                    <span className="text-[11px] font-mono text-muted-foreground">
-                      {row.reporting_marks.slice(0, 6).join(" · ")}
-                      {row.reporting_marks.length > 6 ? "…" : ""}
-                    </span>
-                  )}
+                  <span className="font-medium text-sm">{row.contact_name || row.company_name || "Lease OL contact"}</span>
+                  {viaLabel(row) && <span className="text-[11px] text-muted-foreground">{viaLabel(row)}</span>}
                 </div>
                 <div className="mt-0.5 text-sm">
-                  {row.contact_name || "—"}
+                  <button type="button" className="text-primary hover:underline" onClick={(e) => { e.stopPropagation(); if (row.company_id) { setContactId(null); setCompanyId(row.company_id); } }}>
+                    {row.company_name || "Lease OL"}
+                  </button>
                   {row.title ? <span className="text-muted-foreground"> · {row.title}</span> : null}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
@@ -402,7 +692,7 @@ export default function Contacts() {
           </button>
         ))}
 
-        {totalPages > 1 && (
+        {!leaseTiedOnly && totalPages > 1 && (
           <div className="flex items-center justify-between pt-2">
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
               <ChevronLeft className="h-4 w-4 mr-1" /> Previous
@@ -426,6 +716,11 @@ export default function Contacts() {
               <SheetHeader>
                 <SheetTitle>{detail.name}</SheetTitle>
                 <SheetDescription className="flex flex-wrap gap-2 items-center">
+                  {detail.family_parent && (
+                    <button type="button" className="text-primary hover:underline" onClick={() => setCompanyId(detail.family_parent!.id)}>
+                      Part of {detail.family_parent.name}
+                    </button>
+                  )}
                   <DirectoryBadgeChip
                     badge={
                       detail.account_id ? "customer"
@@ -466,32 +761,64 @@ export default function Contacts() {
                   }}
                 />
                 <div>
-                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                    Contacts ({detail.contacts.length})
-                  </div>
-                  <div className="space-y-2">
-                    {detail.contacts.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className="w-full text-left rounded-md border border-border p-3 hover:bg-muted/40"
-                        onClick={() => setContactId(c.id)}
-                      >
-                        <div className="font-medium flex items-center gap-2"><User className="h-3.5 w-3.5" /> {c.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {[c.title, c.department, c.function_role].filter(Boolean).join(" · ")}
+                  {(() => {
+                    const staff = detail.contacts.filter((c) => !c.is_agent_contact);
+                    const agents = detail.contacts.filter((c) => c.is_agent_contact);
+                    return (
+                      <>
+                        <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                          Contacts ({staff.length})
                         </div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
-                          {c.email && <span>{c.email}</span>}
-                          {c.phone && <span>{c.phone}</span>}
+                        <div className="space-y-2">
+                          {staff.map((c) => (
+                            <button key={c.id} type="button" className="w-full text-left rounded-md border border-border p-3 hover:bg-muted/40" onClick={() => setContactId(c.id)}>
+                              <div className="font-medium flex items-center gap-2"><User className="h-3.5 w-3.5" /> {c.name}</div>
+                              <div className="text-xs text-muted-foreground">{[c.title, c.department, c.function_role].filter(Boolean).join(" · ")}</div>
+                              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
+                                {c.email && <span>{c.email}</span>}
+                                {c.phone && <span>{c.phone}</span>}
+                              </div>
+                            </button>
+                          ))}
+                          {staff.length === 0 && <p className="text-xs text-muted-foreground italic">No in-house people on this company yet.</p>}
                         </div>
-                      </button>
-                    ))}
-                    {detail.contacts.length === 0 && (
-                      <p className="text-xs text-muted-foreground italic">No people on this company yet.</p>
-                    )}
-                  </div>
+                        {agents.length > 0 && (
+                          <div className="mt-4">
+                            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                              Agents / Third-Party Contacts ({agents.length})
+                            </div>
+                            <div className="space-y-2">
+                              {agents.map((c) => (
+                                <button key={c.id} type="button" className="w-full text-left rounded-md border border-dashed border-border p-3 hover:bg-muted/40" onClick={() => setContactId(c.id)}>
+                                  <div className="font-medium">{c.name}{c.agent_organization_name ? ` — via ${c.agent_organization_name}` : ""}</div>
+                                  <div className="text-xs text-muted-foreground">{c.email}</div>
+                                  {c.agent_home_company_id && (
+                                    <button type="button" className="text-xs text-primary hover:underline mt-1" onClick={(e) => { e.stopPropagation(); setCompanyId(c.agent_home_company_id!); setContactId(null); }}>
+                                      Open {c.agent_organization_name}
+                                    </button>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
+                {detail.family_children && detail.family_children.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Locations</div>
+                    <div className="space-y-1">
+                      {detail.family_children.map((ch) => (
+                        <button key={ch.id} type="button" className="block text-left text-sm hover:underline" onClick={() => setCompanyId(ch.id)}>
+                          {ch.name}
+                          {ch.reporting_marks?.length ? <span className="text-xs text-muted-foreground"> · {ch.reporting_marks.join(" · ")}</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <FleetProductsSection
                   products={detail.company_products}
                   fleet={detail.company_fleet_stats ?? []}
@@ -520,10 +847,12 @@ export default function Contacts() {
             <ContactDetailSheet
               person={person}
               canEdit={canEditContacts}
+              canDelete={canDeleteContacts}
               onBackToCompany={() => {
                 setCompanyId(person.company_id);
                 setContactId(null);
               }}
+              onOpenCompany={(id) => { setContactId(null); setCompanyId(id); }}
               onSaved={invalidateDir}
             />
           )}
@@ -629,12 +958,16 @@ function FleetProductsSection({
 function ContactDetailSheet({
   person,
   canEdit,
+  canDelete,
   onBackToCompany,
+  onOpenCompany,
   onSaved,
 }: {
   person: ContactDetail;
   canEdit: boolean;
+  canDelete?: boolean;
   onBackToCompany: () => void;
+  onOpenCompany?: (id: number) => void;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
@@ -714,6 +1047,16 @@ function ContactDetailSheet({
           {person.title ? ` · ${person.title}` : ""}
         </SheetDescription>
       </SheetHeader>
+      {person.is_agent_contact && (
+        <div className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+          This person is a contact via {person.agent_organization_name || "a third party"}, not {person.company?.name || "this company"}'s own staff.
+          {person.agent_home_company_id && onOpenCompany && (
+            <button type="button" className="block text-primary hover:underline mt-1" onClick={() => onOpenCompany(person.agent_home_company_id!)}>
+              Open {person.agent_organization_name}
+            </button>
+          )}
+        </div>
+      )}
       <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={onBackToCompany}>
         ← Back to company
       </Button>
@@ -733,6 +1076,30 @@ function ContactDetailSheet({
         {canEdit && (
           <Button size="sm" onClick={() => void saveFields()} disabled={saving}>
             {saving ? "Saving…" : "Save fields"}
+          </Button>
+        )}
+        {canDelete && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-destructive"
+            onClick={async () => {
+              const ok = await confirmDelete({
+                title: `Delete contact “${person.name}”?`,
+                description: "This removes them from the directory and unlinks them from every lease.",
+              });
+              if (!ok) return;
+              try {
+                await apiRequest("DELETE", `/api/company-contacts/${person.id}`);
+                onBackToCompany();
+                onSaved();
+                toast({ title: "Contact deleted" });
+              } catch (e: any) {
+                toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+              }
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete contact
           </Button>
         )}
         {labeledCustomFields(person.custom_fields).length > 0 && (
@@ -831,6 +1198,9 @@ function AddContactDialog({
 }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [companySearch, setCompanySearch] = useState("");
   const [companyId, setCompanyId] = useState(defaultCompanyId ? String(defaultCompanyId) : "");
   const [busy, setBusy] = useState(false);
@@ -850,11 +1220,17 @@ function AddContactDialog({
     try {
       const res = await apiRequest("POST", "/api/company-contacts", {
         name,
+        title: title || null,
+        email: email || null,
+        phone: phone || null,
         company_id: Number(companyId),
       });
       const row = await res.json();
       onCreated(row.id, Number(companyId));
       setName("");
+      setTitle("");
+      setEmail("");
+      setPhone("");
     } catch (e: any) {
       toast({ title: "Could not create contact", description: e.message, variant: "destructive" });
     } finally {
@@ -870,6 +1246,18 @@ function AddContactDialog({
           <label className="block text-sm">
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Name</div>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Title</div>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Email</div>
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </label>
+          <label className="block text-sm">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Phone</div>
+            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
           </label>
           <div>
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Company</div>

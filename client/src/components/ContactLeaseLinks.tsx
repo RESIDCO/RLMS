@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import SearchableSelect from "@/components/SearchableSelect";
 import { useToast } from "@/hooks/use-toast";
-import { Link2, Trash2 } from "lucide-react";
+import { Link2, Trash2, Building2, User } from "lucide-react";
 import { displayLeaseNumber } from "@shared/residco-import";
 
 type LeaseLink = {
@@ -17,6 +17,7 @@ type LeaseLink = {
   contact_name?: string | null;
   company_id?: number | null;
   company_name?: string | null;
+  link_kind?: string | null;
   master_lease?: { id: number; lease_number: string | null; lessee: string | null } | null;
   rider?: { id: number; rider_name: string | null; schedule_number: string | null } | null;
 };
@@ -101,8 +102,16 @@ export default function ContactLeaseLinks({
   const addMut = useMutation({
     mutationFn: async () => {
       if (mode === "contact" || mode === "company") {
+        if (mode === "company" && (pickContact === "__company__" || !pickContact) && companyId) {
+          await apiRequest("POST", `/api/companies/${companyId}/lease-links`, {
+            master_lease_id: mlaId ? Number(mlaId) : null,
+            rider_id: olId ? Number(olId) : null,
+            relationship_note: note || null,
+          });
+          return;
+        }
         const cid = mode === "contact" ? contactId : Number(pickContact);
-        if (!cid) throw new Error("Pick a contact");
+        if (!cid) throw new Error("Pick a contact or whole company");
         await apiRequest("POST", `/api/company-contacts/${cid}/lease-links`, {
           master_lease_id: mlaId ? Number(mlaId) : null,
           rider_id: olId ? Number(olId) : null,
@@ -122,6 +131,7 @@ export default function ContactLeaseLinks({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [listUrl] });
+      if (riderId) qc.invalidateQueries({ queryKey: ["/api/riders", riderId, "contacts"] });
       setNote("");
       toast({ title: "Lease linked" });
     },
@@ -136,7 +146,10 @@ export default function ContactLeaseLinks({
 
   const delMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", delUrl(id)),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [listUrl] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [listUrl] });
+      if (riderId) qc.invalidateQueries({ queryKey: ["/api/riders", riderId, "contacts"] });
+    },
   });
 
   const peopleOpts = (peoplePage?.rows ?? []).map((p) => ({
@@ -144,21 +157,37 @@ export default function ContactLeaseLinks({
     label: p.name,
     hint: p.company_name ?? undefined,
   }));
-  const companyPeopleOpts = (contacts ?? []).map((c) => ({ value: String(c.id), label: c.name }));
+  const companyPeopleOpts = [
+    ...(mode === "company" ? [{ value: "__company__", label: "(Whole company)" }] : []),
+    ...(contacts ?? []).map((c) => ({ value: String(c.id), label: c.name })),
+  ];
 
   return (
     <div className="space-y-2">
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
         {mode === "lease" || mode === "rider" ? "Linked contacts" : "Linked leases"}
       </div>
-      {links.length === 0 && <p className="text-xs text-muted-foreground italic">No leases linked yet.</p>}
+      {links.length === 0 && (
+        <p className="text-xs text-muted-foreground italic">
+          {mode === "lease" || mode === "rider" ? "No contacts linked yet." : "No leases linked yet."}
+        </p>
+      )}
       <ul className="space-y-1.5">
         {links.map((row) => (
           <li key={row.id} className="flex items-start justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs">
             <div>
-              <div className="font-medium">{linkLabel(row)}</div>
+              <div className="font-medium flex items-center gap-1.5">
+                {row.link_kind === "company" || (!row.company_contact_id && row.company_id)
+                  ? <Building2 className="h-3.5 w-3.5 shrink-0" />
+                  : <User className="h-3.5 w-3.5 shrink-0" />}
+                {linkLabel(row)}
+              </div>
               {(row.contact_name || row.company_name) && (
-                <div className="text-muted-foreground">{[row.contact_name, row.company_name].filter(Boolean).join(" · ")}</div>
+                <div className="text-muted-foreground">
+                  {row.link_kind === "company" || (!row.company_contact_id && row.company_id)
+                    ? `Whole company · ${row.company_name || ""}`
+                    : [row.contact_name, row.company_name].filter(Boolean).join(" · ")}
+                </div>
               )}
               {row.relationship_note && <div className="text-muted-foreground mt-0.5">{row.relationship_note}</div>}
             </div>

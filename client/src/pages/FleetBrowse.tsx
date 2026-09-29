@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
+import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
 
 type RiderRow = {
   ol: string;
@@ -392,6 +393,11 @@ function OlView({
             <Meta label="MLA" value={displayLeaseNumber(data.lease_number) || "—"} />
           </div>
         )}
+        {data?.rider_id ? (
+          <div className="mb-4 rounded-xl border border-card-border bg-card p-5">
+            <OlDirectoryContacts riderId={data.rider_id} />
+          </div>
+        ) : null}
         {isLoading ? (
           <Skeleton className="h-48 rounded-xl" />
         ) : error ? (
@@ -656,6 +662,11 @@ function TurningOlView({ year, ol }: { year: number; ol: string }) {
             <Meta label="MLA" value={displayLeaseNumber(data.lease_number) || "—"} />
           </div>
         )}
+        {data?.rider_id ? (
+          <div className="mb-4 rounded-xl border border-card-border bg-card p-5">
+            <OlDirectoryContacts riderId={data.rider_id} />
+          </div>
+        ) : null}
         {isLoading ? (
           <Skeleton className="h-48 rounded-xl" />
         ) : error ? (

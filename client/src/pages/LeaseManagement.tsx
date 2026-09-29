@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import {
   ChevronRight,
@@ -895,10 +895,7 @@ function RiderDetailPanels({
   return (
     <>
       <RiderCars riderId={riderId} leaseType={leaseType} />
-      <RiderContactsPanel riderId={riderId} />
-      <div className="px-5 pb-3">
-        <ContactLeaseLinks mode="rider" riderId={riderId} canAdd={canEdit} canRemove={canEdit} />
-      </div>
+      <RiderContactsPanel riderId={riderId} canEdit={canEdit} />
       <div className="px-5 pb-3">
         <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
           Account Management notes
@@ -1102,11 +1099,12 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
 
 // ---- Rider Contacts Panel ----
 
-function RiderContactsPanel({ riderId }: { riderId: number }) {
+function RiderContactsPanel({ riderId, canEdit }: { riderId: number; canEdit: boolean }) {
   const { toast } = useToast();
-  const { canDeleteContacts } = usePermissions();
+  const { canDeleteContacts, canEditContacts } = usePermissions();
   const [addOpen, setAddOpen] = useState(false);
   const [editContact, setEditContact] = useState<RiderContact | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
 
   const { data: contacts, isLoading } = useQuery<RiderContact[]>({
     queryKey: ["/api/riders", riderId, "contacts"],
@@ -1117,41 +1115,70 @@ function RiderContactsPanel({ riderId }: { riderId: number }) {
   });
 
   const deleteContact = useMutation({
-    mutationFn: async (id: number) => apiRequest("DELETE", `/api/contacts/${id}`),
+    mutationFn: async (c: RiderContact) => {
+      if (c.source === "directory") {
+        if (!c.link_id) throw new Error("This person is on the lease via their company — unlink the company on the MLA, or open Contacts to delete them.");
+        await apiRequest("DELETE", `/api/contact-lease-links/${c.link_id}`);
+        return;
+      }
+      await apiRequest("DELETE", `/api/contacts/${c.id}`);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/riders", riderId, "contacts"] });
-      toast({ title: "Contact removed" });
+      queryClient.invalidateQueries({ queryKey: [`/api/riders/${riderId}/contact-links`] });
+      toast({ title: "Contact removed from this OL" });
     },
     onError: (e: Error) =>
       toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
+
+  const write = canEdit || canEditContacts;
 
   return (
     <div className="px-5 pb-5 bg-muted/10 border-t border-border/60">
       <div className="pt-3 flex items-center justify-between mb-3">
         <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
           <Users className="h-3.5 w-3.5" />
-          Lessee Contacts
+          Contacts
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setAddOpen(true)} className="h-7 text-xs gap-1">
-          <Plus className="h-3.5 w-3.5" /> Add Contact
-        </Button>
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" className="h-7 text-xs" asChild>
+            <Link href="/contacts/review?tab=leases">Directory lease links</Link>
+          </Button>
+          {write && (
+            <>
+            <Button size="sm" variant="ghost" onClick={() => setLinkOpen((v) => !v)} className="h-7 text-xs gap-1">
+              Link existing
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setAddOpen(true)} className="h-7 text-xs gap-1">
+              <Plus className="h-3.5 w-3.5" /> Add Contact
+            </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
         <Skeleton className="h-12 rounded" />
       ) : (contacts ?? []).length === 0 ? (
         <div className="text-xs text-muted-foreground italic py-4 text-center">
-          No contacts added yet.
+          No contacts linked to this OL yet.
         </div>
       ) : (
         <div className="space-y-2">
           {(contacts ?? []).map((c) => (
-            <div key={c.id} className="rounded-md border border-border bg-card px-4 py-3 flex items-start gap-3">
+            <div key={`${c.source}-${c.id}-${c.link_id ?? ""}`} className="rounded-md border border-border bg-card px-4 py-3 flex items-start gap-3">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-foreground">{c.name}</span>
                   {c.title && <span className="text-xs text-muted-foreground">· {c.title}</span>}
+                  {c.company_name && <span className="text-[11px] text-muted-foreground">{c.company_name}</span>}
+                  {c.source === "legacy" && (
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Legacy OL</span>
+                  )}
+                  {c.source === "directory" && !c.link_id && (
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Via company on lease</span>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
                   {c.email && (
@@ -1168,20 +1195,24 @@ function RiderContactsPanel({ riderId }: { riderId: number }) {
                 {c.notes && <div className="text-xs text-muted-foreground mt-1 italic">{c.notes}</div>}
               </div>
               <div className="flex gap-1 shrink-0">
-                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditContact(c)}>
-                  <Pencil className="h-3 w-3" />
-                </Button>
-                {canDeleteContacts && (
+                {write && (
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditContact(c)}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                )}
+                {canDeleteContacts && (c.source !== "directory" || Boolean(c.link_id)) && (
                   <Button
                     size="icon"
                     variant="ghost"
                     className="h-7 w-7"
                     onClick={async () => {
                       const ok = await confirmDelete({
-                        title: `Delete contact "${c.name}"?`,
-                        description: "This will permanently delete this contact.",
+                        title: c.source === "directory" ? `Unlink “${c.name}” from this OL?` : `Delete contact "${c.name}"?`,
+                        description: c.source === "directory"
+                          ? "They stay in the Contacts directory and can be linked again later."
+                          : "This will permanently delete this legacy OL contact.",
                       });
-                      if (ok) deleteContact.mutate(c.id);
+                      if (ok) deleteContact.mutate(c);
                     }}
                   >
                     <Trash2 className="h-3 w-3" />
@@ -1190,6 +1221,12 @@ function RiderContactsPanel({ riderId }: { riderId: number }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {linkOpen && (
+        <div className="mt-3">
+          <ContactLeaseLinks mode="rider" riderId={riderId} canAdd={write} canRemove={write} />
         </div>
       )}
 
@@ -1236,13 +1273,18 @@ function ContactForm({
         notes: form.notes || null,
       };
       if (contact) {
-        await apiRequest("PATCH", `/api/contacts/${contact.id}`, body);
+        if (contact.source === "directory" || contact.company_contact_id) {
+          await apiRequest("PATCH", `/api/company-contacts/${contact.company_contact_id || contact.id}`, body);
+        } else {
+          await apiRequest("PATCH", `/api/contacts/${contact.id}`, body);
+        }
       } else {
         await apiRequest("POST", `/api/riders/${riderId}/contacts`, body);
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/riders", riderId, "contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/directory-search"] });
       toast({ title: contact ? "Contact updated" : "Contact added" });
       onClose();
     },

@@ -175,6 +175,12 @@ export type RiderContact = {
   notes: string | null;
   created_at?: string;
   updated_at?: string;
+  /** directory = company_contacts + contact_lease_links; legacy = rider_contacts. */
+  source?: "directory" | "legacy";
+  link_id?: number | null;
+  company_id?: number | null;
+  company_name?: string | null;
+  company_contact_id?: number | null;
 };
 
 export type AssignmentHistory = {

@@ -1,4 +1,4 @@
-import { Search as SearchIcon, Loader2, X, Pencil, History, Columns3, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Search as SearchIcon, Loader2, X, Pencil, History, Columns3, ChevronLeft, ChevronRight, Download, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
 import { carListSearchTokens } from "@shared/programs";
@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { carPath, historyPath, openAppTab } from "@/lib/browse-nav";
+import { contactsDirectoryPath } from "@/lib/directory-nav";
 import {
   persistSearchQuery,
   readInitialSearchQuery,
@@ -29,7 +30,8 @@ import {
   shouldRestoreSearchSession,
 } from "@/lib/search-query";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
-import { LeaseGlanceSheet, glanceRiderFromCar, type LeaseGlanceRider } from "@/components/LeaseGlanceSheet";
+import { LeaseGlanceSheet } from "@/components/LeaseGlanceSheet";
+import { glanceRiderFromCar, type LeaseGlanceRider } from "@/lib/glance-rider";
 import { formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { downloadRailcarsCsv } from "@/lib/railcar-csv";
 import { useToast } from "@/hooks/use-toast";
@@ -42,6 +44,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { carBuildYear } from "@shared/build-year";
 
 type SearchScope = { leases: boolean; cars: boolean; carData: boolean };
+
+type DirectoryHit = {
+  total_count?: number;
+  company_id: number | null;
+  company_name: string | null;
+  contact_id: number | null;
+  contact_name: string | null;
+  title: string | null;
+  email: string | null;
+  lease_lessee?: string | null;
+  lease_number?: string | null;
+  rider_name?: string | null;
+};
+
+type DirectoryPage = { rows: DirectoryHit[]; total_count: number };
 
 const DEFAULT_SCOPE: SearchScope = { leases: true, cars: true, carData: false };
 
@@ -242,6 +259,19 @@ export default function SearchPage() {
     staleTime: 30_000,
   });
 
+  const peopleQuery = useQuery<DirectoryPage>({
+    queryKey: ["/api/directory-search", "from-search", committed],
+    queryFn: ({ signal }) =>
+      apiGet<DirectoryPage>(
+        `/api/directory-search?q=${encodeURIComponent(committed.trim())}&page=1&pageSize=8`,
+        { timeoutMs: 20_000, signal },
+      ),
+    enabled: Boolean(committed) && !isPaste && committed.trim().length >= 2,
+    staleTime: 30_000,
+  });
+  const peopleRows = peopleQuery.data?.rows ?? [];
+  const peopleTotal = peopleQuery.data?.total_count ?? 0;
+
   const rows = isPaste ? (pasteRows ?? []) : (textQuery.data?.rows ?? []);
   const totalCount = isPaste ? (pasteRows?.length ?? 0) : (textQuery.data?.total_count ?? 0);
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -405,8 +435,8 @@ export default function SearchPage() {
   const missing = pasteMissing;
   const pasteCount = committed ? carListSearchTokens(committed)?.length ?? 0 : 0;
   const committedLabel = pasteCount > 1 ? `${pasteCount} cars` : `"${committed}"`;
-  const hasResults = Boolean(committed) && (totalCount > 0 || missing.length > 0);
-  const noResults = Boolean(committed) && !loading && totalCount === 0 && missing.length === 0;
+  const hasResults = Boolean(committed) && (totalCount > 0 || missing.length > 0 || peopleRows.length > 0);
+  const noResults = Boolean(committed) && !loading && !peopleQuery.isFetching && totalCount === 0 && missing.length === 0 && peopleRows.length === 0;
   const loadError = !isPaste && textQuery.isError ? ((textQuery.error as Error)?.message || "Search failed") : error;
 
   function cell(key: string, r: any) {
@@ -654,6 +684,66 @@ export default function SearchPage() {
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm px-4 py-3">{loadError}</div>
           )}
 
+          {!isPaste && committed.trim().length >= 2 && (peopleQuery.isFetching || peopleRows.length > 0) && (
+            <div className="rounded-lg border border-card-border bg-card px-4 py-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">People & companies</div>
+                <button
+                  type="button"
+                  className="text-xs text-primary hover:underline"
+                  onClick={() => openAppTab(contactsDirectoryPath({
+                    q: committed.trim(),
+                    companyId: null,
+                    contactId: null,
+                    people: true,
+                    leaseTied: false,
+                  }))}
+                >
+                  {peopleTotal > peopleRows.length
+                    ? `Open all ${peopleTotal.toLocaleString()} in Contacts`
+                    : "Open in Contacts"}
+                </button>
+              </div>
+              {peopleQuery.isFetching && peopleRows.length === 0 ? (
+                <div className="text-xs text-muted-foreground">Looking up directory…</div>
+              ) : (
+                <div className="grid gap-1">
+                  {peopleRows.map((row, i) => (
+                    <button
+                      key={`${row.contact_id ?? "co"}-${row.company_id ?? i}`}
+                      type="button"
+                      className="flex items-start gap-2 text-left rounded-md px-2 py-1.5 hover:bg-muted/50"
+                      onClick={() => openAppTab(contactsDirectoryPath({
+                        q: committed.trim(),
+                        companyId: row.company_id,
+                        contactId: row.contact_id,
+                        people: Boolean(row.contact_id),
+                        leaseTied: false,
+                      }))}
+                    >
+                      <User className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
+                      <span className="min-w-0">
+                        <span className="text-sm font-medium text-foreground">
+                          {row.contact_name || row.company_name || "Directory match"}
+                        </span>
+                        <span className="block text-xs text-muted-foreground truncate">
+                          {[
+                            row.title,
+                            row.company_name,
+                            row.email,
+                            row.lease_lessee,
+                            displayLeaseNumber(row.lease_number),
+                            row.rider_name,
+                          ].filter(Boolean).join(" · ")}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {missing.length > 0 && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
               <div className="text-amber-400 font-medium mb-1">Not in fleet</div>
@@ -670,7 +760,7 @@ export default function SearchPage() {
 
           {noResults && !loading && (
             <div className="text-center text-muted-foreground text-sm py-10">
-              No results for <span className="text-foreground font-medium">{committedLabel}</span>
+              No cars or directory matches for <span className="text-foreground font-medium">{committedLabel}</span>
               {!scope.carData ? ". Turn on Car data to match type or description." : "."}
             </div>
           )}

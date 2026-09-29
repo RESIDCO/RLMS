@@ -71,7 +71,9 @@ import ActivityTimeline from "@/components/ActivityTimeline";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { confirmDelete, confirmSave, confirmWithReason } from "@/components/ConfirmActionDialog";
-import { LeaseGlanceSheet, glanceRiderFromCar, type LeaseGlanceRider } from "@/components/LeaseGlanceSheet";
+import { LeaseGlanceSheet } from "@/components/LeaseGlanceSheet";
+import { glanceRiderFromCar, type LeaseGlanceRider } from "@/lib/glance-rider";
+import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
 import {
   CAR_STATUS_EDIT_OPTIONS,
   crossesInactiveBoundary,
@@ -2235,6 +2237,12 @@ export function CarDetail({
               <span className="font-mono-num">
                 <ExpiresDisplay r={r} />
               </span>
+            </div>
+            <div className="pt-2 border-t border-border">
+              <OlDirectoryContacts
+                riderId={Number((r.assignment as any).rider_id ?? r.assignment.rider?.id)}
+                emptyHint="No directory people on this OL. Open the lease to add them."
+              />
             </div>
           </div>
         ) : (

@@ -684,7 +684,7 @@ export default function SearchPage() {
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm px-4 py-3">{loadError}</div>
           )}
 
-          {!isPaste && committed.trim().length >= 2 && (peopleQuery.isFetching || peopleRows.length > 0) && (
+          {!isPaste && committed.trim().length >= 2 && (
             <div className="rounded-lg border border-card-border bg-card px-4 py-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">People & companies</div>
@@ -697,15 +697,24 @@ export default function SearchPage() {
                     contactId: null,
                     people: true,
                     leaseTied: false,
+                    addContact: peopleRows.length === 0 && !peopleQuery.isFetching,
                   }))}
                 >
-                  {peopleTotal > peopleRows.length
-                    ? `Open all ${peopleTotal.toLocaleString()} in Contacts`
-                    : "Open in Contacts"}
+                  {peopleQuery.isFetching
+                    ? "Open in Contacts"
+                    : peopleRows.length === 0
+                      ? "Add to directory"
+                      : peopleTotal > peopleRows.length
+                        ? `Open all ${peopleTotal.toLocaleString()} in Contacts`
+                        : "Open in Contacts"}
                 </button>
               </div>
               {peopleQuery.isFetching && peopleRows.length === 0 ? (
                 <div className="text-xs text-muted-foreground">Looking up directory…</div>
+              ) : peopleRows.length === 0 ? (
+                <div className="text-xs text-muted-foreground">
+                  No directory matches. Add them and optionally link an MLA or OL.
+                </div>
               ) : (
                 <div className="grid gap-1">
                   {peopleRows.map((row, i) => (

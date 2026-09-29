@@ -1246,10 +1246,18 @@ function AddContactDialog({
       });
       const row = await res.json();
       if (mlaId) {
-        await apiRequest("POST", `/api/company-contacts/${row.id}/lease-links`, {
-          master_lease_id: Number(mlaId),
-          rider_id: olId ? Number(olId) : null,
-        });
+        try {
+          await apiRequest("POST", `/api/company-contacts/${row.id}/lease-links`, {
+            master_lease_id: Number(mlaId),
+            rider_id: olId ? Number(olId) : null,
+          });
+        } catch (linkErr: any) {
+          toast({
+            title: "Contact saved, but the lease was not linked",
+            description: linkErr.message,
+            variant: "destructive",
+          });
+        }
       }
       onCreated(row.id, Number(companyId));
       setName("");

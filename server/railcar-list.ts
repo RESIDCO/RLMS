@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "./supabase";
 import { parseFleetStatus } from "@shared/fleet-status";
-import { isOlNumberToken, splitCarNumber } from "@shared/residco-import";
+import { carNumberSearchPattern, isOlNumberToken, splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag, OPS_FLAG_FALLBACK_PREFIX } from "@shared/ops-flag";
 import { fetchAllRows } from "./fetch-all";
@@ -135,7 +135,8 @@ function safeIlikeToken(s: string) {
  * mark + number ANDed across fields. Digit-only tokens match car_number only
  * (not build year / NBV). Letter tokens match marks, lessee, rider/OL, assignment label.
  * The number half of an explicit mark+number pair is tagged carNumberOnly so it
- * never matches through lease/OL free text.
+ * never matches through lease/OL free text. Short digit strings are zero-padded
+ * to CAR_NUMBER_WIDTH so they cannot substring-match other stored numbers.
  */
 export type SearchToken = { value: string; carNumberOnly?: boolean };
 
@@ -340,7 +341,8 @@ export function applySearchFilter(
     const ors: string[] = [];
     if (tok.carNumberOnly) {
       // Never widen a mark-paired number through lease/OL fields or rider/lease id lists.
-      ors.push(`car_number.ilike.%${t}%`);
+      // Pad short digit strings so "%102%" cannot match 001020 / 310021 / etc.
+      ors.push(`car_number.ilike.%${carNumberSearchPattern(t)}%`);
       ors.push(...railcarIns);
       query = query.or(ors.join(","));
       continue;

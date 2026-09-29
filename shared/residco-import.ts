@@ -255,6 +255,21 @@ export function isOlNumberToken(raw: unknown): boolean {
   return /^X?OL\d+$/i.test(String(raw ?? "").trim().replace(/\s+/g, ""));
 }
 
+/** Stored `railcars.car_number` width — uniformly zero-padded fleet-wide. */
+export const CAR_NUMBER_WIDTH = 6;
+
+/**
+ * Pattern for the number half of an explicit mark+number search.
+ * Short digit strings are padded so they cannot substring-match other 6-digit numbers.
+ */
+export function carNumberSearchPattern(value: string): string {
+  const v = String(value ?? "").trim();
+  if (/^\d+$/.test(v) && v.length < CAR_NUMBER_WIDTH) {
+    return v.padStart(CAR_NUMBER_WIDTH, "0");
+  }
+  return v;
+}
+
 export function splitCarNumber(raw: unknown): {
   reporting_marks: string | null;
   car_number: string;

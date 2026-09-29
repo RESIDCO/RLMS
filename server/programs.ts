@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
-import { splitCarNumber } from "@shared/residco-import";
+import { CAR_NUMBER_WIDTH, splitCarNumber } from "@shared/residco-import";
 import {
   excelSheetName,
   formatCustomField,
@@ -424,7 +424,7 @@ export async function resolveProgramCars(opts: { text: string; programId?: numbe
   for (const n of numbers) {
     numberVariants.add(n);
     numberVariants.add(normCarNumber(n));
-    if (/^\d+$/.test(n)) numberVariants.add(n.padStart(6, "0"));
+    if (/^\d+$/.test(n)) numberVariants.add(n.padStart(CAR_NUMBER_WIDTH, "0"));
   }
 
   const byId = new Map<number, any>();

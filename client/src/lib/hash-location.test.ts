@@ -26,6 +26,11 @@ ok(
   "directory path round-trips people + lease filters",
 );
 ok(contactsDirectoryPath({ q: "", companyId: null, contactId: null, people: false, leaseTied: false }) === "/contacts", "empty directory path");
+ok(
+  contactsDirectoryPath({ q: "Agrex", companyId: null, contactId: null, people: true, leaseTied: false, addContact: true }) === "/contacts?q=Agrex&view=people&add=1",
+  "add=1 opens the add-contact dialog",
+);
+ok(readDirectoryNavState(new URLSearchParams("add=1")).addContact === true, "add=1 parses");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

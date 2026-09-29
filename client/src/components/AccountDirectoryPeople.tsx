@@ -44,6 +44,7 @@ export function AccountDirectoryPeople({
     <div className={compact ? "rounded-lg border border-border bg-card overflow-hidden" : "rounded-xl border border-card-border bg-card overflow-hidden"}>
       <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Directory contacts</div>
+        <div className="flex items-center gap-3 shrink-0">
         <button
           type="button"
           className="text-xs text-primary hover:underline"
@@ -57,6 +58,21 @@ export function AccountDirectoryPeople({
         >
           Open Contacts
         </button>
+        <button
+          type="button"
+          className="text-xs text-primary hover:underline"
+          onClick={() => onOpen(contactsDirectoryPath({
+            q: searchHint ?? "",
+            companyId: null,
+            contactId: null,
+            people: true,
+            leaseTied: false,
+            addContact: true,
+          }))}
+        >
+          Add contact
+        </button>
+        </div>
       </div>
       <div className="px-4 py-3">
         {isLoading ? (

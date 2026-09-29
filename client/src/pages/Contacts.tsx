@@ -357,7 +357,7 @@ export default function Contacts() {
   const [companyId, setCompanyId] = useState<number | null>(boot.companyId);
   const [contactId, setContactId] = useState<number | null>(boot.contactId);
   const [addCompanyOpen, setAddCompanyOpen] = useState(false);
-  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [addContactOpen, setAddContactOpen] = useState(Boolean(boot.addContact));
   const [editCompanyOpen, setEditCompanyOpen] = useState(false);
   const pageSize = 50;
 
@@ -395,6 +395,7 @@ export default function Contacts() {
       setContactId(next.contactId);
       setViewMode(next.people ? "people" : "company");
       setLeaseTiedOnly(next.leaseTied);
+      if (next.addContact) setAddContactOpen(true);
     };
     window.addEventListener("hashchange", apply);
     window.addEventListener("popstate", apply);

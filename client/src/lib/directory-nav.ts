@@ -6,6 +6,7 @@ export type DirectoryNavState = {
   contactId: number | null;
   people: boolean;
   leaseTied: boolean;
+  addContact?: boolean;
 };
 
 function positiveInt(raw: string | null): number | null {
@@ -20,6 +21,7 @@ export function readDirectoryNavState(params: URLSearchParams = hashSearchParams
     contactId: positiveInt(params.get("contact")),
     people: params.get("view") === "people",
     leaseTied: params.get("lease") === "1",
+    addContact: params.get("add") === "1",
   };
 }
 
@@ -30,6 +32,7 @@ export function contactsDirectoryPath(state: DirectoryNavState): string {
   if (state.contactId) p.set("contact", String(state.contactId));
   if (state.people) p.set("view", "people");
   if (state.leaseTied) p.set("lease", "1");
+  if (state.addContact) p.set("add", "1");
   const qs = p.toString();
   return qs ? `/contacts?${qs}` : "/contacts";
 }

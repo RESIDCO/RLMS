@@ -1,4 +1,4 @@
-import { leftoverLegacyContacts, companyNameForRider, pickUniqueCompanyByCleanName, pickUniqueCompanyByPrefix, pickUniqueCompanyStartingWith, pickUniqueCompanyForLessee, directoryCleanName, isPlaceholderLessee } from "@shared/directory-contacts";
+import { leftoverLegacyContacts, companyNameForRider, pickUniqueCompanyByCleanName, pickUniqueCompanyByPrefix, pickUniqueCompanyStartingWith, pickUniqueCompanyForLessee, directoryCleanName, directoryPhoneDigits, isPlaceholderLessee } from "@shared/directory-contacts";
 import { supabaseAdmin } from "./supabase";
 import { classifyAgentEmail } from "./directory-dedup";
 
@@ -112,7 +112,16 @@ export async function listCompanyContacts(query: Record<string, unknown>) {
 
   if (search) {
     const needle = `%${search.replace(/[%_,]/g, "")}%`;
-    q = q.or(`name.ilike.${needle},email.ilike.${needle}`);
+    const digits = directoryPhoneDigits(search);
+    const parts = [
+      `name.ilike.${needle}`,
+      `email.ilike.${needle}`,
+      `phone.ilike.${needle}`,
+      `mobile.ilike.${needle}`,
+      `title.ilike.${needle}`,
+    ];
+    if (digits.length >= 4) parts.push(`phone_digits.ilike.%${digits}%`);
+    q = q.or(parts.join(","));
   }
   if (str(query.company_id)) q = q.eq("company_id", Number(query.company_id));
   if (str(query.source)) q = q.eq("source", str(query.source)!);

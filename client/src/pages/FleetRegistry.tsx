@@ -2241,7 +2241,7 @@ export function CarDetail({
             <div className="pt-2 border-t border-border">
               <OlDirectoryContacts
                 riderId={Number((r.assignment as any).rider_id ?? r.assignment.rider?.id)}
-                emptyHint="No directory people on this OL. Open the lease to add them."
+                emptyHint="No directory people on this OL yet."
               />
             </div>
           </div>

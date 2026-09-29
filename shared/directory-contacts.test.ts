@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/directory-contacts.test.ts */
 
-import { leftoverLegacyContacts, riderContactDedupeKey, companyNameForRider, pickUniqueCompanyByCleanName, pickUniqueCompanyByPrefix, pickUniqueCompanyStartingWith, pickUniqueCompanyForLessee, directoryCleanName, isPlaceholderLessee, wizardRiderContactBody } from "./directory-contacts";
+import { leftoverLegacyContacts, riderContactDedupeKey, companyNameForRider, pickUniqueCompanyByCleanName, pickUniqueCompanyByPrefix, pickUniqueCompanyStartingWith, pickUniqueCompanyForLessee, directoryCleanName, directoryPhoneDigits, isPlaceholderLessee, wizardRiderContactBody } from "./directory-contacts";
 
 let passed = 0;
 let failed = 0;
@@ -88,6 +88,8 @@ ok(
     === JSON.stringify({ name: "Jane", title: "Mgr", email: null, phone: "555" }),
   "wizard contact trims and nulls empty email",
 );
+ok(directoryPhoneDigits("(636) 292-2475") === "6362922475", "phone digits strip punctuation");
+ok(directoryPhoneDigits("abc") === "", "phone digits empty when none");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -23,6 +23,11 @@ export function companyNameForRider(opts: {
   return n || "Unnamed company";
 }
 
+/** Digits-only phone query for directory matching (min 4 digits). */
+export function directoryPhoneDigits(raw: string | null | undefined): string {
+  return String(raw ?? "").replace(/\D/g, "");
+}
+
 /** Strip sold-to "x" prefix, parentheticals like (xTrinity), then legal suffixes. */
 export function directoryCleanName(raw: string): string {
   return cleanCompanyName(

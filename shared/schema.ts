@@ -181,6 +181,7 @@ export type RiderContact = {
   company_id?: number | null;
   company_name?: string | null;
   company_contact_id?: number | null;
+  via_company?: boolean;
 };
 
 export type AssignmentHistory = {

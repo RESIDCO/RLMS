@@ -101,7 +101,7 @@ export function LeaseGlanceSheet({
             </div>
             <OlDirectoryContacts
               riderId={rider.id}
-              emptyHint="No directory people linked to this OL yet. Add them on the full lease page."
+              emptyHint="No directory people linked to this OL yet."
               onPersonClick={onClose}
             />
           </div>

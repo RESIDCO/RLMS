@@ -21,6 +21,7 @@ import Contacts from "@/pages/Contacts";
 import ContactsDedupReview from "@/pages/ContactsDedupReview";
 import Accounts from "@/pages/Accounts";
 import AccountTransitions from "@/pages/AccountTransitions";
+import TerritoryMap from "@/pages/TerritoryMap";
 import APTracker from "@/pages/APTracker";
 import Programs from "@/pages/Programs";
 import ProgramDetail from "@/pages/ProgramDetail";
@@ -86,6 +87,7 @@ function AppRouter() {
       <Route path="/accounts" component={Accounts} />
       <Route path="/account-transitions/:id" component={AccountTransitions} />
       <Route path="/account-transitions" component={AccountTransitions} />
+      <Route path="/territory-map" component={TerritoryMap} />
       <Route path="/all-cars" component={RedirectAllCars} />
       <Route path="/leases" component={LeaseManagement} />
       <Route path="/lease-wizard" component={LeaseWizard} />

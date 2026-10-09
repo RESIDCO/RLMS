@@ -275,6 +275,23 @@ function AccountListView() {
           </Button>
         </div>
 
+        <div className="rounded-xl border border-card-border bg-card shadow-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Territory Map</div>
+            <div className="text-2xl font-semibold font-mono-num mt-1">Sales · Contacts</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              County territories by rep, and contact locations from the Contacts module.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => navigate("/territory-map")}
+            data-testid="button-enter-territory-map"
+          >
+            Open Territory Map
+          </Button>
+        </div>
+
         <div className="flex flex-wrap items-center gap-3">
           <ClearableSearchInput
             className="relative w-full max-w-sm shrink-0 flex-none"

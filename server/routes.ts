@@ -33,6 +33,16 @@ import {
   saveBriefingForm,
 } from "./account-transition-briefing";
 import {
+  assignTerritories,
+  createTerritoryOwner,
+  getTerritoryContacts,
+  getTerritoryHistory,
+  getTerritoryMap,
+  listTerritoryContacts,
+  patchTerritoryOwner,
+  revertTerritoryChangeSet,
+} from "./territories";
+import {
   ACCOUNT_TRANSITIONS_SOURCE,
   genericUploadSource,
   insertAttachmentRow,
@@ -5194,6 +5204,112 @@ export async function registerRoutes(
       if (!Number.isFinite(cid) || cid <= 0) return res.status(400).json({ message: "Invalid comment" });
       await deleteTransitionComment(cid);
       res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/territories/map", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await getTerritoryMap());
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/territories/history", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const county = typeof req.query.county === "string" ? req.query.county : "";
+      const state = typeof req.query.state === "string" ? req.query.state : "";
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 40));
+      res.json(await getTerritoryHistory({ county: county || undefined, state: state || undefined, limit }));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/territories/assign", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      const who = req.authUser?.email || req.authUser?.id || "unknown";
+      try {
+        res.json(await assignTerritories(req.body ?? {}, who));
+      } catch (e: any) {
+        if (e?.status) return res.status(e.status).json({ message: e.message });
+        throw e;
+      }
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/territories/revert", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      const who = req.authUser?.email || req.authUser?.id || "unknown";
+      const id = String(req.body?.change_set_id ?? "").trim();
+      if (!id) return res.status(400).json({ message: "change_set_id is required" });
+      try {
+        res.json(await revertTerritoryChangeSet(id, who));
+      } catch (e: any) {
+        if (e?.status) return res.status(e.status).json({ message: e.message });
+        throw e;
+      }
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/territories/contacts", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await getTerritoryContacts({
+        relationship_type: typeof req.query.relationship_type === "string" ? req.query.relationship_type : undefined,
+        priority_tier: typeof req.query.priority_tier === "string" ? req.query.priority_tier : undefined,
+        pipeline_status: typeof req.query.pipeline_status === "string" ? req.query.pipeline_status : undefined,
+        owner: typeof req.query.owner === "string" ? req.query.owner : undefined,
+        q: typeof req.query.q === "string" ? req.query.q : undefined,
+        linked_to_ol: req.query.linked_to_ol === "true" || req.query.linked_to_ol === "1",
+        location_status: typeof req.query.location_status === "string" ? req.query.location_status : undefined,
+        county: typeof req.query.county === "string" ? req.query.county : undefined,
+        state: typeof req.query.state === "string" ? req.query.state : undefined,
+      }));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/territories/contacts/list", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await listTerritoryContacts({
+        relationship_type: typeof req.query.relationship_type === "string" ? req.query.relationship_type : undefined,
+        priority_tier: typeof req.query.priority_tier === "string" ? req.query.priority_tier : undefined,
+        pipeline_status: typeof req.query.pipeline_status === "string" ? req.query.pipeline_status : undefined,
+        owner: typeof req.query.owner === "string" ? req.query.owner : undefined,
+        q: typeof req.query.q === "string" ? req.query.q : undefined,
+        linked_to_ol: req.query.linked_to_ol === "true" || req.query.linked_to_ol === "1",
+        location_status: typeof req.query.location_status === "string" ? req.query.location_status : undefined,
+        county: typeof req.query.county === "string" ? req.query.county : undefined,
+        state: typeof req.query.state === "string" ? req.query.state : undefined,
+        offset: Number(req.query.offset) || 0,
+        limit: Number(req.query.limit) || 80,
+      }));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/territories/owners", async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      try {
+        const row = await createTerritoryOwner(req.body ?? {});
+        res.status(201).json(row);
+      } catch (e: any) {
+        if (e?.status) return res.status(e.status).json({ message: e.message });
+        throw e;
+      }
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.patch("/api/territories/owners/:initials", async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      try {
+        res.json(await patchTerritoryOwner(String(req.params.initials ?? ""), req.body ?? {}));
+      } catch (e: any) {
+        if (e?.status) return res.status(e.status).json({ message: e.message });
+        throw e;
+      }
     } catch (err) { errHandler(res, err); }
   });
 

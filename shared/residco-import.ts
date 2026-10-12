@@ -270,6 +270,65 @@ export function carNumberSearchPattern(value: string): string {
   return v;
 }
 
+export type CarNumberNormResult =
+  | { ok: true; car_number: string }
+  | { ok: false; message: string };
+
+/**
+ * Stored `railcars.car_number`: digits only, left-padded to CAR_NUMBER_WIDTH.
+ * Rejects letters and values longer than six digits — never silently truncate.
+ */
+export function normalizeStoredCarNumber(raw: unknown): CarNumberNormResult {
+  const s = String(raw ?? "").trim();
+  if (!s) return { ok: false, message: "Enter a car number" };
+  if (!/^\d+$/.test(s)) {
+    return { ok: false, message: "Car number must be digits only (up to 6 digits)." };
+  }
+  if (s.length > CAR_NUMBER_WIDTH) {
+    return { ok: false, message: `Car number must be at most ${CAR_NUMBER_WIDTH} digits.` };
+  }
+  return { ok: true, car_number: s.padStart(CAR_NUMBER_WIDTH, "0") };
+}
+
+export function normalizeMarkAndNumber(raw: unknown):
+  | { ok: true; reporting_marks: string | null; car_number: string; car_initial: string | null }
+  | { ok: false; message: string } {
+  const split = splitCarNumber(raw);
+  if (!split.car_number) {
+    return { ok: false, message: "Enter a mark and number (e.g. OFCX 349699)" };
+  }
+  const num = normalizeStoredCarNumber(split.car_number);
+  if (!num.ok) return num;
+  return {
+    ok: true,
+    reporting_marks: split.reporting_marks,
+    car_number: num.car_number,
+    car_initial: split.car_initial ?? split.reporting_marks,
+  };
+}
+
+export function defaultRemarkReason(fromLabel: string, toLabel: string): string {
+  return `Remarked from ${fromLabel} to ${toLabel}`;
+}
+
+export type CarIdentityConflict = {
+  id: number;
+  reporting_marks?: string | null;
+  car_number?: string | null;
+  status?: string | null;
+  fleet_status?: string | null;
+  entity?: string | null;
+  active?: boolean | null;
+};
+
+export function describeCarNumberConflict(row: CarIdentityConflict): string {
+  const label = [row.reporting_marks, row.car_number].filter(Boolean).join(" ") || "That car number";
+  const active = row.active === false ? "inactive" : "active";
+  const status = String(row.status ?? row.fleet_status ?? "unknown status").trim() || "unknown status";
+  const entity = String(row.entity ?? "unknown").trim() || "unknown";
+  return `${label} already exists — ${active}, ${status}, ${entity} entity (record ${row.id}). Open it to merge or retire it before remarking this car.`;
+}
+
 export function splitCarNumber(raw: unknown): {
   reporting_marks: string | null;
   car_number: string;

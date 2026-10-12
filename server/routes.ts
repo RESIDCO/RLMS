@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { ZodError } from "zod";
 import type { Server } from "http";
 import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
@@ -6,6 +7,7 @@ import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { pointCurrentAssignmentAt } from "./current-assignment";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
+import { conflictResponse, findCarNumberConflict } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
@@ -125,6 +127,9 @@ import {
   parseNumberCell,
   parseIntCell,
   splitCarNumber,
+  normalizeStoredCarNumber,
+  normalizeMarkAndNumber,
+  defaultRemarkReason,
   deriveLeaseKey,
   synthesizeLeaseNumber,
 } from "@shared/residco-import";
@@ -307,6 +312,10 @@ async function dvComputeFreshness() {
 }
 
 function errHandler(res: Response, err: unknown) {
+  if (err instanceof ZodError) {
+    const msg = err.issues[0]?.message || "Invalid input";
+    return res.status(400).json({ message: msg });
+  }
   // Handle Supabase StorageError and PostgrestError objects (have .message but aren't Error instances)
   let msg: string;
   if (err instanceof Error) {
@@ -380,10 +389,21 @@ export async function registerRoutes(
 
         // 3. Create new railcars
         for (const carObj of rp.cars ?? []) {
+          const num = normalizeStoredCarNumber(carObj.car_number);
+          if (!num.ok) {
+            return res.status(400).json({ message: num.message });
+          }
+          const marks = carObj.reporting_marks ?? null;
+          const conflict = await findCarNumberConflict({
+            car_number: num.car_number,
+            reporting_marks: marks,
+          });
+          if (conflict) return res.status(400).json(conflictResponse(conflict));
           const { data: newCar, error: cErr } = await supabase
             .from("railcars")
             .insert({
               ...carObj,
+              car_number: num.car_number,
               ...fieldsImpliedByCarStatus(carObj.status ?? "Active/In-Service"),
             })
             .select()
@@ -1587,6 +1607,11 @@ export async function registerRoutes(
       if (!writerId) return;
       const parsed = insertRailcarSchema.parse(req.body);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RAILCAR_DATE_KEYS]);
+      const createConflict = await findCarNumberConflict({
+        car_number: String(parsed.car_number),
+        reporting_marks: parsed.reporting_marks ?? null,
+      });
+      if (createConflict) return res.status(400).json(conflictResponse(createConflict));
       const flag = parsed.ops_flag;
       const insertRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
       if (parsed.fleet_status) {
@@ -1602,7 +1627,14 @@ export async function registerRoutes(
         .insert(insertRow)
         .select()
         .single();
-      if (error) throw error;
+      if (error) {
+        const raced = await findCarNumberConflict({
+          car_number: String(parsed.car_number),
+          reporting_marks: parsed.reporting_marks ?? null,
+        });
+        if (raced) return res.status(400).json(conflictResponse(raced));
+        throw error;
+      }
       if (flag) await persistOpsFlag([data.id], flag);
       res.json(hydrateOpsFlag({ ...data, ops_flag: flag ?? null }));
     } catch (err) {
@@ -1621,6 +1653,25 @@ export async function registerRoutes(
           : null;
       const parsed = insertRailcarSchema.partial().parse(req.body);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RAILCAR_DATE_KEYS]);
+      if (parsed.car_number !== undefined || parsed.reporting_marks !== undefined) {
+        const { data: currentId, error: idErr } = await supabase
+          .from("railcars")
+          .select("car_number, reporting_marks")
+          .eq("id", id)
+          .single();
+        if (idErr) throw idErr;
+        const nextNum = parsed.car_number ?? currentId?.car_number;
+        const nextMarks =
+          parsed.reporting_marks !== undefined ? parsed.reporting_marks : currentId?.reporting_marks;
+        if (nextNum) {
+          const patchConflict = await findCarNumberConflict({
+            car_number: String(nextNum),
+            reporting_marks: nextMarks ?? null,
+            excludeId: id,
+          });
+          if (patchConflict) return res.status(400).json(conflictResponse(patchConflict));
+        }
+      }
       const flag = parsed.ops_flag;
       const updateRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
 
@@ -1698,9 +1749,9 @@ export async function registerRoutes(
       if (!writerId) return;
       const id = Number(req.params.id);
       const { new_car_number, reason, changed_by } = changeCarNumberSchema.parse(req.body);
-      const split = splitCarNumber(new_car_number);
-      if (!split.car_number) {
-        return res.status(400).json({ message: "Enter a mark and number (e.g. OFCX 349699)" });
+      const split = normalizeMarkAndNumber(new_car_number);
+      if (!split.ok) {
+        return res.status(400).json({ message: split.message });
       }
       const newMarks = split.reporting_marks;
       const newNum = split.car_number;
@@ -1722,21 +1773,19 @@ export async function registerRoutes(
         return res.status(400).json({ message: "New mark/number is the same as the current value" });
       }
 
-      let conflictQ = supabase
-        .from("railcars")
-        .select("id")
-        .eq("car_number", newNum)
-        .neq("id", id);
-      conflictQ = newMarks == null
-        ? conflictQ.is("reporting_marks", null)
-        : conflictQ.eq("reporting_marks", newMarks);
-      const { data: conflict } = await conflictQ.maybeSingle();
-      if (conflict) {
-        const label = [newMarks, newNum].filter(Boolean).join(" ");
-        return res.status(400).json({ message: `Car number ${label} is already in use` });
-      }
+      const conflict = await findCarNumberConflict({
+        car_number: newNum,
+        reporting_marks: newMarks,
+        excludeId: id,
+      });
+      if (conflict) return res.status(400).json(conflictResponse(conflict));
 
       const changedAt = new Date().toISOString();
+      const fromLabel = [oldInitial, car.car_number].filter(Boolean).join(" ");
+      const toLabel = [newInitial, newNum].filter(Boolean).join(" ");
+      const recordedReason =
+        String(reason ?? "").trim() || defaultRemarkReason(fromLabel, toLabel);
+
       const { error: uErr } = await supabase
         .from("railcars")
         .update({
@@ -1745,7 +1794,15 @@ export async function registerRoutes(
           car_initial: newInitial,
         })
         .eq("id", id);
-      if (uErr) throw uErr;
+      if (uErr) {
+        const raced = await findCarNumberConflict({
+          car_number: newNum,
+          reporting_marks: newMarks,
+          excludeId: id,
+        });
+        if (raced) return res.status(400).json(conflictResponse(raced));
+        throw uErr;
+      }
 
       const { data: histRow, error: hErr } = await supabase.from("car_number_history").insert({
         railcar_id: id,
@@ -1755,19 +1812,17 @@ export async function registerRoutes(
         new_car_number: newNum,
         changed_at: changedAt,
         changed_by: changed_by ?? req.authUser?.email ?? "system",
-        reason: reason ?? null,
+        reason: recordedReason,
       }).select("id").single();
       if (hErr) throw hErr;
 
-      const fromLabel = [oldInitial, car.car_number].filter(Boolean).join(" ");
-      const toLabel = [newInitial, newNum].filter(Boolean).join(" ");
       await logActivity({
         entity_type: "railcar",
         entity_id: id,
         railcar_id: id,
         action: "mark_change",
         actor: changed_by ?? req.authUser?.email ?? "system",
-        detail: { from: fromLabel, to: toLabel, reason: reason ?? null },
+        detail: { from: fromLabel, to: toLabel, reason: recordedReason },
         occurred_at: changedAt,
         source_table: "car_number_history",
         source_id: histRow?.id ?? null,
@@ -2374,7 +2429,9 @@ export async function registerRoutes(
     const split = splitCarNumber(rawCarNum);
     const marks = explicitMarks ?? split.reporting_marks;
     const carInitial = explicitInitial ?? split.car_initial ?? marks;
-    const carNum = split.car_number || rawCarNum.toUpperCase();
+    const rawNum = split.car_number || rawCarNum;
+    const padded = normalizeStoredCarNumber(rawNum);
+    const carNum = padded.ok ? padded.car_number : String(rawNum).toUpperCase();
     const carType = get("car_type") || null;
     const statusRaw = get("status");
     const status = statusRaw || "Active/In-Service";

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeStoredCarNumber } from "./residco-import";
 
 // ---- Database row types ----
 
@@ -273,8 +274,17 @@ export const insertAccountSchema = z.object({
 });
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
 
+const storedCarNumber = z.string().min(1).transform((s, ctx) => {
+  const n = normalizeStoredCarNumber(s);
+  if (!n.ok) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: n.message });
+    return z.NEVER;
+  }
+  return n.car_number;
+});
+
 export const insertRailcarSchema = z.object({
-  car_number: z.string().min(1),
+  car_number: storedCarNumber,
   reporting_marks: z.string().nullable().optional(),
   car_type: z.string().nullable().optional(),
   equipment_type_code: z.string().nullable().optional(),

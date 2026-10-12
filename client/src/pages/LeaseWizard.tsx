@@ -40,6 +40,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useCanEdit } from "@/lib/AuthContext";
 import type { RailcarWithAssignment } from "@shared/schema";
 import { wizardRiderContactBody } from "@shared/directory-contacts";
+import { normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MlaForm = {
@@ -317,6 +318,10 @@ function NewCarRow({ car, onChange, onRemove }: {
           placeholder="123456"
           value={car.car_number}
           onChange={(e) => onChange({ ...car, car_number: e.target.value.toUpperCase() })}
+          onBlur={() => {
+            const n = normalizeStoredCarNumber(car.car_number);
+            if (n.ok) onChange({ ...car, car_number: n.car_number });
+          }}
         />
       </div>
       <div className="col-span-2">
@@ -413,12 +418,25 @@ function BulkPasteDialog({ open, onClose, onAdd }: {
           <Button
             disabled={lines.length === 0}
             onClick={() => {
-              const cars = lines.map((num) => ({
-                ...blankCar(),
-                car_number: num.toUpperCase(),
-                entity,
-                car_type: carType,
-              }));
+              const cars = lines.map((num) => {
+                const parsed = normalizeMarkAndNumber(num);
+                if (parsed.ok) {
+                  return {
+                    ...blankCar(),
+                    car_number: parsed.car_number,
+                    reporting_marks: parsed.reporting_marks ?? "",
+                    entity,
+                    car_type: carType,
+                  };
+                }
+                const digits = normalizeStoredCarNumber(num);
+                return {
+                  ...blankCar(),
+                  car_number: digits.ok ? digits.car_number : num.toUpperCase(),
+                  entity,
+                  car_type: carType,
+                };
+              });
               onAdd(cars);
               onClose();
               setText("");
@@ -535,7 +553,11 @@ export default function LeaseWizard() {
           existing_car_ids: r.existing_car_ids,
           contact: wizardRiderContactBody(r),
           cars: r.new_cars.map((c) => ({
-            car_number: c.car_number,
+            car_number: (() => {
+              const n = normalizeStoredCarNumber(c.car_number);
+              if (!n.ok) throw new Error(n.message);
+              return n.car_number;
+            })(),
             reporting_marks: c.reporting_marks || null,
             car_type: c.car_type || null,
             entity: c.entity || null,

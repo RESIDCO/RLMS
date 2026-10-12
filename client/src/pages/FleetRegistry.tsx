@@ -61,7 +61,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { displayLeaseNumber } from "@shared/residco-import";
+import { displayLeaseNumber, normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
 import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
 import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate, todayIsoDateOnly } from "@shared/lease-authority";
 import { leaseExpirationSourceLabel } from "@shared/lease-governance";
@@ -2465,10 +2465,14 @@ function RemarkChangeDialog({
 
   useEffect(() => { if (open) { setNewNumber(""); setReason(""); } }, [open]);
 
+  const preview = newNumber.trim() ? normalizeMarkAndNumber(newNumber) : null;
+
   const save = useMutation({
     mutationFn: async () => {
+      const parsed = normalizeMarkAndNumber(newNumber);
+      if (!parsed.ok) throw new Error(parsed.message);
       const res = await apiRequest("POST", `/api/railcars/${carId}/change-number`, {
-        new_car_number: newNumber.trim().toUpperCase(),
+        new_car_number: `${parsed.reporting_marks ?? ""} ${parsed.car_number}`.trim(),
         reason: reason.trim() || null,
       });
       return res.json();
@@ -2482,12 +2486,23 @@ function RemarkChangeDialog({
       toast({ title: `Car number changed: ${from} → ${to}` });
       onClose();
     },
-    onError: (e: Error) =>
+    onError: (e: Error) => {
+      const m = /record (\d+)/.exec(e.message || "");
       toast({
         title: "Change failed",
-        description: e.message || "Request failed",
+        description: (
+          <div className="space-y-1">
+            <div>{e.message || "Request failed"}</div>
+            {m ? (
+              <a href={`#/cars/${m[1]}`} className="underline font-medium">
+                Open record {m[1]}
+              </a>
+            ) : null}
+          </div>
+        ),
         variant: "destructive",
-      }),
+      });
+    },
   });
 
   return (
@@ -2510,10 +2525,21 @@ function RemarkChangeDialog({
               placeholder="e.g. OFCX 349699"
               className="font-mono"
             />
+            {preview?.ok ? (
+              <p className="text-[11px] text-muted-foreground mt-1 font-mono">
+                Will store {preview.reporting_marks} {preview.car_number}
+              </p>
+            ) : preview && !preview.ok && newNumber.trim() ? (
+              <p className="text-[11px] text-destructive mt-1">{preview.message}</p>
+            ) : null}
           </div>
           <div>
-            <Label>Reason</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reporting mark change per lessee request" />
+            <Label>Comment <span className="text-[10px] text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Leave blank to auto-record Remarked from … to …"
+            />
           </div>
         </div>
         <DialogFooter>
@@ -2594,13 +2620,18 @@ export function RailcarFormDialog({
 
   const save = useMutation({
     mutationFn: async (inactiveReason?: string | null) => {
+      const payload: Record<string, unknown> = { ...form };
+      delete payload.notes;
+      if (!car) {
+        const num = normalizeStoredCarNumber(form.car_number);
+        if (!num.ok) throw new Error(num.message);
+        payload.car_number = num.car_number;
+      }
       if (car) {
-        const payload: Record<string, unknown> = { ...form };
-        delete payload.notes;
         if (inactiveReason) payload.inactive_change_reason = inactiveReason;
         await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
       } else {
-        const res = await apiRequest("POST", `/api/railcars`, form);
+        const res = await apiRequest("POST", `/api/railcars`, payload);
         // If a rider/OL was entered, resolve (match or create) then assign
         if (assignRiderId.trim()) {
           const newCar = await res.json();
@@ -2701,7 +2732,11 @@ export function RailcarFormDialog({
                 <Input
                   value={form.car_number}
                   onChange={(e) => setForm({ ...form, car_number: e.target.value })}
-                  placeholder="e.g. 123456"
+                  onBlur={() => {
+                    const n = normalizeStoredCarNumber(form.car_number);
+                    if (n.ok) setForm({ ...form, car_number: n.car_number });
+                  }}
+                  placeholder="e.g. 032115"
                   className="font-mono"
                   disabled={!!car}
                   data-testid="input-car-number"

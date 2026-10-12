@@ -9,6 +9,8 @@
  * See docs/IMPORT_WRITE_BOUNDARIES.md.
  */
 
+import { normalizeStoredCarNumber } from "./residco-import";
+
 export type VcfRawRow = Record<string, unknown>;
 
 export type ParsedActive =
@@ -237,8 +239,9 @@ function str(v: unknown): string | null {
 
 function carNumStr(v: unknown): string {
   if (v == null || v === "") return "";
-  if (typeof v === "number") return String(Math.trunc(v));
-  return String(v).trim();
+  const s = typeof v === "number" ? String(Math.trunc(v)) : String(v).trim();
+  const n = normalizeStoredCarNumber(s);
+  return n.ok ? n.car_number : s;
 }
 
 export function parseVcfRow(raw: VcfRawRow, sourceRow: number): VcfParsedRow | null {

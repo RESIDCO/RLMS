@@ -7,7 +7,7 @@ import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { pointCurrentAssignmentAt } from "./current-assignment";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
-import { conflictResponse, findCarNumberConflict } from "./car-number-guard";
+import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
@@ -129,7 +129,6 @@ import {
   splitCarNumber,
   normalizeStoredCarNumber,
   normalizeMarkAndNumber,
-  defaultRemarkReason,
   deriveLeaseKey,
   synthesizeLeaseNumber,
 } from "@shared/residco-import";
@@ -1728,7 +1727,8 @@ export async function registerRoutes(
     }
   });
 
-  // Change reporting mark / car number (remark) — retains all other attributes, logs history
+  // Remark: retire old identity, insert new active identity (one DB transaction).
+  // Editor/admin only (requireWrite). RPC is service_role-only; viewers cannot call it.
   app.post("/api/railcars/:id/change-number", async (req, res) => {
     try {
       const writerId = await requireWrite(req, res);
@@ -1739,88 +1739,83 @@ export async function registerRoutes(
       if (!split.ok) {
         return res.status(400).json({ message: split.message });
       }
-      const newMarks = split.reporting_marks;
-      const newNum = split.car_number;
-      const newInitial = split.car_initial ?? split.reporting_marks;
-
-      const { data: car, error: cErr } = await supabase
-        .from("railcars")
-        .select("id, car_number, reporting_marks, car_initial")
-        .eq("id", id)
-        .single();
-      if (cErr) throw cErr;
-      if (!car) return res.status(404).json({ message: "Railcar not found" });
-
-      const oldInitial = car.car_initial ?? car.reporting_marks ?? null;
-      const sameMark =
-        String(car.reporting_marks ?? "").toUpperCase() === String(newMarks ?? "").toUpperCase();
-      const sameNum = String(car.car_number ?? "").toUpperCase() === String(newNum).toUpperCase();
-      if (sameMark && sameNum) {
-        return res.status(400).json({ message: "New mark/number is the same as the current value" });
+      if (!split.reporting_marks) {
+        return res.status(400).json({ message: "Enter a mark and number (e.g. OFCX 349699)" });
       }
-
-      const conflict = await findCarNumberConflict({
-        car_number: newNum,
-        reporting_marks: newMarks,
-        excludeId: id,
+      const { data, error } = await supabaseAdmin.rpc("remark_railcars", {
+        p_items: [{ id, reporting_marks: split.reporting_marks, car_number: split.car_number }],
+        p_reason: reason ?? null,
+        p_changed_by: changed_by ?? req.authUser?.email ?? "system",
       });
-      if (conflict) return res.status(400).json(conflictResponse(conflict));
-
-      const changedAt = new Date().toISOString();
-      const fromLabel = [oldInitial, car.car_number].filter(Boolean).join(" ");
-      const toLabel = [newInitial, newNum].filter(Boolean).join(" ");
-      const recordedReason =
-        String(reason ?? "").trim() || defaultRemarkReason(fromLabel, toLabel);
-
-      const { error: uErr } = await supabase
-        .from("railcars")
-        .update({
-          car_number: newNum,
-          reporting_marks: newMarks,
-          car_initial: newInitial,
-        })
-        .eq("id", id);
-      if (uErr) {
-        const raced = await findCarNumberConflict({
-          car_number: newNum,
-          reporting_marks: newMarks,
-          excludeId: id,
-        });
-        if (raced) return res.status(400).json(conflictResponse(raced));
-        throw uErr;
+      if (error) throw error;
+      const out = data as {
+        ok?: boolean;
+        error?: string;
+        conflicts?: Parameters<typeof remarkConflictsHttp>[0];
+        results?: Array<Record<string, unknown>>;
+      };
+      if (!out?.ok) {
+        if (out?.conflicts?.length) {
+          const http = remarkConflictsHttp(out.conflicts);
+          return res.status(http.status).json(http.body);
+        }
+        return res.status(400).json({ message: out?.error || "Remark failed" });
       }
-
-      const { data: histRow, error: hErr } = await supabase.from("car_number_history").insert({
-        railcar_id: id,
-        old_car_initial: oldInitial,
-        old_car_number: car.car_number,
-        new_car_initial: newInitial,
-        new_car_number: newNum,
-        changed_at: changedAt,
-        changed_by: changed_by ?? req.authUser?.email ?? "system",
-        reason: recordedReason,
-      }).select("id").single();
-      if (hErr) throw hErr;
-
-      await logActivity({
-        entity_type: "railcar",
-        entity_id: id,
-        railcar_id: id,
-        action: "mark_change",
-        actor: changed_by ?? req.authUser?.email ?? "system",
-        detail: { from: fromLabel, to: toLabel, reason: recordedReason },
-        occurred_at: changedAt,
-        source_table: "car_number_history",
-        source_id: histRow?.id ?? null,
-      });
-
+      const row = out.results?.[0] ?? {};
       res.json({
         ok: true,
-        old_car_initial: oldInitial,
-        old_car_number: car.car_number,
-        new_car_initial: newInitial,
-        new_car_number: newNum,
+        old_id: row.old_id,
+        new_id: row.new_id,
+        old_car_initial: row.old_car_initial,
+        old_car_number: row.old_car_number,
+        new_car_initial: row.new_car_initial,
+        new_car_number: row.new_car_number,
       });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  // Bulk remark: same RPC, all-or-none. One optional shared comment. Editor/admin only.
+  app.post("/api/railcars/bulk-change-number", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const itemsIn = Array.isArray(req.body?.items) ? req.body.items : [];
+      const reason = typeof req.body?.reason === "string" ? req.body.reason : null;
+      const changed_by = typeof req.body?.changed_by === "string" ? req.body.changed_by : null;
+      const items: { id: number; reporting_marks: string; car_number: string }[] = [];
+      for (const raw of itemsIn) {
+        const id = Number(raw?.id);
+        const parsed = normalizeMarkAndNumber(raw?.new_car_number ?? `${raw?.reporting_marks ?? ""} ${raw?.car_number ?? ""}`);
+        if (!Number.isFinite(id) || id <= 0) {
+          return res.status(400).json({ message: "Each item needs a railcar id" });
+        }
+        if (!parsed.ok) return res.status(400).json({ message: parsed.message });
+        if (!parsed.reporting_marks) {
+          return res.status(400).json({ message: "Enter a mark and number (e.g. OFCX 349699)" });
+        }
+        items.push({ id, reporting_marks: parsed.reporting_marks, car_number: parsed.car_number });
+      }
+      if (!items.length) return res.status(400).json({ message: "No cars to remark" });
+      const { data, error } = await supabaseAdmin.rpc("remark_railcars", {
+        p_items: items,
+        p_reason: reason,
+        p_changed_by: changed_by ?? req.authUser?.email ?? "system",
+      });
+      if (error) throw error;
+      const out = data as {
+        ok?: boolean;
+        error?: string;
+        conflicts?: Parameters<typeof remarkConflictsHttp>[0];
+        results?: unknown[];
+      };
+      if (!out?.ok) {
+        if (out?.conflicts?.length) {
+          const http = remarkConflictsHttp(out.conflicts);
+          return res.status(http.status).json(http.body);
+        }
+        return res.status(400).json({ message: out?.error || "Remark failed" });
+      }
+      res.json({ ok: true, results: out.results ?? [] });
     } catch (err) { errHandler(res, err); }
   });
 
@@ -3083,6 +3078,8 @@ export async function registerRoutes(
               (updatePayload as any).fleet_status_source = "auto";
             }
             // Never overwrite a human Inactive/Reactivate pick.
+            // Remark-retired identities also stamp active_source=manual so a
+            // later VCF that still lists the old mark as ACTIVE cannot revive them.
             const activeManual = (existingCar as any)?.active_source === "manual";
             if (activeManual) {
               delete (updatePayload as any).active;

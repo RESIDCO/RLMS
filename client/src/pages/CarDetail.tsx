@@ -170,6 +170,7 @@ export default function CarDetailPage() {
                 showCarPageLink={false}
                 onEdit={(car) => setEditCar(car)}
                 onDelete={() => deleteMutation.mutate()}
+                onRemarked={(newId) => navigate(`/cars/${newId}`)}
               />
             </div>
 

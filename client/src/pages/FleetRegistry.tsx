@@ -1852,6 +1852,8 @@ export function RailcarDetailSheet({
   const canEdit = useCanEdit() && !readOnly;
   const { toast } = useToast();
   const [editCar, setEditCar] = useState<Row | null>(null);
+  const [viewId, setViewId] = useState<number | null>(carId);
+  useEffect(() => { setViewId(carId); }, [carId]);
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -1871,14 +1873,15 @@ export function RailcarDetailSheet({
     <>
       <Sheet open={carId != null} onOpenChange={(o) => !o && onClose()}>
         <SheetContent side="right" className="w-full sm:w-[480px] sm:max-w-[480px] overflow-y-auto">
-          {carId != null && (
+          {viewId != null && (
             <CarDetail
-              carId={carId}
+              carId={viewId}
               onEdit={readOnly ? () => {} : (car) => setEditCar(car)}
-              onDelete={readOnly ? () => {} : () => deleteMutation.mutate(carId)}
+              onDelete={readOnly ? () => {} : () => deleteMutation.mutate(viewId)}
               canEdit={canEdit}
               showCarPageLink={!readOnly}
               readOnly={readOnly}
+              onRemarked={(newId) => setViewId(newId)}
             />
           )}
         </SheetContent>
@@ -1901,6 +1904,7 @@ export function CarDetail({
   canEdit,
   showCarPageLink = true,
   readOnly = false,
+  onRemarked,
 }: {
   carId: number;
   onEdit: (car: RailcarWithAssignment) => void;
@@ -1910,6 +1914,7 @@ export function CarDetail({
   showCarPageLink?: boolean;
   /** Context-gated read-only (e.g. Account Management). Overrides canEdit. */
   readOnly?: boolean;
+  onRemarked?: (newId: number) => void;
 }) {
   const allowEdits = canEdit && !readOnly;
   const { toast } = useToast();
@@ -2084,7 +2089,7 @@ export function CarDetail({
             Edit
           </Button>
         )}
-        {allowEdits && (
+        {allowEdits && r.active === true && (
           <Button size="sm" variant="outline" onClick={() => setRemarkOpen(true)}>
             <Hash className="h-3.5 w-3.5" />
             Change Number
@@ -2445,6 +2450,7 @@ export function CarDetail({
           onClose={() => setRemarkOpen(false)}
           carId={carId}
           currentLabel={[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}
+          onRemarked={onRemarked}
         />
       )}
     </div>
@@ -2452,12 +2458,13 @@ export function CarDetail({
 }
 
 function RemarkChangeDialog({
-  open, onClose, carId, currentLabel,
+  open, onClose, carId, currentLabel, onRemarked,
 }: {
   open: boolean;
   onClose: () => void;
   carId: number;
   currentLabel: string;
+  onRemarked?: (newId: number) => void;
 }) {
   const { toast } = useToast();
   const [newNumber, setNewNumber] = useState("");
@@ -2480,11 +2487,13 @@ function RemarkChangeDialog({
     onSuccess: (d: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars", carId] });
+      if (d.new_id) queryClient.invalidateQueries({ queryKey: ["/api/railcars", d.new_id] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
       const from = [d.old_car_initial, d.old_car_number].filter(Boolean).join(" ") || d.old_car_number;
       const to = [d.new_car_initial, d.new_car_number].filter(Boolean).join(" ") || d.new_car_number;
-      toast({ title: `Car number changed: ${from} → ${to}` });
+      toast({ title: `Remarked ${from} → ${to}`, description: "Old identity is Off-Lease; the new identity is the active car." });
       onClose();
+      if (d.new_id) onRemarked?.(Number(d.new_id));
     },
     onError: (e: Error) => {
       const m = /record (\d+)/.exec(e.message || "");
@@ -2516,7 +2525,9 @@ function RemarkChangeDialog({
             <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Current number</div>
             <div className="font-mono font-semibold">{currentLabel || "—"}</div>
           </div>
-          <p className="text-xs text-muted-foreground">All car attributes (type, lining, capacity, history) are retained. Only the car number / reporting mark changes.</p>
+          <p className="text-xs text-muted-foreground">
+            This retires the current mark and number as an inactive Off-Lease row and creates a new active car for the new identity. The lease assignment moves with the new row. Nothing is deleted.
+          </p>
           <div>
             <Label>New Mark + Number <span className="text-destructive">*</span></Label>
             <Input

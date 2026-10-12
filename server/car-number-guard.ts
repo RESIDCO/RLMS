@@ -36,3 +36,18 @@ export function conflictResponse(row: CarIdentityConflict) {
     },
   };
 }
+
+export function remarkConflictsHttp(conflicts: CarIdentityConflict[]) {
+  if (conflicts.length === 1) {
+    return { status: 400 as const, body: conflictResponse(conflicts[0]) };
+  }
+  return {
+    status: 400 as const,
+    body: {
+      message:
+        `Remark blocked for ${conflicts.length} cars:\n` +
+        conflicts.map((c) => describeCarNumberConflict(c)).join("\n"),
+      conflicts: conflicts.map((c) => conflictResponse(c).conflict),
+    },
+  };
+}

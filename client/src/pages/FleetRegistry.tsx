@@ -2628,6 +2628,8 @@ export function RailcarFormDialog({
         payload.car_number = num.car_number;
       }
       if (car) {
+        delete payload.car_number;
+        delete payload.reporting_marks;
         if (inactiveReason) payload.inactive_change_reason = inactiveReason;
         await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
       } else {

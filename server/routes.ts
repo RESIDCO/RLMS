@@ -1653,27 +1653,13 @@ export async function registerRoutes(
           : null;
       const parsed = insertRailcarSchema.partial().parse(req.body);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RAILCAR_DATE_KEYS]);
-      if (parsed.car_number !== undefined || parsed.reporting_marks !== undefined) {
-        const { data: currentId, error: idErr } = await supabase
-          .from("railcars")
-          .select("car_number, reporting_marks")
-          .eq("id", id)
-          .single();
-        if (idErr) throw idErr;
-        const nextNum = parsed.car_number ?? currentId?.car_number;
-        const nextMarks =
-          parsed.reporting_marks !== undefined ? parsed.reporting_marks : currentId?.reporting_marks;
-        if (nextNum) {
-          const patchConflict = await findCarNumberConflict({
-            car_number: String(nextNum),
-            reporting_marks: nextMarks ?? null,
-            excludeId: id,
-          });
-          if (patchConflict) return res.status(400).json(conflictResponse(patchConflict));
-        }
-      }
       const flag = parsed.ops_flag;
       const updateRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
+      // Identity changes go through POST /change-number only. Echoing an unchanged
+      // (or unpadded) car_number on Edit would fire the pad trigger and collide.
+      delete updateRow.car_number;
+      delete updateRow.reporting_marks;
+      delete updateRow.car_initial;
 
       // Rental Status must never flip active / active_status / Car Status as a side effect.
       if (parsed.fleet_status) {

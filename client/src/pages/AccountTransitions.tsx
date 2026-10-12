@@ -283,7 +283,7 @@ function TransitionList() {
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="Account Transitions"
-        subtitle="Handoff tracking — does not change Account Manager on the account"
+        subtitle="Completing a handoff updates the account's Account Manager system-wide"
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -772,7 +772,6 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
         <p className="text-xs text-muted-foreground">
           {acct.counts.mlas} MLA · {acct.counts.ols} OL · {acct.counts.active_cars} active cars
           {flagged ? "" : " · Set Incoming AM to flag this account in the completion tile."}
-          {" "}Completing a handoff never changes the account’s Account Manager field.
         </p>
 
         <div className="grid sm:grid-cols-2 gap-4 max-w-xl">
@@ -829,6 +828,22 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
                 <SelectItem value="complete">Complete</SelectItem>
               </SelectContent>
             </Select>
+            {draft.status === "complete" && String(draft.to_account_manager ?? "").trim() ? (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Setting Complete will change this account's Account Manager from{" "}
+                {displayTransitionAm(acct.account_manager ?? draft.from_account_manager)} to{" "}
+                {displayTransitionAm(draft.to_account_manager)}.
+              </p>
+            ) : draft.status === "complete" ? (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Complete will not change the account's Account Manager until Incoming AM is set.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Completing a handoff updates this account's Account Manager. Reopening does not revert it
+                {acct.account_manager ? ` — the account still shows ${displayTransitionAm(acct.account_manager)}` : ""}.
+              </p>
+            )}
             <div className="mt-2">
               <div className="flex items-center gap-2">
                 <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">

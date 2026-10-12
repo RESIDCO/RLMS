@@ -476,14 +476,16 @@ export function railcarPayloadFromCurrent(
 }
 
 /**
- * Natural key for a VCF assignment-period row in assignment_history (§2.1 step 5).
+ * Natural key for a *closed* VCF assignment-period row in assignment_history.
  *
- * Bruce's intent: car + ASSIGNMENT_ID. In the real V_VALID_CARS file that alone is not
- * unique — renewals reuse ASSIGNMENT_ID, and a handful of rows also share start_date
- * while differing on end_date. Period identity is therefore:
+ * Open (current) periods are matched by railcar_id + rider + start_date in
+ * shared/vcf-assignment-closeout.ts — a null assignment_id_ext and a later
+ * filled id are the same open period. This full key is still used for closed
+ * historical rows (renewals reuse ASSIGNMENT_ID; a few also share start_date
+ * while differing on end_date):
  *   railcar_id + ASSIGNMENT_ID + start_date + end_date
- * ACTIVE is intentionally NOT part of the key so month-over-month ACTIVE flips update
- * the existing period row instead of inserting a sibling.
+ * ACTIVE is intentionally NOT part of the key so month-over-month ACTIVE flips
+ * update the existing period row instead of inserting a sibling.
  * Nulls are empty-string so the key stays stable across runs.
  */
 export function assignmentHistoryNaturalKey(

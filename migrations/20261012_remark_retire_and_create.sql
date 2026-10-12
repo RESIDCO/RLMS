@@ -2,7 +2,8 @@
 -- Never deletes a railcars row. Mirrors VCF: retired rows are active=false,
 -- status Off-Lease, entity unchanged. Sets active_source=manual on the retired
 -- row so a later VCF that still lists the old mark as ACTIVE cannot flip it back
--- (import already skips active/status when active_source=manual).
+-- (import already skips active/status when active_source=manual). The new row
+-- keeps active_source=auto so later VCF can still update active/status.
 
 CREATE OR REPLACE FUNCTION public.remark_railcars(
   p_items jsonb,
@@ -166,7 +167,7 @@ BEGIN
       build_date, railinc_oec, fleet_status, fleet_status_source, acquisition_batch_id,
       acquisition_date, purchase_price, needs_completion, lease_date_source,
       equipment_type_code, ops_flag, ops_flag_set_at,
-      true, v_new_status, 'Active', 'manual'
+      true, v_new_status, 'Active', 'auto'
     FROM public.railcars
     WHERE id = v_id
     RETURNING id INTO v_new_id;

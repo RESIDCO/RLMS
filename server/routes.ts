@@ -135,12 +135,17 @@ import {
 import {
   buildVcfReview,
   railcarPayloadFromCurrent,
-  assignmentHistoryNaturalKey,
   assignmentHistoryPayloadFromPeriod,
-  assignmentHistoryContentEqual,
   carNumberHistoryNaturalKey,
   carNumberHistoryPayloadFromPeriod,
 } from "@shared/vcf-import";
+import {
+  closeoutClosePatch,
+  closeoutStats,
+  planVcfAssignmentCloseout,
+  skipVcfAssignmentWrites,
+  type ExistingHistoryRow,
+} from "@shared/vcf-assignment-closeout";
 import {
   deriveFleetStatus,
   isOperatingFleetCar,
@@ -2940,11 +2945,12 @@ export async function registerRoutes(
 
   // VCF commit — gated. Requires confirmProductionImport === true after Bruce review.
   // Not used for the non-prod gate run; kept ready for the signed-off production load.
-  // Do-not-touch: accounts.account_manager, riders.account_manager (deprecated).
-  // VCF writes railcars + assignment_history + car_number_history. It does not
-  // insert riders or accounts. Post-commit expiration sync may patch
-  // riders.expiration_date / effective_date only.
-  // See docs/IMPORT_WRITE_BOUNDARIES.md.
+  // Do-not-touch: accounts.account_manager, riders.account_manager (deprecated),
+  // railcar_assignments, railcars.current_assignment_id (Phase 2).
+  // VCF writes railcars + assignment_history + car_number_history. Open history
+  // periods match car+rider+start (null vs filled ASSIGNMENT_ID is the same
+  // period). Manual / already-inactive cars skip assignment_history writes.
+  // See docs/IMPORT_WRITE_BOUNDARIES.md and docs/VCF_CLOSEOUT_PHASE1.md.
   app.post("/api/import/vcf/commit", async (req: Request, res: Response) => {
     try {
       const writerId = await requireWrite(req, res);
@@ -2986,36 +2992,33 @@ export async function registerRoutes(
       let assignmentInserted = 0;
       let assignmentUpdated = 0;
       let assignmentUnchanged = 0;
+      let assignmentClosed = 0;
+      let assignmentSkipped = 0;
       let remarkHistory = 0;
       let remarkInserted = 0;
       let remarkUpdated = 0;
       let remarkUnchanged = 0;
       const movedAt = new Date().toISOString();
 
-      // Prefetch existing VCF history for idempotent upsert (car + ASSIGNMENT_ID + start_date)
-      const ahByKey = new Map<string, any>();
+      // Prefetch all assignment_history so close-out can see open periods
+      // regardless of moved_by (null ASSIGNMENT_ID twins, remark copies, etc.).
+      const ahByRailcar = new Map<number, ExistingHistoryRow[]>();
       {
         let from = 0;
         for (;;) {
           const { data, error } = await supabase
             .from("assignment_history")
             .select(
-              "id, railcar_id, assignment_id_ext, start_date, end_date, rider_external_id, assignment_label, active, comment, reason"
+              "id, railcar_id, assignment_id_ext, start_date, end_date, rider_external_id, assignment_label, active, comment, reason, moved_at, moved_by"
             )
-            .eq("moved_by", "vcf-import")
             .range(from, from + 999);
           if (error) throw error;
           const chunk = data ?? [];
           for (const r of chunk) {
-            ahByKey.set(
-              assignmentHistoryNaturalKey(
-                r.railcar_id,
-                r.assignment_id_ext,
-                r.start_date,
-                r.end_date
-              ),
-              r
-            );
+            const rid = Number(r.railcar_id);
+            const list = ahByRailcar.get(rid) ?? [];
+            list.push(r as ExistingHistoryRow);
+            ahByRailcar.set(rid, list);
           }
           if (chunk.length < 1000) break;
           from += 1000;
@@ -3060,13 +3063,15 @@ export async function registerRoutes(
           });
           const existingId = keyToId.get(car.carKey);
           let railcarId = existingId;
+          let existingCar: { entity?: string | null; fleet_status_source?: string | null; active_source?: string | null; active?: boolean | null; status?: string | null } | null = null;
           if (existingId) {
             // Skip entity in update when unchanged so the old managed_category trigger doesn't fire
-            const { data: existingCar } = await supabase
+            const existingCarRes = await supabase
               .from("railcars")
               .select("entity, fleet_status_source, active_source, active, status")
               .eq("id", existingId)
               .maybeSingle();
+            existingCar = existingCarRes.data as typeof existingCar;
             const updatePayload = { ...payload };
             if (existingCar && (existingCar as any).entity === payload.entity) {
               delete (updatePayload as any).entity;
@@ -3106,88 +3111,6 @@ export async function registerRoutes(
             const { error } = await supabase.from("railcars").update(updatePayload).eq("id", existingId);
             if (error) throw error;
             updated += 1;
-
-            // Idempotent assignment_history upsert — natural key car + ASSIGNMENT_ID + start_date
-            // (Do NOT delete-all / blind-insert; monthly re-runs must not double rows.)
-            const protectedActive =
-              activeManual ? ((existingCar as any).active === true) : null;
-            for (const p of car.periods) {
-              const hist = assignmentHistoryPayloadFromPeriod(railcarId!, p, movedAt);
-              // Only the open-ended (current) period feeds export "current" ACTIVE;
-              // keep it aligned with guarded railcars.active. Closed periods keep file ACTIVE.
-              if (protectedActive != null && hist.end_date == null) {
-                hist.active = protectedActive;
-              }
-              const key = assignmentHistoryNaturalKey(
-                hist.railcar_id,
-                hist.assignment_id_ext,
-                hist.start_date,
-                hist.end_date
-              );
-              const existing = ahByKey.get(key);
-              if (existing) {
-                if (assignmentHistoryContentEqual(existing, hist)) {
-                  assignmentUnchanged += 1;
-                } else {
-                  const { error } = await supabase
-                    .from("assignment_history")
-                    .update(hist)
-                    .eq("id", existing.id);
-                  if (error) throw error;
-                  ahByKey.set(key, { ...existing, ...hist });
-                  assignmentUpdated += 1;
-                }
-              } else {
-                const { data: ins, error } = await supabase
-                  .from("assignment_history")
-                  .insert(hist)
-                  .select("id")
-                  .single();
-                if (error) throw error;
-                ahByKey.set(key, { id: ins!.id, ...hist });
-                assignmentInserted += 1;
-              }
-              assignmentPeriods += 1;
-            }
-
-            // After import, re-assert current open AH.active for manual cars (export SoT).
-            if (activeManual) {
-              await syncCurrentAssignmentHistoryActive(
-                existingId,
-                (existingCar as any).active === true,
-              );
-            }
-
-            // Idempotent car_number_history upsert — remark natural key
-            for (const p of car.periods) {
-              const remark = carNumberHistoryPayloadFromPeriod(railcarId!, p, movedAt);
-              if (!remark) continue;
-              const key = carNumberHistoryNaturalKey({
-                railcarId: remark.railcar_id,
-                old_car_initial: remark.old_car_initial,
-                old_car_number: remark.old_car_number,
-                new_car_initial: remark.new_car_initial,
-                new_car_number: remark.new_car_number,
-                changed_at: remark.changed_at,
-              });
-              const existing = cnhByKey.get(key);
-              if (existing) {
-                remarkUnchanged += 1;
-                remarkHistory += 1;
-                continue;
-              }
-              const { data: ins, error } = await supabase
-                .from("car_number_history")
-                .insert(remark)
-                .select("id")
-                .single();
-              if (error) throw error;
-              cnhByKey.set(key, { id: ins!.id, ...remark });
-              remarkInserted += 1;
-              remarkHistory += 1;
-            }
-            historyRows += 1;
-            continue; // skip the shared AH/CNH loops below for this car
           } else {
             const insertPayload = {
               ...payload,
@@ -3209,40 +3132,53 @@ export async function registerRoutes(
             inserted += 1;
           }
 
-          // Idempotent assignment_history upsert — natural key car + ASSIGNMENT_ID + start_date
-          // (Do NOT delete-all / blind-insert; monthly re-runs must not double rows.)
-          for (const p of car.periods) {
-            const hist = assignmentHistoryPayloadFromPeriod(railcarId!, p, movedAt);
-            const key = assignmentHistoryNaturalKey(
-              hist.railcar_id,
-              hist.assignment_id_ext,
-              hist.start_date,
-              hist.end_date
+          // Phase 1 close-out: same open period = car + rider + start (null vs filled
+          // ASSIGNMENT_ID is the same period). Skip retired/inactive cars entirely.
+          // Does not write railcar_assignments / current_assignment_id.
+          const skipHistory = skipVcfAssignmentWrites({
+            active_source: existingId ? existingCar?.active_source : "auto",
+            active: existingId ? existingCar?.active : true,
+          });
+          if (skipHistory) {
+            assignmentSkipped += car.periods.length;
+          } else {
+            const incoming = car.periods.map((p) =>
+              assignmentHistoryPayloadFromPeriod(railcarId!, p, movedAt),
             );
-            const existing = ahByKey.get(key);
-            if (existing) {
-              if (assignmentHistoryContentEqual(existing, hist)) {
-                assignmentUnchanged += 1;
-              } else {
+            const existingRows = ahByRailcar.get(railcarId!) ?? [];
+            const actions = planVcfAssignmentCloseout({ existingRows, incoming });
+            const planned = closeoutStats(actions);
+            for (const action of actions) {
+              if (action.op === "unchanged") continue;
+              if (action.op === "update") {
                 const { error } = await supabase
                   .from("assignment_history")
-                  .update(hist)
-                  .eq("id", existing.id);
+                  .update(action.payload)
+                  .eq("id", action.existingId);
                 if (error) throw error;
-                ahByKey.set(key, { ...existing, ...hist });
-                assignmentUpdated += 1;
+              } else if (action.op === "insert") {
+                const { data: ins, error } = await supabase
+                  .from("assignment_history")
+                  .insert(action.payload)
+                  .select("id")
+                  .single();
+                if (error) throw error;
+                const next = ahByRailcar.get(railcarId!) ?? [];
+                next.push({ id: ins!.id, ...action.payload });
+                ahByRailcar.set(railcarId!, next);
+              } else if (action.op === "close") {
+                const { error } = await supabase
+                  .from("assignment_history")
+                  .update(closeoutClosePatch(action, movedAt))
+                  .eq("id", action.existingId);
+                if (error) throw error;
               }
-            } else {
-              const { data: ins, error } = await supabase
-                .from("assignment_history")
-                .insert(hist)
-                .select("id")
-                .single();
-              if (error) throw error;
-              ahByKey.set(key, { id: ins!.id, ...hist });
-              assignmentInserted += 1;
             }
-            assignmentPeriods += 1;
+            assignmentInserted += planned.inserted;
+            assignmentUpdated += planned.updated;
+            assignmentUnchanged += planned.unchanged;
+            assignmentClosed += planned.closed;
+            assignmentPeriods += car.periods.length;
           }
 
           // Idempotent car_number_history upsert — remark natural key
@@ -3295,6 +3231,8 @@ export async function registerRoutes(
         assignmentInserted,
         assignmentUpdated,
         assignmentUnchanged,
+        assignmentClosed,
+        assignmentSkipped,
         remarkHistory,
         remarkInserted,
         remarkUpdated,

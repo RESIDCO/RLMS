@@ -34,7 +34,16 @@ Named never-write lists in `shared/rider-import-guard.ts`:
 
 ## Valid Car File (`POST /api/import/vcf/commit`)
 
-Does **not** insert `riders`, `master_leases`, or `accounts`.
+Does **not** insert `riders`, `master_leases`, or `accounts`. Does **not** write
+`railcar_assignments` or `railcars.current_assignment_id` (Phase 2, not approved).
+
+Open `assignment_history` periods match on car + rider + start date. A null
+`assignment_id_ext` and a later filled id are the same period (the 118-car
+duplicate). Changed periods close the old open row at the incoming start and
+insert the new one. `active_source = 'manual'` and already-inactive cars skip
+assignment-history writes entirely (history stays frozen). The Python monthly
+script (`script/vcf_monthly_import.py`) uses the same rules, including the
+manual-active protection that used to exist only on the API path.
 
 After commit, `governLeaseDates` re-applies Asset Report lease/OL dates onto `riders.expiration_date` and the car-level copies (`lease_end_date` / `lease_expiry` / `estimated_lease_expiry` / `lease_start_date` from `riders.effective_date`). V_Valid car dates are used only for OLs the Asset Report omits. It does not write `effective_date` on riders.
 

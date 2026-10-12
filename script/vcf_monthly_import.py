@@ -2,12 +2,16 @@
 Monthly / repeatable VCF import (§2.1 step 5) — idempotent upserts.
 
 Natural keys:
-  assignment_history: railcar_id + ASSIGNMENT_ID + start_date
-    (start_date required — VCF reuses ASSIGNMENT_ID across renewals)
+  assignment_history open period: railcar_id + rider + start_date
+    (null ASSIGNMENT_ID and a later filled id are the same period)
+  assignment_history closed period: railcar_id + ASSIGNMENT_ID + start_date + end_date
   car_number_history: railcar_id + old/new initials+numbers + changed_at::date
   railcars: car_initial + car_number (update in place; insert if new)
 
+Honors active_source=manual (does not overwrite active/status/active_status
+and does not write assignment_history for manual or already-inactive cars).
 Does NOT delete existing history rows that are absent from the file.
+Does NOT write railcar_assignments / current_assignment_id.
 Requires --confirm-production-import.
 """
 from __future__ import annotations
@@ -33,6 +37,12 @@ from vcf_commit import (  # noqa: E402
     parse_workbook,
     railcar_payload,
     s,
+)
+from vcf_assignment_closeout import (  # noqa: E402
+    plan_vcf_assignment_closeout,
+    skip_vcf_assignment_writes,
+    status_aligned_to_active_flag,
+    strip_manual_protected_railcar_fields,
 )
 
 for line in (ROOT / ".env.local").read_text(encoding="cp1252", errors="replace").splitlines():
@@ -297,7 +307,7 @@ def main():
         "railcars",
         "id,car_initial,car_number,reporting_marks,car_type,mechanical_designation,"
         "general_description,lease_type,managed,managed_category,lining_material,entity,"
-        "active,active_status,rider_external_id,lessee_name,assignment_label,"
+        "active,active_status,active_source,rider_external_id,lessee_name,assignment_label,"
         "lease_start_date,lease_end_date,lease_expiry,dot_code,dot_specification,"
         "comment_event_note,legacy_valid_car_id,client_id,cover_sheet,legal_owner,"
         "update_made,update_needed_next_vcf,current_assignment_id,data_source,status",
@@ -348,16 +358,9 @@ def main():
         "id,railcar_id,assignment_id_ext,start_date,end_date,rider_external_id,"
         "assignment_label,active,comment,reason",
     )
-    ah_by_key: dict[str, list] = defaultdict(list)
+    ah_by_railcar: dict[int, list] = defaultdict(list)
     for r in existing_ah:
-        ah_by_key[
-            ah_key(
-                r["railcar_id"],
-                r.get("assignment_id_ext"),
-                r.get("start_date"),
-                r.get("end_date"),
-            )
-        ].append(r)
+        ah_by_railcar[r["railcar_id"]].append(r)
 
     existing_cnh = fetch_all(
         sb,
@@ -375,6 +378,8 @@ def main():
         "ah_inserted": 0,
         "ah_updated": 0,
         "ah_unchanged": 0,
+        "ah_closed": 0,
+        "ah_skipped": 0,
         "cnh_inserted": 0,
         "cnh_updated": 0,
         "cnh_unchanged": 0,
@@ -395,6 +400,19 @@ def main():
             update_payload = dict(payload)
             if existing_row.get("entity") == update_payload.get("entity"):
                 update_payload.pop("entity", None)
+            # Urgent: Python must honor active_source=manual the same way the API does.
+            if str(existing_row.get("active_source") or "").strip() == "manual":
+                update_payload = strip_manual_protected_railcar_fields(update_payload)
+            else:
+                if isinstance(update_payload.get("active"), bool):
+                    update_payload["status"] = status_aligned_to_active_flag(
+                        existing_row.get("status"),
+                        update_payload["active"],
+                    )
+                    update_payload["active_status"] = (
+                        "Active" if update_payload["active"] else "Inactive"
+                    )
+                    update_payload["active_source"] = "auto"
             if railcar_content_equal(existing_row, update_payload):
                 stats["railcars_unchanged"] += 1
             else:
@@ -405,10 +423,19 @@ def main():
                 stats["touched_railcar_ids"].add(existing_id)
             rid = existing_id
         else:
+            insert_payload = dict(payload)
+            if isinstance(insert_payload.get("active"), bool):
+                insert_payload["status"] = status_aligned_to_active_flag(
+                    None, insert_payload["active"]
+                )
+                insert_payload["active_status"] = (
+                    "Active" if insert_payload["active"] else "Inactive"
+                )
+                insert_payload["active_source"] = "auto"
             if write:
-                new_id = safe_insert(sb, "railcars", payload)
+                new_id = safe_insert(sb, "railcars", insert_payload)
                 id_by_key[key] = new_id
-                car_by_id[new_id] = {"id": new_id, **payload}
+                car_by_id[new_id] = {"id": new_id, **insert_payload}
                 rid = new_id
             else:
                 rid = None
@@ -419,59 +446,80 @@ def main():
         if rid is None:
             continue
 
-        for p in c["periods"]:
-            start = None if p["start_date_unknown"] else p.get("start_date")
-            end = (
-                None
-                if p["end_date_unknown"] or p["end_date_indefinite"]
-                else p.get("end_date")
-            )
-            hist = {
-                "railcar_id": rid,
-                "rider_external_id": p.get("rider_external_id"),
-                "assignment_label": p.get("assignment_label"),
-                "start_date": start,
-                "end_date": end,
-                "active": p["active"] if p["active_ok"] else None,
-                "comment": p.get("comment"),
-                "assignment_id_ext": p.get("assignment_id"),
-                "moved_by": "vcf-import",
-                "reason": "V_VALID_CARS assignment period",
-            }
-            k = ah_key(
-                rid,
-                hist["assignment_id_ext"],
-                hist["start_date"],
-                hist["end_date"],
-            )
-            existing_rows = ah_by_key.get(k) or []
-            match = next((ex for ex in existing_rows if content_equal_ah(ex, hist)), None)
-            if match:
-                stats["ah_unchanged"] += 1
-            elif existing_rows:
-                # Update the first existing row for this natural key
-                ex = existing_rows[0]
-                if write:
-                    safe_update(
-                        sb,
-                        "assignment_history",
-                        {**hist, "moved_at": now_iso},
-                        ex["id"],
-                    )
-                    existing_rows[0] = {**ex, **hist}
-                stats["ah_updated"] += 1
-                stats["touched_railcar_ids"].add(rid)
-            else:
-                if write:
-                    new_id = safe_insert(
-                        sb,
-                        "assignment_history",
-                        {**hist, "moved_at": now_iso},
-                    )
-                    ah_by_key[k] = [{"id": new_id, **hist}]
-                stats["ah_inserted"] += 1
-                stats["touched_railcar_ids"].add(rid)
+        # Phase 1 close-out. Skip assignment_history for remark-retired / inactive
+        # using the car's state *before* this run (do not revive a just-inactivated row).
+        skip_history = (
+            skip_vcf_assignment_writes(existing_row)
+            if existing_id
+            else False
+        )
+        if skip_history:
+            stats["ah_skipped"] += len(c["periods"])
+        else:
+            incoming = []
+            for p in c["periods"]:
+                start = None if p["start_date_unknown"] else p.get("start_date")
+                end = (
+                    None
+                    if p["end_date_unknown"] or p["end_date_indefinite"]
+                    else p.get("end_date")
+                )
+                incoming.append(
+                    {
+                        "railcar_id": rid,
+                        "rider_external_id": p.get("rider_external_id"),
+                        "assignment_label": p.get("assignment_label"),
+                        "start_date": start,
+                        "end_date": end,
+                        "active": p["active"] if p["active_ok"] else None,
+                        "comment": p.get("comment"),
+                        "assignment_id_ext": p.get("assignment_id"),
+                        "moved_by": "vcf-import",
+                        "reason": "V_VALID_CARS assignment period",
+                    }
+                )
+            existing_rows = list(ah_by_railcar.get(rid) or [])
+            actions = plan_vcf_assignment_closeout(existing_rows, incoming)
+            by_id = {r["id"]: r for r in existing_rows}
+            for action in actions:
+                op = action["op"]
+                if op == "unchanged":
+                    stats["ah_unchanged"] += 1
+                    continue
+                if op == "update":
+                    payload_h = {**action["payload"], "moved_at": now_iso}
+                    if write:
+                        safe_update(sb, "assignment_history", payload_h, action["existing_id"])
+                        by_id[action["existing_id"]] = {
+                            **by_id.get(action["existing_id"], {}),
+                            **payload_h,
+                            "id": action["existing_id"],
+                        }
+                    stats["ah_updated"] += 1
+                    stats["touched_railcar_ids"].add(rid)
+                elif op == "insert":
+                    payload_h = {**action["payload"], "moved_at": now_iso}
+                    if write:
+                        new_id = safe_insert(sb, "assignment_history", payload_h)
+                        by_id[new_id] = {"id": new_id, **payload_h}
+                    stats["ah_inserted"] += 1
+                    stats["touched_railcar_ids"].add(rid)
+                elif op == "close":
+                    payload_h = {
+                        "end_date": action["end_date"],
+                        "active": False,
+                        "comment": action["comment"],
+                        "moved_at": now_iso,
+                    }
+                    if write:
+                        safe_update(sb, "assignment_history", payload_h, action["existing_id"])
+                        prev = by_id.get(action["existing_id"], {})
+                        by_id[action["existing_id"]] = {**prev, **payload_h, "id": action["existing_id"]}
+                    stats["ah_closed"] += 1
+                    stats["touched_railcar_ids"].add(rid)
+            ah_by_railcar[rid] = list(by_id.values())
 
+        for p in c["periods"]:
             if p.get("old_car_initial") or p.get("old_car_number"):
                 changed = (
                     f"{p['start_date']}T00:00:00.000Z"
@@ -533,9 +581,10 @@ def main():
             **{k: (len(v) if isinstance(v, set) else v) for k, v in stats.items()},
         },
         "naturalKeyNote": (
-            "assignment_history upsert key = railcar_id + ASSIGNMENT_ID + start_date + end_date. "
-            "ASSIGNMENT_ID alone is not unique in V_VALID_CARS (renewals reuse it). "
-            "ACTIVE is excluded from the key so MoM ACTIVE flips update the period in place."
+            "Open assignment_history periods match on railcar_id + rider + start_date "
+            "(null vs filled ASSIGNMENT_ID is the same period). Closed periods still "
+            "upsert on railcar_id + ASSIGNMENT_ID + start_date + end_date. "
+            "active_source=manual and already-inactive cars skip assignment_history writes."
         ),
         "touched_railcar_id_list": sorted(stats["touched_railcar_ids"]),
     }

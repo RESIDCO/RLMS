@@ -152,6 +152,25 @@ function plural(n: number, one: string, many: string) {
 }
 
 /** Rider-row copy: active-only unless “Show inactive” is on, then include the split. */
+function leaseCarCountCopy(
+  lease: { car_count?: number | null; active_car_count?: number | null; total_car_count?: number | null },
+  showInactive: boolean,
+) {
+  const active = Number(lease.active_car_count ?? lease.car_count) || 0;
+  const total = Number(lease.total_car_count ?? lease.car_count) || 0;
+  const inactive = Math.max(0, total - active);
+  if (!showInactive) {
+    return { figure: String(active), unit: plural(active, "active car", "active cars") };
+  }
+  if (inactive > 0) {
+    return {
+      figure: `${active} active + ${inactive} inactive`,
+      unit: "cars",
+    };
+  }
+  return { figure: String(total), unit: plural(total, "car", "cars") };
+}
+
 function riderCarCountCopy(
   rider: { car_count?: number | null; active_car_count?: number | null },
   showInactive: boolean,
@@ -576,10 +595,13 @@ export default function LeaseManagement() {
                   </div>
                   <div className="text-right">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Total cars / riders
+                      Cars / riders
                     </div>
                     <div className="font-mono-num text-sm">
-                      {lease.car_count} total {plural(lease.car_count, "car", "cars")}
+                      {(() => {
+                        const carsCopy = leaseCarCountCopy(lease, showInactive);
+                        return `${carsCopy.figure} ${carsCopy.unit}`;
+                      })()}
                       <span className="text-muted-foreground"> / </span>
                       {lease.riders.length} {plural(lease.riders.length, "rider", "riders")}
                     </div>

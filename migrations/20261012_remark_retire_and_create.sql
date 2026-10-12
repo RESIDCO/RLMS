@@ -113,7 +113,10 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'conflicts', v_conflicts);
   END IF;
 
-  -- Apply: retire old, insert new, move the live assignment (never both).
+  -- Apply: retire old, insert new. Copy the lease assignment onto the new
+  -- car; leave the old assignment (and current_assignment_id) frozen. Closing
+  -- the old open assignment_history row records when this identity stopped
+  -- being live — the assignment row itself is not moved or deleted.
   FOR item IN SELECT value FROM jsonb_array_elements(p_items)
   LOOP
     v_id := (item->>'id')::bigint;
@@ -177,7 +180,6 @@ BEGIN
            status = 'Off-Lease',
            active_status = 'Inactive',
            active_source = 'manual',
-           current_assignment_id = NULL,
            monthly_rent_per_car = NULL,
            monthly_depr_per_car = NULL,
            nbv = NULL,
@@ -198,10 +200,14 @@ BEGIN
      WHERE railcar_id = v_id
        AND end_date IS NULL;
 
-    UPDATE public.railcar_assignments
-       SET railcar_id = v_new_id
-     WHERE railcar_id = v_id
-     RETURNING id INTO v_assign_id;
+    INSERT INTO public.railcar_assignments (
+      railcar_id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at
+    )
+    SELECT
+      v_new_id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at
+    FROM public.railcar_assignments
+    WHERE railcar_id = v_id
+    RETURNING id INTO v_assign_id;
 
     IF v_assign_id IS NOT NULL THEN
       UPDATE public.railcars
@@ -214,7 +220,7 @@ BEGIN
       )
       SELECT
         v_new_id, ra.rider_id, ra.fleet_name, now(), coalesce(nullif(p_changed_by, ''), 'system'),
-        'Remark assignment carry',
+        'Remark assignment copy',
         r.rider_external_id, r.assignment_label,
         (now() AT TIME ZONE 'America/New_York')::date, NULL, true
       FROM public.railcar_assignments ra
@@ -296,4 +302,4 @@ REVOKE ALL ON FUNCTION public.remark_railcars(jsonb, text, text) FROM anon, auth
 GRANT EXECUTE ON FUNCTION public.remark_railcars(jsonb, text, text) TO service_role;
 
 COMMENT ON FUNCTION public.remark_railcars(jsonb, text, text) IS
-  'Retire old railcar identity (Off-Lease, inactive) and insert a new active row. All-or-none for a batch. Does not delete rows.';
+  'Retire old railcar identity (Off-Lease, inactive) and insert a new active row. Copies the lease assignment onto the new id; leaves the old assignment frozen. All-or-none for a batch. Does not delete rows.';

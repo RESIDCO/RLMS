@@ -1872,7 +1872,11 @@ export async function registerRoutes(
 
       const result = (leasesRes.data ?? []).map((l) => {
         const leaseRiders = riders.filter((r) => r.master_lease_id === l.id);
-        const car_count = leaseRiders.reduce(
+        const active_car_count = leaseRiders.reduce(
+          (acc, r) => acc + (r.active_car_count ?? 0),
+          0
+        );
+        const total_car_count = leaseRiders.reduce(
           (acc, r) => acc + (r.car_count ?? 0),
           0
         );
@@ -1883,7 +1887,9 @@ export async function registerRoutes(
           ...l,
           account_manager: accountId ? amByAccount.get(accountId) ?? null : null,
           riders: leaseRiders,
-          car_count,
+          car_count: active_car_count,
+          active_car_count,
+          total_car_count,
           is_inactive,
         };
       });
@@ -1998,12 +2004,13 @@ export async function registerRoutes(
           .from("riders")
           .select("*, master_lease:master_leases(id, lease_number)")
           .order("rider_name", { ascending: true }),
-        countCarsByRiderId(),
+        countActiveCarsByRiderId(),
       ]);
       if (ridersRes.error) throw ridersRes.error;
       const out = (ridersRes.data ?? []).map((r: any) => ({
         ...r,
         car_count: countByRider.get(r.id) ?? 0,
+        active_car_count: countByRider.get(r.id) ?? 0,
       }));
       res.json(out);
     } catch (err) {

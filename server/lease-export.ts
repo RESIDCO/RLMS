@@ -121,6 +121,7 @@ async function fetchCarsForRiders(riderIds: number[]): Promise<any[]> {
           .from("railcars")
           .select(EXPORT_CAR_SELECT)
           .in("id", chunk)
+          .eq("active", true)
           .order("id", { ascending: true })
           .range(from, to),
       ),

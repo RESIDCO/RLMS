@@ -400,7 +400,11 @@ export type RiderWithCounts = Rider & {
 
 export type MasterLeaseWithRiders = MasterLease & {
   riders: RiderWithCounts[];
+  /** Active assigned cars (same as active_car_count). Primary Lease Management figure. */
   car_count: number;
+  active_car_count: number;
+  /** All assigned cars including frozen retired identities. */
+  total_car_count: number;
   /** True when every rider under this MLA is inactive (or there are no riders). */
   is_inactive: boolean;
   /** From accounts.account_manager via master_leases.account_id — not stored on the lease. */

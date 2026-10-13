@@ -1,0 +1,54 @@
+import type { Express, Request, Response } from "express";
+import { ZodError } from "zod";
+import type { Server } from "http";
+import multer from "multer";
+import { supabase, supabaseAdmin } from "./supabase";
+import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
+import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
+import { pointCurrentAssignmentAt } from "./current-assignment";
+import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
+import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
+import { runGlobalSearch } from "./global-search";
+import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
+import {
+  attachLatestAmNotes,
+  createRiderAccountComment,
+  deleteRiderAccountComment,
+  listRiderAccountComments,
+} from "./rider-account-comments";
+import {
+  addComment as addTransitionComment,
+  addMilestone,
+  createTransitionRecord,
+  deleteComment as deleteTransitionComment,
+  deleteMilestone,
+  deleteTransitionRecord,
+  getTransitionDetail,
+  listTransitionRecords,
+  listTransitionSummary,
+  patchMilestone,
+  patchTransitionRecord,
+} from "./account-transitions";
+import {
+  generateBriefingPdf,
+  getOrCreateBriefingForm,
+  saveBriefingForm,
+} from "./account-transition-briefing";
+import {
+  assignTerritories,
+  createTerritoryOwner,
+  getTerritoryContacts,
+  getTerritoryHistory,
+  getTerritoryMap,
+  listTerritoryContacts,
+  patchTerritoryOwner,
+  revertTerritoryChangeSet,
+} from "./territories";
+import {
+  ACCOUNT_TRANSITIONS_SOURCE,
+  genericUploadSource,
+  insertAttachmentRow,
+  isAttachmentEntityType,
+  listAccountScopedAttachments,
+  riderBelongsToAccount,
+} from "./attachme

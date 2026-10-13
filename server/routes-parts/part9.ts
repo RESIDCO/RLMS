@@ -1,16 +1,8 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { registerRoutesPart9a } from "./part9a";
-import { registerRoutesPart9b } from "./part9b";
-import { registerRoutesPart9c } from "./part9c";
-import { registerRoutesPart9d } from "./part9d";
 
+/** Stub: see part1.ts — monolith restore pending. */
 export async function registerRoutesPart9(
-  httpServer: Server,
-  app: Express,
-): Promise<void> {
-  await registerRoutesPart9a(httpServer, app);
-  await registerRoutesPart9b(httpServer, app);
-  await registerRoutesPart9c(httpServer, app);
-  await registerRoutesPart9d(httpServer, app);
-}
+  _httpServer: Server,
+  _app: Express,
+): Promise<void> {}

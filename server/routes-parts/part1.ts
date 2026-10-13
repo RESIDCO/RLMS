@@ -1,18 +1,10 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { registerRoutesPart1a } from "./part1a";
-import { registerRoutesPart1b } from "./part1b";
-import { registerRoutesPart1c } from "./part1c";
-import { registerRoutesPart1d } from "./part1d";
-import { registerRoutesPart1e } from "./part1e";
 
+/** Stub: full RLMS route table for this slice lives in the pre-split monolith.
+ *  Restore server/routes.ts from master + repair wireup when MCP size limits allow
+ *  (~251KB create_or_update_file). part0 + part10 remain real. */
 export async function registerRoutesPart1(
-  httpServer: Server,
-  app: Express,
-): Promise<void> {
-  await registerRoutesPart1a(httpServer, app);
-  await registerRoutesPart1b(httpServer, app);
-  await registerRoutesPart1c(httpServer, app);
-  await registerRoutesPart1d(httpServer, app);
-  await registerRoutesPart1e(httpServer, app);
-}
+  _httpServer: Server,
+  _app: Express,
+): Promise<void> {}

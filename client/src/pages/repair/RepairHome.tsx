@@ -132,6 +132,87 @@ export default function RepairHome() {
           <pre className="text-xs bg-muted p-3 overflow-auto rounded-md max-h-80">{result}</pre>
         )}
       </div>
+
+      <ContactBankPanel />
+    </div>
+  );
+}
+
+function ContactBankPanel() {
+  const [contacts, setContacts] = useState<
+    Array<{ id: string; party_type: string; name: string; email: string | null }>
+  >([]);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [partyType, setPartyType] = useState<"shop" | "lessee" | "other">("lessee");
+  const [err, setErr] = useState("");
+
+  async function refresh() {
+    try {
+      const res = await apiRequest("GET", "/api/repair/contacts");
+      const data = await res.json();
+      setContacts(data.contacts ?? []);
+    } catch {
+      setErr("Contacts unavailable (DB wired?)");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function add() {
+    setErr("");
+    try {
+      await apiRequest("POST", "/api/repair/contacts", { partyType, name, email });
+      setName("");
+      setEmail("");
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    }
+  }
+
+  return (
+    <div className="space-y-3 border-t border-border pt-6">
+      <h2 className="font-medium">Contact bank (optional)</h2>
+      <p className="text-xs text-muted-foreground">
+        Shops and lessees. Per-event ad hoc emails and notification rules (Resp 6 never goes to the
+        shop) are available via API.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Select value={partyType} onValueChange={(v) => setPartyType(v as typeof partyType)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="lessee">Lessee</SelectItem>
+            <SelectItem value="shop">Shop</SelectItem>
+            <SelectItem value="other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input
+          placeholder="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
+      <Button variant="secondary" onClick={add} disabled={!name}>
+        Add contact
+      </Button>
+      {err && <p className="text-sm text-destructive">{err}</p>}
+      <ul className="text-xs space-y-1">
+        {contacts.map((c) => (
+          <li key={c.id}>
+            [{c.party_type}] {c.name} {c.email ? `<${c.email}>` : ""}
+          </li>
+        ))}
+        {contacts.length === 0 && (
+          <li className="text-muted-foreground">No contacts yet.</li>
+        )}
+      </ul>
     </div>
   );
 }

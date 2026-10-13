@@ -22,6 +22,7 @@ import {
   requestRevision,
   approveEstimate,
   listEstimatesForEvent,
+  uploadEventDocument,
 } from "./services/estimates";
 import { listResponsibilityCodes } from "./services/categories";
 import {
@@ -30,6 +31,20 @@ import {
   ingestLesseeReply,
   confirmLesseeReply,
 } from "./services/lessee-approval";
+import { enterPodErd, listPodDates, latestPodErd, runPodReminders } from "./services/pod";
+import { setCompletedDate, rollbackCompletedDate } from "./services/completion";
+import { submitShopInvoice, listInvoicesForEvent, approveInvoiceMatch } from "./services/invoices";
+import { relayDispo, listDispo } from "./services/dispo";
+import {
+  listContacts,
+  upsertContact,
+  softDeleteContact,
+  listAdhocEmails,
+  addAdhocEmails,
+  listNotificationRules,
+  updateNotificationRule,
+} from "./services/contacts";
+import { issueStepOtp, isOtpRequired, setOtpStepFlag } from "./services/otp";
 import { getEmailProvider } from "./providers/email";
 import { getInboundEmailProvider } from "./providers/inbound-email";
 import { getStorageProvider } from "./providers/storage";
@@ -69,7 +84,7 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
     res.json({
       ok: true,
       module: "repair",
-      phase: "1-slice-aar-review-resp6",
+      phase: "1-slice-pod-invoice-contacts",
       db: Boolean(process.env.DATABASE_URL || process.env.REPAIR_DATABASE_URL),
       providers: {
         email: "LogEmailProvider",
@@ -126,17 +141,31 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       if (!resolved) {
         return res.status(401).json({ error: "Invalid, expired, or revoked link" });
       }
-      const estimates = await listEstimatesForEvent(String(resolved.event.id));
+      const eventId = String(resolved.event.id);
+      const tenantId = String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID);
+      const estimates = await listEstimatesForEvent(eventId);
       let revisions: unknown[] = [];
       if (estimates[0]) {
         revisions = await listRevisions(estimates[0].id);
       }
+      const pod = await latestPodErd(eventId, tenantId);
+      const invoices = await listInvoicesForEvent(eventId, tenantId);
+      const dispo = await listDispo(eventId, tenantId);
+      const otpInvoice = await isOtpRequired("invoice_submit", tenantId);
       return res.json({
         link: resolved.link,
         event: resolved.event,
-        nextActions: nextShopActions(String(resolved.event.status_code)),
+        nextActions: nextShopActions(String(resolved.event.status_code), {
+          hasPod: Boolean(pod.POD || pod.ERD),
+          estimateLocked: Boolean(estimates[0]?.locked),
+          estimateStatus: estimates[0]?.status_code as string | undefined,
+        }),
         estimates,
         revisions,
+        pod,
+        invoices,
+        dispo,
+        otpRequired: { invoice_submit: otpInvoice },
       });
     } catch (err) {
       console.error("[repair/e/:token]", err);
@@ -251,20 +280,168 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       }
     },
   );
+
+  app.post("/api/repair/e/:token/pod", async (req, res) => {
+    try {
+      const kind = String(req.body?.kind ?? "POD").toUpperCase() === "ERD" ? "ERD" : "POD";
+      const result = await enterPodErd({
+        rawToken: String(req.params.token),
+        kind,
+        dateValue: String(req.body?.dateValue ?? req.body?.date ?? ""),
+        enteredBy: String(req.body?.email ?? "shop@unknown"),
+        reason: req.body?.reason ? String(req.body.reason) : undefined,
+        via: "event_link",
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.status(201).json(result);
+    } catch (err) {
+      console.error("[repair/e/:token/pod]", err);
+      return res.status(500).json({ error: "POD/ERD entry failed" });
+    }
+  });
+
+  app.post("/api/repair/e/:token/complete", async (req, res) => {
+    try {
+      const result = await setCompletedDate({
+        rawToken: String(req.params.token),
+        completedAt: String(req.body?.completedAt ?? req.body?.date ?? new Date().toISOString()),
+        actor: String(req.body?.email ?? "shop@unknown"),
+        comment: req.body?.comment ? String(req.body.comment) : undefined,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    } catch (err) {
+      console.error("[repair/e/:token/complete]", err);
+      return res.status(500).json({ error: "Complete failed" });
+    }
+  });
+
+  app.post(
+    "/api/repair/e/:token/invoice",
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        const file = req.file
+          ? {
+              filename: req.file.originalname || "invoice.pdf",
+              mime: req.file.mimetype || "application/pdf",
+              bytes: req.file.buffer,
+            }
+          : undefined;
+        const result = await submitShopInvoice({
+          rawToken: String(req.params.token),
+          invoiceNo: String(req.body?.invoiceNo ?? ""),
+          total: Number(req.body?.total),
+          actorEmail: String(req.body?.email ?? "shop@unknown"),
+          otpCode: req.body?.otpCode ? String(req.body.otpCode) : undefined,
+          file,
+        });
+        if (!result.ok) {
+          return res.status(result.status).json({
+            error: result.error,
+            otpRequired: "otpRequired" in result ? result.otpRequired : undefined,
+          });
+        }
+        return res.status(201).json(result);
+      } catch (err) {
+        console.error("[repair/e/:token/invoice]", err);
+        return res.status(500).json({ error: "Invoice submit failed" });
+      }
+    },
+  );
+
+  app.post("/api/repair/e/:token/otp", async (req, res) => {
+    try {
+      const resolved = await resolveActiveLink(String(req.params.token), "SHOP");
+      if (!resolved) return res.status(401).json({ error: "Invalid or revoked link" });
+      const step = String(req.body?.step ?? "invoice_submit");
+      const result = await issueStepOtp({
+        eventId: String(resolved.event.id),
+        step,
+        email: String(req.body?.email ?? "shop@unknown"),
+        tenantId: String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID),
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.status(201).json(result);
+    } catch (err) {
+      console.error("[repair/e/:token/otp]", err);
+      return res.status(500).json({ error: "OTP issue failed" });
+    }
+  });
+
+  app.post("/api/repair/e/:token/dispo", async (req, res) => {
+    try {
+      const direction =
+        String(req.body?.direction ?? "from_shop") === "to_shop" ? "to_shop" : "from_shop";
+      const result = await relayDispo({
+        rawToken: String(req.params.token),
+        direction,
+        instructions: String(req.body?.instructions ?? req.body?.comment ?? ""),
+        actor: String(req.body?.email ?? "shop@unknown"),
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.status(201).json(result);
+    } catch (err) {
+      console.error("[repair/e/:token/dispo]", err);
+      return res.status(500).json({ error: "Dispo relay failed" });
+    }
+  });
+
+  app.post(
+    "/api/repair/e/:token/documents",
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        if (!req.file) return res.status(400).json({ error: "file required" });
+        const result = await uploadEventDocument({
+          rawToken: String(req.params.token),
+          kind: String(req.body?.kind ?? "photo"),
+          actorEmail: String(req.body?.email ?? "shop@unknown"),
+          file: {
+            filename: req.file.originalname || "upload.bin",
+            mime: req.file.mimetype || "application/octet-stream",
+            bytes: req.file.buffer,
+          },
+        });
+        if (!result.ok) return res.status(result.status).json({ error: result.error });
+        return res.status(201).json(result);
+      } catch (err) {
+        console.error("[repair/e/:token/documents]", err);
+        return res.status(500).json({ error: "Document upload failed" });
+      }
+    },
+  );
 }
 
-function nextShopActions(statusCode: string): string[] {
+function nextShopActions(
+  statusCode: string,
+  ctx: { hasPod?: boolean; estimateLocked?: boolean; estimateStatus?: string } = {},
+): string[] {
+  const actions: string[] = [];
   switch (statusCode) {
     case "SHOP_ASSIGNED":
       return ["accept", "reject"];
     case "ACCEPTED":
-      return ["on-hand", "upload-estimate"];
+      actions.push("on-hand", "upload-estimate");
+      break;
     case "ON_HAND":
+      actions.push("upload-estimate", "pod");
+      break;
     case "IN_REPAIR":
-      return ["upload-estimate"];
+      actions.push("pod", "complete", "invoice", "dispo", "upload-document");
+      if (!ctx.estimateLocked) actions.push("upload-estimate");
+      break;
+    case "COMPLETE":
+      actions.push("invoice", "dispo", "upload-document");
+      break;
     default:
-      return ["upload-estimate"];
+      actions.push("upload-estimate", "pod", "upload-document");
   }
+  if (ctx.estimateStatus === "APPROVED" && !ctx.estimateLocked) {
+    if (!actions.includes("complete")) actions.push("complete");
+    if (!actions.includes("pod")) actions.push("pod");
+  }
+  return actions;
 }
 
 /** Call AFTER requireApiAuth (or with REPAIR_DEV_BYPASS_AUTH=1). */
@@ -591,5 +768,211 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     });
     const ok = await getStorageProvider().verify(stored.storageKey, stored.sha256);
     return res.json({ stored, verified: ok });
+  });
+
+  // ── POD / completion / invoice / dispo / contacts (authed) ──
+
+  app.post("/api/repair/events/:id/pod", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const kind = String(req.body?.kind ?? "POD").toUpperCase() === "ERD" ? "ERD" : "POD";
+    const result = await enterPodErd({
+      eventId: String(req.params.id),
+      kind,
+      dateValue: String(req.body?.dateValue ?? req.body?.date ?? ""),
+      enteredBy: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+      via: "UI",
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/events/:id/pod", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      history: await listPodDates(String(req.params.id)),
+      latest: await latestPodErd(String(req.params.id)),
+    });
+  });
+
+  app.post("/api/repair/estimates/:id/complete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setCompletedDate({
+      estimateId: String(req.params.id),
+      completedAt: String(req.body?.completedAt ?? new Date().toISOString()),
+      actor: actorFrom(req),
+      actorRole: String(req.body?.actorRole ?? "reviewer"),
+      comment: req.body?.comment ? String(req.body.comment) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/rollback-complete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await rollbackCompletedDate({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      actorRole: String(req.body?.actorRole ?? "reviewer"),
+      comment: req.body?.comment ? String(req.body.comment) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/events/:id/invoices", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ invoices: await listInvoicesForEvent(String(req.params.id)) });
+  });
+
+  app.post("/api/repair/invoices/:id/approve", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await approveInvoiceMatch({
+      invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/events/:id/dispo", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const direction =
+      String(req.body?.direction ?? "to_shop") === "from_shop" ? "from_shop" : "to_shop";
+    const result = await relayDispo({
+      eventId: String(req.params.id),
+      direction,
+      instructions: String(req.body?.instructions ?? ""),
+      actor: actorFrom(req),
+      via: "UI",
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/events/:id/dispo", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ dispo: await listDispo(String(req.params.id)) });
+  });
+
+  app.get("/api/repair/contacts", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const partyType = req.query.partyType
+      ? (String(req.query.partyType) as "shop" | "lessee" | "other")
+      : undefined;
+    return res.json({
+      contacts: await listContacts({
+        partyType:
+          partyType === "shop" || partyType === "lessee" || partyType === "other"
+            ? partyType
+            : undefined,
+      }),
+    });
+  });
+
+  app.post("/api/repair/contacts", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const partyType = String(body.partyType ?? "other");
+    if (partyType !== "shop" && partyType !== "lessee" && partyType !== "other") {
+      return res.status(400).json({ error: "partyType must be shop|lessee|other" });
+    }
+    const result = await upsertContact({
+      id: body.id ? String(body.id) : undefined,
+      partyType,
+      partyRef: body.partyRef ? String(body.partyRef) : undefined,
+      name: String(body.name ?? ""),
+      email: body.email ? String(body.email) : undefined,
+      active: body.active === undefined ? undefined : Boolean(body.active),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(body.id ? 200 : 201).json(result);
+  });
+
+  app.delete("/api/repair/contacts/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await softDeleteContact({
+      id: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/events/:id/adhoc-emails", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ emails: await listAdhocEmails(String(req.params.id)) });
+  });
+
+  app.post("/api/repair/events/:id/adhoc-emails", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const emails = Array.isArray(req.body?.emails)
+      ? req.body.emails.map(String)
+      : String(req.body?.emails ?? "")
+          .split(/[,;\s]+/)
+          .filter(Boolean);
+    const result = await addAdhocEmails({
+      eventId: String(req.params.id),
+      emails,
+      notificationType: req.body?.notificationType
+        ? String(req.body.notificationType)
+        : null,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/notification-rules", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ rules: await listNotificationRules() });
+  });
+
+  app.patch("/api/repair/notification-rules/:type", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await updateNotificationRule({
+      notificationType: String(req.params.type),
+      includeRoles: Array.isArray(req.body?.includeRoles)
+        ? req.body.includeRoles.map(String)
+        : undefined,
+      excludeRoles: Array.isArray(req.body?.excludeRoles)
+        ? req.body.excludeRoles.map(String)
+        : undefined,
+      active: req.body?.active === undefined ? undefined : Boolean(req.body.active),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/reminders/pod-sweep", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json(await runPodReminders());
+  });
+
+  app.post("/api/repair/settings/otp-steps", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const step = String(req.body?.step ?? "invoice_submit");
+    const enabled = Boolean(req.body?.enabled);
+    return res.json(await setOtpStepFlag({ step, enabled }));
   });
 }

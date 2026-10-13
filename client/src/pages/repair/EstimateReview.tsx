@@ -233,6 +233,31 @@ export default function EstimateReview() {
                 Request revision
               </Button>
               <Button onClick={() => act("approve")}>Approve</Button>
+              <Button variant="secondary" onClick={() => act("complete")}>
+                Set completed date (locks estimate)
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={async () => {
+                  setMsg("");
+                  setError("");
+                  try {
+                    const res = await apiRequest(
+                      "POST",
+                      `/api/repair/estimates/${estimateId}/rollback-complete`,
+                      { comment: note || undefined, actorRole: "reviewer" },
+                    );
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || "rollback failed");
+                    setMsg("Completed date rolled back — all parties notified (dev log).");
+                    await load();
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "rollback failed");
+                  }
+                }}
+              >
+                Rollback completed date
+              </Button>
             </div>
             <div className="grid gap-1 pt-2 border-t border-border">
               <Label htmlFor="lessee">Resp 6 — lessee email (shop never copied)</Label>

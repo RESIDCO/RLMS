@@ -31,6 +31,18 @@ export {
   confirmLesseeReply,
 } from "./services/lessee-approval";
 export { resolveLesseeAttachments, listShopOriginalDocuments } from "./services/lessee-attachments";
+export { enterPodErd, listPodDates, runPodReminders } from "./services/pod";
+export { setCompletedDate, rollbackCompletedDate } from "./services/completion";
+export { submitShopInvoice, listInvoicesForEvent } from "./services/invoices";
+export { relayDispo, listDispo } from "./services/dispo";
+export {
+  listContacts,
+  upsertContact,
+  addAdhocEmails,
+  listNotificationRules,
+} from "./services/contacts";
+export { isOtpRequired, issueStepOtp, setOtpStepFlag } from "./services/otp";
+export { notify, resolveRecipients } from "./services/notifications";
 export { getEmailProvider, setEmailProvider, LogEmailProvider } from "./providers/email";
 export {
   getStorageProvider,

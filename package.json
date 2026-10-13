@@ -11,7 +11,8 @@
     "db:push": "drizzle-kit push",
     "repair:smoke": "REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/smoke-server.ts",
     "repair:aar-roundtrip": "tsx modules/repair/dev/aar-roundtrip.ts",
-    "repair:migrate:local": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f modules/repair/dev/local-public-stubs.sql -f migrations/20261013_repair_schema_foundation.sql -f migrations/20261013_repair_schema_events.sql -f migrations/20261014_repair_catalog_and_aar.sql -f migrations/20261014_repair_seed_shops.sql -f migrations/20261014_repair_seed_categories.sql -f migrations/20261014_repair_seed_why_made.sql -f migrations/20261014_repair_resp_names_and_doc_filename.sql"
+    "repair:migrate:local": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f modules/repair/dev/local-public-stubs.sql -f migrations/20261013_repair_schema_foundation.sql -f migrations/20261013_repair_schema_events.sql -f migrations/20261014_repair_catalog_and_aar.sql -f migrations/20261014_repair_seed_shops.sql -f migrations/20261014_repair_seed_categories.sql -f migrations/20261014_repair_seed_why_made.sql -f migrations/20261014_repair_resp_names_and_doc_filename.sql -f migrations/20261014_repair_pod_invoice_contacts.sql",
+    "repair:smoke-pod-invoice": "tsx modules/repair/dev/smoke-pod-invoice.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

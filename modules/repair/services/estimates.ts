@@ -104,6 +104,14 @@ export async function uploadEstimate(opts: {
     actor: opts.actorEmail ?? opts.actorName,
   });
 
+  if (estimate.locked) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Estimate is locked (completed). Documents/photos can still be added; estimate lines cannot change.",
+    };
+  }
+
   const oldStatus = await q<{ code: string }>(
     `SELECT code FROM repair.statuses WHERE id = $1`,
     [estimate.status_id],
@@ -536,4 +544,67 @@ export async function listEstimatesForEvent(eventId: string, tenantId = DEFAULT_
     [eventId, tenantId],
   );
   return rows;
+}
+
+/** Docs/photos allowed even when estimate is locked (completed). */
+export async function uploadEventDocument(opts: {
+  rawToken?: string;
+  eventId?: string;
+  tenantId?: string;
+  kind: string;
+  actorEmail: string;
+  file: { filename: string; mime: string; bytes: Buffer };
+}) {
+  let eventId = opts.eventId;
+  let tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  if (opts.rawToken) {
+    const resolved = await resolveActiveLink(opts.rawToken, "SHOP");
+    if (!resolved) {
+      return { ok: false as const, status: 401, error: "Invalid or revoked link" };
+    }
+    eventId = String(resolved.event.id);
+    tenantId = String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID);
+  }
+  if (!eventId) {
+    return { ok: false as const, status: 400, error: "eventId or token required" };
+  }
+
+  const stored = await getStorageProvider().put({
+    tenantId,
+    kind: opts.kind || "other",
+    filename: opts.file.filename,
+    mime: opts.file.mime,
+    bytes: opts.file.bytes,
+  });
+
+  const { rows } = await q(
+    `INSERT INTO repair.documents
+       (tenant_id, event_id, kind, storage_key, sha256, size, mime,
+        uploaded_by, created_by, original_filename)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9)
+     RETURNING *`,
+    [
+      tenantId,
+      eventId,
+      opts.kind || "other",
+      stored.storageKey,
+      stored.sha256,
+      stored.size,
+      stored.mime,
+      opts.actorEmail,
+      opts.file.filename,
+    ],
+  );
+
+  await writeAudit({
+    tenantId,
+    entity: "document",
+    entityId: rows[0].id,
+    action: "DOCUMENT_UPLOADED",
+    after: { kind: opts.kind, sha256: stored.sha256 },
+    actor: opts.actorEmail,
+    via: opts.rawToken ? "event_link" : "UI",
+  });
+
+  return { ok: true as const, document: rows[0] };
 }

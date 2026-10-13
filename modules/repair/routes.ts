@@ -186,7 +186,7 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
           actorName: String(req.body?.actorName ?? req.body?.email ?? "shop"),
           actorEmail: String(req.body?.email ?? "shop@unknown"),
           via: "event_link",
-          comment: req.body?.comment ? String(req.body.comment),
+          comment: req.body?.comment ? String(req.body.comment) : undefined,
           lines: lines as undefined,
           file,
         });

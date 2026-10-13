@@ -55,9 +55,9 @@ export async function registerRoutesPart5_p0(_httpServer: Server,
     }
   });
 
-  // ═════════════════════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────────────
   // AUTH ROUTES
-  // ═════════════════════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────────────
 
   // Role helpers (requireAdmin / requireWrite / requireUser / contacts) live in ./auth
 

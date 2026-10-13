@@ -26,3 +26,4 @@ schema/*.apply-errors.json
 # Repair module local storage / backups
 data/repair-storage/
 backups/
+

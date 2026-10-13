@@ -1,8 +1,12 @@
 import type { Express } from "express";
 import type { Server } from "http";
+import { registerRoutesChunk07 } from "./part4_chunk07";
+import { registerRoutesChunk08 } from "./part4_chunk08";
 
-/** Stub: see part1.ts — monolith restore pending. */
 export async function registerRoutesPart4(
-  _httpServer: Server,
-  _app: Express,
-): Promise<void> {}
+  httpServer: Server,
+  app: Express,
+): Promise<void> {
+  await registerRoutesChunk07(httpServer, app);
+  await registerRoutesChunk08(httpServer, app);
+}

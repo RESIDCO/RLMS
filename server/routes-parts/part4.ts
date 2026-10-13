@@ -4,7 +4,6 @@ import { registerRoutesPart4a } from "./part4a";
 import { registerRoutesPart4b } from "./part4b";
 import { registerRoutesPart4c } from "./part4c";
 import { registerRoutesPart4d } from "./part4d";
-import { registerRoutesPart4e } from "./part4e";
 
 export async function registerRoutesPart4(
   httpServer: Server,
@@ -14,5 +13,4 @@ export async function registerRoutesPart4(
   await registerRoutesPart4b(httpServer, app);
   await registerRoutesPart4c(httpServer, app);
   await registerRoutesPart4d(httpServer, app);
-  await registerRoutesPart4e(httpServer, app);
 }

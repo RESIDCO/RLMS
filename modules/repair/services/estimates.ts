@@ -151,18 +151,27 @@ export async function uploadEstimate(opts: {
       mime: opts.file.mime,
       bytes: opts.file.bytes,
     });
+    const kind =
+      opts.file.mime?.includes("pdf") || opts.file.filename.toLowerCase().endsWith(".pdf")
+        ? "estimate_pdf"
+        : opts.file.filename.toLowerCase().match(/\.(txt|dat)$/)
+          ? "aar_500byte"
+          : "estimate_file";
     const doc = await q(
       `INSERT INTO repair.documents
-         (tenant_id, event_id, kind, storage_key, sha256, size, mime, uploaded_by, created_by)
-       VALUES ($1,$2,'estimate_file',$3,$4,$5,$6,$7,$7)
+         (tenant_id, event_id, kind, storage_key, sha256, size, mime,
+          original_filename, uploaded_by, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
        RETURNING id`,
       [
         tenantId,
         eventId,
+        kind,
         stored.storageKey,
         stored.sha256,
         stored.size,
         stored.mime,
+        opts.file.filename,
         opts.actorEmail ?? opts.actorName,
       ],
     );

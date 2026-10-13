@@ -30,6 +30,7 @@ export {
   approveViaLesseeLink,
   confirmLesseeReply,
 } from "./services/lessee-approval";
+export { resolveLesseeAttachments, listShopOriginalDocuments } from "./services/lessee-attachments";
 export { getEmailProvider, setEmailProvider, LogEmailProvider } from "./providers/email";
 export {
   getStorageProvider,

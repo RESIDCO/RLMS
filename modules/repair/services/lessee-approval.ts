@@ -10,12 +10,14 @@ import { writeAudit } from "./audit";
 import { issueEventLink } from "./event-links";
 import { getEmailProvider } from "../providers/email";
 import { getInboundEmailProvider } from "../providers/inbound-email";
+import { resolveLesseeAttachments } from "./lessee-attachments";
 
 export async function sendLesseeApprovalRequest(opts: {
   eventId: string;
   estimateId: string;
   revisionId: string;
   lesseeEmail: string;
+  /** Optional reviewer pick; defaults to all shop originals for the revision/event */
   documentIds?: string[];
   actor: string;
   tenantId?: string;
@@ -37,6 +39,16 @@ export async function sendLesseeApprovalRequest(opts: {
   );
   if (!est[0]) return { ok: false as const, status: 404, error: "Estimate not found" };
 
+  const carLabel = `${est[0].car_mark} ${est[0].car_number}`.trim();
+  const resolved = await resolveLesseeAttachments({
+    eventId: opts.eventId,
+    revisionId: opts.revisionId,
+    tenantId,
+    documentIds: opts.documentIds,
+    actor: opts.actor,
+    carLabel,
+  });
+
   const issued = await issueEventLink({
     eventId: opts.eventId,
     scope: "LESSEE",
@@ -46,14 +58,17 @@ export async function sendLesseeApprovalRequest(opts: {
   });
 
   const linkPath = `/repair/lessee/${issued.token}`;
-  const subject = `Estimate approval requested — ${est[0].car_mark} ${est[0].car_number}`;
+  const subject = `Estimate approval requested — ${carLabel}`;
+  const attachNote = resolved.usedGeneratedPdf
+    ? "Attachments: shop original file(s) when present; a generated estimate PDF was added because the shop did not send a PDF. Lessee should normally see exactly what the shop sent."
+    : "Attachments: the shop’s original file(s) (pass-through — no regenerated PDF).";
   const bodyText = [
-    `Please review and approve the repair estimate for ${est[0].car_mark} ${est[0].car_number}.`,
+    `Please review and approve the repair estimate for ${carLabel}.`,
     "",
     `Primary action (login-free link): open ${linkPath}`,
     "You may also reply to this email with APPROVE or REJECT (subject to reviewer confirmation).",
     "",
-    "Attachments: estimate PDF + matching 500-byte detail file (when present).",
+    attachNote,
     opts.note ? `\nNote from reviewer: ${opts.note}` : "",
     "",
     "Do not forward to the repair shop.",
@@ -71,11 +86,7 @@ export async function sendLesseeApprovalRequest(opts: {
     subject,
     bodyText,
     replyTo: `lessee-reply+${issued.link.id}@repair.local`,
-    attachments: (opts.documentIds ?? []).map((id) => ({
-      filename: id,
-      contentType: "application/octet-stream",
-      storageKey: id,
-    })),
+    attachments: resolved.emailAttachments,
   });
 
   const { rows } = await q(
@@ -90,7 +101,7 @@ export async function sendLesseeApprovalRequest(opts: {
       opts.estimateId,
       opts.revisionId,
       email,
-      opts.documentIds ?? [],
+      resolved.documentIds,
       send.providerMessageId,
       issued.link.id,
       opts.actor,
@@ -105,7 +116,9 @@ export async function sendLesseeApprovalRequest(opts: {
     after: {
       lesseeEmail: email,
       linkId: issued.link.id,
-      documentCount: opts.documentIds?.length ?? 0,
+      documentCount: resolved.documentIds.length,
+      shopOriginalCount: resolved.shopOriginalCount,
+      usedGeneratedPdf: resolved.usedGeneratedPdf,
       emailStatus: send.status,
     },
     actor: opts.actor,
@@ -118,6 +131,11 @@ export async function sendLesseeApprovalRequest(opts: {
     token: issued.token,
     lesseeUrlPath: linkPath,
     email: send,
+    attachments: {
+      shopOriginalCount: resolved.shopOriginalCount,
+      usedGeneratedPdf: resolved.usedGeneratedPdf,
+      documentIds: resolved.documentIds,
+    },
   };
 }
 

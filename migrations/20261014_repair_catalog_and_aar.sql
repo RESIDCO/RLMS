@@ -78,19 +78,21 @@ CREATE TABLE IF NOT EXISTS repair.responsibility_codes (
   UNIQUE (tenant_id, code)
 );
 
+-- Display names are seeded here but admin-editable in repair.responsibility_codes
+-- (do not hard-code these strings as the sole source of truth in app code).
 INSERT INTO repair.responsibility_codes
   (tenant_id, code, display_name, description, is_public_aar, sort_order, created_by)
 VALUES
-  ('00000000-0000-4000-8000-000000000001', '0', 'Code 0', 'RESIDCO responsibility code 0', false, 0, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '1', 'Owner', 'Public AAR / RESIDCO code 1 — Owner', true, 1, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '0', 'Bad Order', 'RESIDCO responsibility code 0', false, 0, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '1', 'Owners', 'Public AAR / RESIDCO code 1 — Owners', true, 1, 'seed:resp-codes'),
   ('00000000-0000-4000-8000-000000000001', '2', 'Handling Line', 'Public AAR / RESIDCO code 2 — Handling Line', true, 2, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '3', 'Defect Card / JIC', 'Public AAR / RESIDCO code 3 — Defect Card/JIC', true, 3, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '4', 'Code 4', 'RESIDCO responsibility code 4', false, 4, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '5', 'Code 5', 'RESIDCO responsibility code 5', false, 5, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '6', 'Lessee', 'RESIDCO responsibility code 6 — Lessee (estimate approval path)', false, 6, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '7', 'Code 7', 'RESIDCO responsibility code 7', false, 7, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '8', 'Code 8', 'RESIDCO responsibility code 8', false, 8, 'seed:resp-codes'),
-  ('00000000-0000-4000-8000-000000000001', '9', 'Code 9', 'RESIDCO responsibility code 9', false, 9, 'seed:resp-codes')
+  ('00000000-0000-4000-8000-000000000001', '3', 'Defect Card/JIC', 'Public AAR / RESIDCO code 3 — Defect Card/JIC', true, 3, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '4', 'Capital Program', 'RESIDCO responsibility code 4', false, 4, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '5', 'Lease Return', 'RESIDCO responsibility code 5', false, 5, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '6', 'Auto Rebill', 'RESIDCO responsibility code 6 — Auto Rebill (lessee approval path)', false, 6, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '7', 'Never Rebill', 'RESIDCO responsibility code 7', false, 7, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '8', 'Preventive Maintenance', 'RESIDCO responsibility code 8', false, 8, 'seed:resp-codes'),
+  ('00000000-0000-4000-8000-000000000001', '9', 'HM216', 'RESIDCO responsibility code 9', false, 9, 'seed:resp-codes')
 ON CONFLICT (tenant_id, code) DO UPDATE SET
   display_name = EXCLUDED.display_name,
   description = EXCLUDED.description,

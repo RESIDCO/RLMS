@@ -52,6 +52,7 @@ export default function EstimateReview() {
   const [lesseeEmail, setLesseeEmail] = useState("");
   const [msg, setMsg] = useState("");
   const [respFilter, setRespFilter] = useState<string>("all");
+  const [respNames, setRespNames] = useState<Record<string, string>>({});
 
   async function load() {
     setError("");
@@ -60,6 +61,13 @@ export default function EstimateReview() {
       const data = await res.json();
       setBlocks(data.revisions ?? []);
       setCompare(data.compare ?? null);
+      const codesRes = await apiRequest("GET", "/api/repair/resp-codes");
+      const codesData = await codesRes.json();
+      const map: Record<string, string> = {};
+      for (const c of codesData.codes ?? []) {
+        map[String(c.code)] = String(c.display_name ?? c.code);
+      }
+      setRespNames(map);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load review");
     }
@@ -68,6 +76,11 @@ export default function EstimateReview() {
   useEffect(() => {
     if (estimateId) void load();
   }, [estimateId]);
+
+  function respLabel(code: string) {
+    if (code === "(none)" || code === "all") return code;
+    return respNames[code] ? `${code} — ${respNames[code]}` : code;
+  }
 
   const latest = blocks[blocks.length - 1];
   const respKeys = useMemo(
@@ -154,7 +167,7 @@ export default function EstimateReview() {
                 <option value="all">All ({latest.lines.length})</option>
                 {respKeys.map((k) => (
                   <option key={k} value={k}>
-                    Resp {k} ({latest.byResp[k].length})
+                    {respLabel(k)} ({latest.byResp[k].length})
                   </option>
                 ))}
               </select>
@@ -232,7 +245,8 @@ export default function EstimateReview() {
               />
               <p className="text-xs text-muted-foreground">
                 Every lessee email includes a login-free approval link (primary). Reply is
-                secondary and needs reviewer confirmation.
+                secondary and needs reviewer confirmation. Attachments pass through the shop’s
+                original files; a PDF is generated only if the shop did not send one.
               </p>
               <Button variant="secondary" onClick={sendLessee} disabled={!lesseeEmail}>
                 Send lessee approval email (dev log)

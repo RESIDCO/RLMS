@@ -35,6 +35,8 @@ import AcceptInvite from "@/pages/AcceptInvite";
 import DvNewCalculation from "@/pages/DvCalculator/NewCalculation";
 import DvHistory from "@/pages/DvCalculator/History";
 import DvReference from "@/pages/DvCalculator/Reference";
+import RepairHome from "@/pages/repair/RepairHome";
+import ShopEventLink from "@/pages/repair/ShopEventLink";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -108,6 +110,8 @@ function AppRouter() {
       <Route path="/dv/history" component={DvHistory} />
       <Route path="/dv/history/:id" component={DvHistory} />
       <Route path="/dv/reference" component={DvReference} />
+      <Route path="/repair/e/:token" component={ShopEventLink} />
+      <Route path="/repair" component={RepairHome} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -120,6 +124,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   // Invite acceptance is public (token_hash in query) — no session yet
   if (loc.startsWith("/accept-invite")) {
     return <AcceptInvite />;
+  }
+
+  // Shop / lessee event links — no login (repair module)
+  if (loc.startsWith("/repair/e/")) {
+    return <ShopEventLink />;
   }
 
   if (loading) {

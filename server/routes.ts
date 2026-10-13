@@ -1,1 +1,1 @@
-$file:/workspace/server-routes-repair.ts
+FILE_CONTENT_PLACEHOLDER_SEE_WORKSPACE

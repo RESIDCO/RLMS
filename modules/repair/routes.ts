@@ -23,6 +23,13 @@ import {
   approveEstimate,
   listEstimatesForEvent,
 } from "./services/estimates";
+import { listResponsibilityCodes } from "./services/categories";
+import {
+  sendLesseeApprovalRequest,
+  approveViaLesseeLink,
+  ingestLesseeReply,
+  confirmLesseeReply,
+} from "./services/lessee-approval";
 import { getEmailProvider } from "./providers/email";
 import { getInboundEmailProvider } from "./providers/inbound-email";
 import { getStorageProvider } from "./providers/storage";
@@ -62,7 +69,7 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
     res.json({
       ok: true,
       module: "repair",
-      phase: "1-slice-bo-shop-estimate",
+      phase: "1-slice-aar-review-resp6",
       db: Boolean(process.env.DATABASE_URL || process.env.REPAIR_DATABASE_URL),
       providers: {
         email: "LogEmailProvider",
@@ -134,6 +141,52 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
     } catch (err) {
       console.error("[repair/e/:token]", err);
       return res.status(500).json({ error: "Failed to load event link" });
+    }
+  });
+
+  /** Lessee login-free link (Resp 6 primary path). */
+  app.get("/api/repair/lessee/:token", async (req, res) => {
+    try {
+      const resolved = await resolveActiveLink(String(req.params.token), "LESSEE");
+      if (!resolved) {
+        return res.status(401).json({ error: "Invalid, expired, or revoked link" });
+      }
+      const estimates = await listEstimatesForEvent(String(resolved.event.id));
+      const estimate = estimates[0];
+      let revisions: unknown[] = [];
+      let lines: unknown[] = [];
+      if (estimate) {
+        revisions = await listRevisions(estimate.id);
+        const latest = revisions[revisions.length - 1] as { id?: string } | undefined;
+        if (latest?.id) lines = await getRevisionLines(String(latest.id));
+      }
+      return res.json({
+        link: resolved.link,
+        event: resolved.event,
+        estimate,
+        revisions,
+        lines,
+        note: "Approve via this link (primary). Email reply requires reviewer confirmation.",
+      });
+    } catch (err) {
+      console.error("[repair/lessee/:token]", err);
+      return res.status(500).json({ error: "Failed to load lessee link" });
+    }
+  });
+
+  app.post("/api/repair/lessee/:token/decide", async (req, res) => {
+    try {
+      const decision =
+        String(req.body?.decision ?? "").toUpperCase() === "REJECT" ? "REJECT" : "APPROVE";
+      const result = await approveViaLesseeLink({
+        rawToken: String(req.params.token),
+        decision,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    } catch (err) {
+      console.error("[repair/lessee/:token/decide]", err);
+      return res.status(500).json({ error: "Lessee decision failed" });
     }
   });
 
@@ -369,6 +422,122 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       estimateId: String(req.params.id),
       actor: actorFrom(req),
       comment: req.body?.comment ? String(req.body.comment) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/resp-codes", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const tenantId = String(req.query.tenantId ?? DEFAULT_TENANT_ID);
+    return res.json({ codes: await listResponsibilityCodes(tenantId) });
+  });
+
+  /** Review payload: revisions + lines grouped by resp code + compare. */
+  app.get("/api/repair/estimates/:id/review", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const estimateId = String(req.params.id);
+    const revisions = await listRevisions(estimateId);
+    const withLines = [];
+    for (const rev of revisions) {
+      const lines = await getRevisionLines(String(rev.id));
+      const byResp: Record<string, typeof lines> = {};
+      for (const line of lines) {
+        const key = String(line.resp_code ?? "(none)");
+        (byResp[key] ??= []).push(line);
+      }
+      withLines.push({ revision: rev, lines, byResp });
+    }
+    let compare: { from: number; to: number; added: number; removed: number; changed: number } | null =
+      null;
+    if (withLines.length >= 2) {
+      const prev = withLines[withLines.length - 2];
+      const curr = withLines[withLines.length - 1];
+      const prevMap = new Map(prev.lines.map((l) => [l.line_no, l]));
+      const currMap = new Map(curr.lines.map((l) => [l.line_no, l]));
+      let added = 0;
+      let removed = 0;
+      let changed = 0;
+      for (const [n, line] of currMap) {
+        const p = prevMap.get(n);
+        if (!p) added++;
+        else if (
+          String(p.aar_job_code) !== String(line.aar_job_code) ||
+          Number(p.labor) !== Number(line.labor) ||
+          Number(p.material) !== Number(line.material) ||
+          String(p.resp_code) !== String(line.resp_code)
+        ) {
+          changed++;
+        }
+      }
+      for (const n of prevMap.keys()) {
+        if (!currMap.has(n)) removed++;
+      }
+      compare = {
+        from: Number(prev.revision.rev_no),
+        to: Number(curr.revision.rev_no),
+        added,
+        removed,
+        changed,
+      };
+    }
+    return res.json({ estimateId, revisions: withLines, compare });
+  });
+
+  app.post("/api/repair/estimates/:id/lessee-approval", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const estimateId = String(req.params.id);
+    const { rows } = await q(
+      `SELECT e.id AS estimate_id, e.event_id, e.current_revision,
+              r.id AS revision_id
+       FROM repair.estimates e
+       JOIN repair.estimate_revisions r
+         ON r.estimate_id = e.id AND r.rev_no = e.current_revision
+       WHERE e.id = $1 AND e.deleted_at IS NULL`,
+      [estimateId],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Estimate/revision not found" });
+    const docs = Array.isArray(body.documentIds)
+      ? body.documentIds.map(String)
+      : body.documentId
+        ? [String(body.documentId)]
+        : [];
+    const result = await sendLesseeApprovalRequest({
+      eventId: String(rows[0].event_id),
+      estimateId,
+      revisionId: String(rows[0].revision_id),
+      lesseeEmail: String(body.lesseeEmail ?? ""),
+      documentIds: docs,
+      actor: actorFrom(req),
+      note: body.note ? String(body.note) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.post("/api/repair/lessee-approvals/:id/ingest-reply", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await ingestLesseeReply({
+      approvalId: String(req.params.id),
+      bodyText: String(req.body?.bodyText ?? req.body?.raw ?? ""),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/lessee-approvals/:id/confirm-reply", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await confirmLesseeReply({
+      approvalId: String(req.params.id),
+      accept: Boolean(req.body?.accept ?? true),
+      actor: actorFrom(req),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);

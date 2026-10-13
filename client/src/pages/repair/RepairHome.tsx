@@ -24,6 +24,7 @@ export default function RepairHome() {
   const [result, setResult] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [linkToken, setLinkToken] = useState<string>("");
+  const [estimateId, setEstimateId] = useState<string>("");
 
   useEffect(() => {
     apiRequest("GET", "/api/repair/shops")
@@ -110,6 +111,23 @@ export default function RepairHome() {
             </Link>
           </p>
         )}
+        <div className="grid gap-1">
+          <Label htmlFor="est">Estimate id (after shop uploads)</Label>
+          <Input
+            id="est"
+            value={estimateId}
+            onChange={(e) => setEstimateId(e.target.value)}
+            placeholder="uuid"
+          />
+          {estimateId && (
+            <Link
+              href={`/repair/estimates/${estimateId}`}
+              className="text-sm underline text-primary"
+            >
+              Open estimate review / Resp 6
+            </Link>
+          )}
+        </div>
         {result && (
           <pre className="text-xs bg-muted p-3 overflow-auto rounded-md max-h-80">{result}</pre>
         )}

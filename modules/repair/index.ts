@@ -23,6 +23,13 @@ export {
   requestRevision,
   approveEstimate,
 } from "./services/estimates";
+export { parseAarFile, serializeLine, roundTripOk } from "./services/aar-parser";
+export { listResponsibilityCodes, lookupRepairCategory } from "./services/categories";
+export {
+  sendLesseeApprovalRequest,
+  approveViaLesseeLink,
+  confirmLesseeReply,
+} from "./services/lessee-approval";
 export { getEmailProvider, setEmailProvider, LogEmailProvider } from "./providers/email";
 export {
   getStorageProvider,

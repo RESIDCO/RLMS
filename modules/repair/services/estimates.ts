@@ -4,6 +4,8 @@ import { resolveActiveLink } from "./event-links";
 import { requireVcfCar } from "./vcf";
 import { writeAudit } from "./audit";
 import { getStorageProvider } from "../providers/storage";
+import { parseAarFile, signedMaterialCents } from "./aar-parser";
+import { lookupRepairCategory } from "./categories";
 
 export type EstimateLineInput = {
   lineNo?: number;
@@ -15,6 +17,12 @@ export type EstimateLineInput = {
   labor?: number;
   material?: number;
   total?: number;
+  laborCents?: number;
+  materialCents?: number;
+  repairCategory?: string | null;
+  subCategory?: string | null;
+  aarComponentId?: string | null;
+  ddctIncidentId?: string | null;
   rawLine?: string;
 };
 
@@ -163,12 +171,25 @@ export async function uploadEstimate(opts: {
 
   const lines = opts.lines?.length
     ? opts.lines
-    : placeholderLinesFromFile(opts.file?.bytes);
+    : await linesFromAarFile(opts.file?.bytes, tenantId);
 
-  const labor = lines.reduce((s, l) => s + Number(l.labor ?? 0), 0);
-  const material = lines.reduce((s, l) => s + Number(l.material ?? 0), 0);
+  const labor = lines.reduce(
+    (s, l) => s + Number(l.labor ?? (l.laborCents != null ? l.laborCents / 100 : 0)),
+    0,
+  );
+  const material = lines.reduce(
+    (s, l) =>
+      s + Number(l.material ?? (l.materialCents != null ? l.materialCents / 100 : 0)),
+    0,
+  );
   const total = lines.reduce(
-    (s, l) => s + Number(l.total ?? Number(l.labor ?? 0) + Number(l.material ?? 0)),
+    (s, l) =>
+      s +
+      Number(
+        l.total ??
+          Number(l.labor ?? (l.laborCents != null ? l.laborCents / 100 : 0)) +
+            Number(l.material ?? (l.materialCents != null ? l.materialCents / 100 : 0)),
+      ),
     0,
   );
 
@@ -205,8 +226,10 @@ export async function uploadEstimate(opts: {
       await client.query(
         `INSERT INTO repair.estimate_lines
            (tenant_id, revision_id, line_no, aar_job_code, qualifier, why_made,
-            condition_code, resp_code, labor, material, total, raw_line, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            condition_code, resp_code, labor, material, total,
+            repair_category, sub_category, labor_cents, material_cents,
+            aar_component_id, ddct_incident_id, raw_line, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
         [
           tenantId,
           rev.rows[0].id,
@@ -216,9 +239,17 @@ export async function uploadEstimate(opts: {
           line.whyMade ?? null,
           line.conditionCode ?? null,
           line.respCode ?? null,
-          Number(line.labor ?? 0),
-          Number(line.material ?? 0),
+          Number(line.labor ?? (line.laborCents != null ? line.laborCents / 100 : 0)),
+          Number(
+            line.material ?? (line.materialCents != null ? line.materialCents / 100 : 0),
+          ),
           lineTotal,
+          line.repairCategory ?? null,
+          line.subCategory ?? null,
+          line.laborCents ?? null,
+          line.materialCents ?? null,
+          line.aarComponentId ?? null,
+          line.ddctIncidentId ?? null,
           line.rawLine ?? null,
           opts.actorEmail ?? opts.actorName,
         ],
@@ -260,20 +291,59 @@ export async function uploadEstimate(opts: {
   return { ok: true as const, ...packed, linesCount: lines.length };
 }
 
-function placeholderLinesFromFile(bytes?: Buffer): EstimateLineInput[] {
+async function linesFromAarFile(
+  bytes: Buffer | undefined,
+  tenantId: string,
+): Promise<EstimateLineInput[]> {
   if (!bytes || bytes.length === 0) {
     return [{ lineNo: 1, labor: 0, material: 0, total: 0, rawLine: "" }];
   }
-  // Placeholder until sample 500-byte files arrive — keep original as raw_line chunks.
-  const text = bytes.toString("utf8");
-  const chunks = text.match(/.{1,500}/g) ?? [text];
-  return chunks.slice(0, 50).map((raw, i) => ({
-    lineNo: i + 1,
-    labor: 0,
-    material: 0,
-    total: 0,
-    rawLine: raw,
-  }));
+  try {
+    const parsed = parseAarFile(bytes);
+    const out: EstimateLineInput[] = [];
+    for (const line of parsed.lines) {
+      if (line.recordFormat !== "1") continue;
+      const cat = await lookupRepairCategory({
+        tenantId,
+        jobCode: line.appliedJobCode,
+        qualifier: line.appliedQualifier,
+      });
+      const laborCents = line.laborCents ?? 0;
+      const materialCents = signedMaterialCents(line);
+      out.push({
+        lineNo: Number(line.fields.line_number ?? line.lineNo) || line.lineNo,
+        aarJobCode: line.appliedJobCode ?? undefined,
+        qualifier: line.appliedQualifier ?? undefined,
+        whyMade: line.whyMade ?? undefined,
+        conditionCode: String(line.fields.condition_code ?? "").trim() || undefined,
+        respCode: line.respCode ?? undefined,
+        laborCents,
+        materialCents,
+        labor: laborCents / 100,
+        material: materialCents / 100,
+        total: (laborCents + materialCents) / 100,
+        repairCategory: cat?.category ?? null,
+        subCategory: cat?.sub_category ?? null,
+        aarComponentId: line.aarComponentId,
+        ddctIncidentId: line.ddctIncidentId,
+        rawLine: line.rawLine,
+      });
+    }
+    return out.length
+      ? out
+      : [{ lineNo: 1, labor: 0, material: 0, total: 0, rawLine: "" }];
+  } catch (err) {
+    console.warn("[repair/estimates] AAR parse failed; storing raw only", err);
+    return [
+      {
+        lineNo: 1,
+        labor: 0,
+        material: 0,
+        total: 0,
+        rawLine: bytes.toString("latin1").slice(0, 500),
+      },
+    ];
+  }
 }
 
 export async function listRevisions(estimateId: string, tenantId = DEFAULT_TENANT_ID) {

@@ -37,6 +37,8 @@ import DvHistory from "@/pages/DvCalculator/History";
 import DvReference from "@/pages/DvCalculator/Reference";
 import RepairHome from "@/pages/repair/RepairHome";
 import ShopEventLink from "@/pages/repair/ShopEventLink";
+import EstimateReview from "@/pages/repair/EstimateReview";
+import LesseeApproval from "@/pages/repair/LesseeApproval";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -111,6 +113,8 @@ function AppRouter() {
       <Route path="/dv/history/:id" component={DvHistory} />
       <Route path="/dv/reference" component={DvReference} />
       <Route path="/repair/e/:token" component={ShopEventLink} />
+      <Route path="/repair/lessee/:token" component={LesseeApproval} />
+      <Route path="/repair/estimates/:id" component={EstimateReview} />
       <Route path="/repair" component={RepairHome} />
       <Route component={NotFound} />
     </Switch>
@@ -129,6 +133,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   // Shop / lessee event links — no login (repair module)
   if (loc.startsWith("/repair/e/")) {
     return <ShopEventLink />;
+  }
+  if (loc.startsWith("/repair/lessee/")) {
+    return <LesseeApproval />;
   }
 
   if (loading) {

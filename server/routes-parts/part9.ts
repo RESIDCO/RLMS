@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { registerRoutesPart9a } from "./part9a";
 import { registerRoutesPart9b } from "./part9b";
 import { registerRoutesPart9c } from "./part9c";
+import { registerRoutesPart9d } from "./part9d";
 
 export async function registerRoutesPart9(
   httpServer: Server,
@@ -11,4 +12,5 @@ export async function registerRoutesPart9(
   await registerRoutesPart9a(httpServer, app);
   await registerRoutesPart9b(httpServer, app);
   await registerRoutesPart9c(httpServer, app);
+  await registerRoutesPart9d(httpServer, app);
 }

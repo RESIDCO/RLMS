@@ -2,19 +2,27 @@
  * Smoke: OWNER_UI §B Shop master + entity workspace.
  * - Shop list empty until create
  * - Create shop with contacts; billing-road validation
+ * - Optional shop mark / delivering lines / capabilities / car types / certs
+ * - BO dropdown label "Name (MARK) – City, ST"
  * - Entity snapshot on BO; Estimates History entity column/summary
  * - Monthly close entity subtotals
+ * - Tracked migrate (idempotent on already-migrated DB)
  *
  * Run: npm run repair:smoke-shop-entity
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { createBadOrder, listDemoShop } from "../services/bo";
 import {
+  certExpiryWarning,
   createShop,
+  formatShopLabel,
   listBillingRoads,
   listShopMaster,
   ensureDemoShop,
+  uploadShopDocument,
 } from "../services/shops";
+import { listCatalog } from "../services/shop-catalog";
+import { softDeleteDocument } from "../services/gap-lifecycle-06";
 import {
   listOwnerEntityTags,
   lookupCarEntity,
@@ -40,11 +48,21 @@ async function main() {
   await migrateLocal();
 
   // Soft-retired payee seeds → shop dropdown empty (or only owner-created)
-  // Deactivate any leftover active shops for a clean empty check in this smoke.
+  // Deactivate leftover smoke/seed shops so re-runs don't collide on reporting_mark.
   await q(
     `UPDATE repair.shops SET active = false
      WHERE tenant_id = $1 AND deleted_at IS NULL AND active = true
-       AND created_by LIKE 'seed:%'`,
+       AND (created_by LIKE 'seed:%' OR created_by = 'smoke-b')`,
+    [DEFAULT_TENANT_ID],
+  );
+  // Soft-delete prior smoke shops so unique (tenant, reporting_mark) can reuse marks
+  await q(
+    `UPDATE repair.shops
+     SET deleted_at = COALESCE(deleted_at, now()),
+         deleted_by = COALESCE(deleted_by, 'smoke-b'),
+         delete_reason = COALESCE(delete_reason, 'smoke re-run'),
+         active = false
+     WHERE tenant_id = $1 AND created_by = 'smoke-b' AND deleted_at IS NULL`,
     [DEFAULT_TENANT_ID],
   );
 
@@ -78,12 +96,51 @@ async function main() {
   if (badMark.ok) bad("billing road validate", "accepted unknown mark");
   ok("rejects unknown billing road mark");
 
+  const caps = await listCatalog("capability");
+  const cars = await listCatalog("car_type");
+  const certs = await listCatalog("cert_type");
+  if (caps.length < 1 || cars.length < 1 || certs.length < 1) {
+    bad("catalogs", "expected seeded capability/car_type/cert_type");
+  }
+  ok(
+    `admin catalogs seeded caps=${caps.length} cars=${cars.length} certs=${certs.length}`,
+  );
+
+  const badLine = await createShop({
+    legalName: "Bad Line Shop",
+    city: "Tucson",
+    state: "AZ",
+    splc: "222222",
+    deliveringLines: ["ZZZZ_NOT_A_ROAD"],
+    actor: "smoke-b",
+  });
+  if (badLine.ok) bad("delivering line validate", "accepted unknown mark");
+  ok("rejects unknown delivering line mark");
+
+  const soon = new Date();
+  soon.setUTCDate(soon.getUTCDate() + 30);
+  const soonStr = soon.toISOString().slice(0, 10);
+
   const created = await createShop({
-    legalName: "Smoke Master Shop",
+    legalName: "Guardian Rail Services",
     city: "Phoenix",
     state: "AZ",
     splc: "850001",
     billingRoad: roads[0].mark ? String(roads[0].mark) : null,
+    shopMark: "A084",
+    website: "https://smoke.example.invalid",
+    hoursNotes: "Mon–Fri 0700–1700",
+    deliveringLines: roads[0].mark ? [String(roads[0].mark)] : [],
+    capabilityIds: [caps[0].id],
+    carTypeIds: [cars[0].id],
+    certifications: [
+      {
+        certTypeId: certs[0].id,
+        certTypeLabel: certs[0].display_name,
+        certificateNumber: "CERT-SMOKE-1",
+        expiresOn: soonStr,
+      },
+    ],
     actor: "smoke-b",
     contacts: [
       {
@@ -95,19 +152,93 @@ async function main() {
     ],
   });
   if (!created.ok || !created.shop) bad("create shop", created.ok === false ? created.error : "no shop");
+  const expectedLabel = "Guardian Rail Services (A084) – Phoenix, AZ";
+  if (created.shop!.display_label !== expectedLabel) {
+    bad("shop label", `expected "${expectedLabel}" got "${created.shop!.display_label}"`);
+  }
   ok(`created shop ${created.shop!.display_label}`);
+  if (created.shop!.shop_mark !== "A084") bad("shop_mark", String(created.shop!.shop_mark));
+  if ((created.shop!.delivering_lines?.length ?? 0) < 1) {
+    bad("delivering_lines", "expected ≥1");
+  }
+  if ((created.shop!.capability_ids?.length ?? 0) < 1) {
+    bad("capabilities", "expected ≥1");
+  }
+  if ((created.shop!.car_type_ids?.length ?? 0) < 1) {
+    bad("car_types", "expected ≥1");
+  }
+  if ((created.shop!.certifications?.length ?? 0) < 1) {
+    bad("certifications", "expected ≥1");
+  }
+  if (created.shop!.certifications[0].expiry_warning !== "expiring_soon") {
+    bad(
+      "cert warning",
+      `expected expiring_soon got ${created.shop!.certifications[0].expiry_warning}`,
+    );
+  }
+  ok("optional shop fields saved (mark/lines/caps/cars/certs/website)");
+  if (certExpiryWarning("2000-01-01") !== "expired") {
+    bad("certExpiryWarning", "expected expired for past date");
+  }
+  ok("certExpiryWarning expired/soon helpers");
+
+  const dropdownLabel = formatShopLabel({
+    name: "Guardian Rail Services",
+    shop_mark: "A084",
+    city: "Phoenix",
+    state: "AZ",
+  });
+  if (dropdownLabel !== expectedLabel) {
+    bad("formatShopLabel", dropdownLabel);
+  }
+  ok(`BO dropdown label format = ${dropdownLabel}`);
+
+  const up = await uploadShopDocument({
+    shopId: created.shop!.id,
+    kind: "w9",
+    actor: "smoke-b",
+    file: {
+      filename: "w9-smoke.pdf",
+      mime: "application/pdf",
+      bytes: Buffer.from("%PDF-1.4 smoke"),
+    },
+  });
+  if (!up.ok) bad("shop document upload", up.error);
+  const voided = await softDeleteDocument({
+    documentId: String(up.document.id),
+    actor: "smoke-b",
+    reason: "smoke void shop attachment",
+  });
+  if (!voided.ok) bad("shop document void", voided.error);
+  if (String(voided.document.lifecycle_status) !== "VOIDED") {
+    bad("void status", String(voided.document.lifecycle_status));
+  }
+  ok("shop attachment upload + VOIDED (retained)");
+
+  // Second migrate must skip (tracked) — no view column-drop error
+  await migrateLocal();
+  ok("second migrateLocal skipped already-applied files");
 
   const master = await listShopMaster({ activeOnly: true });
   if (!master.some((s) => s.id === created.shop!.id)) {
     bad("shop master list", "new shop missing");
   }
-  ok(`shop master lists ${master.length} active shop(s)`);
+  const searched = await listShopMaster({
+    activeOnly: true,
+    search: "A084",
+  });
+  if (!searched.some((s) => s.id === created.shop!.id)) {
+    bad("search shop_mark", "A084 not found");
+  }
+  ok(`shop master lists ${master.length} active; searchable by shop mark`);
 
   const dropdown = await listDemoShop();
-  if (!dropdown.some((s) => s.id === created.shop!.id)) {
-    bad("dropdown", "created shop not in dropdown");
+  const dd = dropdown.find((s) => s.id === created.shop!.id);
+  if (!dd) bad("dropdown", "created shop not in dropdown");
+  if (dd.display_label !== expectedLabel) {
+    bad("dropdown label", dd.display_label);
   }
-  ok("shop appears in dropdown after create");
+  ok("shop appears in dropdown after create with mark in label");
 
   // Entity lookup from railcars stub (ARSX 100001 → Main → MAIN)
   await q(

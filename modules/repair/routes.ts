@@ -12,9 +12,17 @@ import {
   deactivateShop,
   getShopMaster,
   listBillingRoads,
+  listShopDocuments,
   listShopMaster,
   updateShop,
+  uploadShopDocument,
 } from "./services/shops";
+import {
+  deactivateCatalogItem,
+  listCatalog,
+  upsertCatalogItem,
+  type CatalogKind,
+} from "./services/shop-catalog";
 import {
   correctEventEntity,
   getEventEntitySnapshot,
@@ -821,6 +829,21 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       state: String(body.state ?? ""),
       splc: String(body.splc ?? ""),
       billingRoad: body.billingRoad != null ? String(body.billingRoad) : null,
+      shopMark: body.shopMark != null ? String(body.shopMark) : null,
+      website: body.website != null ? String(body.website) : null,
+      hoursNotes: body.hoursNotes != null ? String(body.hoursNotes) : null,
+      deliveringLines: Array.isArray(body.deliveringLines)
+        ? body.deliveringLines.map(String)
+        : undefined,
+      capabilityIds: Array.isArray(body.capabilityIds)
+        ? body.capabilityIds.map(String)
+        : undefined,
+      carTypeIds: Array.isArray(body.carTypeIds)
+        ? body.carTypeIds.map(String)
+        : undefined,
+      certifications: Array.isArray(body.certifications)
+        ? body.certifications
+        : undefined,
       active: body.active !== false,
       contacts: Array.isArray(body.contacts) ? body.contacts : undefined,
       actor: actorFrom(req),
@@ -845,6 +868,36 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
             ? null
             : String(body.billingRoad)
           : undefined,
+      shopMark:
+        body.shopMark !== undefined
+          ? body.shopMark == null
+            ? null
+            : String(body.shopMark)
+          : undefined,
+      website:
+        body.website !== undefined
+          ? body.website == null
+            ? null
+            : String(body.website)
+          : undefined,
+      hoursNotes:
+        body.hoursNotes !== undefined
+          ? body.hoursNotes == null
+            ? null
+            : String(body.hoursNotes)
+          : undefined,
+      deliveringLines: Array.isArray(body.deliveringLines)
+        ? body.deliveringLines.map(String)
+        : undefined,
+      capabilityIds: Array.isArray(body.capabilityIds)
+        ? body.capabilityIds.map(String)
+        : undefined,
+      carTypeIds: Array.isArray(body.carTypeIds)
+        ? body.carTypeIds.map(String)
+        : undefined,
+      certifications: Array.isArray(body.certifications)
+        ? body.certifications
+        : undefined,
       active: body.active != null ? Boolean(body.active) : undefined,
       contacts: Array.isArray(body.contacts) ? body.contacts : undefined,
       actor: actorFrom(req),
@@ -865,6 +918,41 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.json(result);
   });
 
+  app.get("/api/repair/shops/:id/documents", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      documents: await listShopDocuments(String(req.params.id)),
+    });
+  });
+
+  app.post(
+    "/api/repair/shops/:id/documents",
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        const uid = await maybeRequireUser(deps, req, res);
+        if (!uid) return;
+        if (!req.file) return res.status(400).json({ error: "file required" });
+        const result = await uploadShopDocument({
+          shopId: String(req.params.id),
+          kind: String(req.body?.kind ?? "shop_attachment"),
+          actor: actorFrom(req),
+          file: {
+            filename: req.file.originalname || "upload.bin",
+            mime: req.file.mimetype || "application/octet-stream",
+            bytes: req.file.buffer,
+          },
+        });
+        if (!result.ok) return res.status(result.status).json({ error: result.error });
+        return res.status(201).json(result);
+      } catch (err) {
+        console.error("[repair/shops/:id/documents]", err);
+        return res.status(500).json({ error: "Shop document upload failed" });
+      }
+    },
+  );
+
   /** Billing roads — validation lookup only (not the shop list). */
   app.get("/api/repair/billing-roads", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
@@ -874,6 +962,56 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       activeOnly: String(req.query.activeOnly ?? "1") !== "0",
     });
     return res.json({ billingRoads: roads });
+  });
+
+  /** Admin gear — shop capability / car-type / cert-type catalogs. */
+  app.get("/api/repair/admin/shop-catalog/:kind", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const kind = String(req.params.kind) as CatalogKind;
+    if (!["capability", "car_type", "cert_type"].includes(kind)) {
+      return res.status(400).json({ error: "kind must be capability|car_type|cert_type" });
+    }
+    const items = await listCatalog(kind, {
+      activeOnly: String(req.query.activeOnly ?? "1") !== "0",
+    });
+    return res.json({ kind, items });
+  });
+
+  app.post("/api/repair/admin/shop-catalog/:kind", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const kind = String(req.params.kind) as CatalogKind;
+    if (!["capability", "car_type", "cert_type"].includes(kind)) {
+      return res.status(400).json({ error: "kind must be capability|car_type|cert_type" });
+    }
+    const body = req.body ?? {};
+    const result = await upsertCatalogItem({
+      kind,
+      code: String(body.code ?? ""),
+      displayName: String(body.displayName ?? body.display_name ?? ""),
+      sortOrder: body.sortOrder != null ? Number(body.sortOrder) : undefined,
+      active: body.active != null ? Boolean(body.active) : true,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.post("/api/repair/admin/shop-catalog/:kind/:id/deactivate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const kind = String(req.params.kind) as CatalogKind;
+    if (!["capability", "car_type", "cert_type"].includes(kind)) {
+      return res.status(400).json({ error: "kind must be capability|car_type|cert_type" });
+    }
+    const result = await deactivateCatalogItem({
+      kind,
+      id: String(req.params.id),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 
   app.get("/api/repair/workspace", async (_req, res) => {

@@ -738,7 +738,7 @@ export async function buildEntityCloseSubtotals(opts: {
     [opts.tenantId, opts.accountMonth],
   ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
-  for (const r of inbound.rows) {
+  for (const r of inbound) {
     bump(
       r.entity_code != null ? String(r.entity_code) : null,
       "inboundShopPaymentCents",
@@ -765,7 +765,7 @@ export async function buildEntityCloseSubtotals(opts: {
     [opts.tenantId, opts.closeRunId ?? null],
   ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
-  for (const r of resp7.rows) {
+  for (const r of resp7) {
     bump(
       r.entity_code != null ? String(r.entity_code) : null,
       "resp7Cents",

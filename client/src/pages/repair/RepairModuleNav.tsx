@@ -22,6 +22,12 @@ const NAV: NavItem[] = [
     match: (p) => p.startsWith("/repair/bad-orders"),
   },
   {
+    kind: "link",
+    href: "/repair/shops",
+    label: "Shops",
+    match: (p) => p.startsWith("/repair/shops"),
+  },
+  {
     kind: "menu",
     label: "Estimates",
     match: (p) =>
@@ -57,11 +63,9 @@ const NAV: NavItem[] = [
     kind: "menu",
     label: "Reference",
     match: (p) =>
-      p.startsWith("/repair/shops") ||
       p.startsWith("/repair/bo-reasons") ||
       p.startsWith("/repair/billing-roads"),
     items: [
-      { href: "/repair/shops", label: "Shops" },
       { href: "/repair/bo-reasons", label: "BO reasons" },
       { href: "/repair/billing-roads", label: "Billing roads" },
     ],

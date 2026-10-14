@@ -236,7 +236,10 @@ DROP FUNCTION IF EXISTS repair._seed_status(uuid, text, text, text, int, boolean
 -- Current-row summary for VCF / assignment context.
 -- VCF membership: appears in v_valid_export_rows with active = 1.
 -- Exact active/inactive sync rule is open item Q1 — refine when brief lands.
-CREATE OR REPLACE VIEW repair.cars_ref AS
+-- DROP before CREATE: CREATE OR REPLACE VIEW cannot drop columns (PG view.c
+-- checkViewColumns) when a later migration widened the view (e.g. entity_source).
+DROP VIEW IF EXISTS repair.cars_ref CASCADE;
+CREATE VIEW repair.cars_ref AS
 SELECT
   r.id AS rlms_railcar_id,
   COALESCE(NULLIF(r.car_initial, ''), NULLIF(r.reporting_marks, ''), '') AS car_mark,

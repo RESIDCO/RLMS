@@ -8,17 +8,24 @@
 
 ## Shop master (OWNER_UI_SPEC §B)
 
-**Route:** `/#/repair/shops` (Reference → Shops).  
+**Route:** `/#/repair/shops` (top-level **Shops** nav, between Bad Orders and Estimates).  
 **Rule:** Shop dropdowns elsewhere are **EMPTY until at least one shop is created.** Do **not** seed shops from the payee / billing-road spreadsheet. Billing roads remain a separate lookup for optional mark validation.
 
 ### Create / edit form
 
 | Field | Required | Notes |
 |---|---|---|
-| Legal name | Yes | Display + `Name – City, ST` |
+| Legal name | Yes | Display |
 | City, State | Yes | State = 2 letters |
 | SPLC | Yes | Location |
+| Shop mark / AAR shop code | Optional | e.g. A084 → BO dropdown `Name (A084) – City, ST` |
 | Mark / billing road | Optional | Validated against `repair.billing_roads` when provided |
+| Delivering line(s) | Optional | Multi-select railroad marks vs billing-road table |
+| Shop capabilities | Optional | Multi-select; catalog under Admin gear |
+| Car types accepted | Optional | Multi-select; catalog under Admin gear |
+| AAR certifications | Optional | Repeatable rows (type, #, expiration); warn if expired or ≤60 days |
+| Website, hours/notes | Optional | Free text |
+| Attachments | Optional | W-9 / certificates / rate sheets; delete → VOIDED |
 | Contacts | ≥0 | name, email, phone, role |
 | Active | Yes | Deactivate hides from dropdowns; **never hard-delete** |
 
@@ -26,8 +33,10 @@
 
 - Shops are permanent and linked to the owner tenant/workspace.
 - Deactivate only (soft). No hard deletes.
-- Nav: Reference → Shops (live). BO reasons / Billing roads remain placeholders as needed.
+- Nav: top-level **Shops** (removed from Reference). BO reasons / Billing roads stay under Reference.
+- Admin (gear) manages capability / car-type / cert-type lists so they can grow.
 - Former `seed:payee-list` rows are soft-removed from shop master and copied into `repair.billing_roads`.
+- Grid search covers mark, delivering lines, capabilities, car types.
 
 ---
 

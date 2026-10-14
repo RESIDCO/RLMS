@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS public.v_valid_export_rows_data (
   end_date text
 );
 
+-- CREATE OR REPLACE is fine here: column list is SELECT * from the table
+-- (append-only). Do NOT DROP … CASCADE — that would drop repair.cars_ref.
 CREATE OR REPLACE VIEW public.v_valid_export_rows AS
 SELECT * FROM public.v_valid_export_rows_data;
 

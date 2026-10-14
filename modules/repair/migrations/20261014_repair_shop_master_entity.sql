@@ -197,7 +197,10 @@ CREATE TRIGGER entity_corrections_no_delete
   FOR EACH ROW EXECUTE FUNCTION repair.reject_mutation();
 
 -- ── cars_ref: expose railcars.entity for lookup ───────────────────────
-CREATE OR REPLACE VIEW repair.cars_ref AS
+-- DROP before CREATE so re-apply / force migrate never hits checkViewColumns
+-- when column lists change across migrations.
+DROP VIEW IF EXISTS repair.cars_ref CASCADE;
+CREATE VIEW repair.cars_ref AS
 SELECT
   r.id AS rlms_railcar_id,
   COALESCE(NULLIF(r.car_initial, ''), NULLIF(r.reporting_marks, ''), '') AS car_mark,

@@ -3,9 +3,9 @@ RLMS repair — Owner UI sub-section 1: Estimates History (/#/repair)
 Requires tip: 3d1dd73159f481e761dbe33f46eeb94b75b7ca2d
 (Owner UI Spec Step 1 — docs map A–H)
 
-Bundle tip (after apply): 698290dde63db25d3013fc32158bde265eb2ef9e
-Bundle size: 226055 bytes
-SHA-256: 090c13758732aa890aff0b30c9c9907a8c06034abcb77164cc02b01954e0c1ca
+Bundle tip (after apply): e17389fb5b787206693ffd79c522e318ab2c7446
+Bundle size: 226057 bytes
+SHA-256: ef0a5745f05c6208e7ad874637115d1967f07d01f7e34b3b366fa37c7b236c0e
 
 What this adds
 ----------------------------------------------------------------

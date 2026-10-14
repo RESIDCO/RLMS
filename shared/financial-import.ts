@@ -505,6 +505,8 @@ export type FinancialReview = {
     detail: string;
   };
   unmatchedRiders: string[];
+  /** Built from unmerged sheet rows so same-cost multi-term riders keep every Lease Exp. */
+  leaseTerms: RiderLeaseTermRow[];
 };
 
 function riderTypeKey(rider: string, carType: string, entity?: string) {
@@ -712,6 +714,7 @@ export function buildFinancialReview(
 ): FinancialReview {
   const main = parseAssetSheet("Main", mainMatrix, snapshotMonthOverride);
   const rps = parseAssetSheet("RPS", rpsMatrix, snapshotMonthOverride);
+  const leaseTerms = buildRiderLeaseTerms([...main.rows, ...rps.rows]);
   main.rows = mergeFinancialRowsByUniqueKey(main.rows);
   rps.rows = mergeFinancialRowsByUniqueKey(rps.rows);
   const allRows = [...main.rows, ...rps.rows];
@@ -842,6 +845,7 @@ export function buildFinancialReview(
         "RPS aliases Rail Partners Select. Entity matching is only used when the same snapshot has both Main and RPS rows.",
     },
     unmatchedRiders,
+    leaseTerms,
   };
 }
 
@@ -915,6 +919,30 @@ export function buildRiderLeaseTerms(rows: FinancialParsedRow[]): RiderLeaseTerm
       String(a.term_end ?? "").localeCompare(String(b.term_end ?? "")) ||
       String(a.status_text ?? "").localeCompare(String(b.status_text ?? "")),
   );
+}
+
+/** OLs whose raw rows have more than one distinct dated Lease Exp. */
+export function olsWithMultipleDatedTerms(
+  terms: Array<{ snapshot_month?: string | null; rider_id?: string | null; term_end?: string | null }>,
+  snapshotMonth?: string | null
+): Set<string> {
+  const dates = new Map<string, Set<string>>();
+  const snap = snapshotMonth ? String(snapshotMonth).slice(0, 10) : null;
+  for (const t of terms) {
+    if (snap && String(t.snapshot_month ?? "").slice(0, 10) !== snap) continue;
+    const end = String(t.term_end ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
+    const ol = String(t.rider_id ?? "").trim().toUpperCase();
+    if (!ol) continue;
+    const set = dates.get(ol) ?? new Set<string>();
+    set.add(end);
+    dates.set(ol, set);
+  }
+  const out = new Set<string>();
+  for (const [ol, set] of dates) {
+    if (set.size > 1) out.add(ol);
+  }
+  return out;
 }
 
 /** Same grain as rider_financial_summary_uniq — merge source lines that would collide. */

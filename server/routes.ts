@@ -3438,7 +3438,9 @@ export async function registerRoutes(
 
       const sourceRows = [...review.main.rows, ...review.rps.rows];
       const allRows = mergeFinancialRowsByUniqueKey(sourceRows);
-      const termRows = buildRiderLeaseTerms(sourceRows);
+      const termRows = review.leaseTerms?.length
+        ? review.leaseTerms
+        : buildRiderLeaseTerms(sourceRows);
       const BATCH = 100;
       let inserted = 0;
       for (let i = 0; i < allRows.length; i += BATCH) {

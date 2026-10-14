@@ -38,6 +38,7 @@ import {
   mergeFinancialRowsByUniqueKey,
   parseLeaseExpCell,
   buildRiderLeaseTerms,
+  olsWithMultipleDatedTerms,
   financialRowToDbPayload,
   RAILCAR_FINANCIAL_REFRESH_FIELDS,
   type ActiveCarForJoin,
@@ -598,6 +599,33 @@ eq(
   ]);
   eq(terms.length, 3, "multi-term + status keep separate term rows");
   eq(terms.find((t) => t.term_end === "2030-01-31")?.car_count, 135, "OL1513 2030 term keeps 135 cars");
+
+  const ol1956Raw = [
+    { ...base, rider_id: "OL1956", lease_exp_date: "2027-01-31", lease_status: null, count_cars: 50 },
+    { ...base, rider_id: "OL1956", lease_exp_date: "2028-01-31", lease_status: null, count_cars: 50 },
+  ];
+  const ol1956Merged = mergeFinancialRowsByUniqueKey(ol1956Raw);
+  eq(ol1956Merged.length, 1, "OL1956 same-cost rows still merge for financials");
+  eq(ol1956Merged[0].count_cars, 100, "OL1956 merged count is 100");
+  eq(ol1956Merged[0].lease_exp_date, "2027-01-31", "OL1956 financial row keeps the earliest date");
+  const ol1956Terms = buildRiderLeaseTerms(ol1956Raw);
+  eq(ol1956Terms.length, 2, "OL1956 terms keep both dates before merge");
+  eq(ol1956Terms.find((t) => t.term_end === "2027-01-31")?.car_count, 50, "OL1956 2027 term is 50 cars");
+  eq(ol1956Terms.find((t) => t.term_end === "2028-01-31")?.car_count, 50, "OL1956 2028 term is 50 cars");
+  eq(olsWithMultipleDatedTerms(ol1956Terms, "2026-08-01").has("OL1956"), true, "OL1956 is multi-term from raw dates");
+
+  const ol1942Raw = [
+    { ...base, lease_exp_date: "2026-12-31", lease_status: null, count_cars: 20 },
+    { ...base, lease_exp_date: "2027-12-31", lease_status: null, count_cars: 42 },
+    { ...base, lease_exp_date: null, lease_status: "SCRAPPING", count_cars: 1 },
+  ];
+  const ol1942Merged = mergeFinancialRowsByUniqueKey(ol1942Raw);
+  eq(ol1942Merged[0].count_cars, 63, "OL1942 financial merge still totals 63");
+  const ol1942Terms = buildRiderLeaseTerms(ol1942Raw);
+  eq(ol1942Terms.length, 3, "OL1942 keeps three raw terms including SCRAPPING");
+  eq(ol1942Terms.find((t) => t.term_end === "2026-12-31")?.car_count, 20, "OL1942 2026 term is 20 cars");
+  eq(ol1942Terms.find((t) => t.term_end === "2027-12-31")?.car_count, 42, "OL1942 2027 term is 42 cars");
+  eq(ol1942Terms.find((t) => t.status_text === "SCRAPPING")?.car_count, 1, "OL1942 SCRAPPING stays its own term");
 }
 
 eq(parseLeaseExpCell("2026-10-31").date, "2026-10-31", "Lease Exp date cell");

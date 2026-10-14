@@ -17,6 +17,7 @@ import {
   type LeaseDateSource,
 } from "@shared/lease-governance";
 import { carOlCode } from "@shared/lease-authority";
+import { olsWithMultipleDatedTerms } from "@shared/financial-import";
 
 const CAR_ID_CHUNK = 150;
 
@@ -120,6 +121,10 @@ export async function governLeaseDates(db: SupabaseClient): Promise<GovernLeaseD
 
   const { latestSnap, byOl: assetByOl } = buildAssetReportExpirations(finRows);
   const assetPresent = olsPresentInSnapshot(finRows, latestSnap);
+  const multiTermOls = olsWithMultipleDatedTerms(termRows as any[], latestSnap);
+  for (const [key, governed] of assetByOl) {
+    if (multiTermOls.has(key)) governed.source = "asset_report_multi_term";
+  }
   const statusByOl = new Map<string, string>();
   for (const t of termRows as any[]) {
     if (asIso(t.snapshot_month) !== latestSnap) continue;

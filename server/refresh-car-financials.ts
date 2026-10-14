@@ -50,7 +50,8 @@ export async function loadFinancialSummaryRows(sb: SupabaseClient): Promise<Summ
 export async function applyCarFinancialsFromSummary(
   sb: SupabaseClient,
   activeCars: CarRow[],
-  summaryRows: SummaryRowForRefresh[]
+  summaryRows: SummaryRowForRefresh[],
+  onProgress?: (done: number, total: number) => void
 ): Promise<ApplyCarFinancialResult> {
   const { updates, leftBlank, coalSkipped } = buildCarFinancialUpdates(activeCars, summaryRows);
   const byId = new Map(activeCars.map((c) => [c.id, c]));
@@ -65,6 +66,7 @@ export async function applyCarFinancialsFromSummary(
     }
     return true;
   });
+  onProgress?.(0, pending.length);
   for (let i = 0; i < pending.length; i += WAVE) {
     const slice = pending.slice(i, i + WAVE);
     const results = await Promise.all(
@@ -79,6 +81,7 @@ export async function applyCarFinancialsFromSummary(
       if (r.error) throw r.error;
     }
     carsUpdated += slice.length;
+    onProgress?.(carsUpdated, pending.length);
   }
   return {
     matched: updates.length,

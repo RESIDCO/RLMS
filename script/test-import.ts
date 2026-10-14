@@ -45,6 +45,12 @@ import {
   type SummaryRowForRefresh,
   type FinancialParsedRow,
 } from "../shared/financial-import";
+import {
+  buildGapWarning,
+  buildLoadChangeReport,
+  pickBaseMonth,
+  stripFormerDeal,
+} from "../shared/financial-load-review";
 
 let passed = 0;
 let failed = 0;
@@ -652,6 +658,69 @@ eq(parseLeaseExpCell("Available").status, "AVAILABLE", "status is uppercased");
   );
 }
 
+eq(pickBaseMonth(["2026-08-01", "2026-10-01"], "2026-10-01"), "2026-08-01", "replace October compares to August");
+eq(pickBaseMonth(["2026-08-01"], "2026-10-01"), "2026-08-01", "gap month uses latest before detected");
+{
+  const gap = buildGapWarning("2026-08-01", "2026-10-01");
+  eq(gap?.skippedLabels.join(","), "September 2026", "gap names September 2026");
+  eq(
+    /September 2026 was never loaded/.test(gap?.message ?? "") && /two months/.test(gap?.message ?? ""),
+    true,
+    "gap copy matches October-after-August"
+  );
+}
+eq(stripFormerDeal("xOL2312"), "OL2312", "Former Deal strips leading x");
+
+{
+  const k = (o: Record<string, unknown>) =>
+    ({
+      car_type: "TANK CARS",
+      entity: "Main",
+      total_book_value: 1000,
+      monthly_rent_total: 0,
+      monthly_rent_per_car: 0,
+      total_monthly_depreciation: 10,
+      monthly_depreciation_per_asset: 1,
+      net_equipment_cost_per_car: 100,
+      net_equipment_cost_total: 100,
+      lease_exp_date: null,
+      lease_status: null,
+      former_deal: null,
+      ...o,
+    }) as any;
+  const report = buildLoadChangeReport({
+    snapshotMonth: "2026-10-01",
+    loadedMonths: ["2026-08-01", "2026-10-01"],
+    fileRows: [
+      k({ rider_id: "OL2611", count_cars: 445, lease_exp_date: "2031-01-31" }),
+      k({ rider_id: "OL2603", count_cars: 10, lease_exp_date: "2030-01-31" }),
+      k({ rider_id: "OL2109", count_cars: 51, monthly_rent_per_car: 575, monthly_rent_total: 29325, lease_exp_date: "2031-10-31", months_until_lease_exp: 60 }),
+      k({ rider_id: "OL1826", count_cars: 5, lease_status: "SCRAPPING", lease_exp_date: null }),
+      k({ rider_id: "EA2312", count_cars: 3, former_deal: "xOL2312" }),
+      k({ rider_id: "OL2222", count_cars: 21, lease_exp_date: "2027-01-31" }),
+    ],
+    baseRows: [
+      k({ rider_id: "OL2109", count_cars: 51, monthly_rent_per_car: 425, monthly_rent_total: 21675, lease_exp_date: "2026-09-30", months_until_lease_exp: 2 }),
+      k({ rider_id: "OL1826", count_cars: 5, lease_exp_date: "2026-12-31" }),
+      k({ rider_id: "OL2222", count_cars: 41, lease_exp_date: "2027-01-31" }),
+    ],
+    ridersToday: [
+      { code: "OL2312", expiration_date: "2028-01-31", lease_status: null, active_cars: 12 },
+      { code: "EA2435", expiration_date: null, lease_status: null, active_cars: 150 },
+      { code: "OL2109", expiration_date: "2031-10-31", lease_status: null, active_cars: 51 },
+    ],
+    unmatchedRiders: ["EA2312"],
+    merge: { collapsedRows: 0, riders: [] },
+  });
+  eq(report.newKeys.map((x) => x.rider_id).sort().join(","), "EA2312,OL2603,OL2611", "new keys include OL2603 and OL2611");
+  eq(report.droppedKeys.length, 0, "no dropped keys");
+  eq(report.carCountChanges.length, 1, "one car-count change");
+  eq(report.carCountChanges[0].rider_id, "OL2222", "OL2222 count changed");
+  eq(report.possibleRenewals.some((x) => x.rider_id === "OL2109"), true, "OL2109 possible renewal");
+  eq(report.rentCostChanges.some((x) => x.rider_id === "OL2109" && x.old_rent_per_car === 425 && x.new_rent_per_car === 575), true, "OL2109 rent 425 → 575");
+  eq(report.statusChanges.some((x) => x.rider_id === "OL1826" && x.new_cell === "SCRAPPING"), true, "OL1826 date → SCRAPPING");
+  eq(report.suggestedMatches.some((x) => x.file_rider === "EA2312" && x.suggested_rider === "OL2312"), true, "EA2312 suggests OL2312");
+}
 eq(resolveLeaseType("Full Service Lease", "Net Lease"), "Full Service Lease", "resolveLeaseType prefers car over stale MLA");
 eq(resolveLeaseType(null, "Net Lease"), "Net Lease", "resolveLeaseType falls back to MLA when car blank");
 eq(resolveLeaseType("IDLE", "Net Lease"), "IDLE", "resolveLeaseType keeps car IDLE over MLA");

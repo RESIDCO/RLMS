@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCanEdit } from "@/lib/AuthContext";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,13 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import AcquisitionImportSection from "./AcquisitionImportSection";
 import MarkContactsImportSection from "./MarkContactsImportSection";
+import {
+  DownloadChangeReportButton,
+  FinancialChangeSections,
+  IntegrityChecksList,
+  type IntegrityCheckView,
+} from "./FinancialReviewSections";
+import type { LoadChangeReport } from "@shared/financial-load-review";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Loose shape — server returns the full normalized row alongside derived fields.
@@ -221,6 +228,7 @@ interface FinancialReviewResult {
   };
   refreshPreview: { carsMatched: number; carsUnmatched: number; multiBatchRiderTypes: number };
   railcarFieldsWritten?: string[];
+  changeReport?: LoadChangeReport | null;
 }
 
 interface FinCommitResult {
@@ -247,6 +255,16 @@ interface FinCommitResult {
     conflicted: number;
     unchanged?: number;
   };
+  rowsByEntity?: Record<string, number>;
+  mergedRows?: number;
+  mergedRiders?: string[];
+  ridersUpdated?: number;
+  leaseDatesChanged?: number;
+  multiTermRiders?: string[];
+  statusesSet?: string[];
+  changeReport?: LoadChangeReport | null;
+  integrityChecks?: IntegrityCheckView[];
+  leaseGovernance?: { ridersUpdated?: number; carsUpdated?: number };
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -374,9 +392,27 @@ export default function BulkImportPage() {
   const [finCommitted, setFinCommitted] = useState<FinCommitResult | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [finFileName, setFinFileName] = useState<string | null>(null);
+  const [finCommitPhase, setFinCommitPhase] = useState<string | null>(null);
+  const [finLoadLog, setFinLoadLog] = useState<
+    Array<{ id: number; snapshot_month: string; loaded_at: string; file_name: string | null; checks: IntegrityCheckView[] | null }>
+  >([]);
   const [showAll, setShowAll] = useState(false);
   const [rawRows, setRawRows] = useState<PreviewRow[]>([]);
   const [vcfRawRows, setVcfRawRows] = useState<Record<string, string>[]>([]);
+
+  async function refreshFinLoadLog() {
+    try {
+      const res = await apiRequest("GET", "/api/import/financial/loads");
+      const body = await res.json();
+      setFinLoadLog(body.loads ?? []);
+    } catch {
+      /* table may not exist yet */
+    }
+  }
+
+  useEffect(() => {
+    void refreshFinLoadLog();
+  }, []);
 
   async function previewFinancial(mainRows: unknown[][], rpsRows: unknown[][], snapshotMonth?: string | null) {
     const res = await apiRequest("POST", "/api/import/financial/preview", {
@@ -486,23 +522,63 @@ export default function BulkImportPage() {
       return;
     }
     setFinLoading(true);
+    setFinCommitPhase("Starting — do not close this tab");
     try {
-      const res = await apiRequest("POST", "/api/import/financial/commit", {
-        mainRows: finPayload.mainRows,
-        rpsRows: finPayload.rpsRows,
-        snapshotMonth: `${finSnapshotMonth}-01`,
-        confirmReplace: existing > 0 ? true : false,
-      });
-      const result: FinCommitResult = await res.json();
+      const res = await apiRequest(
+        "POST",
+        "/api/import/financial/commit?progress=1",
+        {
+          mainRows: finPayload.mainRows,
+          rpsRows: finPayload.rpsRows,
+          snapshotMonth: `${finSnapshotMonth}-01`,
+          confirmReplace: existing > 0 ? true : false,
+          fileName: finFileName,
+        },
+        { Accept: "application/x-ndjson" },
+        { timeoutMs: 10 * 60 * 1000 }
+      );
+      const ct = res.headers.get("content-type") || "";
+      let result: FinCommitResult;
+      if (ct.includes("ndjson") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let parsed: FinCommitResult | null = null;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const msg = JSON.parse(line);
+            if (msg.type === "progress") setFinCommitPhase(String(msg.phase));
+            if (msg.type === "error") throw new Error(msg.message || "Commit failed");
+            if (msg.type === "done") parsed = msg.result as FinCommitResult;
+          }
+        }
+        if (buf.trim()) {
+          const msg = JSON.parse(buf);
+          if (msg.type === "error") throw new Error(msg.message || "Commit failed");
+          if (msg.type === "done") parsed = msg.result as FinCommitResult;
+        }
+        if (!parsed) throw new Error("Commit finished without a summary");
+        result = parsed;
+      } else {
+        result = await res.json();
+      }
       setFinCommitted(result);
       setFinReview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void refreshFinLoadLog();
       toast({ title: `Financial refresh committed for ${finSnapshotMonth}` });
     } catch (e: any) {
       toast({ title: "Financial refresh failed", description: e.message, variant: "destructive" });
     } finally {
       setFinLoading(false);
+      setFinCommitPhase(null);
     }
   }
 
@@ -548,8 +624,19 @@ export default function BulkImportPage() {
           </div>
           <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
             <div>Summary rows written: <span className="font-mono-num">{finCommitted.summaryRowsWritten}</span></div>
+            {finCommitted.rowsByEntity &&
+              Object.entries(finCommitted.rowsByEntity).map(([ent, n]) => (
+                <div key={ent}>
+                  {ent} rows: <span className="font-mono-num">{n}</span>
+                </div>
+              ))}
+            <div>Merged same-cost rows: <span className="font-mono-num">{finCommitted.mergedRows ?? 0}</span></div>
             <div>Rows replaced: <span className="font-mono-num">{finCommitted.summaryRowsDeleted}</span></div>
             <div>Cars updated: <span className="font-mono-num">{finCommitted.carsUpdated}</span></div>
+            <div>Riders updated: <span className="font-mono-num">{finCommitted.ridersUpdated ?? finCommitted.leaseGovernance?.ridersUpdated ?? 0}</span></div>
+            <div>Lease dates changed: <span className="font-mono-num">{finCommitted.leaseDatesChanged ?? 0}</span></div>
+            <div>Multi-term riders: <span className="font-mono-num">{finCommitted.multiTermRiders?.length ?? 0}</span></div>
+            <div>Statuses set: <span className="font-mono-num">{finCommitted.statusesSet?.length ?? 0}</span></div>
             <div>Cars unchanged: <span className="font-mono-num">{finCommitted.carsUnchanged}</span></div>
             <div>Cars still blank: <span className="font-mono-num">{finCommitted.carsLeftBlank}</span></div>
             <div>Coal skipped: <span className="font-mono-num">{finCommitted.coalSkipped}</span></div>
@@ -582,6 +669,40 @@ export default function BulkImportPage() {
             <div className="text-xs text-amber-400 mt-2">
               No RLMS cars for: {finCommitted.unmatchedRiders.slice(0, 20).join(", ")}
               {finCommitted.unmatchedRiders.length > 20 ? "…" : ""}
+            </div>
+          )}
+          {(finCommitted.mergedRiders?.length ?? 0) > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Same-cost merge collapsed rows on: {finCommitted.mergedRiders!.join(", ")}
+            </p>
+          )}
+          {(finCommitted.multiTermRiders?.length ?? 0) > 0 && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Multi-term: {finCommitted.multiTermRiders!.join(", ")}
+            </p>
+          )}
+          {(finCommitted.statusesSet?.length ?? 0) > 0 && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Text statuses: {finCommitted.statusesSet!.join(", ")}
+            </p>
+          )}
+          {finCommitted.integrityChecks && finCommitted.integrityChecks.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <div className="text-sm font-semibold">Integrity checks</div>
+              <IntegrityChecksList checks={finCommitted.integrityChecks} />
+            </div>
+          )}
+          {finCommitted.changeReport && (
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">Change report</div>
+                <DownloadChangeReportButton
+                  report={finCommitted.changeReport}
+                  checks={finCommitted.integrityChecks}
+                  fileBase={(finFileName || "asset-report").replace(/\.[^.]+$/, "")}
+                />
+              </div>
+              <FinancialChangeSections report={finCommitted.changeReport} />
             </div>
           )}
           <Button className="mt-4" variant="secondary" onClick={() => { setFinCommitted(null); setFinFileName(null); setFinPayload(null); setFinReview(null); }}>
@@ -967,14 +1088,21 @@ export default function BulkImportPage() {
             </div>
           </div>
 
-          {finLoading && (
+          {finLoading && !finReview && (
             <div className="mt-6 space-y-2">
               <Skeleton className="h-8 w-1/3" />
               <Skeleton className="h-48 w-full" />
             </div>
           )}
 
-          {finReview && !finLoading && (
+          {finCommitPhase && (
+            <div className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <div className="font-medium text-foreground">Do not close this tab until the load finishes.</div>
+              <div className="mt-1 text-xs text-muted-foreground">{finCommitPhase}</div>
+            </div>
+          )}
+
+          {finReview && (
             <div className="mt-6 space-y-4">
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
                 <div className="text-sm font-semibold text-foreground">Review before commit — nothing written yet</div>
@@ -1024,6 +1152,18 @@ export default function BulkImportPage() {
                   color={(finReview.unmatchedRiders?.length ?? 0) ? "amber" : undefined}
                 />
               </div>
+
+              {finReview.changeReport && (
+                <>
+                  <div className="flex items-center justify-end">
+                    <DownloadChangeReportButton
+                      report={finReview.changeReport}
+                      fileBase={(finFileName || "asset-report").replace(/\.[^.]+$/, "")}
+                    />
+                  </div>
+                  <FinancialChangeSections report={finReview.changeReport} />
+                </>
+              )}
 
               {(finReview.unmatchedRiders?.length ?? 0) > 0 && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs">
@@ -1084,6 +1224,25 @@ export default function BulkImportPage() {
                   {!canEdit ? "View only" : finLoading ? "Committing…" : `Commit ${monthLabel(finSnapshotMonth) || "this month"}`}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {finLoadLog.length > 0 && (
+            <div className="mt-6 rounded-lg border border-border p-4">
+              <div className="text-sm font-medium mb-2">Load history</div>
+              <ul className="space-y-1 text-xs">
+                {finLoadLog.map((row) => {
+                  const failed = (row.checks ?? []).some((c) => !c.pass);
+                  return (
+                    <li key={row.id} className="flex flex-wrap gap-x-3">
+                      <span className="font-mono">{String(row.snapshot_month).slice(0, 7)}</span>
+                      <span className="text-muted-foreground">{new Date(row.loaded_at).toLocaleString()}</span>
+                      <span className="text-muted-foreground">{row.file_name || "—"}</span>
+                      <span className={failed ? "text-red-500" : "text-emerald-500"}>{failed ? "checks failed" : "checks passed"}</span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
         </section>

@@ -183,8 +183,22 @@ import {
   financialRowToDbPayload,
   mergeFinancialRowsByUniqueKey,
   normalizeSnapshotMonth,
+  olsWithMultipleDatedTerms,
   RAILCAR_FINANCIAL_REFRESH_FIELDS,
 } from "@shared/financial-import";
+import {
+  buildLoadChangeReport,
+  pickBaseMonth,
+  sameCostMergeStats,
+  type LoadChangeReport,
+} from "@shared/financial-load-review";
+import {
+  listLoadedSnapshotMonths,
+  loadBaseMonthRows,
+  loadRidersToday,
+  snapshotScopeChecksums,
+  runFinancialIntegrityChecks,
+} from "./financial-load-integrity";
 import {
   classifyAcquisitionRows,
   buildExistingCarKeySet,
@@ -3321,6 +3335,27 @@ export async function registerRoutes(
         existingSnapshotRows = count ?? 0;
       }
 
+      const fileRows = [...review.main.rows, ...review.rps.rows];
+      const loadedMonths = await listLoadedSnapshotMonths(supabaseAdmin);
+      const baseMonth = month ? pickBaseMonth(loadedMonths, month) : null;
+      const baseRows = await loadBaseMonthRows(supabaseAdmin, baseMonth);
+      const ridersToday = await loadRidersToday(supabaseAdmin, activeCars);
+      const changeReport = month
+        ? buildLoadChangeReport({
+            snapshotMonth: month,
+            loadedMonths,
+            fileRows,
+            baseRows,
+            ridersToday,
+            unmatchedRiders: review.unmatchedRiders,
+            merge: sameCostMergeStats(
+              review.sourceRowCount,
+              fileRows.length,
+              review.collapsedMergeRiders
+            ),
+          })
+        : null;
+
       res.json({
         ok: true,
         mode: "financial",
@@ -3346,6 +3381,9 @@ export async function registerRoutes(
         assetFamilyMappingNotes: review.assetFamilyMappingNotes,
         joinRules: review.joinRules,
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
+        changeReport,
+        loadedMonths,
+        baseMonth,
       });
     } catch (err) { errHandler(res, err); }
   });
@@ -3357,14 +3395,20 @@ export async function registerRoutes(
   // fillBlankRiderMonthlyRent may fill blank riders.monthly_rent_per_car.
   // See docs/IMPORT_WRITE_BOUNDARIES.md.
   app.post("/api/import/financial/commit", async (req: Request, res: Response) => {
+    const stream =
+      String(req.headers.accept || "").includes("ndjson") || String(req.query.progress || "") === "1";
+    const emit = (obj: Record<string, unknown>) => {
+      if (stream && !res.writableEnded) res.write(JSON.stringify(obj) + "\n");
+    };
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const { mainRows, rpsRows, snapshotMonth, confirmReplace } = req.body as {
+      const { mainRows, rpsRows, snapshotMonth, confirmReplace, fileName } = req.body as {
         mainRows?: unknown[][];
         rpsRows?: unknown[][];
         snapshotMonth?: string | null;
         confirmReplace?: boolean;
+        fileName?: string | null;
       };
 
       const month = normalizeSnapshotMonth(snapshotMonth);
@@ -3404,6 +3448,14 @@ export async function registerRoutes(
         throw probeErr;
       }
 
+      if (stream) {
+        res.status(200);
+        res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("X-Accel-Buffering", "no");
+        (res as any).flushHeaders?.();
+      }
+
       const activeCars: any[] = [];
       let from = 0;
       for (;;) {
@@ -3429,6 +3481,25 @@ export async function registerRoutes(
         return res.status(400).json({ message: "snapshot_month required — detect failed; pass snapshotMonth explicitly" });
       }
 
+      emit({ type: "progress", phase: "Checking what must stay unchanged" });
+      const scopeBefore = await snapshotScopeChecksums(supabaseAdmin, month);
+
+      const loadedMonths = await listLoadedSnapshotMonths(supabaseAdmin);
+      const baseMonth = pickBaseMonth(loadedMonths, month);
+      const baseRows = await loadBaseMonthRows(supabaseAdmin, baseMonth);
+      const ridersToday = await loadRidersToday(supabaseAdmin, activeCars);
+      const fileRows = [...review.main.rows, ...review.rps.rows];
+      const changeReport: LoadChangeReport = buildLoadChangeReport({
+        snapshotMonth: month,
+        loadedMonths,
+        fileRows,
+        baseRows,
+        ridersToday,
+        unmatchedRiders: review.unmatchedRiders,
+        merge: sameCostMergeStats(review.sourceRowCount, fileRows.length, review.collapsedMergeRiders),
+      });
+
+      emit({ type: "progress", phase: "Writing financial rows" });
       // Replace this month only — other months stay. Never append/duplicate.
       const { error: delErr } = await supabaseAdmin
         .from("rider_financial_summary")
@@ -3448,8 +3519,10 @@ export async function registerRoutes(
         const { error } = await supabaseAdmin.from("rider_financial_summary").insert(slice);
         if (error) throw error;
         inserted += slice.length;
+        emit({ type: "progress", phase: `Writing financial rows (${inserted} of ${allRows.length})` });
       }
 
+      emit({ type: "progress", phase: "Updating riders" });
       const { error: termDelErr } = await supabaseAdmin
         .from("rider_lease_terms")
         .delete()
@@ -3470,30 +3543,70 @@ export async function registerRoutes(
         carsUnchanged,
         carsLeftBlank: leftBlank,
         coalSkipped,
-      } = await applyCarFinancialsFromSummary(supabaseAdmin, activeCars, summaryRows);
+      } = await applyCarFinancialsFromSummary(supabaseAdmin, activeCars, summaryRows, (done, total) => {
+        emit({ type: "progress", phase: `Updating cars (${done} of ${total})` });
+      });
 
+      emit({ type: "progress", phase: "Updating riders" });
       const leaseGovernance = await governLeaseDates(supabaseAdmin);
       const riderRentRollup = await fillBlankRiderMonthlyRent();
 
-      console.log("[financial-refresh]", JSON.stringify({
+      emit({ type: "progress", phase: "Running integrity checks" });
+      const scopeAfter = await snapshotScopeChecksums(supabaseAdmin, month);
+      const integrityChecks = await runFinancialIntegrityChecks({
+        db: supabaseAdmin,
         snapshotMonth: month,
-        summaryRowsDeleted: existingCount ?? 0,
-        summaryRowsWritten: inserted,
-        carsUpdated,
-        carsUnchanged,
-        carsLeftBlank: leftBlank,
-        coalSkipped,
-        unmatchedRiders: review.unmatchedRiders.length,
-        railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
-        leaseGovernance,
-        riderRentRollup,
-      }));
+        fileRows: allRows,
+        termRows,
+        scopeBefore,
+        scopeAfter,
+      });
+      const carried: string[] = [];
+      if (changeReport.expiredRiders.length) {
+        carried.push(
+          `${changeReport.expiredRiders.length} riders are past their lease end: ${changeReport.expiredRiders.map((r) => r.rider_id).join(", ")}`
+        );
+      }
+      if (changeReport.droppedKeys.length) {
+        carried.push(
+          `${changeReport.droppedKeys.length} keys dropped versus ${changeReport.totals.baseLabel}: ${changeReport.droppedKeys.map((k) => k.rider_id).join(", ")}`
+        );
+      }
+      if (review.unmatchedRiders.length) {
+        carried.push(`${review.unmatchedRiders.length} unmatched riders: ${review.unmatchedRiders.slice(0, 20).join(", ")}`);
+      }
+      if (changeReport.suggestedMatches.length) {
+        carried.push(
+          `Suggested matches (not applied): ${changeReport.suggestedMatches.map((s) => `${s.file_rider}→${s.suggested_rider}`).join(", ")}`
+        );
+      }
+      if (carried.length) {
+        integrityChecks.push({
+          id: "carried_forward",
+          label: "Carried-forward warnings",
+          pass: true,
+          warning: true,
+          detail: carried.join(" · "),
+        });
+      }
 
-      res.json({
+      const statusesSet = new Set(
+        termRows.filter((t) => t.status_text && !t.term_end).map((t) => t.rider_id.toUpperCase())
+      );
+      const multiTerm = olsWithMultipleDatedTerms(termRows, month);
+      const rowsByEntity: Record<string, number> = {};
+      for (const r of allRows) {
+        rowsByEntity[r.entity] = (rowsByEntity[r.entity] ?? 0) + 1;
+      }
+
+      const payload = {
         ok: true,
         snapshotMonth: month,
         summaryRowsDeleted: existingCount ?? 0,
         summaryRowsWritten: inserted,
+        rowsByEntity,
+        mergedRows: changeReport.merge.collapsedRows,
+        mergedRiders: changeReport.merge.riders,
         carsUpdated,
         carsUnchanged,
         carsLeftBlank: leftBlank,
@@ -3510,7 +3623,83 @@ export async function registerRoutes(
         railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
         leaseGovernance,
         riderRentRollup,
+        ridersUpdated: leaseGovernance.ridersUpdated,
+        leaseDatesChanged: changeReport.leaseDateChanges.length,
+        multiTermRiders: Array.from(multiTerm),
+        statusesSet: Array.from(statusesSet),
+        changeReport,
+        integrityChecks,
+        flagged: review.flagged,
+      };
+
+      const { error: logErr } = await supabaseAdmin.from("asset_report_load_log").insert({
+        snapshot_month: month,
+        loaded_by: writerId,
+        file_name: fileName ?? null,
+        summary: {
+          summaryRowsWritten: inserted,
+          rowsByEntity,
+          mergedRows: changeReport.merge.collapsedRows,
+          carsUpdated,
+          ridersUpdated: leaseGovernance.ridersUpdated,
+          leaseDatesChanged: changeReport.leaseDateChanges.length,
+          unmatchedRiders: review.unmatchedRiders,
+        },
+        checks: integrityChecks,
       });
+      if (logErr && !/asset_report_load_log/i.test(logErr.message)) {
+        console.warn("[financial-refresh] load log insert:", logErr.message);
+      }
+
+      console.log("[financial-refresh]", JSON.stringify({
+        snapshotMonth: month,
+        summaryRowsDeleted: existingCount ?? 0,
+        summaryRowsWritten: inserted,
+        carsUpdated,
+        carsUnchanged,
+        carsLeftBlank: leftBlank,
+        coalSkipped,
+        unmatchedRiders: review.unmatchedRiders.length,
+        railcarFieldsWritten: RAILCAR_FINANCIAL_REFRESH_FIELDS,
+        leaseGovernance,
+        riderRentRollup,
+        integrityPass: integrityChecks.filter((c) => !c.pass).length === 0,
+      }));
+
+      if (stream) {
+        emit({ type: "done", result: payload });
+        res.end();
+      } else {
+        res.json(payload);
+      }
+    } catch (err) {
+      if (stream && res.headersSent) {
+        const message =
+          err instanceof Error ? err.message : err && typeof err === "object" && "message" in err
+            ? String((err as any).message)
+            : String(err);
+        emit({ type: "error", message });
+        res.end();
+        return;
+      }
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/import/financial/loads", async (req: Request, res: Response) => {
+    try {
+      const uid = await requireWrite(req, res);
+      if (!uid) return;
+      const { data, error } = await supabaseAdmin
+        .from("asset_report_load_log")
+        .select("id, snapshot_month, loaded_at, loaded_by, file_name, summary, checks")
+        .order("loaded_at", { ascending: false })
+        .limit(24);
+      if (error) {
+        if (/asset_report_load_log/i.test(error.message)) return res.json({ loads: [] });
+        throw error;
+      }
+      res.json({ loads: data ?? [] });
     } catch (err) { errHandler(res, err); }
   });
 

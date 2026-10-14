@@ -6,6 +6,8 @@
  * car_number, entity, active, lessee, rider assignment. See docs/IMPORT_WRITE_BOUNDARIES.md.
  */
 
+import { ridersCollapsedByMerge } from "./financial-load-review";
+
 export type FinRawRow = Record<string, unknown>;
 
 export type FlaggedFinancialRow = {
@@ -507,6 +509,8 @@ export type FinancialReview = {
   unmatchedRiders: string[];
   /** Built from unmerged sheet rows so same-cost multi-term riders keep every Lease Exp. */
   leaseTerms: RiderLeaseTermRow[];
+  sourceRowCount: number;
+  collapsedMergeRiders: string[];
 };
 
 function riderTypeKey(rider: string, carType: string, entity?: string) {
@@ -714,7 +718,10 @@ export function buildFinancialReview(
 ): FinancialReview {
   const main = parseAssetSheet("Main", mainMatrix, snapshotMonthOverride);
   const rps = parseAssetSheet("RPS", rpsMatrix, snapshotMonthOverride);
-  const leaseTerms = buildRiderLeaseTerms([...main.rows, ...rps.rows]);
+  const rawRows = [...main.rows, ...rps.rows];
+  const leaseTerms = buildRiderLeaseTerms(rawRows);
+  const sourceRowCount = rawRows.length;
+  const collapsedMergeRiders = ridersCollapsedByMerge(rawRows);
   main.rows = mergeFinancialRowsByUniqueKey(main.rows);
   rps.rows = mergeFinancialRowsByUniqueKey(rps.rows);
   const allRows = [...main.rows, ...rps.rows];
@@ -846,6 +853,8 @@ export function buildFinancialReview(
     },
     unmatchedRiders,
     leaseTerms,
+    sourceRowCount,
+    collapsedMergeRiders,
   };
 }
 

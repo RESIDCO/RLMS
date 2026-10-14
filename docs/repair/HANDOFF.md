@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§C Template fields + attach carry** | Apply `rlms-phase1-owner-ui-c-template-fields.bundle`. Requires **`8a9378e`**. Lands tip in bundle README. |
+| **§D Estimate Review (owner)** | Apply `rlms-phase1-owner-ui-d-estimate-review.bundle`. Requires **`468a9db`**. Lands tip in bundle README. |
+| **§C Template fields + attach carry** | Prior / signed off: `rlms-phase1-owner-ui-c-template-fields.bundle` → **`468a9db`**. |
 | **§C Copy BO template** | Prior: `rlms-phase1-owner-ui-c-copy-template.bundle` → **`8a9378e`**. |
 | **§C Bad Orders r2** | Prior: `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` → **`1b6e660`**. |
 | **§C Bad Orders (initial)** | Prior: `rlms-phase1-owner-ui-c-bad-orders.bundle` → **`d4a2bfb`**. |
@@ -21,7 +22,7 @@
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`8a9378e`**, apply the §C **template-fields** bundle next.
+If PC is on **`468a9db`**, apply the §D **estimate-review** bundle next.
 
 ---
 
@@ -31,10 +32,11 @@ If PC is on **`8a9378e`**, apply the §C **template-fields** bundle next.
 |---|---|---|
 | **1** | Estimates History `/#/repair` (spec §A) | Done |
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
-| **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Template fields + attach carry (this tip)** |
-| 4+ | Estimate Review rebuild, etc. | Parked |
+| **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Signed off** (`468a9db`) |
+| **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **This tip** |
+| 5+ | Documents polish / Lessee, etc. | Parked |
 
-**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md)  
+**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md)  
 **Overall map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)
 
 ---
@@ -47,7 +49,8 @@ If PC is on **`8a9378e`**, apply the §C **template-fields** bundle next.
 | N+10 | `rlms-phase1-owner-ui-c-bad-orders.bundle` | `dd5acc7` | → **`d4a2bfb`** |
 | N+11 | `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` | `d4a2bfb` | → **`1b6e660`** |
 | N+12 | `rlms-phase1-owner-ui-c-copy-template.bundle` | `1b6e660` | → **`8a9378e`** |
-| N+13 | **`rlms-phase1-owner-ui-c-template-fields.bundle`** | **`8a9378e`** | → **(see README)** |
+| N+13 | `rlms-phase1-owner-ui-c-template-fields.bundle` | `8a9378e` | → **`468a9db`** |
+| N+14 | **`rlms-phase1-owner-ui-d-estimate-review.bundle`** | **`468a9db`** | → **(see README)** |
 
 ---
 
@@ -74,13 +77,13 @@ If PC is on **`8a9378e`**, apply the §C **template-fields** bundle next.
 
 ---
 
-## Apply §C template-fields (on tip `8a9378e`)
+## Apply §D Estimate Review (on tip `468a9db`)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect 8a9378e…
-git bundle verify PATH\TO\rlms-phase1-owner-ui-c-template-fields.bundle
-git pull PATH\TO\rlms-phase1-owner-ui-c-template-fields.bundle HEAD
+git rev-parse HEAD   # expect 468a9db…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-d-estimate-review.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-d-estimate-review.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -92,14 +95,16 @@ $env:REPAIR_LOCAL_DB = "1"
 $env:REPAIR_DEV_BYPASS_AUTH = "1"
 npm install
 npm run repair:migrate:local
+npm run repair:smoke-estimate-review
 npm run repair:smoke-bad-orders
 npm run repair:smoke-shop-entity
 npm run repair:dev:local
-# http://127.0.0.1:5000/#/repair/bad-orders
-# http://127.0.0.1:5000/#/repair/bo-reasons
+# http://127.0.0.1:5000/#/repair
+# open an Awaiting Approval estimate → Estimate Review
+# Update Responsibilities · Review & Compare · N Document(s) found (new window)
 ```
 
-Expect: **New from existing…** / **Use as template** fills Shop, Reason (+ keyed detail), Comments in the form controls; source attachments shown as **From BO &lt;car&gt; &lt;date&gt;** (checked); car #s / B/O date today / arrival / incident / DDCT left blank; smoke asserts shop/reason/keyed/comments + attachment link PASS.
+Expect: compact RS header; line grid with Loc/Qnty/AJOB/…/PM; owner Approve / Request Revision / Update Responsibilities / Rollback / Export; **no** Submit for approval; **no** completed/outbound date entry; responsibilities codes 1/2/4/5/6/7/8/9; compare any two revisions; documents viewer new window.
 
 ---
 
@@ -115,6 +120,6 @@ Expect: **New from existing…** / **Use as template** fills Shop, Reason (+ key
 
 ## Open items
 
-- Screenshots 02–05 for later subsections (Estimate Review, attachments, responsibilities).
 - Full AAR Bad Order Reason list still incomplete (do not invent) — admin-extensible via `/#/repair/bo-reasons`.
 - Q1 / Q2 remain in open-questions.md.
+- Screen E document polish / Screen F Lessee after §D sign-off.

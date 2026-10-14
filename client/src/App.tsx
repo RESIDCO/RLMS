@@ -38,6 +38,8 @@ import DvReference from "@/pages/DvCalculator/Reference";
 import RepairHome from "@/pages/repair/RepairHome";
 import ShopEventLink from "@/pages/repair/ShopEventLink";
 import EstimateReview from "@/pages/repair/EstimateReview";
+import UpdateResponsibilities from "@/pages/repair/UpdateResponsibilities";
+import EstimateDocuments from "@/pages/repair/EstimateDocuments";
 import LesseeApproval from "@/pages/repair/LesseeApproval";
 import RepairComingSoon from "@/pages/repair/RepairComingSoon";
 import BadOrders from "@/pages/repair/BadOrders";
@@ -132,6 +134,9 @@ function AppRouter() {
       <Route path="/repair/billing-roads" component={RepairComingSoon} />
       <Route path="/repair/admin" component={RepairAdmin} />
       <Route path="/repair/help" component={RepairComingSoon} />
+      {/* §D Estimate Review sub-routes before :id */}
+      <Route path="/repair/estimates/:id/responsibilities" component={UpdateResponsibilities} />
+      <Route path="/repair/estimates/:id/documents" component={EstimateDocuments} />
       <Route path="/repair/estimates/:id" component={EstimateReview} />
       <Route path="/repair" component={RepairHome} />
       <Route component={NotFound} />

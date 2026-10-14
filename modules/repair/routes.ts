@@ -155,6 +155,12 @@ import {
 import { ownerVerifyTankDocsFirst } from "./services/tank-docs";
 import { listResponsibilityCodes } from "./services/categories";
 import {
+  buildEstimateReviewPayload,
+  setBillingCategory,
+  submitResponsibilityUpdates,
+  summarizeByResp,
+} from "./services/estimate-review";
+import {
   sendLesseeApprovalRequest,
   approveViaLesseeLink,
   ingestLesseeReply,
@@ -1714,76 +1720,32 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.json({ codes: await listResponsibilityCodes(tenantId) });
   });
 
-  /** Review payload: revisions + lines grouped by resp code + compare + Data File header. */
+  /** Review payload (§D): compact context, RS line fields, optional any-two-rev compare. */
   app.get("/api/repair/estimates/:id/review", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     const estimateId = String(req.params.id);
-    const revisions = await listRevisions(estimateId);
-    const withLines = [];
-    for (const rev of revisions) {
-      const lines = await getRevisionLines(String(rev.id));
-      const byResp: Record<string, typeof lines> = {};
-      for (const line of lines) {
-        const key = String(line.resp_code ?? "(none)");
-        (byResp[key] ??= []).push(line);
-      }
-      withLines.push({ revision: rev, lines, byResp });
-    }
-    let compare: { from: number; to: number; added: number; removed: number; changed: number } | null =
-      null;
-    if (withLines.length >= 2) {
-      const prev = withLines[withLines.length - 2];
-      const curr = withLines[withLines.length - 1];
-      const prevMap = new Map(prev.lines.map((l) => [l.line_no, l]));
-      const currMap = new Map(curr.lines.map((l) => [l.line_no, l]));
-      let added = 0;
-      let removed = 0;
-      let changed = 0;
-      for (const [n, line] of currMap) {
-        const p = prevMap.get(n);
-        if (!p) added++;
-        else if (
-          String(p.aar_job_code) !== String(line.aar_job_code) ||
-          Number(p.labor) !== Number(line.labor) ||
-          Number(p.material) !== Number(line.material) ||
-          String(p.resp_code) !== String(line.resp_code)
-        ) {
-          changed++;
-        }
-      }
-      for (const n of prevMap.keys()) {
-        if (!currMap.has(n)) removed++;
-      }
-      compare = {
-        from: Number(prev.revision.rev_no),
-        to: Number(curr.revision.rev_no),
-        added,
-        removed,
-        changed,
-      };
-    }
-    const editor = await getCorrectionEditorPayload({ estimateId });
-    const headerEdits = await listHeaderEdits({ estimateId });
-    const latest = withLines[withLines.length - 1];
-    const header =
-      (editor.ok ? editor.header : null) ??
-      latest?.revision?.header ??
-      {};
-    return res.json({
+    const fromQ = req.query.fromRev != null ? Number(req.query.fromRev) : undefined;
+    const toQ = req.query.toRev != null ? Number(req.query.toRev) : undefined;
+    const result = await buildEstimateReviewPayload({
       estimateId,
-      revisions: withLines,
-      compare,
-      header,
-      headerFields: DATA_FILE_HEADER_FIELDS,
-      headerEdits,
-      canPencilEdit: editor.ok ? editor.canCorrect || editor.needsAdjustment : false,
-      needsAdjustment: editor.ok ? editor.needsAdjustment : false,
-      estimate: editor.ok ? editor.estimate : null,
-      documents: editor.ok
-        ? await listEventDocuments({ eventId: String(editor.estimate.event_id) })
-        : [],
+      compareFromRev: Number.isFinite(fromQ) ? fromQ : undefined,
+      compareToRev: Number.isFinite(toQ) ? toQ : undefined,
     });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/billing-category", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setBillingCategory({
+      estimateId: String(req.params.id),
+      billingCategory: String(req.body?.billingCategory ?? ""),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 
   app.post("/api/repair/estimates/:id/header-edit", async (req, res) => {
@@ -2981,6 +2943,29 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
           respCode: String(u.respCode ?? ""),
         }))
       : [];
+    const splits = Array.isArray(req.body?.splits)
+      ? req.body.splits.map(
+          (s: { lineId?: string; percent?: number; respCode?: string }) => ({
+            lineId: String(s.lineId ?? ""),
+            percent: Number(s.percent ?? 0),
+            respCode: String(s.respCode ?? ""),
+          }),
+        )
+      : [];
+    // Prefer §D submit path (splits + cents); fall back to legacy updater when no splits.
+    if (splits.length > 0 || req.body?.useOwnerUiD === true) {
+      const result = await submitResponsibilityUpdates({
+        estimateId: String(req.params.id),
+        lineUpdates,
+        splits,
+        responsibleParty: req.body?.responsibleParty
+          ? String(req.body.responsibleParty)
+          : undefined,
+        actor: actorFrom(req),
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    }
     const result = await updateResponsibility({
       estimateId: String(req.params.id),
       lineUpdates,
@@ -2988,6 +2973,13 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/responsibility-summary", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    return res.json({ summary: summarizeByResp(lines) });
   });
 
   app.post("/api/repair/estimates/export-aar", async (req, res) => {

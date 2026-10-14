@@ -138,6 +138,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return <LesseeApproval />;
   }
 
+  // Local review mode (no Supabase): allow all repair screens against local Postgres.
+  if (import.meta.env.VITE_REPAIR_LOCAL_REVIEW === "1" && loc.startsWith("/repair")) {
+    return <>{children}</>;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">

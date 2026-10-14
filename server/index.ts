@@ -6,6 +6,19 @@ import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer, type IncomingMessage } from "http";
+import { isRepairLocalReviewMode } from "./supabase";
+
+if (isRepairLocalReviewMode()) {
+  // Ensure Vite client sees local-review flags (AuthGate / supabase stub).
+  process.env.VITE_REPAIR_LOCAL_REVIEW = "1";
+  if (!process.env.REPAIR_LOCAL_REVIEW_BANNER_PRINTED) {
+    console.log("============================================================");
+    console.log(" LOCAL REVIEW MODE, no Supabase");
+    console.log(" Repair module only — local Postgres (DATABASE_URL).");
+    console.log("============================================================");
+    process.env.REPAIR_LOCAL_REVIEW_BANNER_PRINTED = "1";
+  }
+}
 
 const app = express();
 const httpServer = createServer(app);

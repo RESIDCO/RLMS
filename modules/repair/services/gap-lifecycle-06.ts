@@ -436,7 +436,8 @@ export async function softDeleteDocument(opts: {
   if (!reason) return { ok: false as const, status: 400, error: "Delete reason required" };
   const { rows } = await q(
     `UPDATE repair.documents
-     SET deleted_at = now(), deleted_by = $1, delete_reason = $2
+     SET deleted_at = now(), deleted_by = $1, delete_reason = $2,
+         lifecycle_status = 'VOIDED'
      WHERE id = $3 AND tenant_id = $4 AND deleted_at IS NULL
      RETURNING *`,
     [opts.actor, reason, opts.documentId, tenantId],
@@ -447,7 +448,7 @@ export async function softDeleteDocument(opts: {
     entity: "document",
     entityId: opts.documentId,
     action: "DOCUMENT_SOFT_DELETED",
-    after: { reason, neverPurge: true },
+    after: { reason, neverPurge: true, lifecycle_status: "VOIDED" },
     actor: opts.actor,
     via: "UI",
   });
@@ -465,7 +466,8 @@ export async function restoreDocument(opts: {
   if (!reason) return { ok: false as const, status: 400, error: "Restore reason required" };
   const { rows } = await q(
     `UPDATE repair.documents
-     SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL
+     SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL,
+         lifecycle_status = 'ACTIVE'
      WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NOT NULL
      RETURNING *`,
     [opts.documentId, tenantId],

@@ -7,6 +7,17 @@ import multer from "multer";
 import { requireVcfCar } from "./services/vcf";
 import { listStatuses, listTransitions } from "./services/status-machine";
 import { createBadOrder, getEvent, listDemoShop } from "./services/bo";
+import { listBoRules, createBoRule } from "./services/bo-rules";
+import {
+  listDistributionEntries,
+  addDistributionEntry,
+  removeDistributionEntry,
+} from "./services/distribution-list";
+import {
+  DATA_FILE_HEADER_FIELDS,
+  editHeaderField,
+  listHeaderEdits,
+} from "./services/header-edits";
 import {
   issueEventLink,
   revokeEventLink,
@@ -759,6 +770,58 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.json({ shops: await listDemoShop() });
   });
 
+  app.get("/api/repair/bo-rules", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const activeOnly = String(req.query.activeOnly ?? "1") !== "0";
+    return res.json({ rules: await listBoRules({ activeOnly }) });
+  });
+
+  app.post("/api/repair/bo-rules", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await createBoRule({
+      code: String(body.code ?? ""),
+      description: String(body.description ?? ""),
+      eventRule: body.eventRule === "RULE_107" ? "RULE_107" : "RULE_1",
+      requiresOtherText: Boolean(body.requiresOtherText),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/distribution-list", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ entries: await listDistributionEntries() });
+  });
+
+  app.post("/api/repair/distribution-list", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await addDistributionEntry({
+      email: String(req.body?.email ?? ""),
+      name: req.body?.name ? String(req.body.name) : undefined,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.post("/api/repair/distribution-list/:id/remove", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await removeDistributionEntry({
+      id: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
   app.post("/api/repair/bad-orders", async (req, res) => {
     try {
       const uid = await maybeRequireUser(deps, req, res);
@@ -767,17 +830,36 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       const result = await createBadOrder({
         carMark: String(body.carMark ?? ""),
         carNumber: String(body.carNumber ?? ""),
-        rule: body.rule === "RULE_107" ? "RULE_107" : "RULE_1",
+        boRuleCode: body.boRuleCode
+          ? String(body.boRuleCode)
+          : body.rule
+            ? String(body.rule)
+            : undefined,
+        boRuleOtherText: body.boRuleOtherText
+          ? String(body.boRuleOtherText)
+          : body.otherText
+            ? String(body.otherText)
+            : undefined,
+        rule: body.rule === "RULE_107" ? "RULE_107" : body.rule === "RULE_1" ? "RULE_1" : undefined,
         source:
           body.source === "DDCT" || body.source === "EMAIL_DOC"
             ? body.source
             : "INTERNAL",
         shoppingReason: body.shoppingReason ? String(body.shoppingReason) : undefined,
         damagingRoad: body.damagingRoad ? String(body.damagingRoad) : undefined,
+        billingRoad: body.billingRoad ? String(body.billingRoad) : undefined,
+        billingRoadOverrideReason: body.billingRoadOverrideReason
+          ? String(body.billingRoadOverrideReason)
+          : undefined,
         ddctEventId: body.ddctEventId ? String(body.ddctEventId) : undefined,
         ddctIncidentId: body.ddctIncidentId ? String(body.ddctIncidentId) : undefined,
         shopId: body.shopId ? String(body.shopId) : undefined,
         isWreck: Boolean(body.isWreck),
+        boDate: body.boDate ? String(body.boDate) : undefined,
+        boCity: body.boCity ? String(body.boCity) : undefined,
+        boState: body.boState ? String(body.boState) : undefined,
+        destCity: body.destCity ? String(body.destCity) : undefined,
+        destState: body.destState ? String(body.destState) : undefined,
         actor: actorFrom(req),
       });
       if (!result.ok) return res.status(result.status).json({ error: result.error });
@@ -787,6 +869,34 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       return res.status(500).json({ error: "BO create failed" });
     }
   });
+
+  /** BO / event attachments (same storage as estimate; delete → VOIDED). */
+  app.post(
+    "/api/repair/events/:id/documents",
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        const uid = await maybeRequireUser(deps, req, res);
+        if (!uid) return;
+        if (!req.file) return res.status(400).json({ error: "file required" });
+        const result = await uploadEventDocument({
+          eventId: String(req.params.id),
+          kind: String(req.body?.kind ?? "bo_attachment"),
+          actorEmail: actorFrom(req),
+          file: {
+            filename: req.file.originalname || "upload.bin",
+            mime: req.file.mimetype || "application/octet-stream",
+            bytes: req.file.buffer,
+          },
+        });
+        if (!result.ok) return res.status(result.status).json({ error: result.error });
+        return res.status(201).json(result);
+      } catch (err) {
+        console.error("[repair/events/:id/documents]", err);
+        return res.status(500).json({ error: "Document upload failed" });
+      }
+    },
+  );
 
   app.get("/api/repair/events/:id", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
@@ -900,7 +1010,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.json({ codes: await listResponsibilityCodes(tenantId) });
   });
 
-  /** Review payload: revisions + lines grouped by resp code + compare. */
+  /** Review payload: revisions + lines grouped by resp code + compare + Data File header. */
   app.get("/api/repair/estimates/:id/review", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
@@ -949,7 +1059,48 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
         changed,
       };
     }
-    return res.json({ estimateId, revisions: withLines, compare });
+    const editor = await getCorrectionEditorPayload({ estimateId });
+    const headerEdits = await listHeaderEdits({ estimateId });
+    const latest = withLines[withLines.length - 1];
+    const header =
+      (editor.ok ? editor.header : null) ??
+      latest?.revision?.header ??
+      {};
+    return res.json({
+      estimateId,
+      revisions: withLines,
+      compare,
+      header,
+      headerFields: DATA_FILE_HEADER_FIELDS,
+      headerEdits,
+      canPencilEdit: editor.ok ? editor.canCorrect || editor.needsAdjustment : false,
+      needsAdjustment: editor.ok ? editor.needsAdjustment : false,
+      estimate: editor.ok ? editor.estimate : null,
+      documents: editor.ok
+        ? await listEventDocuments({ eventId: String(editor.estimate.event_id) })
+        : [],
+    });
+  });
+
+  app.post("/api/repair/estimates/:id/header-edit", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await editHeaderField({
+      estimateId: String(req.params.id),
+      fieldKey: String(req.body?.fieldKey ?? ""),
+      newValue: String(req.body?.newValue ?? ""),
+      reason: String(req.body?.reason ?? ""),
+      actor: actorFrom(req),
+      actorRole: req.body?.actorRole ? String(req.body.actorRole) : "reviewer",
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/estimates/:id/header-edits", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ edits: await listHeaderEdits({ estimateId: String(req.params.id) }) });
   });
 
   app.post("/api/repair/estimates/:id/lessee-approval", async (req, res) => {

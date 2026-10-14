@@ -1,0 +1,67 @@
+RLMS repair — Phase 1 UI review feedback (Bruce 2026-10-14)
+============================================================
+Requires tip: ac7148e911d17f8af206ce35567277fa93e9511d
+(local-review-mode — LOCAL REVIEW MODE, no Supabase)
+
+Bundle tip (after apply): 4debe04b1344ae3a9cfdbb3db1f005c40d77949c
+Bundle size: 26806 bytes
+SHA-256: c1d32b3c273a6d9aebab1519f979e168b1e08b4a966f390a615557f75feeb396
+
+What this adds
+----------------------------------------------------------------
+  Bad Order (`/#/repair`)
+    - repair.bo_rules lookup dropdown (code + description + active); admins add
+    - Seeded RULE_1, RULE_107, OTHER (+ manual text)
+    - Shop dropdown: "Name – City, ST" (shops.city / state / billing_road)
+    - Billing road auto-fill from shop; override requires reason
+    - BO attachments → repair.documents; delete → VOIDED (never purged)
+    - Resp 6 / lessee contact fields removed from BO
+    - Plain distribution list for BO notifications
+
+  Internal estimate review (`/#/repair/estimates/:id`)
+    - Data File header (full Format-1 header block) on every estimate
+    - Pencil editor per header field; reason required; audit old→new/user/time
+    - After Approved → Adjustment path (MG1)
+
+  Lessee (`/#/repair/lessee/:token`)
+    - Same layout/field set as internal (header, all lines, totals, attachments)
+    - Read-only except approve/dispute own responsibility lines (Resp 6)
+    - Pencil / admin controls hidden
+
+  Shop URL (`/#/repair/e/:token`) — NO CHANGES
+
+  Gap: full repairSMART AAR/BO rule list not in store captures — only RULE_1 /
+  RULE_107 / OTHER seeded. Documented in docs/repair/HANDOFF.md.
+
+  Verified: repair:demo:local (14 steps, [4]=36732.04);
+            repair:smoke-ui-review
+
+Files outside modules/repair (and why)
+----------------------------------------------------------------
+  client/src/pages/repair/*
+    BO / estimate / lessee UI (shop page untouched). Allowed client repair pages.
+  package.json
+    repair:smoke-ui-review script
+  docs/repair/HANDOFF.md
+    tip / apply steps / AAR seed gap
+  docs/bundles/rlms-phase1-ui-review-feedback.README.txt
+    this file
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect ac7148e
+  git bundle verify PATH\TO\rlms-phase1-ui-review-feedback.bundle
+  git pull PATH\TO\rlms-phase1-ui-review-feedback.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:demo:local
+  npm run repair:smoke-ui-review
+  npm run repair:dev:local
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

@@ -20,6 +20,7 @@
     "repair:smoke-estimate-lifecycle": "tsx modules/repair/dev/smoke-estimate-lifecycle.ts",
     "repair:smoke-lifecycle-05": "tsx modules/repair/dev/smoke-lifecycle-05.ts",
     "repair:smoke-lifecycle-06": "tsx modules/repair/dev/smoke-lifecycle-06.ts",
+    "repair:smoke-ui-review": "tsx modules/repair/dev/smoke-ui-review-feedback.ts",
     "repair:demo:local": "tsx modules/repair/dev/demo-local.ts"
   },
   "dependencies": {

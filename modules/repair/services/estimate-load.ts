@@ -21,6 +21,7 @@ import { lookupRepairCategory } from "./categories";
 import { getInboundEmailProvider } from "../providers/inbound-email";
 import { notify } from "./notifications";
 import { centsToDollars } from "./money";
+import { headerFromAarFields } from "./header-edits";
 
 export type LoadFinding = {
   severity: "ERROR" | "WARNING";
@@ -378,13 +379,20 @@ async function applyCarEstimate(opts: {
   const material = centsToDollars(materialCentsSum);
   const total = centsToDollars(laborCentsSum + materialCentsSum);
 
+  // Data File header from first Format-1 detail line (full 500-byte header block)
+  const firstFmt1 = opts.car.lines.find((l) => String(l.recordFormat) === "1") ?? opts.car.lines[0];
+  const header = firstFmt1
+    ? headerFromAarFields(firstFmt1.fields as Record<string, string | number | null>)
+    : {};
+
   const packed = await withTransaction(async (client) => {
     const revNo = Number(estimate.current_revision) + 1;
     const rev = await client.query(
       `INSERT INTO repair.estimate_revisions
          (tenant_id, estimate_id, rev_no, action, actor_name, actor_email,
-          labor, material, total, new_status, old_status, comment, source_file_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          labor, material, total, new_status, old_status, comment, source_file_id, created_by,
+          header)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
        RETURNING *`,
       [
         tenantId,
@@ -401,6 +409,7 @@ async function applyCarEstimate(opts: {
         opts.comment ?? null,
         opts.sourceFileId,
         opts.actor,
+        JSON.stringify(header),
       ],
     );
     for (const line of lineInputs) {
@@ -436,9 +445,9 @@ async function applyCarEstimate(opts: {
     }
     await client.query(
       `UPDATE repair.estimates
-       SET current_revision = $1, status_id = $2
+       SET current_revision = $1, status_id = $2, current_header = $4::jsonb
        WHERE id = $3`,
-      [revNo, newStatus.id, estimate.id],
+      [revNo, newStatus.id, estimate.id, JSON.stringify(header)],
     );
     if (opts.sourceFileId) {
       await client.query(

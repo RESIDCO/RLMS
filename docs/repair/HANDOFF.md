@@ -10,11 +10,10 @@
 
 | Tip | Meaning |
 |---|---|
-| **`a3a17a6`** (`a3a17a652f8d6a94592cd830a378c65a7ce9d2ff`) | Cents demo clean — step **[4] = 36732.04**. Bruce confirmed. Base for local-review-mode bundle. |
-| **`60e380b`** | Optional docs-only UI runbook tip (if applied earlier). **Prefer** applying local-review-mode from **`a3a17a6`** (includes full runbook). |
-| **Local-review tip** | After apply: see `docs/bundles/rlms-phase1-local-review-mode.README.txt`. |
+| **`ac7148e`** (`ac7148e911d17f8af206ce35567277fa93e9511d`) | Local-review-mode (Windows `cross-env` + **LOCAL REVIEW MODE, no Supabase**). **Requires** tip for UI-review-feedback bundle. |
+| **UI-review-feedback tip** | After apply: see `docs/bundles/rlms-phase1-ui-review-feedback.README.txt` (this slice). |
 
-Requires tip to apply local-review-mode bundle: **`a3a17a6`**.
+Requires tip to apply UI-review-feedback bundle: **`ac7148e`**.
 
 ---
 
@@ -22,49 +21,65 @@ Requires tip to apply local-review-mode bundle: **`a3a17a6`**.
 
 | Order | Bundle | Requires | Lands |
 |---|---|---|---|
-| 1 | `rlms-phase1-review-package.bundle` | lifecycle-06 base | walkthrough / checklist / demo docs + `repair:demo:local` |
-| 2 | `rlms-phase1-demo-windows-fix.bundle` | review-package tip | Windows Node 22 / portable Postgres **5433** notes |
-| 3 | `rlms-phase1-demo-migrate-totals.bundle` | `1adb3bf` | node-pg migrate + Resp 7 gap totals smoke → **`b29d0a5`** |
-| 4 | `rlms-phase1-cents-handoff.bundle` | **`b29d0a5`** | integer-cents money + HANDOFF → **`a3a17a6`** |
-| 5 | `rlms-phase1-ui-review-runbook.bundle` (optional) | **`a3a17a6`** | docs only → **`60e380b`** |
-| 6 | **`rlms-phase1-local-review-mode.bundle`** (next) | **`a3a17a6`** | Windows `cross-env` + **LOCAL REVIEW MODE, no Supabase** + full UI runbook |
+| … | (earlier chain through cents + local-review-mode) | … | … |
+| N | **`rlms-phase1-local-review-mode.bundle`** | **`a3a17a6`** | → **`ac7148e`** |
+| N+1 | **`rlms-phase1-ui-review-feedback.bundle`** | **`ac7148e`** | Bruce Phase 1 UI review feedback |
 
 Store copies: `/cursor/stores/self/docs/bundles/` (Bruce pulls to `C:\Users\BruceHarbridge\rlms-push`).
 
 ---
 
-## Next step (tonight)
+## This slice — Phase 1 UI review feedback (2026-10-14)
 
-**Phase 1 UI review on Windows** — no new features; **no production Supabase**.
+### Bad Order screen
+- **BO rule** dropdown from `repair.bo_rules` (code + description + active); admins can add.
+- Seeded **RULE_1**, **RULE_107**, **OTHER** (+ manual text). Full repairSMART AAR shopping-reason list was **not** in store captures — **do not invent**; admins add more as needed (gap documented below).
+- Shop dropdown: **"Name – City, ST"** (`shops.city` / `shops.state` / `billing_road`).
+- **Billing road** auto-fill from shop; override requires **reason**.
+- **Attachments** on BO (same `repair.documents` storage; delete → **VOIDED**, never purged).
+- Removed Resp 6 / lessee contact fields from BO; notifications use plain **distribution list**.
 
-1. Confirm tip `a3a17a6` (or pull cents bundle first if behind).
-2. Apply **`rlms-phase1-local-review-mode.bundle`**.
-3. Follow **[`PHASE1_UI_REVIEW_RUN.md`](./PHASE1_UI_REVIEW_RUN.md)**.
+### Internal estimate review
+- Data File **header** (full Format-1 header block) on every estimate.
+- **Pencil editor** per header field (reason required; audit old→new, user, time).
+- After Approved → **Adjustment** path (MG1).
 
-### Apply local-review-mode bundle
+### Shop URL (`/#/repair/e/:token`)
+- **No changes.**
+
+### Lessee estimate (`/#/repair/lessee/:token`)
+- Same layout/field set as internal (header, all lines, totals, attachments).
+- Read-only except approve/dispute **own** responsibility lines (Resp 6).
+- Pencil / admin controls hidden.
+
+### Verified
+- `npm run repair:demo:local` — all 14 steps; step **[4] = 36732.04**
+- `npm run repair:smoke-ui-review` — BO rules, shop City/ST, billing auto-fill, BO attachments VOIDED, audited header edit, ≤2 decimals
+
+### Gap (AAR rule seed)
+Store had no crawl screenshot / export of the full repairSMART BO reason/rule dropdown. Seeded only **RULE_1**, **RULE_107**, and **OTHER** (from prior UI + Manual_Gap / Railinc references). Bruce/admins can add the remaining list via **Admin — add BO rule** without a code deploy.
+
+---
+
+## Apply UI-review-feedback bundle
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect a3a17a6…
-git bundle verify PATH\TO\rlms-phase1-local-review-mode.bundle
-git pull PATH\TO\rlms-phase1-local-review-mode.bundle HEAD
+git rev-parse HEAD   # expect ac7148e…
+git bundle verify PATH\TO\rlms-phase1-ui-review-feedback.bundle
+git pull PATH\TO\rlms-phase1-ui-review-feedback.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
-
-### Quick local UI path (no Supabase)
 
 ```powershell
 $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
 $env:REPAIR_LOCAL_DB = "1"
 $env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
 npm run repair:demo:local
+npm run repair:smoke-ui-review
 npm run repair:dev:local
-# Banner: LOCAL REVIEW MODE, no Supabase
-# App: http://127.0.0.1:5000
-# Tokens: modules\repair\dev\demo-output\step-log.json → shopLink / lesseeLink
 ```
-
-Screens: `/#/repair`, `/#/repair/e/<token>`, `/#/repair/lessee/<token>`, `/#/repair/estimates/<id>` — all without Supabase login.
 
 ---
 
@@ -78,29 +93,8 @@ Screens: `/#/repair`, `/#/repair/e/<token>`, `/#/repair/lessee/<token>`, `/#/rep
 
 ---
 
-## Docs to use
-
-| Doc | In-repo | Store mirror |
-|---|---|---|
-| **UI review runbook** | [`PHASE1_UI_REVIEW_RUN.md`](./PHASE1_UI_REVIEW_RUN.md) | `docs/phase1-ui-review-run.md` |
-| Walkthrough | [`PHASE1_WALKTHROUGH.md`](./PHASE1_WALKTHROUGH.md) | `docs/phase1-walkthrough.md` |
-| Review checklist | [`PHASE1_REVIEW_CHECKLIST.md`](./PHASE1_REVIEW_CHECKLIST.md) | `docs/phase1-review-checklist.md` |
-| Windows demo | [`PHASE1_DEMO_WINDOWS.md`](./PHASE1_DEMO_WINDOWS.md) | `docs/phase1-demo-windows.md` |
-| Module plan | — | `docs/rlms-repair-module-plan.md` |
-| Open questions | — | `docs/open-questions.md` |
-
----
-
 ## Open items / questions
 
-- **Bruce confirmed** demo step `[4]` = **`36732.04`** clean on tip `a3a17a6`.
-- **Blocked previously:** `npm run dev` failed on Windows (`NODE_ENV=development`) and Supabase required at boot — fixed by local-review-mode bundle.
-- Phase 1 polish still open (thin): invoice cover-sheet UI, Excel/PDF BRC export, richer Bill Summary — see plan / open-questions Manual_Gap leftovers.
-- Phase 2: CROP/carMARQS (`POST /api/repair/phase2/crop-import` → 501 only).
+- Full repairSMART BO rule / shopping-reason list still needed from capture or Bruce export to expand `repair.bo_rules` seed.
 - Q1 (VCF active sync) and Q2 (shop bank security) remain open in `open-questions.md`.
-
----
-
-## Next planned slice
-
-**Awaiting Bruce UI review feedback** — no further code slice until then.
+- Phase 2: CROP/carMARQS (`POST /api/repair/phase2/crop-import` → 501 only).

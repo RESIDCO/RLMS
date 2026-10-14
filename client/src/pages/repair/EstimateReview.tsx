@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,20 +6,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import PageHeader from "@/components/PageHeader";
 import { apiRequest } from "@/lib/queryClient";
-
-type Line = {
-  id: string;
-  line_no: number;
-  aar_job_code: string | null;
-  qualifier: string | null;
-  why_made: string | null;
-  resp_code: string | null;
-  labor: number;
-  material: number;
-  total: number;
-  repair_category: string | null;
-  sub_category: string | null;
-};
+import {
+  EstimateDataFile,
+  type EstimateLine,
+  type HeaderEdit,
+  type HeaderFieldDef,
+  type DocRow,
+} from "./EstimateDataFile";
 
 type RevBlock = {
   revision: {
@@ -31,9 +24,10 @@ type RevBlock = {
     labor: number;
     material: number;
     total: number;
+    header?: Record<string, unknown>;
   };
-  lines: Line[];
-  byResp: Record<string, Line[]>;
+  lines: EstimateLine[];
+  byResp: Record<string, EstimateLine[]>;
 };
 
 export default function EstimateReview() {
@@ -47,15 +41,17 @@ export default function EstimateReview() {
     removed: number;
     changed: number;
   } | null>(null);
+  const [header, setHeader] = useState<Record<string, unknown>>({});
+  const [headerFields, setHeaderFields] = useState<HeaderFieldDef[]>([]);
+  const [headerEdits, setHeaderEdits] = useState<HeaderEdit[]>([]);
+  const [documents, setDocuments] = useState<DocRow[]>([]);
+  const [canPencil, setCanPencil] = useState(false);
+  const [needsAdjustment, setNeedsAdjustment] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [lesseeEmail, setLesseeEmail] = useState("");
   const [msg, setMsg] = useState("");
-  const [respFilter, setRespFilter] = useState<string>("all");
-  const [respNames, setRespNames] = useState<Record<string, string>>({});
   const [corrReason, setCorrReason] = useState("");
-  const [corrHeaderNotes, setCorrHeaderNotes] = useState("");
-  const [corrShopMark, setCorrShopMark] = useState("");
   const [editLines, setEditLines] = useState<
     Array<{
       lineNo: number;
@@ -67,7 +63,6 @@ export default function EstimateReview() {
       material: string;
     }>
   >([]);
-  const [needsAdjustment, setNeedsAdjustment] = useState(false);
   const [canCorrect, setCanCorrect] = useState(false);
 
   async function load() {
@@ -77,13 +72,12 @@ export default function EstimateReview() {
       const data = await res.json();
       setBlocks(data.revisions ?? []);
       setCompare(data.compare ?? null);
-      const codesRes = await apiRequest("GET", "/api/repair/resp-codes");
-      const codesData = await codesRes.json();
-      const map: Record<string, string> = {};
-      for (const c of codesData.codes ?? []) {
-        map[String(c.code)] = String(c.display_name ?? c.code);
-      }
-      setRespNames(map);
+      setHeader(data.header ?? {});
+      setHeaderFields(data.headerFields ?? []);
+      setHeaderEdits(data.headerEdits ?? []);
+      setDocuments(data.documents ?? []);
+      setCanPencil(Boolean(data.canPencilEdit));
+      setNeedsAdjustment(Boolean(data.needsAdjustment));
 
       const ed = await apiRequest(
         "GET",
@@ -93,10 +87,7 @@ export default function EstimateReview() {
         const payload = await ed.json();
         setCanCorrect(Boolean(payload.canCorrect));
         setNeedsAdjustment(Boolean(payload.needsAdjustment));
-        const h = payload.header ?? {};
-        setCorrShopMark(String(h.shopMark ?? ""));
-        setCorrHeaderNotes(String(h.notes ?? ""));
-        const lines = (payload.lines ?? []) as Line[];
+        const lines = (payload.lines ?? []) as EstimateLine[];
         setEditLines(
           lines.map((l) => ({
             lineNo: l.line_no,
@@ -125,10 +116,7 @@ export default function EstimateReview() {
           reason: corrReason,
           actorRole: "reviewer",
           asAdjustment: needsAdjustment || undefined,
-          header: {
-            shopMark: corrShopMark || undefined,
-            notes: corrHeaderNotes || undefined,
-          },
+          header,
           lines: editLines.map((l) => ({
             lineNo: l.lineNo,
             aarJobCode: l.aarJobCode || undefined,
@@ -157,21 +145,7 @@ export default function EstimateReview() {
     if (estimateId) void load();
   }, [estimateId]);
 
-  function respLabel(code: string) {
-    if (code === "(none)" || code === "all") return code;
-    return respNames[code] ? `${code} — ${respNames[code]}` : code;
-  }
-
   const latest = blocks[blocks.length - 1];
-  const respKeys = useMemo(
-    () => (latest ? Object.keys(latest.byResp).sort() : []),
-    [latest],
-  );
-  const visibleLines = useMemo(() => {
-    if (!latest) return [];
-    if (respFilter === "all") return latest.lines;
-    return latest.byResp[respFilter] ?? [];
-  }, [latest, respFilter]);
 
   async function act(path: string) {
     setMsg("");
@@ -209,10 +183,10 @@ export default function EstimateReview() {
   }
 
   return (
-    <div className="p-6 max-w-5xl space-y-6">
+    <div className="p-6 max-w-6xl space-y-6">
       <PageHeader
         title="Estimate review"
-        subtitle="Lines by responsibility code, revision compare, approve / request revision (audited)."
+        subtitle="repairSMART-style Data File header, lines by responsibility, pencil audits, approve / request revision."
       />
       <p className="text-sm text-muted-foreground">
         <Link href="/repair" className="underline">
@@ -220,6 +194,13 @@ export default function EstimateReview() {
         </Link>
         {" · "}
         Estimate {estimateId.slice(0, 8)}…
+        {latest && (
+          <>
+            {" · "}
+            Rev {latest.revision.rev_no} · {latest.revision.new_status} · total $
+            {Number(latest.revision.total).toFixed(2)}
+          </>
+        )}
       </p>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -236,64 +217,17 @@ export default function EstimateReview() {
 
       {latest && (
         <>
-          <div className="flex flex-wrap gap-2 items-end">
-            <div className="grid gap-1">
-              <Label>Filter by resp code</Label>
-              <select
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                value={respFilter}
-                onChange={(e) => setRespFilter(e.target.value)}
-              >
-                <option value="all">All ({latest.lines.length})</option>
-                {respKeys.map((k) => (
-                  <option key={k} value={k}>
-                    {respLabel(k)} ({latest.byResp[k].length})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="text-sm text-muted-foreground pb-2">
-              Rev {latest.revision.rev_no} · {latest.revision.new_status} · labor $
-              {Number(latest.revision.labor).toFixed(2)} · material $
-              {Number(latest.revision.material).toFixed(2)} · total $
-              {Number(latest.revision.total).toFixed(2)}
-            </div>
-          </div>
-
-          <div className="overflow-auto border border-border rounded-md">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/50 text-left">
-                <tr>
-                  <th className="p-2">Line</th>
-                  <th className="p-2">Resp</th>
-                  <th className="p-2">Job</th>
-                  <th className="p-2">Qual</th>
-                  <th className="p-2">Why</th>
-                  <th className="p-2">Category</th>
-                  <th className="p-2 text-right">Labor</th>
-                  <th className="p-2 text-right">Material</th>
-                  <th className="p-2 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleLines.map((l) => (
-                  <tr key={l.id} className="border-t border-border">
-                    <td className="p-2">{l.line_no}</td>
-                    <td className="p-2">{l.resp_code}</td>
-                    <td className="p-2">{l.aar_job_code}</td>
-                    <td className="p-2">{l.qualifier}</td>
-                    <td className="p-2">{l.why_made}</td>
-                    <td className="p-2">
-                      {[l.repair_category, l.sub_category].filter(Boolean).join(" / ")}
-                    </td>
-                    <td className="p-2 text-right">{Number(l.labor).toFixed(2)}</td>
-                    <td className="p-2 text-right">{Number(l.material).toFixed(2)}</td>
-                    <td className="p-2 text-right">{Number(l.total).toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <EstimateDataFile
+            estimateId={estimateId}
+            header={header}
+            headerFields={headerFields}
+            headerEdits={headerEdits}
+            lines={latest.lines}
+            documents={documents}
+            canPencilEdit={canPencil}
+            readOnly={false}
+            onHeaderChanged={load}
+          />
 
           <div className="grid gap-3 max-w-xl">
             <div className="grid gap-1">
@@ -348,11 +282,6 @@ export default function EstimateReview() {
                 value={lesseeEmail}
                 onChange={(e) => setLesseeEmail(e.target.value)}
               />
-              <p className="text-xs text-muted-foreground">
-                Every lessee email includes a login-free approval link (primary). Reply is
-                secondary and needs reviewer confirmation. Attachments pass through the shop’s
-                original files; a PDF is generated only if the shop did not send one.
-              </p>
               <Button variant="secondary" onClick={sendLessee} disabled={!lesseeEmail}>
                 Send lessee approval email (dev log)
               </Button>
@@ -363,9 +292,8 @@ export default function EstimateReview() {
                 Internal correction editor (admin/reviewer only)
               </h2>
               <p className="text-xs text-muted-foreground">
-                Shops stay re-upload only via the shop link. Each save creates a new revision
-                (reason required), recalculates totals, and notifies the shop. After Approved,
-                corrections must go through Adjustment.
+                Line bulk edit. Header pencil edits above also create a revision and require a
+                reason. After Approved, corrections go through Adjustment.
               </p>
               {needsAdjustment && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -379,26 +307,7 @@ export default function EstimateReview() {
                   value={corrReason}
                   onChange={(e) => setCorrReason(e.target.value)}
                   rows={2}
-                  placeholder="Why this correction is needed"
                 />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="grid gap-1">
-                  <Label htmlFor="corr-shop">Header — shop mark</Label>
-                  <Input
-                    id="corr-shop"
-                    value={corrShopMark}
-                    onChange={(e) => setCorrShopMark(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-1">
-                  <Label htmlFor="corr-notes">Header — notes</Label>
-                  <Input
-                    id="corr-notes"
-                    value={corrHeaderNotes}
-                    onChange={(e) => setCorrHeaderNotes(e.target.value)}
-                  />
-                </div>
               </div>
               {editLines.length > 0 && (
                 <div className="overflow-auto border border-border rounded-md">

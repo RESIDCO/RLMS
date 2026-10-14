@@ -539,6 +539,9 @@ export async function getLesseeViewForToken(rawToken: string) {
   const { listEstimatesForEvent, listRevisions, getRevisionLines } = await import(
     "./estimates"
   );
+  const { getCorrectionEditorPayload } = await import("./gap-lifecycle-06");
+  const { DATA_FILE_HEADER_FIELDS } = await import("./header-edits");
+  const { listEventDocuments } = await import("./ops-grid");
   const resolved = await resolveActiveLink(rawToken, "LESSEE");
   if (!resolved) return null;
 
@@ -546,7 +549,11 @@ export async function getLesseeViewForToken(rawToken: string) {
   const estimate = estimates[0];
   let revisions: unknown[] = [];
   let lines: unknown[] = [];
+  let allLines: unknown[] = [];
   let amountPresented = 0;
+  let header: Record<string, unknown> = {};
+  let documents: unknown[] = [];
+  const ownRespCodes = new Set(["6"]);
   if (estimate) {
     revisions = await listRevisions(estimate.id);
     const { rows: appr } = await q(
@@ -559,13 +566,22 @@ export async function getLesseeViewForToken(rawToken: string) {
       appr[0]?.revision_id ??
       (revisions[revisions.length - 1] as { id?: string } | undefined)?.id;
     if (revisionId) {
-      const all = await getRevisionLines(String(revisionId));
-      lines = all.filter((l) => String(l.resp_code) === "6");
+      allLines = await getRevisionLines(String(revisionId));
+      // Own-responsibility lines (Resp 6) — approve/dispute scope + smoke contract
+      lines = allLines.filter((l) => ownRespCodes.has(String(l.resp_code)));
       amountPresented = (lines as Array<{ total?: number }>).reduce(
         (s, l) => s + Number(l.total ?? 0),
         0,
       );
     }
+    const editor = await getCorrectionEditorPayload({ estimateId: String(estimate.id) });
+    if (editor.ok) {
+      header = (editor.header as Record<string, unknown>) ?? {};
+    } else {
+      const latest = revisions[revisions.length - 1] as { header?: Record<string, unknown> };
+      header = latest?.header ?? {};
+    }
+    documents = await listEventDocuments({ eventId: String(resolved.event.id) });
   }
   return {
     link: resolved.link,
@@ -573,7 +589,18 @@ export async function getLesseeViewForToken(rawToken: string) {
     estimate,
     revisions,
     lines,
+    allLines,
+    header,
+    headerFields: DATA_FILE_HEADER_FIELDS,
+    documents,
+    ownRespCodes: Array.from(ownRespCodes),
     amountPresented,
-    note: "Approve via this link (primary). Email reply requires reviewer confirmation. Showing Resp 6 portion only.",
+    /** Hide pencil / admin — lessee may only approve/dispute own responsibility lines */
+    readOnly: true,
+    canPencilEdit: false,
+    note:
+      "Same estimate layout as internal review (header, lines, totals, attachments). " +
+      "Read-only except approve/dispute on your responsibility lines (Resp 6). " +
+      "Approve via this link (primary). Email reply requires reviewer confirmation.",
   };
 }

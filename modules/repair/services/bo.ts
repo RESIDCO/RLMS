@@ -4,15 +4,23 @@ import { requireVcfCar } from "./vcf";
 import { getStatusByCode } from "./status-machine";
 import { writeAudit } from "./audit";
 import { notify } from "./notifications";
+import { resolveBoRuleSelection } from "./bo-rules";
+import { activeDistributionEmails } from "./distribution-list";
 
 export type CreateBadOrderInput = {
   tenantId?: string;
   carMark: string;
   carNumber: string;
+  /** @deprecated Prefer boRuleCode from repair.bo_rules */
   rule?: "RULE_1" | "RULE_107";
+  boRuleCode?: string;
+  boRuleOtherText?: string;
   source?: "DDCT" | "EMAIL_DOC" | "INTERNAL";
   shoppingReason?: string;
   damagingRoad?: string;
+  /** Billing road — defaults from shop.billing_road; override requires reason */
+  billingRoad?: string;
+  billingRoadOverrideReason?: string;
   ddctEventId?: string;
   ddctIncidentId?: string;
   shopId?: string;
@@ -29,13 +37,64 @@ export type CreateBadOrderInput = {
 
 export async function createBadOrder(input: CreateBadOrderInput) {
   const tenantId = input.tenantId ?? DEFAULT_TENANT_ID;
-  const rule = input.rule ?? "RULE_1";
   const source = input.source ?? "INTERNAL";
+
+  const resolvedRule = await resolveBoRuleSelection({
+    boRuleCode: input.boRuleCode,
+    otherText: input.boRuleOtherText,
+    legacyRule: input.rule,
+    tenantId,
+  });
+  if (!resolvedRule.ok) {
+    return { ok: false as const, status: resolvedRule.status, error: resolvedRule.error };
+  }
+  const rule = resolvedRule.eventRule;
 
   const vcf = await requireVcfCar(input.carMark, input.carNumber);
   if (!vcf.ok) {
     return { ok: false as const, status: 422, error: vcf.reason };
   }
+
+  let shopBillingRoad: string | null = null;
+  if (input.shopId) {
+    const { rows: shops } = await q(
+      `SELECT id, billing_road, reporting_mark, city, state, name
+       FROM repair.shops
+       WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [input.shopId, tenantId],
+    );
+    if (!shops[0]) {
+      return { ok: false as const, status: 400, error: "Shop not found" };
+    }
+    shopBillingRoad = String(shops[0].billing_road || shops[0].reporting_mark || "");
+  }
+
+  const requestedBilling = (input.billingRoad ?? "").trim().toUpperCase() || null;
+  const defaultBilling = (shopBillingRoad ?? "").trim().toUpperCase() || null;
+  let billingRoad = requestedBilling ?? defaultBilling;
+  let overrideReason: string | null = null;
+  if (
+    requestedBilling &&
+    defaultBilling &&
+    requestedBilling !== defaultBilling
+  ) {
+    overrideReason = (input.billingRoadOverrideReason ?? "").trim();
+    if (!overrideReason) {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Billing road override requires a reason",
+      };
+    }
+  } else if (requestedBilling && !defaultBilling) {
+    billingRoad = requestedBilling;
+  }
+
+  const shoppingReason =
+    input.shoppingReason?.trim() ||
+    (resolvedRule.otherText
+      ? `${resolvedRule.description}: ${resolvedRule.otherText}`
+      : resolvedRule.description);
 
   const boStatus = await getStatusByCode(tenantId, "EVENT", "BO_CREATED");
   const shopStatus = await getStatusByCode(tenantId, "EVENT", "SHOP_ASSIGNED");
@@ -54,8 +113,9 @@ export async function createBadOrder(input: CreateBadOrderInput) {
       `INSERT INTO repair.events
          (tenant_id, car_mark, car_number, rlms_railcar_id, shop_id, rule,
           damaging_road, ddct_event_id, ddct_incident_id, origin, status_id,
-          is_wreck, is_tank_car, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'BO',$10,$11,$12,$13)
+          is_wreck, is_tank_car, created_by,
+          bo_rule_code, bo_rule_other_text, billing_road, billing_road_override_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'BO',$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [
         tenantId,
@@ -71,6 +131,10 @@ export async function createBadOrder(input: CreateBadOrderInput) {
         Boolean(input.isWreck || input.shoppingReason === "WRECK"),
         Boolean(input.isTankCar),
         input.actor ?? "system",
+        resolvedRule.code,
+        resolvedRule.otherText,
+        billingRoad,
+        overrideReason,
       ],
     );
     const ev = event.rows[0];
@@ -78,20 +142,23 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     const bo = await client.query(
       `INSERT INTO repair.bad_orders
          (tenant_id, event_id, source, shopping_reason, bo_date, bo_city, bo_state,
-          dest_city, dest_state, lifecycle_status, created_by)
-       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6,$7,$8,$9,'QUEUED',$10)
+          dest_city, dest_state, lifecycle_status, created_by,
+          bo_rule_code, bo_rule_other_text)
+       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6,$7,$8,$9,'QUEUED',$10,$11,$12)
        RETURNING *`,
       [
         tenantId,
         ev.id,
         source,
-        input.shoppingReason ?? null,
+        shoppingReason,
         input.boDate ?? null,
         input.boCity ?? null,
         input.boState ?? null,
         input.destCity ?? null,
         input.destState ?? null,
         input.actor ?? "system",
+        resolvedRule.code,
+        resolvedRule.otherText,
       ],
     );
 
@@ -116,13 +183,15 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     via: "UI",
   });
 
-  // Manual_Gap #6: creating a B/O emails both shop and owner
+  // BO notifications → plain distribution list (not Resp 6 / lessee contact fields)
+  const dist = await activeDistributionEmails(tenantId);
   await notify({
     tenantId,
     eventId: String(result.event.id),
     type: "BO_CREATED",
-    bodyText: `Bad order created for ${input.carMark} ${input.carNumber}. Reason: ${input.shoppingReason ?? "(none)"}.`,
+    bodyText: `Bad order created for ${input.carMark} ${input.carNumber}. Rule: ${resolvedRule.code}. Reason: ${shoppingReason}.`,
     actor: input.actor ?? "system",
+    extraTo: dist.length ? dist : undefined,
   }).catch(() => undefined);
 
   return { ok: true as const, ...result };
@@ -146,7 +215,9 @@ async function insertTrack(
 export async function getEvent(eventId: string, tenantId = DEFAULT_TENANT_ID) {
   const { rows } = await q(
     `SELECT e.*, s.code AS status_code, s.display_name AS status_name,
-            sh.reporting_mark AS shop_mark, sh.name AS shop_name
+            sh.reporting_mark AS shop_mark, sh.name AS shop_name,
+            sh.city AS shop_city, sh.state AS shop_state,
+            sh.billing_road AS shop_billing_road
      FROM repair.events e
      JOIN repair.statuses s ON s.id = e.status_id
      LEFT JOIN repair.shops sh ON sh.id = e.shop_id
@@ -165,13 +236,51 @@ export async function getEvent(eventId: string, tenantId = DEFAULT_TENANT_ID) {
   return { ...rows[0], tracks: tracks.rows, badOrders: bos.rows };
 }
 
-export async function listDemoShop(tenantId = DEFAULT_TENANT_ID) {
+export type ShopListRow = {
+  id: string;
+  reporting_mark: string;
+  name: string;
+  default_inbox: string | null;
+  city: string | null;
+  state: string | null;
+  billing_road: string | null;
+  remit_address: string | null;
+  display_label: string;
+};
+
+export async function listDemoShop(tenantId = DEFAULT_TENANT_ID): Promise<ShopListRow[]> {
   const { rows } = await q(
-    `SELECT id, reporting_mark, name, default_inbox
+    `SELECT id, reporting_mark, name, default_inbox, city, state, billing_road,
+            remit_address
      FROM repair.shops
      WHERE tenant_id = $1 AND deleted_at IS NULL
-     ORDER BY reporting_mark`,
+     ORDER BY name, reporting_mark`,
     [tenantId],
   );
-  return rows;
+  return rows.map((s) => ({
+    id: String(s.id),
+    reporting_mark: String(s.reporting_mark),
+    name: String(s.name),
+    default_inbox: s.default_inbox != null ? String(s.default_inbox) : null,
+    city: s.city != null ? String(s.city) : null,
+    state: s.state != null ? String(s.state) : null,
+    billing_road: s.billing_road != null ? String(s.billing_road) : null,
+    remit_address: s.remit_address != null ? String(s.remit_address) : null,
+    /** Display: "Name – City, ST" */
+    display_label: formatShopLabel(s),
+  }));
+}
+
+export function formatShopLabel(s: {
+  name?: string | null;
+  city?: string | null;
+  state?: string | null;
+  reporting_mark?: string | null;
+}): string {
+  const name = (s.name || s.reporting_mark || "Shop").trim();
+  const city = (s.city || "").trim();
+  const state = (s.state || "").trim();
+  if (city && state) return `${name} – ${city}, ${state}`;
+  if (city) return `${name} – ${city}`;
+  return name;
 }

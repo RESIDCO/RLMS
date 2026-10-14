@@ -53,6 +53,7 @@ export const LOCAL_MIGRATE_SQL_FILES = [
   "modules/repair/migrations/20261014_repair_shop_master_entity.sql",
   "modules/repair/migrations/20261014_repair_shop_master_fields.sql",
   "modules/repair/migrations/20261014_repair_railroads.sql",
+  "modules/repair/migrations/20261014_repair_shop_map.sql",
 ] as const;
 
 /**
@@ -74,6 +75,8 @@ const MIGRATION_BASELINE_PROBES: Partial<Record<string, string>> = {
     )`,
   "modules/repair/migrations/20261014_repair_railroads.sql": `
     to_regclass('repair.railroads') IS NOT NULL`,
+  "modules/repair/migrations/20261014_repair_shop_map.sql": `
+    to_regclass('repair.places') IS NOT NULL`,
 };
 
 /** Full ordered list previously passed to `psql -f …` (stubs + migrations). */
@@ -304,6 +307,20 @@ export async function migrateLocal(opts?: {
   } catch (err) {
     console.warn(
       "  railroads seed skipped:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // GeoNames US/CA/MX places seed (idempotent UPSERT) — shop map geocode
+  try {
+    const { seedPlacesFromBundle } = await import("../services/places");
+    const places = await seedPlacesFromBundle();
+    console.log(
+      `  places seed: inserted ${places.inserted}, updated ${places.updated} (of ${places.total})`,
+    );
+  } catch (err) {
+    console.warn(
+      "  places seed skipped:",
       err instanceof Error ? err.message : err,
     );
   }

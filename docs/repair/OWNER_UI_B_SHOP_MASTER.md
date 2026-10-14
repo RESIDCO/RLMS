@@ -1,14 +1,15 @@
 # Owner UI — Sub-section 2: Shop master + Entity/workspace (`/#/repair/shops`)
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §B (+ entity/workspace riding with this slice)  
-**Tip base:** `00d13c97bbce14164660db483ef8aa629293977b` (seed-idempotent; requires `e99c935`)  
-**Scope:** Shop master screen, shop dropdown empty-until-created, **railroads** delivering lines (NARN), billing-road validation table (not shop list), Shop Profile read view, RESIDCO workspace title, entity tags on Estimates History + close. §C Bad Order rebuild **not** started beyond entity snapshot on existing BO create. **Map (part 3) not in this tip.**
+**Tip base:** `eeffc61af59d7bf72a965d0587e22b991da4470f` (railroads-profile; requires `00d13c9`)  
+**Scope:** Shop master screen, shop dropdown empty-until-created, **railroads** delivering lines (NARN), billing-road validation table (not shop list), Shop Profile read view, **Shop Map** (Leaflet + OSM + NARN overlay + places geocode), RESIDCO workspace title, entity tags on Estimates History + close. §C Bad Order rebuild **not** started beyond entity snapshot on existing BO create.
 
 ---
 
 ## Shop master (OWNER_UI_SPEC §B)
 
 **Route:** `/#/repair/shops` (top-level **Shops** nav, between Bad Orders and Estimates).  
+**Views:** **Grid | Map** toggle beside the list toolbar.  
 **Profile:** `/#/repair/shops/:id` — click shop name → read-only Shop Profile; **Edit** opens form (`/#/repair/shops?edit=:id`). Grid **Edit** stays as shortcut.  
 **Rule:** Shop dropdowns elsewhere are **EMPTY until at least one shop is created.** Do **not** seed shops from the payee / billing-road spreadsheet. Billing roads remain a separate lookup for optional mark validation.
 
@@ -17,7 +18,7 @@
 | Field | Required | Notes |
 |---|---|---|
 | Legal name | Yes | Display; click name in grid → Shop Profile |
-| City, State | Yes | State = 2 letters |
+| City, State | Yes | State = 2 letters; used to geocode map pin via `repair.places` |
 | SPLC | Yes | Location |
 | Shop mark / AAR shop code | Optional | e.g. A084 → BO dropdown `Name (A084) – City, ST` |
 | Mark / billing road | Optional | Validated against `repair.billing_roads` when provided |
@@ -26,6 +27,7 @@
 | Car types accepted | Optional | Multi-select; catalog under Admin gear |
 | AAR certifications | Optional | Repeatable rows (type, #, expiration); warn if expired or ≤60 days |
 | Website, hours/notes | Optional | Free text |
+| Lat / long override | Optional | Both or neither; wins over places geocode on the map |
 | Attachments | Optional | W-9 / certificates / rate sheets; delete → VOIDED |
 | Contacts | ≥0 | name, email, phone, role (profile: click-to-email / click-to-call) |
 | Active | Yes | Deactivate hides from dropdowns; **never hard-delete** |
@@ -42,6 +44,15 @@ Manual delivering marks (not in `railroads`) are saved with `manual_entry` + `ne
 ### Shop Profile (read mode)
 
 Header (name, mark, city/ST, SPLC, billing road, active), delivering lines, capabilities, car types, certifications (expiry warnings), contacts, attachments, notes/hours, recent bad orders + estimates at that shop.
+
+### Shop Map (part 3)
+
+- **Leaflet** + free **OpenStreetMap** tiles (no paid map API keys).
+- **NARN rail overlay** from bundled simplified GeoJSON (`narn-lines-simplified.geojson.gz`), colored by owning railroad mark; layer toggle. Optional **OpenRailwayMap** tile overlay.
+- **One pin per shop** — City/ST → `repair.places` (GeoNames US/CA/MX cities5000, bundled). Manual lat/long override on the shop record wins.
+- Pin popup: name, mark, city/ST, delivering lines, capabilities, primary contact, **View shop** → profile.
+- Map filters: delivering railroad (also highlights that railroad’s lines), capability, car type, active.
+- Dataset is **local** — no runtime geocoder / BTS calls (tiles only). Sources + dates in [HANDOFF.md](./HANDOFF.md) and `modules/repair/data/*_SOURCE.md`.
 
 ### Behavior
 
@@ -76,16 +87,15 @@ npm run repair:migrate:local
 npm run repair:seed:estimates-history
 npm run repair:smoke-shop-entity
 npm run repair:dev:local
-# http://127.0.0.1:5000/#/repair/shops
-# http://127.0.0.1:5000/#/repair/shops/<id>   ← Shop Profile
+# http://127.0.0.1:5000/#/repair/shops          ← Grid | Map
+# http://127.0.0.1:5000/#/repair/shops/<id>     ← Shop Profile
 # http://127.0.0.1:5000/#/repair
 ```
 
-Expect: delivering lines type-ahead from railroads (not billing-road checkboxes); manual marks flagged for review; click shop name → profile; Edit → form; billing roads still validate optional mark field only.
+Expect: Grid/Map toggle; Map shows OSM + NARN rails + shop pins; filters work; pin popup → View shop; lat/long override on form; places seed ~10.6k; delivering lines type-ahead still from railroads.
 
 ---
 
-## Next (do not start in this tip)
+## Next
 
-- **Shop map (part 3)** — separate follow-up bundle after this lands.
 - After Bruce sign-off on §B → **Bad Orders** rebuild (OWNER_UI_SPEC §C).

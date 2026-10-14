@@ -20,6 +20,7 @@ import {
   listBillingRoads,
   listShopMaster,
   ensureDemoShop,
+  updateShop,
   uploadShopDocument,
 } from "../services/shops";
 import { listCatalog } from "../services/shop-catalog";
@@ -28,6 +29,8 @@ import {
   listRailroads,
   seedRailroadsFromNarn,
 } from "../services/railroads";
+import { geocodeCityState, seedPlacesFromBundle } from "../services/places";
+import { listShopMapPins } from "../services/shop-map";
 import { softDeleteDocument } from "../services/gap-lifecycle-06";
 import {
   listOwnerEntityTags,
@@ -222,6 +225,52 @@ async function main() {
     bad("certExpiryWarning", "expected expired for past date");
   }
   ok("certExpiryWarning expired/soon helpers");
+
+  // §B part 3 — places geocode + map pins + lat/lng override
+  const placesSeed = await seedPlacesFromBundle();
+  if (placesSeed.total < 1000) {
+    bad("places seed", `expected ≥1000 places got ${placesSeed.total}`);
+  }
+  ok(`places seeded (${placesSeed.total} US/CA/MX)`);
+  const phoenix = await geocodeCityState("Phoenix", "AZ");
+  if (!phoenix || Math.abs(phoenix.lat - 33.45) > 1) {
+    bad("geocode Phoenix AZ", JSON.stringify(phoenix));
+  }
+  ok(`geocode City/ST → ${phoenix!.lat},${phoenix!.lng}`);
+  if (
+    created.shop!.coord_source !== "places" ||
+    created.shop!.lat == null ||
+    created.shop!.lng == null
+  ) {
+    bad(
+      "shop geocode",
+      `expected places coords got source=${created.shop!.coord_source} lat=${created.shop!.lat}`,
+    );
+  }
+  ok("shop pin from places (Phoenix, AZ)");
+  const mapPins = await listShopMapPins({ activeOnly: true });
+  const pin = mapPins.pins.find((p) => p.id === created.shop!.id);
+  if (!pin) bad("map pins", "created shop missing from map");
+  ok(`map pins include shop (${mapPins.pins.length} total)`);
+  const overridden = await updateShop({
+    shopId: created.shop!.id,
+    latOverride: 35.1,
+    lngOverride: -106.6,
+    actor: "smoke-b",
+  });
+  if (!overridden.ok || !overridden.shop) {
+    bad(
+      "lat override",
+      overridden.ok === false ? overridden.error : "no shop",
+    );
+  }
+  if (
+    overridden.shop!.coord_source !== "override" ||
+    overridden.shop!.lat_override !== 35.1
+  ) {
+    bad("override source", JSON.stringify(overridden.shop));
+  }
+  ok("manual lat/lng override wins over places");
 
   const dropdownLabel = formatShopLabel({
     name: "Guardian Rail Services",

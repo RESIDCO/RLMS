@@ -9,6 +9,7 @@ import { DEFAULT_TENANT_ID, q, withTransaction } from "../db";
 import { writeAudit } from "./audit";
 import { getStorageProvider } from "../providers/storage";
 import { formatRailroadLabel, getRailroadByMark } from "./railroads";
+import { geocodeCityState, validateLatLng } from "./places";
 
 export type ShopListRow = {
   id: string;
@@ -89,6 +90,13 @@ export type ShopMasterRow = ShopListRow & {
   website: string | null;
   hours_notes: string | null;
   active: boolean;
+  /** Manual map pin override (nullable). */
+  lat_override: number | null;
+  lng_override: number | null;
+  /** Resolved pin: override or places geocode. */
+  lat: number | null;
+  lng: number | null;
+  coord_source: "override" | "places" | null;
   contacts: Array<{
     id: string;
     name: string;
@@ -148,6 +156,9 @@ export type CreateShopInput = {
   shopMark?: string | null;
   website?: string | null;
   hoursNotes?: string | null;
+  /** Optional manual map coordinates (both or neither). */
+  latOverride?: number | null;
+  lngOverride?: number | null;
   deliveringLines?: DeliveringLineInput[];
   capabilityIds?: string[];
   carTypeIds?: string[];
@@ -243,12 +254,43 @@ async function hydrateShopMaster(
       listShopCertifications(shopId, tenantId),
       listShopDocuments(shopId, tenantId),
     ]);
+  const latOv =
+    s.lat_override != null && Number.isFinite(Number(s.lat_override))
+      ? Number(s.lat_override)
+      : null;
+  const lngOv =
+    s.lng_override != null && Number.isFinite(Number(s.lng_override))
+      ? Number(s.lng_override)
+      : null;
+  let lat: number | null = null;
+  let lng: number | null = null;
+  let coord_source: "override" | "places" | null = null;
+  if (latOv != null && lngOv != null) {
+    lat = latOv;
+    lng = lngOv;
+    coord_source = "override";
+  } else {
+    const place = await geocodeCityState(
+      s.city != null ? String(s.city) : "",
+      s.state != null ? String(s.state) : "",
+    );
+    if (place) {
+      lat = place.lat;
+      lng = place.lng;
+      coord_source = "places";
+    }
+  }
   return {
     ...mapListRow(s),
     splc: s.splc != null ? String(s.splc) : null,
     website: s.website != null ? String(s.website) : null,
     hours_notes: s.hours_notes != null ? String(s.hours_notes) : null,
     active: Boolean(s.active),
+    lat_override: latOv,
+    lng_override: lngOv,
+    lat,
+    lng,
+    coord_source,
     contacts,
     delivering_lines,
     capability_ids,
@@ -267,7 +309,7 @@ export async function listShopMaster(opts?: {
   const params: unknown[] = [tenantId];
   let sql = `SELECT id, reporting_mark, name, default_inbox, city, state,
                     billing_road, remit_address, splc, shop_mark, website,
-                    hours_notes, active
+                    hours_notes, active, lat_override, lng_override
              FROM repair.shops
              WHERE tenant_id = $1 AND deleted_at IS NULL`;
   if (opts?.activeOnly !== false) {
@@ -322,7 +364,7 @@ export async function getShopMaster(
   const { rows } = await q(
     `SELECT id, reporting_mark, name, default_inbox, city, state,
             billing_road, remit_address, splc, shop_mark, website,
-            hours_notes, active
+            hours_notes, active, lat_override, lng_override
      FROM repair.shops
      WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
     [shopId, tenantId],
@@ -734,6 +776,8 @@ export async function createShop(input: CreateShopInput) {
   const shopMark = (input.shopMark ?? "").trim().toUpperCase() || null;
   const website = (input.website ?? "").trim() || null;
   const hoursNotes = (input.hoursNotes ?? "").trim() || null;
+  const coords = validateLatLng(input.latOverride, input.lngOverride);
+  if (!coords.ok) return { ok: false as const, status: 400, error: coords.error };
 
   // reporting_mark: use billing road mark when present, else synthetic unique key
   const reportingMark =
@@ -747,8 +791,9 @@ export async function createShop(input: CreateShopInput) {
     const { rows } = await client.query(
       `INSERT INTO repair.shops
          (tenant_id, reporting_mark, name, city, state, splc, billing_road,
-          shop_mark, website, hours_notes, active, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,true),$12)
+          shop_mark, website, hours_notes, lat_override, lng_override,
+          active, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,COALESCE($13,true),$14)
        RETURNING *`,
       [
         tenantId,
@@ -761,6 +806,8 @@ export async function createShop(input: CreateShopInput) {
         shopMark,
         website,
         hoursNotes,
+        coords.lat,
+        coords.lng,
         input.active ?? true,
         input.actor,
       ],
@@ -805,6 +852,8 @@ export async function updateShop(opts: {
   shopMark?: string | null;
   website?: string | null;
   hoursNotes?: string | null;
+  latOverride?: number | null;
+  lngOverride?: number | null;
   deliveringLines?: DeliveringLineInput[];
   capabilityIds?: string[];
   carTypeIds?: string[];
@@ -864,14 +913,22 @@ export async function updateShop(opts: {
       ? (opts.hoursNotes ?? "").trim() || null
       : existing.hours_notes;
 
+  const latIn =
+    opts.latOverride !== undefined ? opts.latOverride : existing.lat_override;
+  const lngIn =
+    opts.lngOverride !== undefined ? opts.lngOverride : existing.lng_override;
+  const coords = validateLatLng(latIn, lngIn);
+  if (!coords.ok) return { ok: false as const, status: 400, error: coords.error };
+
   const reportingMark = road.mark ?? existing.reporting_mark;
 
   const { rows } = await q(
     `UPDATE repair.shops
      SET name = $1, city = $2, state = $3, splc = $4, billing_road = $5,
          reporting_mark = $6, shop_mark = $7, website = $8, hours_notes = $9,
-         active = COALESCE($10, active)
-     WHERE id = $11 AND tenant_id = $12 AND deleted_at IS NULL
+         lat_override = $10, lng_override = $11,
+         active = COALESCE($12, active)
+     WHERE id = $13 AND tenant_id = $14 AND deleted_at IS NULL
      RETURNING *`,
     [
       legalName,
@@ -883,6 +940,8 @@ export async function updateShop(opts: {
       shopMark,
       website,
       hoursNotes,
+      coords.lat,
+      coords.lng,
       opts.active ?? null,
       opts.shopId,
       tenantId,

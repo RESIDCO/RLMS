@@ -40,7 +40,7 @@ export async function listRailroads(
   tenantId = DEFAULT_TENANT_ID,
   opts?: { q?: string; activeOnly?: boolean; limit?: number },
 ): Promise<RailroadRow[]> {
-  const lim = Math.min(Math.max(opts?.limit ?? 40, 1), 200);
+  const lim = Math.min(Math.max(opts?.limit ?? 40, 1), 2000);
   const qTrim = opts?.q?.trim() ?? "";
   const params: unknown[] = [tenantId];
   let sql = `SELECT id, mark, name, railroad_class, source, active

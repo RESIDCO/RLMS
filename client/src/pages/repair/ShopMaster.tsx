@@ -18,6 +18,7 @@ import { useRepairTheme } from "./repairTheme";
 import DeliveringLinesPicker, {
   type DeliveringLineValue,
 } from "./DeliveringLinesPicker";
+import ShopMap from "./ShopMap";
 
 type Contact = {
   id?: string;
@@ -67,6 +68,11 @@ type Shop = {
   reporting_mark: string;
   active: boolean;
   display_label: string;
+  lat_override?: number | null;
+  lng_override?: number | null;
+  lat?: number | null;
+  lng?: number | null;
+  coord_source?: "override" | "places" | null;
   contacts: Contact[];
   delivering_lines: DeliveringLine[];
   capability_ids: string[];
@@ -101,6 +107,8 @@ const emptyForm = () => ({
   shopMark: "",
   website: "",
   hoursNotes: "",
+  latOverride: "",
+  lngOverride: "",
   active: true,
   contacts: [{ name: "", email: "", phone: "", role: "" }] as Contact[],
   deliveringLines: [] as DeliveringLineValue[],
@@ -129,6 +137,7 @@ function ShopMasterBody() {
   const [msg, setMsg] = useState("");
   const [activeOnly, setActiveOnly] = useState(true);
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "map">("grid");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm());
@@ -194,6 +203,14 @@ function ShopMasterBody() {
       shopMark: shop.shop_mark ?? "",
       website: shop.website ?? "",
       hoursNotes: shop.hours_notes ?? "",
+      latOverride:
+        shop.lat_override != null && Number.isFinite(shop.lat_override)
+          ? String(shop.lat_override)
+          : "",
+      lngOverride:
+        shop.lng_override != null && Number.isFinite(shop.lng_override)
+          ? String(shop.lng_override)
+          : "",
       active: shop.active,
       contacts:
         shop.contacts?.length > 0
@@ -273,6 +290,12 @@ function ShopMasterBody() {
         shopMark: form.shopMark.trim() || null,
         website: form.website.trim() || null,
         hoursNotes: form.hoursNotes.trim() || null,
+        latOverride: form.latOverride.trim()
+          ? Number(form.latOverride.trim())
+          : null,
+        lngOverride: form.lngOverride.trim()
+          ? Number(form.lngOverride.trim())
+          : null,
         active: form.active,
         contacts: form.contacts.filter((c) => c.name.trim()),
         deliveringLines: form.deliveringLines.map((l) => ({
@@ -429,6 +452,41 @@ function ShopMasterBody() {
         ) : null}
 
         <div className={`flex flex-wrap gap-3 items-center border p-2 ${panel}`}>
+          <div
+            className="inline-flex border rounded overflow-hidden text-xs font-semibold"
+            role="group"
+            aria-label="Shops view"
+            data-testid="shops-view-toggle"
+          >
+            <button
+              type="button"
+              className={`px-3 py-1.5 ${
+                viewMode === "grid"
+                  ? "bg-[#8B1E1E] text-white"
+                  : dark
+                    ? "bg-slate-900 text-slate-200"
+                    : "bg-white text-slate-800"
+              }`}
+              onClick={() => setViewMode("grid")}
+              data-testid="shops-view-grid"
+            >
+              Grid
+            </button>
+            <button
+              type="button"
+              className={`px-3 py-1.5 border-l ${
+                viewMode === "map"
+                  ? "bg-[#8B1E1E] text-white"
+                  : dark
+                    ? "bg-slate-900 text-slate-200 border-slate-600"
+                    : "bg-white text-slate-800 border-slate-300"
+              }`}
+              onClick={() => setViewMode("map")}
+              data-testid="shops-view-map"
+            >
+              Map
+            </button>
+          </div>
           <label className="inline-flex items-center gap-2 text-xs font-semibold">
             <Checkbox
               checked={activeOnly}
@@ -436,17 +494,36 @@ function ShopMasterBody() {
             />
             Active only
           </label>
-          <Input
-            className={`w-72 ${inputCls}`}
-            placeholder="Search name, mark, city, capability…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <Button type="button" variant="outline" className="h-8" onClick={() => void load()}>
-            Search
-          </Button>
+          {viewMode === "grid" ? (
+            <>
+              <Input
+                className={`w-72 ${inputCls}`}
+                placeholder="Search name, mark, city, capability…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8"
+                onClick={() => void load()}
+              >
+                Search
+              </Button>
+            </>
+          ) : null}
         </div>
 
+        {viewMode === "map" ? (
+          <ShopMap
+            dark={dark}
+            activeOnly={activeOnly}
+            capabilities={capabilities}
+            carTypes={carTypes}
+            panelClass={panel}
+            inputClass={inputCls}
+          />
+        ) : (
         <div className={`border overflow-auto ${panel}`}>
           <table className="w-full text-xs border-collapse">
             <thead>
@@ -528,6 +605,7 @@ function ShopMasterBody() {
             </tbody>
           </table>
         </div>
+        )}
 
         {showForm ? (
           <div className={`border p-4 space-y-4 max-w-3xl ${panel}`} data-testid="shop-form">
@@ -609,6 +687,45 @@ function ShopMasterBody() {
                   onChange={(e) => setForm({ ...form, hoursNotes: e.target.value })}
                 />
               </div>
+              <div>
+                <Label className={labelCls}>Map latitude override</Label>
+                <Input
+                  className={inputCls}
+                  value={form.latOverride}
+                  onChange={(e) =>
+                    setForm({ ...form, latOverride: e.target.value })
+                  }
+                  placeholder="e.g. 33.4484"
+                  inputMode="decimal"
+                />
+              </div>
+              <div>
+                <Label className={labelCls}>Map longitude override</Label>
+                <Input
+                  className={inputCls}
+                  value={form.lngOverride}
+                  onChange={(e) =>
+                    setForm({ ...form, lngOverride: e.target.value })
+                  }
+                  placeholder="e.g. -112.0740"
+                  inputMode="decimal"
+                />
+              </div>
+              <p
+                className={`text-[11px] sm:col-span-2 ${
+                  dark ? "text-slate-400" : "text-slate-600"
+                }`}
+              >
+                Leave lat/long blank to geocode from City/ST via the bundled
+                US/CA/MX places table. Set both to pin the shop manually.
+                {editingId && shops.find((s) => s.id === editingId)?.coord_source
+                  ? ` Current pin: ${shops.find((s) => s.id === editingId)?.coord_source}${
+                      shops.find((s) => s.id === editingId)?.lat != null
+                        ? ` (${shops.find((s) => s.id === editingId)?.lat}, ${shops.find((s) => s.id === editingId)?.lng})`
+                        : ""
+                    }.`
+                  : ""}
+              </p>
               <label className="inline-flex items-center gap-2 text-xs font-semibold sm:col-span-2">
                 <Checkbox
                   checked={form.active}

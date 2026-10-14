@@ -23,6 +23,8 @@ import {
   listRailroads,
   seedRailroadsFromNarn,
 } from "./services/railroads";
+import { listShopMapPins, streamRailLinesGeoJson } from "./services/shop-map";
+import { seedPlacesFromBundle } from "./services/places";
 import {
   deactivateCatalogItem,
   listCatalog,
@@ -815,11 +817,47 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     });
   });
 
+  /** Shop map pins — geocoded City/ST or lat/lng override. Local places only. */
+  app.get("/api/repair/shops/map", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await listShopMapPins({
+      activeOnly: String(req.query.activeOnly ?? "1") !== "0",
+      railroadMark: req.query.railroad
+        ? String(req.query.railroad)
+        : undefined,
+      capabilityId: req.query.capability
+        ? String(req.query.capability)
+        : undefined,
+      carTypeId: req.query.carType ? String(req.query.carType) : undefined,
+    });
+    return res.json({
+      ...result,
+      workspaceTitle: await workspaceTitle(),
+    });
+  });
+
+  /** Simplified NARN rail lines GeoJSON (bundled; no runtime BTS calls). */
+  app.get("/api/repair/map/rail-lines", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return streamRailLinesGeoJson(res);
+  });
+
+  /** Dev/local: re-seed places geocode table (idempotent). */
+  app.post("/api/repair/map/places/seed", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await seedPlacesFromBundle();
+    return res.json(result);
+  });
+
   app.get("/api/repair/shops/:id", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     // Avoid colliding with /shops/:id/otp-steps — only UUID-like ids
     if (String(req.params.id) === "otp-steps") return;
+    if (String(req.params.id) === "map") return;
     const shop = await getShopMaster(String(req.params.id));
     if (!shop) return res.status(404).json({ error: "Shop not found" });
     const recent = await getShopRecentActivity(String(req.params.id));
@@ -864,6 +902,18 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       shopMark: body.shopMark != null ? String(body.shopMark) : null,
       website: body.website != null ? String(body.website) : null,
       hoursNotes: body.hoursNotes != null ? String(body.hoursNotes) : null,
+      latOverride:
+        body.latOverride !== undefined
+          ? body.latOverride == null || body.latOverride === ""
+            ? null
+            : Number(body.latOverride)
+          : null,
+      lngOverride:
+        body.lngOverride !== undefined
+          ? body.lngOverride == null || body.lngOverride === ""
+            ? null
+            : Number(body.lngOverride)
+          : null,
       deliveringLines: Array.isArray(body.deliveringLines)
         ? body.deliveringLines
         : undefined,
@@ -917,6 +967,18 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
           ? body.hoursNotes == null
             ? null
             : String(body.hoursNotes)
+          : undefined,
+      latOverride:
+        body.latOverride !== undefined
+          ? body.latOverride == null || body.latOverride === ""
+            ? null
+            : Number(body.latOverride)
+          : undefined,
+      lngOverride:
+        body.lngOverride !== undefined
+          ? body.lngOverride == null || body.lngOverride === ""
+            ? null
+            : Number(body.lngOverride)
           : undefined,
       deliveringLines: Array.isArray(body.deliveringLines)
         ? body.deliveringLines

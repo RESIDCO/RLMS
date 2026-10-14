@@ -10,14 +10,15 @@
 
 | Tip | Meaning |
 |---|---|
-| **§B railroads + Shop Profile** | Apply `rlms-phase1-owner-ui-b-railroads-profile.bundle`. Requires **`00d13c9`** (seed-idempotent). Lands tip after apply (see bundle README). Delivering lines → NARN railroads type-ahead; Shop Profile read view. **No map yet.** |
+| **§B Shop map (part 3)** | Apply `rlms-phase1-owner-ui-b-shop-map.bundle`. Requires **`eeffc61`** (railroads-profile; needs `00d13c9` seed tip before that). Leaflet + OSM map, NARN rail overlay, places geocode, lat/lng override. |
+| **§B railroads + Shop Profile** | Prior: `rlms-phase1-owner-ui-b-railroads-profile.bundle` → **`eeffc61`**. |
 | **Seed idempotent** | Prior: `rlms-phase1-seed-estimates-idempotent.bundle` → **`00d13c9`**. |
 | **Migrate view fix + §B shop fields** | Prior: `rlms-phase1-migrate-view-fix.bundle` → **`e99c935`**. |
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`e99c935`**, apply seed-idempotent first (lands `00d13c9`), then this railroads-profile bundle.  
-If PC is still on **`2039b7f`**, apply migrate-view-fix → `e99c935`, then seed-idempotent → `00d13c9`, then railroads-profile.
+If PC is on **`00d13c9`**, apply railroads-profile first (lands `eeffc61`), then this shop-map bundle.  
+If PC is on **`e99c935`**, apply seed-idempotent → `00d13c9`, then railroads-profile → `eeffc61`, then shop-map.
 
 ---
 
@@ -26,8 +27,8 @@ If PC is still on **`2039b7f`**, apply migrate-view-fix → `e99c935`, then seed
 | Sub-section | Deliverable | Status |
 |---|---|---|
 | **1** | Estimates History `/#/repair` (spec §A) | Done |
-| **2** | Shop master (spec §B) + Entity/workspace + railroads delivering lines + Shop Profile | **Awaiting Bruce sign-off** |
-| 2c | Shop map (part 3) | **Not started** — follow-up after this tip |
+| **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + **Map** | **Awaiting Bruce sign-off** |
+| 2c | Shop map (part 3) | **In this tip** |
 | 3+ | Bad Orders, Estimate Review rebuild, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md)  
@@ -42,17 +43,31 @@ If PC is still on **`2039b7f`**, apply migrate-view-fix → `e99c935`, then seed
 | N+5 | `rlms-phase1-owner-ui-b-shops-entity.bundle` | `1f6aa47` | → **`2039b7f`** |
 | N+6 | `rlms-phase1-migrate-view-fix.bundle` | `2039b7f` | → **`e99c935`** |
 | N+7 | `rlms-phase1-seed-estimates-idempotent.bundle` | `e99c935` | → **`00d13c9`** |
-| N+8 | **`rlms-phase1-owner-ui-b-railroads-profile.bundle`** | **`00d13c9`** | → **(see README)** |
+| N+8 | `rlms-phase1-owner-ui-b-railroads-profile.bundle` | `00d13c9` | → **`eeffc61`** |
+| N+9 | **`rlms-phase1-owner-ui-b-shop-map.bundle`** | **`eeffc61`** | → **(see README)** |
 
 ---
 
-## Apply railroads-profile (on tip `00d13c9`)
+## Map data sources (free / local — documented 2026-10-14)
+
+| Asset | Source | Date | Notes |
+|---|---|---|---|
+| Rail overlay | USDOT/BTS/FRA **NARN Lines** (public domain) | Queried 2026-10-14 | Dissolved by `RROWNER1`, simplified (~0.08° offset); `narn-lines-simplified.geojson.gz` (~0.6 MB gz, ~980 marks). US/CA/MX including short lines. Not truncated to CONUS; yard detail removed for size. See `modules/repair/data/NARN_LINES_SOURCE.md`. |
+| Places geocode | **GeoNames** `cities5000` (CC-BY 4.0) | Downloaded 2026-10-14 | US/CA/MX only → `repair.places` (~10.6k). See `modules/repair/data/PLACES_SOURCE.md`. |
+| Base tiles | OpenStreetMap | runtime | Free tile servers only |
+| Optional tiles | OpenRailwayMap | runtime | Layer toggle; free tiles |
+
+**No paid map API keys. No runtime geocoder calls.** Manual `lat_override` / `lng_override` on shop record wins over places.
+
+---
+
+## Apply shop-map (on tip `eeffc61`)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect 00d13c9…
-git bundle verify PATH\TO\rlms-phase1-owner-ui-b-railroads-profile.bundle
-git pull PATH\TO\rlms-phase1-owner-ui-b-railroads-profile.bundle HEAD
+git rev-parse HEAD   # expect eeffc61…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-b-shop-map.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-b-shop-map.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -67,11 +82,10 @@ npm run repair:migrate:local
 npm run repair:seed:estimates-history
 npm run repair:smoke-shop-entity
 npm run repair:dev:local
-# http://127.0.0.1:5000/#/repair/shops
-# http://127.0.0.1:5000/#/repair/shops/<uuid>
+# http://127.0.0.1:5000/#/repair/shops  → Grid | Map toggle
 ```
 
-Expect: migrate seeds `repair.railroads` from NARN JSON; delivering lines type-ahead (not billing-road wall); manual marks flagged review; Shop Profile on name click; billing roads still validate optional mark only.
+Expect: migrate seeds `repair.places` (~10.6k) + railroads; Map view with OSM tiles, NARN rail overlay (toggle) + optional OpenRailwayMap; shop pins from City/ST or lat/long override; pin popup → View shop; filters by railroad / capability / car type / active.
 
 ---
 
@@ -87,8 +101,7 @@ Expect: migrate seeds `repair.railroads` from NARN JSON; delivering lines type-a
 
 ## Open items
 
-- **Bruce sign-off on §B** (railroads + profile) before map (part 3) and Bad Orders (§C).
-- Shop map (part 3) — separate follow-up bundle.
+- **Bruce sign-off on §B** (railroads + profile + map) before Bad Orders (§C).
 - Screenshots 02–06 available for later subsections.
 - Full AAR Bad Order Reason list still incomplete (do not invent).
 - Q1 / Q2 remain in open-questions.md.

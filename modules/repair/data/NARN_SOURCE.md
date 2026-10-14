@@ -14,3 +14,6 @@ requested marks not present in NARN owner fields (e.g. CP, KCSM) are added as
 `source=curated_supplement`.
 
 Free source only — no Railinc paid products.
+
+See also `NARN_LINES_SOURCE.md` for the simplified rail-line map overlay
+(`narn-lines-simplified.geojson.gz`) and `PLACES_SOURCE.md` for City/ST geocoding.

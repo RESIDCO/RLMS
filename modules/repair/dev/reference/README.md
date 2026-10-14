@@ -5,4 +5,4 @@
 
 Seed-only spreadsheets (`Shop_Payee_List.xlsx`, `Repair_Categories.xlsx`) live in the
 Project store at `internal/briefs/reference/` — not in the git tree. Seeds are already
-materialized as SQL under `migrations/20261014_repair_seed_*.sql`.
+materialized as SQL under `modules/repair/migrations/20261014_repair_seed_*.sql`.

@@ -1,12 +1,13 @@
 -- 20261013_repair_schema_foundation.sql
 --
 -- RLMS Repair Module — Phase 1 first slice (schema foundation).
--- APPLY ONLY to local Postgres or an APPROVED Supabase branch of rlms-residco.
--- Do NOT apply to production without Bruce's written approval.
+-- APPLY ONLY to local Postgres via: npm run repair:migrate:local
+-- Path: modules/repair/migrations/ (not host migrations/).
+-- Do NOT apply to production Supabase (rlms-residco). No Supabase branches.
 --
 -- Safety:
---   - Creates schema "repair" only; does not ALTER public tables.
---   - cars_ref is a VIEW over public (read-only).
+--   - Creates schema "repair" only; does not ALTER public tables/views/auth.
+--   - cars_ref is a VIEW over public (read-only SELECT; no public DDL).
 --   - Append-only tables reject UPDATE/DELETE via triggers.
 
 BEGIN;

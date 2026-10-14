@@ -10,7 +10,9 @@
 --       POD_MISSED → shop + internal reviewers/fleet managers
 --       POD_REVISED → internal only
 --
--- APPLY ONLY to local Postgres. Creates/alters objects in schema "repair" only.
+-- APPLY ONLY to local Postgres via: npm run repair:migrate:local
+-- Path: modules/repair/migrations/ (not host migrations/).
+-- Creates/alters objects in schema "repair" only — never public/auth.
 
 BEGIN;
 

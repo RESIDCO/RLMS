@@ -1,0 +1,73 @@
+RLMS repair — Owner UI §B Shop master + Entity/workspace
+================================================================
+Requires tip: 1f6aa475ed05c03609e0d7c70605d8c30cba4ace
+(§A final Estimates History + nav polish)
+
+If PC is still on cce5026, apply rlms-phase1-owner-ui-a-final.bundle first
+(requires cce5026 → lands 1f6aa47), then this bundle.
+
+Bundle tip (after apply): f9e2c0dc5cd9c9b84dbbaf5b904f61688245362b
+Bundle size: 36492 bytes
+SHA-256: 5e9ff8707c9ae95ab6cf56cd717f776ff1394b74c747ef9a921703ca98e419e2
+
+What this adds
+----------------------------------------------------------------
+  modules/repair/migrations/20261014_repair_shop_master_entity.sql
+    - Shop splc/active; contacts phone/role
+    - billing_roads table; retire seed:payee-list from shop master
+    - owner_entity_tags MAIN/COAL/RPS; entity snapshot columns
+    - cars_ref.entity_source; workspaceTitle=RESIDCO
+
+  modules/repair/services/shops.ts
+    - create/update/deactivate shop; list empty-until-created
+    - billing-road validation; ensureDemoShop for local demos
+
+  modules/repair/services/entity.ts
+    - lookup/snapshot/correct entity; close subtotal helper
+
+  client/src/pages/repair/ShopMaster.tsx
+    - /#/repair/shops create/edit/deactivate UI
+
+  client/src/pages/repair/RepairHome.tsx (+ WorkspaceTitle)
+    - Entity column / group / summary / Excel; title RESIDCO
+
+  modules/repair/dev/smoke-shop-master-entity.ts
+    - empty-until-create; entity snapshot; close entity subtotals
+
+  docs/repair/OWNER_UI_B_SHOP_MASTER.md
+  docs/repair/HANDOFF.md
+
+Files outside modules/repair (and why)
+----------------------------------------------------------------
+  client/src/pages/repair/*
+    Shop Master UI + Estimates History Entity + workspace title
+  client/src/App.tsx
+    Route /repair/shops → ShopMaster
+  docs/repair/*
+    sub-spec, handoff, bundle README
+  package.json
+    repair:smoke-shop-entity script
+
+§C Bad Order rebuild — NOT started (entity snapshot only on existing BO create).
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect 1f6aa47 (if cce5026, apply a-final first)
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-b-shops-entity.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-b-shops-entity.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:seed:estimates-history
+  npm run repair:smoke-shop-entity
+  npm run repair:dev:local
+  # http://127.0.0.1:5000/#/repair/shops
+  # http://127.0.0.1:5000/#/repair
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

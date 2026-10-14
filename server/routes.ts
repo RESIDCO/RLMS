@@ -190,6 +190,7 @@ import {
   buildLoadChangeReport,
   pickBaseMonth,
   sameCostMergeStats,
+  unmatchedSet,
   type LoadChangeReport,
 } from "@shared/financial-load-review";
 import {
@@ -3543,9 +3544,15 @@ export async function registerRoutes(
         carsUnchanged,
         carsLeftBlank: leftBlank,
         coalSkipped,
-      } = await applyCarFinancialsFromSummary(supabaseAdmin, activeCars, summaryRows, (done, total) => {
-        emit({ type: "progress", phase: `Updating cars (${done} of ${total})` });
-      });
+      } = await applyCarFinancialsFromSummary(
+        supabaseAdmin,
+        activeCars,
+        summaryRows,
+        (done, total) => {
+          emit({ type: "progress", phase: `Updating cars (${done} of ${total})` });
+        },
+        month
+      );
 
       emit({ type: "progress", phase: "Updating riders" });
       const leaseGovernance = await governLeaseDates(supabaseAdmin);
@@ -3558,6 +3565,7 @@ export async function registerRoutes(
         snapshotMonth: month,
         fileRows: allRows,
         termRows,
+        unmatchedRiders: review.unmatchedRiders,
         scopeBefore,
         scopeAfter,
       });
@@ -3590,8 +3598,13 @@ export async function registerRoutes(
         });
       }
 
+      const unmatched = unmatchedSet(review.unmatchedRiders);
+      const riderCodes = new Set(ridersToday.map((r) => r.code.trim().toUpperCase()));
       const statusesSet = new Set(
-        termRows.filter((t) => t.status_text && !t.term_end).map((t) => t.rider_id.toUpperCase())
+        termRows
+          .filter((t) => t.status_text && !t.term_end)
+          .map((t) => t.rider_id.toUpperCase())
+          .filter((id) => !unmatched.has(id) && riderCodes.has(id))
       );
       const multiTerm = olsWithMultipleDatedTerms(termRows, month);
       const rowsByEntity: Record<string, number> = {};
@@ -3624,7 +3637,9 @@ export async function registerRoutes(
         leaseGovernance,
         riderRentRollup,
         ridersUpdated: leaseGovernance.ridersUpdated,
-        leaseDatesChanged: changeReport.leaseDateChanges.length,
+        leaseDatesChanged: changeReport.leaseDateChanges.filter(
+          (c) => !unmatched.has(c.rider_id.toUpperCase()) && riderCodes.has(c.rider_id.toUpperCase())
+        ).length,
         multiTermRiders: Array.from(multiTerm),
         statusesSet: Array.from(statusesSet),
         changeReport,
@@ -3642,7 +3657,9 @@ export async function registerRoutes(
           mergedRows: changeReport.merge.collapsedRows,
           carsUpdated,
           ridersUpdated: leaseGovernance.ridersUpdated,
-          leaseDatesChanged: changeReport.leaseDateChanges.length,
+          leaseDatesChanged: changeReport.leaseDateChanges.filter(
+          (c) => !unmatched.has(c.rider_id.toUpperCase()) && riderCodes.has(c.rider_id.toUpperCase())
+        ).length,
           unmatchedRiders: review.unmatchedRiders,
         },
         checks: integrityChecks,

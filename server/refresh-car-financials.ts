@@ -8,6 +8,7 @@ import {
   RAILCAR_FINANCIAL_REFRESH_FIELDS,
   buildCarFinancialUpdates,
   carFinancialFingerprint,
+  normalizeSnapshotMonth,
   type ActiveCarForJoin,
   type SummaryRowForRefresh,
 } from "@shared/financial-import";
@@ -51,17 +52,20 @@ export async function applyCarFinancialsFromSummary(
   sb: SupabaseClient,
   activeCars: CarRow[],
   summaryRows: SummaryRowForRefresh[],
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  loadedMonth?: string | null
 ): Promise<ApplyCarFinancialResult> {
   const { updates, leftBlank, coalSkipped } = buildCarFinancialUpdates(activeCars, summaryRows);
   const byId = new Map(activeCars.map((c) => [c.id, c]));
+  const monthKey = normalizeSnapshotMonth(loadedMonth);
   let carsUpdated = 0;
   let carsUnchanged = 0;
   const WAVE = 40;
   const pending = updates.filter((u) => {
     const car = byId.get(u.id);
+    const onLoadedMonth = !monthKey || normalizeSnapshotMonth(u.financial_snapshot_month) === monthKey;
     if (car && carFinancialFingerprint(car) === carFinancialFingerprint(u)) {
-      carsUnchanged += 1;
+      if (onLoadedMonth) carsUnchanged += 1;
       return false;
     }
     return true;

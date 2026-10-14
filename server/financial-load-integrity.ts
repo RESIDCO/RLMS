@@ -1,7 +1,13 @@
 import { createHash } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "./fetch-all";
-import { aggregateKeys, type FinKeyRow, type RiderToday } from "@shared/financial-load-review";
+import {
+  aggregateKeys,
+  evaluateRiderDateIntegrity,
+  unmatchedSet,
+  type FinKeyRow,
+  type RiderToday,
+} from "@shared/financial-load-review";
 import { olsWithMultipleDatedTerms, type RiderLeaseTermRow } from "@shared/financial-import";
 
 export async function listLoadedSnapshotMonths(db: SupabaseClient): Promise<string[]> {
@@ -199,10 +205,12 @@ export async function runFinancialIntegrityChecks(args: {
   snapshotMonth: string;
   fileRows: FinKeyRow[];
   termRows: RiderLeaseTermRow[];
+  unmatchedRiders?: string[];
   scopeBefore: ScopeChecksum;
   scopeAfter: ScopeChecksum;
 }): Promise<IntegrityCheck[]> {
   const { db, snapshotMonth, fileRows, termRows } = args;
+  const unmatched = unmatchedSet(args.unmatchedRiders);
   const fileAgg = aggregateKeys(fileRows);
   const written = await fetchAllRows<any>((from, to) =>
     db
@@ -253,28 +261,24 @@ export async function runFinancialIntegrityChecks(args: {
       if (c) riderByCode.set(c, r);
     }
   }
-  let dateOk = 0;
-  const dateFail: string[] = [];
-  for (const [id, date] of Array.from(datedFile.entries())) {
-    const rider = riderByCode.get(id);
-    const got = rider?.expiration_date ? String(rider.expiration_date).slice(0, 10) : null;
-    if (got !== date) {
-      dateFail.push(`${id}: file ${date} vs rider ${got ?? "(blank)"}`);
-      continue;
-    }
-    dateOk += 1;
+  const riderExpirationByCode = new Map<string, string | null>();
+  for (const [code, r] of Array.from(riderByCode.entries())) {
+    riderExpirationByCode.set(
+      code,
+      r?.expiration_date ? String(r.expiration_date).slice(0, 10) : null
+    );
   }
-  const finDateFail: string[] = [];
-  for (const r of written) {
-    if (!r.lease_exp_date) continue;
-    const id = String(r.rider_id ?? "").trim().toUpperCase();
-    const expected = datedFile.get(id);
-    if (expected && String(r.lease_exp_date).slice(0, 10) !== expected) {
-      finDateFail.push(`${id} financial row lease_exp_date ${String(r.lease_exp_date).slice(0, 10)} vs file ${expected}`);
-    }
-  }
-
   const multi = olsWithMultipleDatedTerms(termRows, snapshotMonth);
+  const dateCheck = evaluateRiderDateIntegrity({
+    unmatchedRiders: Array.from(unmatched),
+    riderExpirationByCode,
+    fileEarliestDateByRider: datedFile,
+    financialRows: written,
+    terms: termRows,
+    multiTermRiders: multi,
+  });
+  const dateFail = dateCheck.fail;
+  const dateOk = dateCheck.checked;
   const statusRiders = new Set<string>();
   for (const r of fileRows) {
     if (r.lease_status && !r.lease_exp_date) statusRiders.add(String(r.rider_id).trim().toUpperCase());
@@ -292,6 +296,7 @@ export async function runFinancialIntegrityChecks(args: {
   for (const c of cars) {
     const ol = String(c.rider_external_id ?? "").trim().toUpperCase();
     if (!ol) continue;
+    if (unmatched.has(ol)) continue;
     if (multi.has(ol) || String(c.lease_date_source ?? "") === "asset_report_multi_term") continue;
     if (statusRiders.has(ol)) continue;
     const rider = riderByCode.get(ol);
@@ -354,11 +359,11 @@ export async function runFinancialIntegrityChecks(args: {
     {
       id: "rider_dates",
       label: "Rider dates match the file",
-      pass: dateFail.length === 0 && finDateFail.length === 0,
+      pass: dateFail.length === 0,
       detail:
-        dateFail.length === 0 && finDateFail.length === 0
-          ? `${dateOk} of ${datedFile.size} dated riders; financial lease_exp_date matches.`
-          : [...dateFail, ...finDateFail].slice(0, 8).join("; "),
+        dateFail.length === 0
+          ? `${dateOk} of ${dateCheck.total} dated riders; financial lease_exp_date matches.`
+          : dateFail.slice(0, 8).join("; "),
     },
     {
       id: "car_dates",

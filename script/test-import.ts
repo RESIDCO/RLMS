@@ -48,6 +48,7 @@ import {
 import {
   buildGapWarning,
   buildLoadChangeReport,
+  evaluateRiderDateIntegrity,
   pickBaseMonth,
   stripFormerDeal,
 } from "../shared/financial-load-review";
@@ -720,6 +721,45 @@ eq(stripFormerDeal("xOL2312"), "OL2312", "Former Deal strips leading x");
   eq(report.rentCostChanges.some((x) => x.rider_id === "OL2109" && x.old_rent_per_car === 425 && x.new_rent_per_car === 575), true, "OL2109 rent 425 → 575");
   eq(report.statusChanges.some((x) => x.rider_id === "OL1826" && x.new_cell === "SCRAPPING"), true, "OL1826 date → SCRAPPING");
   eq(report.suggestedMatches.some((x) => x.file_rider === "EA2312" && x.suggested_rider === "OL2312"), true, "EA2312 suggests OL2312");
+}
+
+{
+  const riderExpirationByCode = new Map<string, string | null>([
+    ["OL1513", "2027-01-31"],
+    ["OL1942", "2026-12-31"],
+    ["OL1236", "2027-06-30"],
+    ["OL2109", "2031-10-31"],
+  ]);
+  const fileEarliest = new Map([
+    ["OL1513", "2027-01-31"],
+    ["OL1942", "2026-12-31"],
+    ["OL1236", "2027-06-30"],
+    ["OL2109", "2031-10-31"],
+    ["OL2611", "2031-01-31"],
+    ["OL1816", "2026-11-30"],
+  ]);
+  const dates = evaluateRiderDateIntegrity({
+    unmatchedRiders: ["OL2611", "OL1816"],
+    riderExpirationByCode,
+    fileEarliestDateByRider: fileEarliest,
+    financialRows: [
+      { rider_id: "OL1513", lease_exp_date: "2027-01-31" },
+      { rider_id: "OL1513", lease_exp_date: "2030-01-31" },
+      { rider_id: "OL1942", lease_exp_date: "2026-12-31" },
+      { rider_id: "OL1942", lease_exp_date: "2027-12-31" },
+      { rider_id: "OL2611", lease_exp_date: "2031-01-31" },
+      { rider_id: "OL2109", lease_exp_date: "2031-10-31" },
+    ],
+    terms: [
+      { rider_id: "OL1513", term_end: "2027-01-31" },
+      { rider_id: "OL1513", term_end: "2030-01-31" },
+      { rider_id: "OL1942", term_end: "2026-12-31" },
+      { rider_id: "OL1942", term_end: "2027-12-31" },
+    ],
+    multiTermRiders: ["OL1513", "OL1942", "OL1236"],
+  });
+  eq(dates.fail.length, 0, "unmatched and multi-term dates are not false FAILs");
+  eq(dates.total, 4, "dated check skips unmatched riders with no RLMS row");
 }
 eq(resolveLeaseType("Full Service Lease", "Net Lease"), "Full Service Lease", "resolveLeaseType prefers car over stale MLA");
 eq(resolveLeaseType(null, "Net Lease"), "Net Lease", "resolveLeaseType falls back to MLA when car blank");

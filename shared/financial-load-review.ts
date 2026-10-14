@@ -612,6 +612,66 @@ export function buildLoadChangeReport(args: {
   };
 }
 
+export function unmatchedSet(ids: string[] | undefined | null): Set<string> {
+  return new Set((ids ?? []).map((x) => String(x).trim().toUpperCase()).filter(Boolean));
+}
+
+export function evaluateRiderDateIntegrity(args: {
+  unmatchedRiders: string[];
+  riderExpirationByCode: Map<string, string | null>;
+  fileEarliestDateByRider: Map<string, string>;
+  financialRows: Array<{ rider_id?: string | null; lease_exp_date?: string | null }>;
+  terms: Array<{ rider_id?: string | null; term_end?: string | null }>;
+  multiTermRiders: Iterable<string>;
+}): { checked: number; total: number; fail: string[] } {
+  const unmatched = unmatchedSet(args.unmatchedRiders);
+  const multi = new Set(Array.from(args.multiTermRiders, (x) => String(x).trim().toUpperCase()));
+  const termsByRider = new Map<string, Set<string>>();
+  for (const t of args.terms) {
+    const id = String(t.rider_id ?? "").trim().toUpperCase();
+    const end = t.term_end ? String(t.term_end).slice(0, 10) : "";
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
+    const set = termsByRider.get(id) ?? new Set<string>();
+    set.add(end);
+    termsByRider.set(id, set);
+  }
+  const fail: string[] = [];
+  let checked = 0;
+  let total = 0;
+  for (const [id, earliest] of Array.from(args.fileEarliestDateByRider.entries())) {
+    const ol = id.trim().toUpperCase();
+    if (unmatched.has(ol)) continue;
+    const rider = args.riderExpirationByCode.get(ol);
+    if (rider === undefined) continue;
+    total += 1;
+    const got = rider ? String(rider).slice(0, 10) : null;
+    if (got !== earliest) {
+      fail.push(`${ol}: file earliest ${earliest} vs rider ${got ?? "(blank)"}`);
+      continue;
+    }
+    checked += 1;
+  }
+  for (const r of args.financialRows) {
+    const ol = String(r.rider_id ?? "").trim().toUpperCase();
+    const got = r.lease_exp_date ? String(r.lease_exp_date).slice(0, 10) : "";
+    if (!ol || !got) continue;
+    if (unmatched.has(ol)) continue;
+    if (args.riderExpirationByCode.get(ol) === undefined) continue;
+    if (multi.has(ol)) {
+      const terms = termsByRider.get(ol);
+      if (!terms || !terms.has(got)) {
+        fail.push(`${ol} financial row lease_exp_date ${got} is not a term in rider_lease_terms`);
+      }
+      continue;
+    }
+    const expected = args.fileEarliestDateByRider.get(ol);
+    if (expected && got !== expected) {
+      fail.push(`${ol} financial row lease_exp_date ${got} vs file ${expected}`);
+    }
+  }
+  return { checked, total, fail };
+}
+
 export function moneyAbbrev(n: number): string {
   const abs = Math.abs(n);
   const sign = n < 0 ? "-" : "";

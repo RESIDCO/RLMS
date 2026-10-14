@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **Sub-section 1 — Estimates History** | Apply `rlms-phase1-owner-ui-a-estimates.bundle`. Requires **`3d1dd73`**. Lands tip: see `docs/bundles/rlms-phase1-owner-ui-a-estimates.README.txt`. |
+| **§A contrast + module nav** | Apply `rlms-phase1-owner-ui-a-contrast.bundle`. Requires **`bd049dc`**. Lands tip: see `docs/bundles/rlms-phase1-owner-ui-a-contrast.README.txt`. |
+| **Sub-section 1 — Estimates History** | Apply `rlms-phase1-owner-ui-a-estimates.bundle` first if behind. Requires **`3d1dd73`**. Lands **`bd049dc`**. |
 | **`3d1dd73`** | Owner UI Spec Step 1 (docs map A–H). Keep as overall map — build **one screen at a time**. |
 | **`f4e65cc`** | UI review feedback code baseline (predecessor of 3d1dd73 docs). |
 
@@ -22,7 +23,7 @@ Bruce changed plan: **do not** build all of OWNER_UI_SPEC at once.
 
 | Sub-section | Deliverable | Status |
 |---|---|---|
-| **1** | Estimates History `/#/repair` (spec §A) — sub-spec + working grid + demo seed | **Delivered — awaiting Bruce sign-off** |
+| **1** | Estimates History `/#/repair` (spec §A) — grid + contrast/nav fixes | **Awaiting Bruce sign-off** (contrast/nav fix on tip after `bd049dc`) |
 | **2** | Shop master (spec §B) | **Do not start** until Bruce signs off §A |
 | 3+ | Bad Orders, Estimate Review rebuild, etc. | Parked |
 
@@ -39,19 +40,20 @@ Bruce changed plan: **do not** build all of OWNER_UI_SPEC at once.
 |---|---|---|---|
 | N | `rlms-phase1-ui-review-feedback.bundle` | `ac7148e` | → `f4e65cc` |
 | N+1 | `rlms-phase1-owner-ui-spec.bundle` | `f4e65cc` | → `3d1dd73` |
-| N+2 | **`rlms-phase1-owner-ui-a-estimates.bundle`** | **`3d1dd73`** | → Estimates History tip (see README) |
+| N+2 | `rlms-phase1-owner-ui-a-estimates.bundle` | `3d1dd73` | → `bd049dc` |
+| N+3 | **`rlms-phase1-owner-ui-a-contrast.bundle`** | **`bd049dc`** | → contrast/nav tip (see README) |
 
 Store copies: Project store `docs/bundles/` (Bruce pulls to `C:\Users\BruceHarbridge\rlms-push`).
 
 ---
 
-## Apply Estimates History bundle (sub-section 1)
+## Apply §A contrast + nav bundle
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect 3d1dd73…
-git bundle verify PATH\TO\rlms-phase1-owner-ui-a-estimates.bundle
-git pull PATH\TO\rlms-phase1-owner-ui-a-estimates.bundle HEAD
+git rev-parse HEAD   # expect bd049dc…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-a-contrast.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-a-contrast.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -68,7 +70,7 @@ npm run repair:dev:local
 # open http://127.0.0.1:5000/#/repair
 ```
 
-Default filter = actionable only (Awaiting Approval / Revision Requested / Adjustment for Approval / Awaiting Terminate). Filter in **Approved** to verify opt-in statuses. Click Estimate (car) → existing estimate page (unchanged).
+Expect: sticky repair module nav; legible dark text on light/banded rows; bold `$` totals; Shop as `Name – City, ST`; unbuilt nav links → coming soon (not error).
 
 ---
 
@@ -84,7 +86,7 @@ Default filter = actionable only (Awaiting Approval / Revision Requested / Adjus
 
 ## Open items
 
-- Bruce sign-off on §A before Shop master (§B).
+- Bruce sign-off on §A (incl. contrast/nav) before Shop master (§B).
 - Screenshots 02–06 available for later subsections.
 - Full AAR Bad Order Reason list still incomplete (do not invent).
 - Q1 / Q2 remain in open-questions.md.

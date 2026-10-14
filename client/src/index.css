@@ -112,6 +112,87 @@
   }
 }
 
+/* Owner repair UI (Estimates History §A): light surfaces with WCAG AA+ contrast.
+   RLMS app chrome is dark-first; scoped remaps keep shadcn Input/Select/Button readable. */
+.repair-owner-ui {
+  color-scheme: light;
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 215 19% 28%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+  --secondary: 210 20% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --border: 214 20% 70%;
+  --input: 214 20% 70%;
+  --ring: 215 70% 40%;
+  --primary: 215 70% 35%;
+  --primary-foreground: 0 0% 100%;
+  --destructive: 0 72% 40%;
+  --destructive-foreground: 0 0% 100%;
+  --button-outline: rgba(51, 65, 85, 0.45);
+  background-color: #f3f4f6;
+  color: #0f172a;
+}
+
+.repair-owner-ui input:not([type="checkbox"]):not([type="radio"]),
+.repair-owner-ui textarea,
+.repair-owner-ui select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #64748b !important;
+  caret-color: #0f172a;
+}
+
+.repair-owner-ui input::placeholder,
+.repair-owner-ui textarea::placeholder {
+  color: #475569 !important;
+  opacity: 1;
+}
+
+.repair-owner-ui label,
+.repair-owner-ui legend,
+.repair-owner-ui dt,
+.repair-owner-ui dd {
+  color: #0f172a;
+}
+
+.repair-owner-ui button:disabled,
+.repair-owner-ui [data-disabled] {
+  opacity: 1 !important;
+  color: #334155 !important;
+  background-color: #e2e8f0 !important;
+  border-color: #94a3b8 !important;
+}
+
+.repair-owner-ui [role="combobox"],
+.repair-owner-ui button[role="combobox"] {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #64748b !important;
+}
+
+/* Radix Select/Popover portal to body — keep AA contrast while Estimates History is open */
+body:has(.repair-owner-ui) [data-radix-select-content],
+body:has(.repair-owner-ui) [role="listbox"] {
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 215 19% 28%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #64748b !important;
+}
+
 @layer utilities {
   .font-mono-num {
     font-family: var(--font-mono);

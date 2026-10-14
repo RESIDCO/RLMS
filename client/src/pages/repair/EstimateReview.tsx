@@ -13,6 +13,7 @@ import {
   type HeaderFieldDef,
   type DocRow,
 } from "./EstimateDataFile";
+import RepairOwnerShell from "./RepairOwnerShell";
 
 type RevBlock = {
   revision: {
@@ -183,6 +184,7 @@ export default function EstimateReview() {
   }
 
   return (
+    <RepairOwnerShell>
     <div className="p-6 max-w-6xl space-y-6">
       <PageHeader
         title="Estimate review"
@@ -390,5 +392,6 @@ export default function EstimateReview() {
         <p className="text-sm text-muted-foreground">No revisions yet for this estimate.</p>
       )}
     </div>
+    </RepairOwnerShell>
   );
 }

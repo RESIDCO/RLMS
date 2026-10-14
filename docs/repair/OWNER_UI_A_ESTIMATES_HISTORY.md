@@ -31,11 +31,19 @@ Local review seeds ~15 estimates across statuses so the default queue and “fil
 
 | Region | Contents |
 |---|---|
+| **Module nav** | Sticky top bar on every owner `/#/repair*` page (Bad Orders, Estimates History/BRC, Outbound Dispos, Invoices, Assignments, Reference, Admin, Help). Active highlight. Unbuilt → **coming soon** (not 404). Shop/lessee token links excluded. |
 | **Search** | Shop dropdown; Status multi; Initials; Number; Date Range (from–to); Date Range Filter field (Ignore / Yard Arrival / Approval Requested / Approved / Outbound Target / Outbound Date / Created / Terminated); Search + Reset |
 | **Apply to Checked Estimates** | Approve · Get BRC · Excel · 500 · Validate · View Auto Approval Queue · Tank Car Doc Complete count |
 | **Summary** | Estimates · # of cars · # of clients · Total Cost ($) · $ per estimate · $ per car · $ per client — updates with filters (integer **cents** math; ≤2 decimals display) |
 | **Grid chrome** | Paging · items/page · Export Grid · group-by drop zone · Create Filter |
 | **Row click** | Estimate link → existing `/#/repair/estimates/:id` |
+
+### Contrast / chrome (Bruce §A fix)
+
+- Light Estimates History surfaces (white / light-blue row banding) with **dark text** — WCAG AA+ vs RLMS dark-first tokens.
+- Inputs (Initials/Number/dates/selects) are **white with dark text**, not black boxes.
+- Status cells use **colored backgrounds** (yellow Awaiting Approval, orange Adjustment for Approval, etc.).
+- **Total** column: right-aligned **bold** `$` amounts; Shop Name: **`Name – City, ST`**.
 
 ### Columns (shot 01 order)
 

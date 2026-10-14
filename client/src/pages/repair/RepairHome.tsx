@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
 import { Paperclip, Check, X, Trash2, Search, RotateCcw } from "lucide-react";
+import RepairOwnerShell from "./RepairOwnerShell";
 
 type Shop = {
   id: string;
@@ -150,25 +151,28 @@ function money(display: string | undefined): string {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Status cell fill (shot 01): colored background + dark text for AA contrast. */
 function statusClass(code: string): string {
   switch (code) {
     case "AWAITING_APPROVAL":
-      return "text-amber-700 font-medium";
+      return "bg-yellow-300 text-slate-900 font-semibold";
     case "REVISION_REQUESTED":
-      return "text-yellow-800 font-medium";
+      return "bg-yellow-200 text-slate-900 font-semibold";
     case "ADJUSTMENT_FOR_APPROVAL":
-      return "text-orange-600 font-semibold";
+      return "bg-orange-400 text-slate-900 font-semibold";
     case "AWAITING_TERMINATE":
-      return "text-rose-700 font-medium";
+      return "bg-rose-300 text-slate-900 font-semibold";
     case "APPROVED":
-      return "text-emerald-700 font-medium";
+      return "bg-emerald-200 text-slate-900 font-semibold";
     case "COMPLETED":
-      return "text-slate-700";
+      return "bg-slate-200 text-slate-900 font-medium";
     case "TERMINATED":
     case "VOIDED":
-      return "text-red-700";
+      return "bg-red-200 text-slate-900 font-semibold";
+    case "QUEUED":
+      return "bg-sky-100 text-slate-900 font-medium";
     default:
-      return "text-foreground";
+      return "bg-slate-100 text-slate-900";
   }
 }
 
@@ -493,14 +497,15 @@ export default function RepairHome() {
   const tankDocComplete = rows.filter((r) => r.attachment_count > 0).length;
 
   return (
-    <div className="min-h-screen bg-[#f3f4f6] text-sm">
+    <RepairOwnerShell light>
+    <div className="min-h-full bg-[#f3f4f6] text-sm text-slate-900">
       <div className="bg-[#8B1E1E] text-white px-4 py-2 flex items-center justify-between">
         <div className="font-semibold tracking-wide">
           Residco — Main — Default :: Estimates History
         </div>
         <button
           type="button"
-          className="text-white/90 hover:text-white text-xs underline"
+          className="text-white hover:text-white text-xs underline font-medium"
           onClick={() => loadGrid()}
         >
           Refresh
@@ -508,10 +513,10 @@ export default function RepairHome() {
       </div>
 
       <div className="p-3 space-y-3">
-        <div className="flex flex-wrap gap-2 items-center text-xs">
-          <Label className="text-xs">Views</Label>
+        <div className="flex flex-wrap gap-2 items-center text-xs text-slate-900">
+          <Label className="text-xs text-slate-900 font-semibold">Views</Label>
           <Select value={activeView} onValueChange={applyView}>
-            <SelectTrigger className="h-8 w-[220px] bg-white">
+            <SelectTrigger className="h-8 w-[220px] bg-white text-slate-900 border-slate-500">
               <SelectValue placeholder="Default action queue" />
             </SelectTrigger>
             <SelectContent>
@@ -523,23 +528,23 @@ export default function RepairHome() {
               ))}
             </SelectContent>
           </Select>
-          <Button type="button" variant="outline" size="sm" className="h-8" onClick={saveCurrentView}>
+          <Button type="button" variant="outline" size="sm" className="h-8 text-slate-900 border-slate-500 bg-white" onClick={saveCurrentView}>
             Save view
           </Button>
-          <Button type="button" variant="outline" size="sm" className="h-8" onClick={manageViews}>
+          <Button type="button" variant="outline" size="sm" className="h-8 text-slate-900 border-slate-500 bg-white" onClick={manageViews}>
             Manage views
           </Button>
         </div>
 
         <div className="grid gap-3 xl:grid-cols-[1.2fr_1fr_0.9fr]">
           {/* Search */}
-          <fieldset className="border border-slate-300 bg-white rounded p-3 space-y-2">
-            <legend className="px-1 text-xs font-semibold text-slate-700">Search</legend>
+          <fieldset className="border border-slate-400 bg-[#e8eaed] rounded p-3 space-y-2">
+            <legend className="px-1 text-xs font-bold text-slate-900">Search</legend>
             <div className="grid gap-2">
               <div className="grid gap-1">
-                <Label className="text-xs">Shop</Label>
+                <Label className="text-xs text-slate-900 font-semibold">Shop</Label>
                 <Select value={shopId} onValueChange={(v) => { setShopId(v); setPage(1); }}>
-                  <SelectTrigger className="h-8 bg-white">
+                  <SelectTrigger className="h-8 bg-white text-slate-900 border-slate-500">
                     <SelectValue placeholder="--- All Shop Locations ---" />
                   </SelectTrigger>
                   <SelectContent>
@@ -554,17 +559,17 @@ export default function RepairHome() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="grid gap-1">
-                  <Label className="text-xs">Initials</Label>
+                  <Label className="text-xs text-slate-900 font-semibold">Initials</Label>
                   <Input
-                    className="h-8"
+                    className="h-8 bg-white text-slate-900 border-slate-500"
                     value={carMark}
                     onChange={(e) => { setCarMark(e.target.value.toUpperCase()); setPage(1); }}
                   />
                 </div>
                 <div className="grid gap-1">
-                  <Label className="text-xs">Number</Label>
+                  <Label className="text-xs text-slate-900 font-semibold">Number</Label>
                   <Input
-                    className="h-8"
+                    className="h-8 bg-white text-slate-900 border-slate-500"
                     value={carNumber}
                     onChange={(e) => { setCarNumber(e.target.value); setPage(1); }}
                   />
@@ -572,26 +577,26 @@ export default function RepairHome() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="grid gap-1">
-                  <Label className="text-xs">Date Range</Label>
+                  <Label className="text-xs text-slate-900 font-semibold">Date Range</Label>
                   <div className="flex gap-1">
                     <Input
                       type="date"
-                      className="h-8"
+                      className="h-8 bg-white text-slate-900 border-slate-500"
                       value={from}
                       onChange={(e) => { setFrom(e.target.value); setPage(1); }}
                     />
                     <Input
                       type="date"
-                      className="h-8"
+                      className="h-8 bg-white text-slate-900 border-slate-500"
                       value={to}
                       onChange={(e) => { setTo(e.target.value); setPage(1); }}
                     />
                   </div>
                 </div>
                 <div className="grid gap-1">
-                  <Label className="text-xs">Date Range Filter</Label>
+                  <Label className="text-xs text-slate-900 font-semibold">Date Range Filter</Label>
                   <Select value={dateField} onValueChange={(v) => { setDateField(v); setPage(1); }}>
-                    <SelectTrigger className="h-8 bg-white">
+                    <SelectTrigger className="h-8 bg-white text-slate-900 border-slate-500">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -605,14 +610,14 @@ export default function RepairHome() {
                 </div>
               </div>
               <div className="grid gap-1">
-                <Label className="text-xs">Status</Label>
+                <Label className="text-xs text-slate-900 font-semibold">Status</Label>
                 <div className="flex gap-2 items-start">
-                  <div className="flex-1 border rounded bg-slate-50 p-2 max-h-28 overflow-auto text-xs space-y-1">
-                    <div className="text-slate-600 mb-1 truncate" title={statusLabel}>
+                  <div className="flex-1 border border-slate-400 rounded bg-white p-2 max-h-28 overflow-auto text-xs space-y-1 text-slate-900">
+                    <div className="text-slate-800 mb-1 truncate font-medium" title={statusLabel}>
                       {statusLabel || "(none)"}
                     </div>
                     {ALL_STATUSES.map((s) => (
-                      <label key={s.code} className="flex items-center gap-2 cursor-pointer">
+                      <label key={s.code} className="flex items-center gap-2 cursor-pointer text-slate-900">
                         <Checkbox
                           checked={statuses.includes(s.code)}
                           onCheckedChange={() => toggleStatus(s.code)}
@@ -622,14 +627,14 @@ export default function RepairHome() {
                     ))}
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Button type="button" size="icon" className="h-8 w-8" onClick={() => loadGrid()}>
+                    <Button type="button" size="icon" className="h-8 w-8 bg-slate-700 text-white border-slate-700" onClick={() => loadGrid()}>
                       <Search className="h-4 w-4" />
                     </Button>
                     <Button
                       type="button"
                       size="icon"
                       variant="outline"
-                      className="h-8 w-8 text-red-600"
+                      className="h-8 w-8 text-red-700 border-slate-500 bg-white"
                       onClick={resetFilters}
                     >
                       <RotateCcw className="h-4 w-4" />
@@ -641,57 +646,57 @@ export default function RepairHome() {
           </fieldset>
 
           {/* Apply to Checked */}
-          <fieldset className="border border-slate-300 bg-white rounded p-3 space-y-2">
-            <legend className="px-1 text-xs font-semibold text-slate-700">
+          <fieldset className="border border-slate-400 bg-[#e8eaed] rounded p-3 space-y-2">
+            <legend className="px-1 text-xs font-bold text-slate-900">
               Apply to Checked Estimates
             </legend>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" className="h-8 border-blue-500 text-blue-700" onClick={bulkApprove}>
+              <Button type="button" variant="outline" className="h-8 border-blue-700 text-blue-800 bg-white font-medium" onClick={bulkApprove}>
                 Approve
               </Button>
-              <Button type="button" variant="outline" className="h-8" onClick={getBrc}>
+              <Button type="button" variant="outline" className="h-8 text-slate-900 border-slate-500 bg-white" onClick={getBrc}>
                 Get BRC
               </Button>
-              <Button type="button" variant="outline" className="h-8" onClick={exportExcelSelection}>
+              <Button type="button" variant="outline" className="h-8 text-slate-900 border-slate-500 bg-white" onClick={exportExcelSelection}>
                 Excel
               </Button>
-              <Button type="button" variant="outline" className="h-8" onClick={export500}>
+              <Button type="button" variant="outline" className="h-8 text-slate-900 border-slate-500 bg-white" onClick={export500}>
                 500
               </Button>
-              <Button type="button" variant="outline" className="h-8 text-red-700" onClick={validateSelected}>
+              <Button type="button" variant="outline" className="h-8 text-red-800 border-slate-500 bg-white font-medium" onClick={validateSelected}>
                 Validate
               </Button>
             </div>
-            <label className="flex items-center gap-2 text-xs">
+            <label className="flex items-center gap-2 text-xs text-slate-900 font-medium">
               <Checkbox
                 checked={viewAutoApproval}
                 onCheckedChange={(v) => setViewAutoApproval(Boolean(v))}
               />
               View Auto Approval Queue
             </label>
-            <div className="text-xs text-slate-600">
+            <div className="text-xs text-slate-800 font-medium">
               Tank Car Doc Complete ({tankDocComplete} estimates)
             </div>
           </fieldset>
 
           {/* Summary */}
-          <fieldset className="border border-slate-300 bg-white rounded p-3">
-            <legend className="px-1 text-xs font-semibold text-slate-700">Summary</legend>
-            <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-xs">
-              <dt>Estimates:</dt>
-              <dd className="text-right font-medium">{summary?.estimates ?? 0}</dd>
-              <dt># of cars:</dt>
-              <dd className="text-right font-medium">{summary?.cars ?? 0}</dd>
-              <dt># of clients:</dt>
-              <dd className="text-right font-medium">{summary?.clients ?? 0}</dd>
-              <dt>Total Cost ($):</dt>
-              <dd className="text-right font-medium">{money(summary?.totalCostDisplay)}</dd>
-              <dt>$ per estimate:</dt>
-              <dd className="text-right font-medium">{money(summary?.perEstimateDisplay)}</dd>
-              <dt>$ per car:</dt>
-              <dd className="text-right font-medium">{money(summary?.perCarDisplay)}</dd>
-              <dt>$ per client:</dt>
-              <dd className="text-right font-medium">{money(summary?.perClientDisplay)}</dd>
+          <fieldset className="border border-slate-400 bg-[#e8eaed] rounded p-3">
+            <legend className="px-1 text-xs font-bold text-slate-900">Summary</legend>
+            <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-xs text-slate-900">
+              <dt className="font-medium">Estimates:</dt>
+              <dd className="text-right font-bold">{summary?.estimates ?? 0}</dd>
+              <dt className="font-medium"># of cars:</dt>
+              <dd className="text-right font-bold">{summary?.cars ?? 0}</dd>
+              <dt className="font-medium"># of clients:</dt>
+              <dd className="text-right font-bold">{summary?.clients ?? 0}</dd>
+              <dt className="font-medium">Total Cost ($):</dt>
+              <dd className="text-right font-bold">{money(summary?.totalCostDisplay)}</dd>
+              <dt className="font-medium">$ per estimate:</dt>
+              <dd className="text-right font-bold">{money(summary?.perEstimateDisplay)}</dd>
+              <dt className="font-medium">$ per car:</dt>
+              <dd className="text-right font-bold">{money(summary?.perCarDisplay)}</dd>
+              <dt className="font-medium">$ per client:</dt>
+              <dd className="text-right font-bold">{money(summary?.perClientDisplay)}</dd>
             </dl>
           </fieldset>
         </div>
@@ -708,29 +713,57 @@ export default function RepairHome() {
         ) : null}
 
         {/* Paging / export */}
-        <div className="flex flex-wrap items-center gap-3 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-900 font-medium">
           <span>
             Page {page} of {totalPages} ({summary?.estimates ?? rows.length} items)
           </span>
-          <Button type="button" variant="ghost" size="sm" className="h-7" disabled={page <= 1} onClick={() => setPage(1)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-slate-900 border-slate-500 bg-slate-100 disabled:bg-slate-200 disabled:text-slate-600 disabled:opacity-100"
+            disabled={page <= 1}
+            onClick={() => setPage(1)}
+          >
             « First
           </Button>
-          <Button type="button" variant="ghost" size="sm" className="h-7" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-slate-900 border-slate-500 bg-slate-100 disabled:bg-slate-200 disabled:text-slate-600 disabled:opacity-100"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
             ‹ Prev
           </Button>
           <span>Select Page: {page}</span>
-          <Button type="button" variant="ghost" size="sm" className="h-7" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-slate-900 border-slate-500 bg-slate-100 disabled:bg-slate-200 disabled:text-slate-600 disabled:opacity-100"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+          >
             Next ›
           </Button>
-          <Button type="button" variant="ghost" size="sm" className="h-7" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-slate-900 border-slate-500 bg-slate-100 disabled:bg-slate-200 disabled:text-slate-600 disabled:opacity-100"
+            disabled={page >= totalPages}
+            onClick={() => setPage(totalPages)}
+          >
             Last »
           </Button>
-          <Label className="text-xs ml-2">Items per page</Label>
+          <Label className="text-xs ml-2 text-slate-900 font-semibold">Items per page</Label>
           <Select
             value={String(pageSize)}
             onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}
           >
-            <SelectTrigger className="h-7 w-[80px] bg-white">
+            <SelectTrigger className="h-7 w-[80px] bg-white text-slate-900 border-slate-500">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -747,7 +780,7 @@ export default function RepairHome() {
               if (v === "csv" || v === "excel") exportGrid(v);
             }}
           >
-            <SelectTrigger className="h-7 w-[130px] bg-white">
+            <SelectTrigger className="h-7 w-[130px] bg-slate-800 text-white border-slate-800 font-semibold">
               <SelectValue placeholder="Export Grid" />
             </SelectTrigger>
             <SelectContent>
@@ -758,9 +791,9 @@ export default function RepairHome() {
               <SelectItem value="excel">Excel (CSV)</SelectItem>
             </SelectContent>
           </Select>
-          <Label className="text-xs">Group by</Label>
+          <Label className="text-xs text-slate-900 font-semibold">Group by</Label>
           <Select value={groupBy} onValueChange={setGroupBy}>
-            <SelectTrigger className="h-7 w-[140px] bg-white">
+            <SelectTrigger className="h-7 w-[140px] bg-white text-slate-900 border-slate-500">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -770,9 +803,9 @@ export default function RepairHome() {
               <SelectItem value="wreck">Wreck?</SelectItem>
             </SelectContent>
           </Select>
-          <Label className="text-xs">Sort</Label>
+          <Label className="text-xs text-slate-900 font-semibold">Sort</Label>
           <Select value={sortBy} onValueChange={(v) => setSortBy(v)}>
-            <SelectTrigger className="h-7 w-[160px] bg-white">
+            <SelectTrigger className="h-7 w-[160px] bg-white text-slate-900 border-slate-500">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -787,24 +820,24 @@ export default function RepairHome() {
           </Select>
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
-            className="h-7"
+            className="h-7 text-slate-900 border-slate-500 bg-slate-100"
             onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
           >
             {sortDir === "asc" ? "Asc" : "Desc"}
           </Button>
         </div>
 
-        <div className="border border-slate-300 rounded bg-white overflow-hidden">
-          <div className="bg-slate-100 text-slate-600 text-xs px-3 py-1.5 border-b border-slate-200">
+        <div className="border border-slate-400 rounded bg-white overflow-hidden text-slate-900">
+          <div className="bg-slate-200 text-slate-800 text-xs px-3 py-1.5 border-b border-slate-300 font-medium">
             Drag a column header here to group by that column — use Group by above
             {groupBy !== "none" ? ` (grouped by ${groupBy})` : ""}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse min-w-[1600px]">
               <thead>
-                <tr className="bg-slate-600 text-white">
+                <tr className="bg-slate-700 text-white">
                   <th className="px-2 py-2 text-left font-medium w-8">
                     <Checkbox
                       checked={rows.length > 0 && selected.size === rows.length}
@@ -834,7 +867,10 @@ export default function RepairHome() {
                     "Lease Type",
                     "Resp 6 Email",
                   ].map((h) => (
-                    <th key={h} className="px-2 py-2 text-left font-medium whitespace-nowrap">
+                    <th
+                      key={h}
+                      className={`px-2 py-2 font-medium whitespace-nowrap ${h === "Total" ? "text-right" : "text-left"}`}
+                    >
                       {h}
                     </th>
                   ))}
@@ -843,13 +879,13 @@ export default function RepairHome() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={22} className="px-3 py-8 text-center text-slate-500">
+                    <td colSpan={22} className="px-3 py-8 text-center text-slate-700 font-medium">
                       Loading estimates…
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={22} className="px-3 py-8 text-center text-slate-500">
+                    <td colSpan={22} className="px-3 py-8 text-center text-slate-700 font-medium">
                       No estimates match the current filters. Try filtering in Approved, or run{" "}
                       <code>npm run repair:seed:estimates-history</code>.
                     </td>
@@ -858,7 +894,7 @@ export default function RepairHome() {
                   grouped.map((g) => (
                     <Fragment key={g.key || "all"}>
                       {g.key ? (
-                        <tr className="bg-slate-200">
+                        <tr className="bg-slate-200 text-slate-900">
                           <td colSpan={22} className="px-3 py-1 font-semibold">
                             {g.key} ({g.rows.length})
                           </td>
@@ -867,101 +903,101 @@ export default function RepairHome() {
                       {g.rows.map((r, idx) => (
                         <tr
                           key={r.estimate_id}
-                          className={idx % 2 === 0 ? "bg-white" : "bg-sky-50/60"}
+                          className={idx % 2 === 0 ? "bg-white text-slate-900" : "bg-[#e8f4fc] text-slate-900"}
                         >
-                          <td className="px-2 py-1.5 border-b border-slate-100">
+                          <td className="px-2 py-1.5 border-b border-slate-200">
                             <Checkbox
                               checked={selected.has(r.estimate_id)}
                               onCheckedChange={() => toggleSelect(r.estimate_id)}
                             />
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap">
                             <Link
                               href={`/repair/estimates/${r.estimate_id}`}
-                              className="text-blue-700 underline font-medium"
+                              className="text-blue-800 underline font-semibold"
                             >
                               {r.estimate_label}
                             </Link>
                           </td>
-                          <td className={`px-2 py-1.5 border-b border-slate-100 whitespace-nowrap ${statusClass(r.status_code)}`}>
+                          <td className={`px-2 py-1.5 border-b border-slate-200 whitespace-nowrap ${statusClass(r.status_code)}`}>
                             {r.status_name}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 text-right whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-right whitespace-nowrap font-bold text-slate-900 tabular-nums">
                             {money(r.total_display)}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100">{r.issues}</td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 text-center">
+                          <td className="px-2 py-1.5 border-b border-slate-200">{r.issues}</td>
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-center">
                             {r.attachment_count > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 text-slate-700" title={`${r.attachment_count} attachment(s)`}>
+                              <span className="inline-flex items-center gap-0.5 text-slate-800" title={`${r.attachment_count} attachment(s)`}>
                                 <Paperclip className="h-3.5 w-3.5" />
                                 {r.attachment_count > 1 ? r.attachment_count : null}
                               </span>
                             ) : null}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap text-slate-900">
                             {r.shop_display}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap text-slate-900">
                             {fmtDate(r.yard_arrived_at)}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap text-slate-900">
                             {fmtDate(r.approval_requested_at)}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 text-center">
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-center">
                             {r.approved_at ? (
-                              <span title={fmtDate(r.approved_at)} className="text-emerald-600 inline-flex">
+                              <span title={fmtDate(r.approved_at)} className="text-emerald-700 inline-flex">
                                 <Check className="h-4 w-4" />
                               </span>
                             ) : (
-                              <span className="text-emerald-600/40 inline-flex" title="Approve via bulk or estimate page">
+                              <span className="text-emerald-700/50 inline-flex" title="Approve via bulk or estimate page">
                                 <Check className="h-4 w-4" />
                               </span>
                             )}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 text-center">
-                            <span className="text-red-600/70 inline-flex" title={r.terminated_at ? fmtDate(r.terminated_at) : "Terminate on estimate page"}>
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-center">
+                            <span className="text-red-700 inline-flex" title={r.terminated_at ? fmtDate(r.terminated_at) : "Terminate on estimate page"}>
                               <X className="h-4 w-4" />
                             </span>
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 text-center">
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-center">
                             <Link
                               href={`/repair/estimates/${r.estimate_id}`}
-                              className="text-slate-500 inline-flex"
+                              className="text-slate-700 inline-flex"
                               title="Open estimate"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Link>
                           </td>
                           <td
-                            className={`px-2 py-1.5 border-b border-slate-100 whitespace-nowrap ${
+                            className={`px-2 py-1.5 border-b border-slate-200 whitespace-nowrap ${
                               isOutboundOverdue(r.target_outbound_at)
                                 ? "bg-red-600 text-white font-semibold"
-                                : ""
+                                : "text-slate-900"
                             }`}
                           >
                             {fmtDate(r.target_outbound_at)}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap text-slate-900">
                             {fmtDate(r.actual_outbound_at)}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap text-slate-900">
                             {r.invoice_no ?? ""}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap">
                             {r.bad_order_reason ? (
-                              <span className="text-blue-700 underline">{r.bad_order_reason}</span>
+                              <span className="text-blue-800 underline font-medium">{r.bad_order_reason}</span>
                             ) : null}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100">{r.ctc ?? ""}</td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 max-w-[220px] truncate" title={r.assignment ?? ""}>
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-slate-900">{r.ctc ?? ""}</td>
+                          <td className="px-2 py-1.5 border-b border-slate-200 max-w-[220px] truncate text-slate-900" title={r.assignment ?? ""}>
                             {r.assignment}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100">{r.wreck}</td>
-                          <td className="px-2 py-1.5 border-b border-slate-100">{r.dispo_reqd}</td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-slate-900">{r.wreck}</td>
+                          <td className="px-2 py-1.5 border-b border-slate-200 text-slate-900">{r.dispo_reqd}</td>
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap text-slate-900">
                             {r.lease_type}
                           </td>
-                          <td className="px-2 py-1.5 border-b border-slate-100 whitespace-nowrap">
+                          <td className="px-2 py-1.5 border-b border-slate-200 whitespace-nowrap text-slate-900">
                             {fmtDate(r.resp6_email_at)}
                           </td>
                         </tr>
@@ -972,10 +1008,10 @@ export default function RepairHome() {
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-200 text-xs text-slate-600">
+          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-300 text-xs text-slate-800 font-medium">
             <button
               type="button"
-              className="text-blue-700 underline"
+              className="text-blue-800 underline font-semibold"
               onClick={() => setShowCreateFilter((v) => !v)}
             >
               Create Filter
@@ -983,7 +1019,7 @@ export default function RepairHome() {
             <span>RLMS Repair · Estimates History</span>
           </div>
           {showCreateFilter ? (
-            <div className="px-3 pb-3 text-xs text-slate-600">
+            <div className="px-3 pb-3 text-xs text-slate-800">
               Use Search filters above (Shop, Status, Initials, Number, Date Range + Date Range Filter).
               Saved views keep the combination. Advanced AND builder lands with later grid polish.
             </div>
@@ -991,11 +1027,12 @@ export default function RepairHome() {
         </div>
 
         {viewAutoApproval ? (
-          <div className="text-xs text-slate-600 border border-dashed border-slate-300 rounded p-2 bg-white">
+          <div className="text-xs text-slate-800 border border-dashed border-slate-400 rounded p-2 bg-white font-medium">
             Auto Approval Queue view is a placeholder flag for §A — no separate queue yet.
           </div>
         ) : null}
       </div>
     </div>
+    </RepairOwnerShell>
   );
 }

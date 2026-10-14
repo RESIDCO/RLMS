@@ -479,17 +479,16 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
 
   const mapped = rows.map((r) => {
     const totalCentsRow = dollarsToCents(r.total);
-    const shopLabel =
-      r.shop_name || r.shop_mark
-        ? [
-            r.shop_name || r.shop_mark,
-            r.shop_city && r.shop_state
-              ? `${r.shop_city}, ${r.shop_state}`
-              : r.shop_city || null,
-          ]
-            .filter(Boolean)
-            .join(" - ")
-        : null;
+    // Match repairSMART / formatShopLabel: "Name – City, ST"
+    const shopName = (r.shop_name || r.shop_mark || "").trim();
+    const shopCity = (r.shop_city || "").trim();
+    const shopState = (r.shop_state || "").trim();
+    let shopLabel: string | null = null;
+    if (shopName) {
+      if (shopCity && shopState) shopLabel = `${shopName} – ${shopCity}, ${shopState}`;
+      else if (shopCity) shopLabel = `${shopName} – ${shopCity}`;
+      else shopLabel = shopName;
+    }
     return {
       ...r,
       estimate_label: `${r.car_mark} ${r.car_number}`.trim(),

@@ -2,8 +2,8 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §A  
 **Screenshot:** `docs/repair/screenshots/01-estimates-history.png`  
-**Tip base:** `3d1dd73` (Owner UI Spec Step 1)  
-**Scope:** This screen only. Estimate Review (`/#/repair/estimates/:id`) is **unchanged**. Shop master, Bad Orders rebuild, and screens B–H are **out of scope**.
+**Tip base:** `cce5026` (§A contrast + sticky nav) → this final polish lands next tip  
+**Scope:** This screen + module nav/theme shell. Estimate Review content unchanged (nav/theme shell only). Shop master, Bad Orders rebuild, and screens B–H are **out of scope**.
 
 ---
 
@@ -27,27 +27,26 @@ Local review seeds ~15 estimates across statuses so the default queue and “fil
 
 ---
 
-## Layout (match shot 01)
+## Layout (match shot 01 + Bruce §A final)
 
 | Region | Contents |
 |---|---|
-| **Module nav** | Sticky top bar on every owner `/#/repair*` page (Bad Orders, Estimates History/BRC, Outbound Dispos, Invoices, Assignments, Reference, Admin, Help). Active highlight. Unbuilt → **coming soon** (not 404). Shop/lessee token links excluded. |
-| **Search** | Shop dropdown; Status multi; Initials; Number; Date Range (from–to); Date Range Filter field (Ignore / Yard Arrival / Approval Requested / Approved / Outbound Target / Outbound Date / Created / Terminated); Search + Reset |
-| **Apply to Checked Estimates** | Approve · Get BRC · Excel · 500 · Validate · View Auto Approval Queue · Tank Car Doc Complete count |
-| **Summary** | Estimates · # of cars · # of clients · Total Cost ($) · $ per estimate · $ per car · $ per client — updates with filters (integer **cents** math; ≤2 decimals display) |
-| **Grid chrome** | Paging · items/page · Export Grid · group-by drop zone · Create Filter |
+| **Module nav** | Sticky top bar: Bad Orders, Estimates, Outbound Dispos, Invoices, Reference, Help. **Assignments removed.** **Admin = gear icon at right end.** Light/dark toggle (per user) left of gear. Unbuilt → **coming soon** (not 404). |
+| **Search** | Shop dropdown; Status multi; Initials; Number; Date Range (from–to); Date Range Filter field; Search + Reset |
+| **Apply to Checked Estimates** | Approve · Get BRC · Excel · 500. **Validate removed** (validation runs on file intake → Issues?). **View Auto Approval Queue** hidden until auto-approval rules exist. **Tank Car Doc Complete** shown only when tenant tank-doc gate is ON (MG3 OFF for RESIDCO). |
+| **Summary** | Estimates · # of cars · # of clients · Total Cost ($) · $ per estimate · $ per car · $ per client — integer **cents** math; ≤2 decimals display |
+| **Grid chrome** | Paging · items/page · Export Grid · group-by · sort · **Columns** show/hide · drag handles to reorder · **filter row under headers** · column resize · Create Filter |
 | **Row click** | Estimate link → existing `/#/repair/estimates/:id` |
 
-### Contrast / chrome (Bruce §A fix)
+### Contrast / theme
 
-- Light Estimates History surfaces (white / light-blue row banding) with **dark text** — WCAG AA+ vs RLMS dark-first tokens.
-- Inputs (Initials/Number/dates/selects) are **white with dark text**, not black boxes.
-- Status cells use **colored backgrounds** (yellow Awaiting Approval, orange Adjustment for Approval, etc.).
-- **Total** column: right-aligned **bold** `$` amounts; Shop Name: **`Name – City, ST`**.
+- **Light** (default): white / light-blue banding, dark text, AA+.
+- **Dark** (nav toggle, per user): slate surfaces, light text, AA; **status cell fills keep dark text** so colors stay distinct.
+- Inputs readable in both themes; bold right-aligned `$` totals; Shop **`Name – City, ST`**.
 
-### Columns (shot 01 order)
+### Columns (shot 01 order — user-reorderable)
 
-Select · Estimate · Status (colored) · Total · Issues? · Attachment · Shop Name (Name – City, ST) · Arrived At Yard · Approval Requested · Approved · Terminated · Action · Outbound Target · Outbound Date · Invoice # · Bad Order Reason · CTC · Assignment · Wreck? · Dispo Req'd · Lease Type · Resp 6 Email
+Select · Estimate · Status (colored) · Total · Issues? · Attachment · Shop Name · Arrived At Yard · Approval Requested · Approved · Terminated · Action · Outbound Target · Outbound Date · Invoice # · Bad Order Reason · CTC · Assignment · Wreck? · Dispo Req'd · Lease Type · Resp 6 Email
 
 ---
 
@@ -55,13 +54,14 @@ Select · Estimate · Status (colored) · Total · Issues? · Attachment · Shop
 
 | Capability | Behavior |
 |---|---|
-| Saved views | Named views (column set, filters, sort, group-by) — Default action queue + Save / Manage (per browser user in local review) |
-| Sort / filter / group | Per-column; multi-status; shop / initials / number / date-field range |
+| Saved views | Named views store filters, sort, group-by, **column order / width / visibility / column filters** — per browser user. **Set as default** chooses which view opens next. Built-in Default action queue remains available. |
+| Sort / filter / group | Per-column filter row; multi-status; shop / initials / number / date-field range; group-by |
+| Column chrome | Drag handle reorder; resize; Columns menu show/hide |
 | Paging | Items per page + First/Prev/Next/Last |
 | Export Grid | Current filtered/sorted view (CSV / Excel) |
 | Bulk Approve | Selected rows in approvable statuses → Approved |
 | Get BRC | Detail export for selection |
-| Excel / 500 / Validate | Grid Excel; AAR 500-byte export; Railinc validate on selection |
+| Excel / 500 | Grid Excel; AAR 500-byte export |
 
 ---
 
@@ -87,4 +87,4 @@ npm run repair:dev:local
 
 ## Next (do not start)
 
-After Bruce signs off this sub-section → **Shop master** (OWNER_UI_SPEC §B).
+**§A final awaiting Bruce sign-off.** After approve → **Shop master** (OWNER_UI_SPEC §B).

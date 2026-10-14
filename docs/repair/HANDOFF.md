@@ -10,10 +10,10 @@
 
 | Tip | Meaning |
 |---|---|
-| **§A contrast + module nav** | Apply `rlms-phase1-owner-ui-a-contrast.bundle`. Requires **`bd049dc`**. Lands tip: see `docs/bundles/rlms-phase1-owner-ui-a-contrast.README.txt`. |
-| **Sub-section 1 — Estimates History** | Apply `rlms-phase1-owner-ui-a-estimates.bundle` first if behind. Requires **`3d1dd73`**. Lands **`bd049dc`**. |
+| **§A final (nav + Estimates History polish)** | Apply `rlms-phase1-owner-ui-a-final.bundle`. Requires **`cce5026`**. Lands tip after apply (see bundle README). |
+| **§A contrast + module nav** | Prior: `rlms-phase1-owner-ui-a-contrast.bundle` → **`cce5026`**. |
+| **Sub-section 1 — Estimates History** | `rlms-phase1-owner-ui-a-estimates.bundle` → **`bd049dc`**. |
 | **`3d1dd73`** | Owner UI Spec Step 1 (docs map A–H). Keep as overall map — build **one screen at a time**. |
-| **`f4e65cc`** | UI review feedback code baseline (predecessor of 3d1dd73 docs). |
 
 ---
 
@@ -23,7 +23,7 @@ Bruce changed plan: **do not** build all of OWNER_UI_SPEC at once.
 
 | Sub-section | Deliverable | Status |
 |---|---|---|
-| **1** | Estimates History `/#/repair` (spec §A) — grid + contrast/nav fixes | **Awaiting Bruce sign-off** (contrast/nav fix on tip after `bd049dc`) |
+| **1** | Estimates History `/#/repair` (spec §A) — grid + contrast/nav + **§A final polish** | **§A final awaiting Bruce sign-off** |
 | **2** | Shop master (spec §B) | **Do not start** until Bruce signs off §A |
 | 3+ | Bad Orders, Estimate Review rebuild, etc. | Parked |
 
@@ -41,19 +41,20 @@ Bruce changed plan: **do not** build all of OWNER_UI_SPEC at once.
 | N | `rlms-phase1-ui-review-feedback.bundle` | `ac7148e` | → `f4e65cc` |
 | N+1 | `rlms-phase1-owner-ui-spec.bundle` | `f4e65cc` | → `3d1dd73` |
 | N+2 | `rlms-phase1-owner-ui-a-estimates.bundle` | `3d1dd73` | → `bd049dc` |
-| N+3 | **`rlms-phase1-owner-ui-a-contrast.bundle`** | **`bd049dc`** | → contrast/nav tip (see README) |
+| N+3 | `rlms-phase1-owner-ui-a-contrast.bundle` | `bd049dc` | → **`cce5026`** |
+| N+4 | **`rlms-phase1-owner-ui-a-final.bundle`** | **`cce5026`** | → **(see README)** |
 
 Store copies: Project store `docs/bundles/` (Bruce pulls to `C:\Users\BruceHarbridge\rlms-push`).
 
 ---
 
-## Apply §A contrast + nav bundle
+## Apply §A final bundle
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect bd049dc…
-git bundle verify PATH\TO\rlms-phase1-owner-ui-a-contrast.bundle
-git pull PATH\TO\rlms-phase1-owner-ui-a-contrast.bundle HEAD
+git rev-parse HEAD   # expect cce5026…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-a-final.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-a-final.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -70,7 +71,7 @@ npm run repair:dev:local
 # open http://127.0.0.1:5000/#/repair
 ```
 
-Expect: sticky repair module nav; legible dark text on light/banded rows; bold `$` totals; Shop as `Name – City, ST`; unbuilt nav links → coming soon (not error).
+Expect: Validate gone; Tank Doc / Auto Approval Queue hidden (RESIDCO defaults); column drag handles + filter row + named saved views w/ default; light/dark toggle in nav; Assignments removed; Admin = gear at right.
 
 ---
 
@@ -86,7 +87,7 @@ Expect: sticky repair module nav; legible dark text on light/banded rows; bold `
 
 ## Open items
 
-- Bruce sign-off on §A (incl. contrast/nav) before Shop master (§B).
+- **Bruce sign-off on §A final** before Shop master (§B).
 - Screenshots 02–06 available for later subsections.
 - Full AAR Bad Order Reason list still incomplete (do not invent).
 - Q1 / Q2 remain in open-questions.md.

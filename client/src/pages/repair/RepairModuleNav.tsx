@@ -1,11 +1,13 @@
 /**
  * Sticky repairSMART-style module nav for every owner /#/repair* page.
  * Unbuilt targets route to coming-soon placeholders (not 404).
+ * Admin = gear at right end; Assignments removed; light/dark toggle (per user).
  */
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Moon, Settings, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRepairTheme } from "./repairTheme";
 
 type NavLink = { href: string; label: string; match?: (path: string) => boolean };
 type NavItem =
@@ -52,12 +54,6 @@ const NAV: NavItem[] = [
     match: (p) => p.startsWith("/repair/invoices"),
   },
   {
-    kind: "link",
-    href: "/repair/assignments",
-    label: "Assignments",
-    match: (p) => p.startsWith("/repair/assignments"),
-  },
-  {
     kind: "menu",
     label: "Reference",
     match: (p) =>
@@ -69,12 +65,6 @@ const NAV: NavItem[] = [
       { href: "/repair/bo-reasons", label: "BO reasons" },
       { href: "/repair/billing-roads", label: "Billing roads" },
     ],
-  },
-  {
-    kind: "link",
-    href: "/repair/admin",
-    label: "Admin",
-    match: (p) => p.startsWith("/repair/admin"),
   },
   {
     kind: "link",
@@ -175,6 +165,8 @@ function Dropdown({
 export default function RepairModuleNav() {
   const [location] = useLocation();
   const path = pathOf(location);
+  const { theme, toggleTheme } = useRepairTheme();
+  const adminActive = path.startsWith("/repair/admin");
 
   return (
     <nav
@@ -182,34 +174,67 @@ export default function RepairModuleNav() {
       className="sticky top-0 z-50 flex flex-wrap items-stretch bg-[#243b55] text-white border-b border-[#1a2b3f] shadow-sm"
       data-testid="repair-module-nav"
     >
-      {NAV.map((item) => {
-        const active = itemActive(item, path);
-        if (item.kind === "menu") {
+      <div className="flex flex-wrap items-stretch flex-1 min-w-0">
+        {NAV.map((item) => {
+          const active = itemActive(item, path);
+          if (item.kind === "menu") {
+            return (
+              <Dropdown
+                key={item.label}
+                label={item.label}
+                items={item.items}
+                active={active}
+                path={path}
+              />
+            );
+          }
           return (
-            <Dropdown
-              key={item.label}
-              label={item.label}
-              items={item.items}
-              active={active}
-              path={path}
-            />
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "inline-flex items-center px-3 py-2 text-sm whitespace-nowrap transition-colors",
+                active
+                  ? "bg-[#1e3a5f] text-white font-semibold"
+                  : "text-white/95 hover:bg-white/10",
+              )}
+            >
+              {item.label}
+            </Link>
           );
-        }
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "inline-flex items-center px-3 py-2 text-sm whitespace-nowrap transition-colors",
-              active
-                ? "bg-[#1e3a5f] text-white font-semibold"
-                : "text-white/95 hover:bg-white/10",
-            )}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
+        })}
+      </div>
+
+      <div className="flex items-stretch ml-auto border-l border-white/10">
+        <button
+          type="button"
+          className="inline-flex items-center justify-center px-3 py-2 text-white/95 hover:bg-white/10 transition-colors"
+          aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+          title={theme === "light" ? "Dark mode" : "Light mode"}
+          onClick={toggleTheme}
+          data-testid="repair-theme-toggle"
+        >
+          {theme === "light" ? (
+            <Moon className="h-4 w-4" />
+          ) : (
+            <Sun className="h-4 w-4" />
+          )}
+        </button>
+        <Link
+          href="/repair/admin"
+          aria-label="Admin"
+          title="Admin"
+          className={cn(
+            "inline-flex items-center justify-center px-3 py-2 transition-colors",
+            adminActive
+              ? "bg-[#1e3a5f] text-white"
+              : "text-white/95 hover:bg-white/10",
+          )}
+          data-testid="repair-admin-gear"
+        >
+          <Settings className="h-4 w-4" />
+        </Link>
+      </div>
     </nav>
   );
 }

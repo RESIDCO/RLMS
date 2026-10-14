@@ -1,31 +1,47 @@
 /**
- * Owner repair pages: sticky module nav + optional light theme scope (Estimates History).
+ * Owner repair pages: sticky module nav + theme scope (light/dark, per user).
  * Shop / lessee token pages do not use this shell.
  */
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import RepairModuleNav from "./RepairModuleNav";
+import { RepairThemeProvider, useRepairTheme } from "./repairTheme";
 
-export default function RepairOwnerShell({
+function ShellInner({
   children,
-  light = false,
   className,
 }: {
   children: ReactNode;
-  /** Force WCAG-friendly light surfaces (shot 01 / Estimates History). */
-  light?: boolean;
   className?: string;
 }) {
+  const { theme } = useRepairTheme();
   return (
     <div
       className={cn(
-        "min-h-full flex flex-col",
-        light && "repair-owner-ui",
+        "min-h-full flex flex-col repair-owner-ui",
+        theme === "dark" ? "repair-owner-ui--dark" : "repair-owner-ui--light",
         className,
       )}
+      data-repair-theme={theme}
     >
       <RepairModuleNav />
       <div className="flex-1 min-h-0">{children}</div>
     </div>
+  );
+}
+
+export default function RepairOwnerShell({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  /** @deprecated Theme is user-controlled via nav toggle; prop ignored. */
+  light?: boolean;
+  className?: string;
+}) {
+  return (
+    <RepairThemeProvider>
+      <ShellInner className={className}>{children}</ShellInner>
+    </RepairThemeProvider>
   );
 }

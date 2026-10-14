@@ -11,9 +11,10 @@
 | Tip | Meaning |
 |---|---|
 | **`b29d0a5`** (`b29d0a530d5c88e2828790e00e7ac06b32076812`) | Remote PR tip **before** this cents/handoff slice (migrate via node-pg + CRIP/Resp 6/3 totals). Demo reran clean on this tip. |
-| **`b90440c`** (`b90440c76fcc2a301ef08fb9a14069b573b2ec6f`) | Bundle tip after integer-cents fix + this HANDOFF (apply `rlms-phase1-cents-handoff.bundle` on `b29d0a5`). |
+| **`f48054d`** (`f48054d88bf3df4dd068b8398b8c5d50a072748b`) | Cents fix + HANDOFF commit (may be parent of tip if a follow-up docs commit lands). |
+| **Bundle tip** | See `docs/bundles/rlms-phase1-cents-handoff.README.txt` (authoritative after apply). |
 
-Requires tip to apply cents bundle: **`b29d0a5`**. Bundle lands **`b90440c`**.
+Requires tip to apply cents bundle: **`b29d0a5`**.
 
 ---
 

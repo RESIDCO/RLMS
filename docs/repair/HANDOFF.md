@@ -10,7 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
-| **§D Estimate Review r2** | Apply `rlms-phase1-owner-ui-d-estimate-review-r2.bundle`. Requires **`f853e48`**. Lands tip in bundle README. Licensed AAR CSVs in `modules/repair/ref-data/` + `npm run repair:import-ref-data`. |
+| **§D Estimate Review r2** | Apply `rlms-phase1-owner-ui-d-estimate-review-r2.bundle`. Requires **`f853e48`**. Lands ****. Licensed AAR CSVs in `modules/repair/ref-data/` + `npm run repair:import-ref-data`. |
 | **§D Estimate Review (initial)** | Prior: `rlms-phase1-owner-ui-d-estimate-review.bundle` → **`f853e48`**. |
 | **§C Template fields + attach carry** | Prior / signed off: `rlms-phase1-owner-ui-c-template-fields.bundle` → **`468a9db`**. |
 | **§C Copy BO template** | Prior: `rlms-phase1-owner-ui-c-copy-template.bundle` → **`8a9378e`**. |

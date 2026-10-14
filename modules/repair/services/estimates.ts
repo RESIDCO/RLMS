@@ -389,6 +389,23 @@ export async function submitForApproval(opts: {
   tenantId?: string;
   comment?: string;
 }) {
+  // Yard arrival required to leave Queued (Bruce status rules)
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { rows: yard } = await q(
+    `SELECT ev.yard_arrived_at
+     FROM repair.estimates e
+     JOIN repair.events ev ON ev.id = e.event_id
+     JOIN repair.statuses s ON s.id = e.status_id
+     WHERE e.id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL`,
+    [opts.estimateId, tenantId],
+  );
+  if (yard[0] && !yard[0].yard_arrived_at) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Yard arrival required before leaving Queued",
+    };
+  }
   return transitionEstimate({
     ...opts,
     actorRole: "reviewer",

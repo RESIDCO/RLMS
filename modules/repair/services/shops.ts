@@ -3,10 +3,12 @@
  * Shops are owner-created, permanent, linked to tenant. Never hard-delete —
  * deactivate (active=false). Dropdown empty until at least one shop exists.
  * Billing roads are a separate table for optional mark validation only.
+ * Delivering lines use repair.railroads (NARN), not billing_roads.
  */
 import { DEFAULT_TENANT_ID, q, withTransaction } from "../db";
 import { writeAudit } from "./audit";
 import { getStorageProvider } from "../providers/storage";
+import { formatRailroadLabel, getRailroadByMark } from "./railroads";
 
 export type ShopListRow = {
   id: string;
@@ -95,7 +97,7 @@ export type ShopMasterRow = ShopListRow & {
     role: string | null;
     active: boolean;
   }>;
-  delivering_lines: string[];
+  delivering_lines: DeliveringLineRow[];
   capability_ids: string[];
   car_type_ids: string[];
   certifications: Array<{
@@ -116,6 +118,24 @@ export type ShopMasterRow = ShopListRow & {
   }>;
 };
 
+export type DeliveringLineRow = {
+  mark: string;
+  name: string | null;
+  label: string;
+  manual_entry: boolean;
+  needs_review: boolean;
+};
+
+/** Accept plain marks or enriched objects from the UI. */
+export type DeliveringLineInput =
+  | string
+  | {
+      mark: string;
+      manualEntry?: boolean;
+      needsReview?: boolean;
+      name?: string | null;
+    };
+
 export type CreateShopInput = {
   tenantId?: string;
   legalName: string;
@@ -128,7 +148,7 @@ export type CreateShopInput = {
   shopMark?: string | null;
   website?: string | null;
   hoursNotes?: string | null;
-  deliveringLines?: string[];
+  deliveringLines?: DeliveringLineInput[];
   capabilityIds?: string[];
   carTypeIds?: string[];
   certifications?: ShopCertInput[];
@@ -217,7 +237,7 @@ async function hydrateShopMaster(
   const [contacts, delivering_lines, capability_ids, car_type_ids, certifications, documents] =
     await Promise.all([
       listShopContacts(shopId, tenantId),
-      listDeliveringLines(shopId),
+      listDeliveringLines(shopId, tenantId),
       listShopCapabilityIds(shopId),
       listShopCarTypeIds(shopId),
       listShopCertifications(shopId, tenantId),
@@ -311,12 +331,38 @@ export async function getShopMaster(
   return hydrateShopMaster(rows[0], tenantId);
 }
 
-async function listDeliveringLines(shopId: string): Promise<string[]> {
+async function listDeliveringLines(
+  shopId: string,
+  tenantId = DEFAULT_TENANT_ID,
+): Promise<DeliveringLineRow[]> {
   const { rows } = await q(
-    `SELECT mark FROM repair.shop_delivering_lines WHERE shop_id = $1 ORDER BY mark`,
-    [shopId],
+    `SELECT dl.mark, dl.manual_entry, dl.needs_review, dl.display_name,
+            rr.name AS railroad_name
+     FROM repair.shop_delivering_lines dl
+     LEFT JOIN repair.railroads rr
+       ON rr.tenant_id = $2
+      AND upper(rr.mark) = upper(dl.mark)
+      AND rr.deleted_at IS NULL AND rr.active = true
+     WHERE dl.shop_id = $1
+     ORDER BY dl.mark`,
+    [shopId, tenantId],
   );
-  return rows.map((r) => String(r.mark));
+  return rows.map((r) => {
+    const mark = String(r.mark);
+    const name =
+      r.display_name != null
+        ? String(r.display_name)
+        : r.railroad_name != null
+          ? String(r.railroad_name)
+          : null;
+    return {
+      mark,
+      name,
+      label: formatRailroadLabel({ mark, name }),
+      manual_entry: Boolean(r.manual_entry),
+      needs_review: Boolean(r.needs_review),
+    };
+  });
 }
 
 async function listShopCapabilityIds(shopId: string): Promise<string[]> {
@@ -436,37 +482,92 @@ export async function uploadShopDocument(opts: {
   return { ok: true as const, document: rows[0] };
 }
 
-async function validateDeliveringLines(
+async function normalizeDeliveringLines(
   tenantId: string,
-  marks: string[] | undefined,
-): Promise<{ ok: true; marks: string[] } | { ok: false; error: string }> {
-  if (!marks?.length) return { ok: true, marks: [] };
-  const cleaned = [
-    ...new Set(marks.map((m) => m.trim().toUpperCase()).filter(Boolean)),
-  ];
-  for (const m of cleaned) {
-    const road = await validateBillingRoad(tenantId, m);
-    if (!road.ok) {
+  lines: DeliveringLineInput[] | undefined,
+): Promise<
+  | {
+      ok: true;
+      lines: Array<{
+        mark: string;
+        name: string | null;
+        manual_entry: boolean;
+        needs_review: boolean;
+      }>;
+    }
+  | { ok: false; error: string }
+> {
+  if (!lines?.length) return { ok: true, lines: [] };
+  const byMark = new Map<
+    string,
+    {
+      mark: string;
+      name: string | null;
+      manual_entry: boolean;
+      needs_review: boolean;
+    }
+  >();
+  for (const raw of lines) {
+    const mark =
+      typeof raw === "string"
+        ? raw.trim().toUpperCase()
+        : String(raw.mark ?? "")
+            .trim()
+            .toUpperCase();
+    if (!mark) continue;
+    if (!/^[A-Z0-9]{2,8}$/.test(mark)) {
       return {
         ok: false,
-        error: `Delivering line "${m}" is not in the billing-road / railroad table`,
+        error: `Delivering line "${mark}" must be a 2–8 character railroad mark`,
       };
     }
+    const known = await getRailroadByMark(mark, tenantId);
+    const forcedManual =
+      typeof raw === "object" ? Boolean(raw.manualEntry) : false;
+    const forcedReview =
+      typeof raw === "object" ? Boolean(raw.needsReview) : false;
+    const manual = forcedManual || !known;
+    const needsReview = forcedReview || !known;
+    const name =
+      (typeof raw === "object" && raw.name != null
+        ? String(raw.name).trim() || null
+        : null) ??
+      known?.name ??
+      null;
+    byMark.set(mark, {
+      mark,
+      name,
+      manual_entry: manual,
+      needs_review: needsReview,
+    });
   }
-  return { ok: true, marks: cleaned };
+  return { ok: true, lines: [...byMark.values()] };
 }
 
 async function replaceDeliveringLines(
   shopId: string,
-  marks: string[],
+  lines: Array<{
+    mark: string;
+    name: string | null;
+    manual_entry: boolean;
+    needs_review: boolean;
+  }>,
   actor: string,
 ) {
   await q(`DELETE FROM repair.shop_delivering_lines WHERE shop_id = $1`, [shopId]);
-  for (const mark of marks) {
+  for (const line of lines) {
     await q(
-      `INSERT INTO repair.shop_delivering_lines (shop_id, mark, created_by)
-       VALUES ($1,$2,$3)`,
-      [shopId, mark, actor],
+      `INSERT INTO repair.shop_delivering_lines
+         (shop_id, mark, manual_entry, needs_review, display_name, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [
+        shopId,
+        line.mark,
+        line.manual_entry,
+        line.needs_review,
+        line.name,
+        actor,
+      ],
     );
   }
 }
@@ -627,7 +728,7 @@ export async function createShop(input: CreateShopInput) {
   const road = await validateBillingRoad(tenantId, input.billingRoad);
   if (!road.ok) return { ok: false as const, status: 400, error: road.error };
 
-  const lines = await validateDeliveringLines(tenantId, input.deliveringLines);
+  const lines = await normalizeDeliveringLines(tenantId, input.deliveringLines);
   if (!lines.ok) return { ok: false as const, status: 400, error: lines.error };
 
   const shopMark = (input.shopMark ?? "").trim().toUpperCase() || null;
@@ -669,7 +770,7 @@ export async function createShop(input: CreateShopInput) {
 
   const shopId = String(shop.id);
   await upsertShopContacts(tenantId, shopId, input.contacts, input.actor);
-  await replaceDeliveringLines(shopId, lines.marks, input.actor);
+  await replaceDeliveringLines(shopId, lines.lines, input.actor);
   await replaceCapabilities(shopId, input.capabilityIds ?? [], input.actor);
   await replaceCarTypes(shopId, input.carTypeIds ?? [], input.actor);
   await replaceCertifications(
@@ -704,7 +805,7 @@ export async function updateShop(opts: {
   shopMark?: string | null;
   website?: string | null;
   hoursNotes?: string | null;
-  deliveringLines?: string[];
+  deliveringLines?: DeliveringLineInput[];
   capabilityIds?: string[];
   carTypeIds?: string[];
   certifications?: ShopCertInput[];
@@ -741,8 +842,13 @@ export async function updateShop(opts: {
   const linesIn =
     opts.deliveringLines !== undefined
       ? opts.deliveringLines
-      : existing.delivering_lines;
-  const lines = await validateDeliveringLines(tenantId, linesIn);
+      : existing.delivering_lines.map((l) => ({
+          mark: l.mark,
+          manualEntry: l.manual_entry,
+          needsReview: l.needs_review,
+          name: l.name,
+        }));
+  const lines = await normalizeDeliveringLines(tenantId, linesIn);
   if (!lines.ok) return { ok: false as const, status: 400, error: lines.error };
 
   const shopMark =
@@ -787,7 +893,7 @@ export async function updateShop(opts: {
   }
 
   await upsertShopContacts(tenantId, opts.shopId, opts.contacts, opts.actor);
-  await replaceDeliveringLines(opts.shopId, lines.marks, opts.actor);
+  await replaceDeliveringLines(opts.shopId, lines.lines, opts.actor);
   if (opts.capabilityIds !== undefined) {
     await replaceCapabilities(opts.shopId, opts.capabilityIds, opts.actor);
   }
@@ -918,4 +1024,81 @@ export async function ensureDemoShop(opts: {
     throw new Error(created.ok === false ? created.error : "Failed to create demo shop");
   }
   return created.shop.id;
+}
+
+export type ShopRecentActivity = {
+  badOrders: Array<{
+    event_id: string;
+    car_mark: string;
+    car_number: string;
+    status_code: string | null;
+    created_at: string;
+  }>;
+  estimates: Array<{
+    estimate_id: string;
+    event_id: string;
+    car_mark: string;
+    car_number: string;
+    status_code: string | null;
+    total_cents: number | null;
+    created_at: string;
+  }>;
+};
+
+/** Recent bad orders + estimates at a shop (Shop Profile read view). */
+export async function getShopRecentActivity(
+  shopId: string,
+  tenantId = DEFAULT_TENANT_ID,
+  limit = 8,
+): Promise<ShopRecentActivity> {
+  const lim = Math.min(Math.max(limit, 1), 50);
+  const bos = await q(
+    `SELECT e.id AS event_id, e.car_mark, e.car_number, e.created_at,
+            s.code AS status_code
+     FROM repair.events e
+     LEFT JOIN repair.statuses s ON s.id = e.status_id
+     WHERE e.tenant_id = $1 AND e.shop_id = $2 AND e.deleted_at IS NULL
+       AND e.origin = 'BO'
+     ORDER BY e.created_at DESC
+     LIMIT $3`,
+    [tenantId, shopId, lim],
+  );
+  const est = await q(
+    `SELECT est.id AS estimate_id, est.event_id, e.car_mark, e.car_number,
+            est.created_at, s.code AS status_code,
+            CASE WHEN r.total IS NULL THEN NULL
+                 ELSE ROUND(r.total * 100)::bigint
+            END AS total_cents
+     FROM repair.estimates est
+     JOIN repair.events e ON e.id = est.event_id
+     LEFT JOIN repair.statuses s ON s.id = est.status_id
+     LEFT JOIN repair.estimate_revisions r
+       ON r.estimate_id = est.id AND r.rev_no = est.current_revision
+     WHERE est.tenant_id = $1 AND e.shop_id = $2
+       AND est.deleted_at IS NULL AND e.deleted_at IS NULL
+     ORDER BY est.created_at DESC
+     LIMIT $3`,
+    [tenantId, shopId, lim],
+  );
+  return {
+    badOrders: bos.rows.map((r) => ({
+      event_id: String(r.event_id),
+      car_mark: String(r.car_mark),
+      car_number: String(r.car_number),
+      status_code: r.status_code != null ? String(r.status_code) : null,
+      created_at: String(r.created_at),
+    })),
+    estimates: est.rows.map((r) => ({
+      estimate_id: String(r.estimate_id),
+      event_id: String(r.event_id),
+      car_mark: String(r.car_mark),
+      car_number: String(r.car_number),
+      status_code: r.status_code != null ? String(r.status_code) : null,
+      total_cents:
+        r.total_cents != null && r.total_cents !== ""
+          ? Number(r.total_cents)
+          : null,
+      created_at: String(r.created_at),
+    })),
+  };
 }

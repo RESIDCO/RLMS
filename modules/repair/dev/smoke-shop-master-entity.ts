@@ -16,12 +16,18 @@ import {
   certExpiryWarning,
   createShop,
   formatShopLabel,
+  getShopRecentActivity,
   listBillingRoads,
   listShopMaster,
   ensureDemoShop,
   uploadShopDocument,
 } from "../services/shops";
 import { listCatalog } from "../services/shop-catalog";
+import {
+  formatRailroadLabel,
+  listRailroads,
+  seedRailroadsFromNarn,
+} from "../services/railroads";
 import { softDeleteDocument } from "../services/gap-lifecycle-06";
 import {
   listOwnerEntityTags,
@@ -106,16 +112,40 @@ async function main() {
     `admin catalogs seeded caps=${caps.length} cars=${cars.length} certs=${certs.length}`,
   );
 
-  const badLine = await createShop({
-    legalName: "Bad Line Shop",
+  const seededRr = await seedRailroadsFromNarn();
+  if (seededRr.total < 100) bad("railroads seed", `expected ≥100 got ${seededRr.total}`);
+  ok(
+    `railroads seeded total=${seededRr.total} inserted=${seededRr.inserted} updated=${seededRr.updated}`,
+  );
+
+  const bpHits = await listRailroads(undefined, { q: "BP", limit: 20 });
+  const bprr = bpHits.find((r) => r.mark === "BPRR");
+  if (!bprr) bad("railroad typeahead", "BP did not find BPRR");
+  const bpLabel = formatRailroadLabel(bprr);
+  if (!bpLabel.includes("BPRR") || !/Buffalo/i.test(bpLabel)) {
+    bad("railroad label", bpLabel);
+  }
+  ok(`typeahead BP → ${bpLabel}`);
+
+  const manualLine = await createShop({
+    legalName: "Manual Line Shop",
     city: "Tucson",
     state: "AZ",
     splc: "222222",
-    deliveringLines: ["ZZZZ_NOT_A_ROAD"],
+    deliveringLines: ["ZZZZMAN"],
     actor: "smoke-b",
   });
-  if (badLine.ok) bad("delivering line validate", "accepted unknown mark");
-  ok("rejects unknown delivering line mark");
+  if (!manualLine.ok || !manualLine.shop) {
+    bad(
+      "manual delivering line",
+      manualLine.ok === false ? manualLine.error : "no shop",
+    );
+  }
+  const z = manualLine.shop!.delivering_lines.find((l) => l.mark === "ZZZZMAN");
+  if (!z?.needs_review || !z.manual_entry) {
+    bad("manual flag", JSON.stringify(z));
+  }
+  ok("unknown delivering mark accepted as manual + needs_review");
 
   const soon = new Date();
   soon.setUTCDate(soon.getUTCDate() + 30);
@@ -130,7 +160,7 @@ async function main() {
     shopMark: "A084",
     website: "https://smoke.example.invalid",
     hoursNotes: "Mon–Fri 0700–1700",
-    deliveringLines: roads[0].mark ? [String(roads[0].mark)] : [],
+    deliveringLines: ["BPRR", "NS"],
     capabilityIds: [caps[0].id],
     carTypeIds: [cars[0].id],
     certifications: [
@@ -158,9 +188,20 @@ async function main() {
   }
   ok(`created shop ${created.shop!.display_label}`);
   if (created.shop!.shop_mark !== "A084") bad("shop_mark", String(created.shop!.shop_mark));
-  if ((created.shop!.delivering_lines?.length ?? 0) < 1) {
-    bad("delivering_lines", "expected ≥1");
+  if ((created.shop!.delivering_lines?.length ?? 0) < 2) {
+    bad("delivering_lines", "expected BPRR+NS");
   }
+  const knownLine = created.shop!.delivering_lines.find((l) => l.mark === "BPRR");
+  if (!knownLine || knownLine.needs_review || knownLine.manual_entry) {
+    bad("known delivering line", JSON.stringify(knownLine));
+  }
+  ok(`delivering lines from railroads: ${created.shop!.delivering_lines.map((l) => l.mark).join(",")}`);
+
+  const recent = await getShopRecentActivity(created.shop!.id);
+  if (!Array.isArray(recent.badOrders) || !Array.isArray(recent.estimates)) {
+    bad("shop profile recent", "missing arrays");
+  }
+  ok("shop profile recent activity shape ok");
   if ((created.shop!.capability_ids?.length ?? 0) < 1) {
     bad("capabilities", "expected ≥1");
   }
@@ -271,8 +312,8 @@ async function main() {
     actor: "smoke-b",
   });
   await q(
-    `INSERT INTO public.railcars (car_number, car_initial, reporting_marks, active, entity)
-     SELECT '100002', 'ARSX', 'ARSX', true, 'Coal'
+    `INSERT INTO public.railcars (id, car_number, car_initial, reporting_marks, active, entity)
+     SELECT 3, '100002', 'ARSX', 'ARSX', true, 'Coal'
      WHERE NOT EXISTS (
        SELECT 1 FROM public.railcars WHERE car_initial = 'ARSX' AND car_number = '100002'
      )`,

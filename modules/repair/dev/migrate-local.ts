@@ -52,6 +52,7 @@ export const LOCAL_MIGRATE_SQL_FILES = [
   "modules/repair/migrations/20261014_repair_ui_review_feedback.sql",
   "modules/repair/migrations/20261014_repair_shop_master_entity.sql",
   "modules/repair/migrations/20261014_repair_shop_master_fields.sql",
+  "modules/repair/migrations/20261014_repair_railroads.sql",
 ] as const;
 
 /**
@@ -71,6 +72,8 @@ const MIGRATION_BASELINE_PROBES: Partial<Record<string, string>> = {
       SELECT 1 FROM information_schema.columns
       WHERE table_schema = 'repair' AND table_name = 'shops' AND column_name = 'shop_mark'
     )`,
+  "modules/repair/migrations/20261014_repair_railroads.sql": `
+    to_regclass('repair.railroads') IS NOT NULL`,
 };
 
 /** Full ordered list previously passed to `psql -f …` (stubs + migrations). */
@@ -290,6 +293,21 @@ export async function migrateLocal(opts?: {
   } else {
     await applySqlViaPg(databaseUrl, LOCAL_MIGRATE_SQL_FILES);
   }
+
+  // NARN operating-railroad seed (idempotent UPSERT) — after table exists
+  try {
+    const { seedRailroadsFromNarn } = await import("../services/railroads");
+    const seeded = await seedRailroadsFromNarn();
+    console.log(
+      `  railroads seed: inserted ${seeded.inserted}, updated ${seeded.updated} (of ${seeded.total})`,
+    );
+  } catch (err) {
+    console.warn(
+      "  railroads seed skipped:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   console.log("repair:migrate:local complete");
 }
 

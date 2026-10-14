@@ -41,6 +41,7 @@ import EstimateReview from "@/pages/repair/EstimateReview";
 import LesseeApproval from "@/pages/repair/LesseeApproval";
 import RepairComingSoon from "@/pages/repair/RepairComingSoon";
 import ShopMaster from "@/pages/repair/ShopMaster";
+import ShopProfile from "@/pages/repair/ShopProfile";
 import RepairAdmin from "@/pages/repair/RepairAdmin";
 import NotFound from "@/pages/not-found";
 
@@ -123,6 +124,7 @@ function AppRouter() {
       <Route path="/repair/outbound-dispos" component={RepairComingSoon} />
       <Route path="/repair/invoices" component={RepairComingSoon} />
       <Route path="/repair/assignments" component={RepairComingSoon} />
+      <Route path="/repair/shops/:id" component={ShopProfile} />
       <Route path="/repair/shops" component={ShopMaster} />
       <Route path="/repair/bo-reasons" component={RepairComingSoon} />
       <Route path="/repair/billing-roads" component={RepairComingSoon} />

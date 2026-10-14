@@ -10,11 +10,14 @@
 
 | Tip | Meaning |
 |---|---|
-| **Migrate view fix + §B shop fields** | Apply `rlms-phase1-migrate-view-fix.bundle`. Requires **`2039b7f`**. Lands tip after apply (see bundle README). Tracked migrations + shop mark / lines / caps / certs / Admin catalogs / top-level Shops nav. |
+| **§B railroads + Shop Profile** | Apply `rlms-phase1-owner-ui-b-railroads-profile.bundle`. Requires **`00d13c9`** (seed-idempotent). Lands tip after apply (see bundle README). Delivering lines → NARN railroads type-ahead; Shop Profile read view. **No map yet.** |
+| **Seed idempotent** | Prior: `rlms-phase1-seed-estimates-idempotent.bundle` → **`00d13c9`**. |
+| **Migrate view fix + §B shop fields** | Prior: `rlms-phase1-migrate-view-fix.bundle` → **`e99c935`**. |
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`1f6aa47`**, apply §B shops-entity first (lands `2039b7f`), then this migrate-view-fix bundle.
+If PC is on **`e99c935`**, apply seed-idempotent first (lands `00d13c9`), then this railroads-profile bundle.  
+If PC is still on **`2039b7f`**, apply migrate-view-fix → `e99c935`, then seed-idempotent → `00d13c9`, then railroads-profile.
 
 ---
 
@@ -23,7 +26,8 @@ If PC is on **`1f6aa47`**, apply §B shops-entity first (lands `2039b7f`), then 
 | Sub-section | Deliverable | Status |
 |---|---|---|
 | **1** | Estimates History `/#/repair` (spec §A) | Done |
-| **2** | Shop master (spec §B) + Entity/workspace + optional fields | **Awaiting Bruce sign-off** (migrate fix + fields) |
+| **2** | Shop master (spec §B) + Entity/workspace + railroads delivering lines + Shop Profile | **Awaiting Bruce sign-off** |
+| 2c | Shop map (part 3) | **Not started** — follow-up after this tip |
 | 3+ | Bad Orders, Estimate Review rebuild, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md)  
@@ -36,17 +40,19 @@ If PC is on **`1f6aa47`**, apply §B shops-entity first (lands `2039b7f`), then 
 | Order | Bundle | Requires | Lands |
 |---|---|---|---|
 | N+5 | `rlms-phase1-owner-ui-b-shops-entity.bundle` | `1f6aa47` | → **`2039b7f`** |
-| N+6 | **`rlms-phase1-migrate-view-fix.bundle`** | **`2039b7f`** | → **`4f87d46`** |
+| N+6 | `rlms-phase1-migrate-view-fix.bundle` | `2039b7f` | → **`e99c935`** |
+| N+7 | `rlms-phase1-seed-estimates-idempotent.bundle` | `e99c935` | → **`00d13c9`** |
+| N+8 | **`rlms-phase1-owner-ui-b-railroads-profile.bundle`** | **`00d13c9`** | → **(see README)** |
 
 ---
 
-## Apply migrate-view-fix (on tip `2039b7f`)
+## Apply railroads-profile (on tip `00d13c9`)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect 2039b7f…
-git bundle verify PATH\TO\rlms-phase1-migrate-view-fix.bundle
-git pull PATH\TO\rlms-phase1-migrate-view-fix.bundle HEAD
+git rev-parse HEAD   # expect 00d13c9…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-b-railroads-profile.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-b-railroads-profile.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -60,13 +66,12 @@ npm install
 npm run repair:migrate:local
 npm run repair:seed:estimates-history
 npm run repair:smoke-shop-entity
-npm run repair:demo:local
 npm run repair:dev:local
 # http://127.0.0.1:5000/#/repair/shops
-# http://127.0.0.1:5000/#/repair/admin
+# http://127.0.0.1:5000/#/repair/shops/<uuid>
 ```
 
-Expect: seed/smoke no longer die on `checkViewColumns`; tracked migrate skips applied files; **Shops** top-level nav (not under Reference); optional shop mark → BO label `Name (MARK) – City, ST`; Admin gear manages capability / car-type / cert catalogs.
+Expect: migrate seeds `repair.railroads` from NARN JSON; delivering lines type-ahead (not billing-road wall); manual marks flagged review; Shop Profile on name click; billing roads still validate optional mark only.
 
 ---
 
@@ -82,7 +87,8 @@ Expect: seed/smoke no longer die on `checkViewColumns`; tracked migrate skips ap
 
 ## Open items
 
-- **Bruce sign-off on §B** (including new optional fields) before Bad Orders (§C).
+- **Bruce sign-off on §B** (railroads + profile) before map (part 3) and Bad Orders (§C).
+- Shop map (part 3) — separate follow-up bundle.
 - Screenshots 02–06 available for later subsections.
 - Full AAR Bad Order Reason list still incomplete (do not invent).
 - Q1 / Q2 remain in open-questions.md.

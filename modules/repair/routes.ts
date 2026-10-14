@@ -11,12 +11,18 @@ import {
   createShop,
   deactivateShop,
   getShopMaster,
+  getShopRecentActivity,
   listBillingRoads,
   listShopDocuments,
   listShopMaster,
   updateShop,
   uploadShopDocument,
 } from "./services/shops";
+import {
+  formatRailroadLabel,
+  listRailroads,
+  seedRailroadsFromNarn,
+} from "./services/railroads";
 import {
   deactivateCatalogItem,
   listCatalog,
@@ -816,7 +822,33 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     if (String(req.params.id) === "otp-steps") return;
     const shop = await getShopMaster(String(req.params.id));
     if (!shop) return res.status(404).json({ error: "Shop not found" });
-    return res.json({ shop });
+    const recent = await getShopRecentActivity(String(req.params.id));
+    return res.json({ shop, recent, workspaceTitle: await workspaceTitle() });
+  });
+
+  /** Operating railroads (NARN) — delivering-line type-ahead. Not billing_roads. */
+  app.get("/api/repair/railroads", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const roads = await listRailroads(undefined, {
+      q: req.query.q ? String(req.query.q) : undefined,
+      activeOnly: String(req.query.activeOnly ?? "1") !== "0",
+      limit: req.query.limit ? Number(req.query.limit) : 40,
+    });
+    return res.json({
+      railroads: roads.map((r) => ({
+        ...r,
+        label: formatRailroadLabel(r),
+      })),
+    });
+  });
+
+  /** Dev/local: re-seed NARN railroads (idempotent). */
+  app.post("/api/repair/railroads/seed", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await seedRailroadsFromNarn();
+    return res.json(result);
   });
 
   app.post("/api/repair/shops", async (req, res) => {
@@ -833,7 +865,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       website: body.website != null ? String(body.website) : null,
       hoursNotes: body.hoursNotes != null ? String(body.hoursNotes) : null,
       deliveringLines: Array.isArray(body.deliveringLines)
-        ? body.deliveringLines.map(String)
+        ? body.deliveringLines
         : undefined,
       capabilityIds: Array.isArray(body.capabilityIds)
         ? body.capabilityIds.map(String)
@@ -887,7 +919,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
             : String(body.hoursNotes)
           : undefined,
       deliveringLines: Array.isArray(body.deliveringLines)
-        ? body.deliveringLines.map(String)
+        ? body.deliveringLines
         : undefined,
       capabilityIds: Array.isArray(body.capabilityIds)
         ? body.capabilityIds.map(String)

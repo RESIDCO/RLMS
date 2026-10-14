@@ -1,10 +1,12 @@
 /**
  * OWNER_UI §B — Shop master `/#/repair/shops`
  * Empty until owner creates shops. Never hard-delete — deactivate.
- * Optional: shop mark, delivering lines, capabilities, car types, certs,
- * website/hours, attachments (delete → VOIDED).
+ * Optional: shop mark, delivering lines (NARN railroads type-ahead),
+ * capabilities, car types, certs, website/hours, attachments (delete → VOIDED).
+ * Click shop name → read-only Shop Profile. Grid Edit stays as form shortcut.
  */
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +15,9 @@ import { apiRequest } from "@/lib/queryClient";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceBanner } from "./WorkspaceTitle";
 import { useRepairTheme } from "./repairTheme";
+import DeliveringLinesPicker, {
+  type DeliveringLineValue,
+} from "./DeliveringLinesPicker";
 
 type Contact = {
   id?: string;
@@ -24,7 +29,6 @@ type Contact = {
 };
 
 type CatalogItem = { id: string; code: string; display_name: string };
-type Road = { mark: string; name: string | null };
 
 type CertRow = {
   id?: string;
@@ -42,6 +46,14 @@ type ShopDoc = {
   size: number;
 };
 
+type DeliveringLine = {
+  mark: string;
+  name: string | null;
+  label: string;
+  manual_entry: boolean;
+  needs_review: boolean;
+};
+
 type Shop = {
   id: string;
   name: string;
@@ -56,7 +68,7 @@ type Shop = {
   active: boolean;
   display_label: string;
   contacts: Contact[];
-  delivering_lines: string[];
+  delivering_lines: DeliveringLine[];
   capability_ids: string[];
   car_type_ids: string[];
   certifications: Array<{
@@ -70,6 +82,16 @@ type Shop = {
   documents: ShopDoc[];
 };
 
+function toPickerLines(lines: DeliveringLine[] | undefined): DeliveringLineValue[] {
+  return (lines ?? []).map((l) => ({
+    mark: l.mark,
+    name: l.name,
+    label: l.label || (l.name ? `${l.mark} – ${l.name}` : l.mark),
+    manualEntry: Boolean(l.manual_entry),
+    needsReview: Boolean(l.needs_review),
+  }));
+}
+
 const emptyForm = () => ({
   legalName: "",
   city: "",
@@ -81,7 +103,7 @@ const emptyForm = () => ({
   hoursNotes: "",
   active: true,
   contacts: [{ name: "", email: "", phone: "", role: "" }] as Contact[],
-  deliveringLines: [] as string[],
+  deliveringLines: [] as DeliveringLineValue[],
   capabilityIds: [] as string[],
   carTypeIds: [] as string[],
   certifications: [
@@ -114,21 +136,18 @@ function ShopMasterBody() {
   const [capabilities, setCapabilities] = useState<CatalogItem[]>([]);
   const [carTypes, setCarTypes] = useState<CatalogItem[]>([]);
   const [certTypes, setCertTypes] = useState<CatalogItem[]>([]);
-  const [roads, setRoads] = useState<Road[]>([]);
   const [docKind, setDocKind] = useState("w9");
   const [uploading, setUploading] = useState(false);
 
   const loadCatalogs = useCallback(async () => {
-    const [cap, car, cert, roadRes] = await Promise.all([
+    const [cap, car, cert] = await Promise.all([
       apiRequest("GET", "/api/repair/admin/shop-catalog/capability"),
       apiRequest("GET", "/api/repair/admin/shop-catalog/car_type"),
       apiRequest("GET", "/api/repair/admin/shop-catalog/cert_type"),
-      apiRequest("GET", "/api/repair/billing-roads"),
     ]);
     setCapabilities((await cap.json()).items ?? []);
     setCarTypes((await car.json()).items ?? []);
     setCertTypes((await cert.json()).items ?? []);
-    setRoads((await roadRes.json()).billingRoads ?? []);
   }, []);
 
   const load = useCallback(async () => {
@@ -187,7 +206,7 @@ function ShopMasterBody() {
               active: c.active !== false,
             }))
           : [{ name: "", email: "", phone: "", role: "" }],
-      deliveringLines: [...(shop.delivering_lines ?? [])],
+      deliveringLines: toPickerLines(shop.delivering_lines),
       capabilityIds: [...(shop.capability_ids ?? [])],
       carTypeIds: [...(shop.car_type_ids ?? [])],
       certifications:
@@ -213,6 +232,33 @@ function ShopMasterBody() {
     setMsg("");
   }
 
+  // Profile "Edit" → `/#/repair/shops?edit=<id>` opens the form shortcut
+  useEffect(() => {
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const qIndex = hash.indexOf("?");
+    if (qIndex < 0 || loading) return;
+    const editId = new URLSearchParams(hash.slice(qIndex + 1)).get("edit");
+    if (!editId) return;
+    const clearQ = () => {
+      const base = hash.slice(0, qIndex) || "#/repair/shops";
+      window.history.replaceState(null, "", base);
+    };
+    const fromList = shops.find((s) => s.id === editId);
+    if (fromList) {
+      openEdit(fromList);
+      clearQ();
+      return;
+    }
+    void apiRequest("GET", `/api/repair/shops/${editId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.shop) openEdit(data.shop as Shop);
+        clearQ();
+      })
+      .catch(() => clearQ());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, shops]);
+
   async function save() {
     setSaving(true);
     setError("");
@@ -229,7 +275,12 @@ function ShopMasterBody() {
         hoursNotes: form.hoursNotes.trim() || null,
         active: form.active,
         contacts: form.contacts.filter((c) => c.name.trim()),
-        deliveringLines: form.deliveringLines,
+        deliveringLines: form.deliveringLines.map((l) => ({
+          mark: l.mark,
+          manualEntry: l.manualEntry,
+          needsReview: l.needsReview,
+          name: l.name,
+        })),
         capabilityIds: form.capabilityIds,
         carTypeIds: form.carTypeIds,
         certifications: form.certifications
@@ -432,14 +483,24 @@ function ShopMasterBody() {
                     key={s.id}
                     className={dark ? "odd:bg-slate-900/40" : "odd:bg-white even:bg-sky-50/40"}
                   >
-                    <td className="p-2 border font-medium">{s.name}</td>
+                    <td className="p-2 border font-medium">
+                      <Link
+                        href={`/repair/shops/${s.id}`}
+                        className="underline text-blue-700 dark:text-sky-300"
+                        data-testid={`shop-name-${s.id}`}
+                      >
+                        {s.name}
+                      </Link>
+                    </td>
                     <td className="p-2 border">{s.shop_mark ?? "—"}</td>
                     <td className="p-2 border">{s.city}</td>
                     <td className="p-2 border">{s.state}</td>
                     <td className="p-2 border">{s.splc}</td>
                     <td className="p-2 border">{s.billing_road ?? "—"}</td>
                     <td className="p-2 border">
-                      {(s.delivering_lines ?? []).join(", ") || "—"}
+                      {(s.delivering_lines ?? [])
+                        .map((l) => l.mark)
+                        .join(", ") || "—"}
                     </td>
                     <td className="p-2 border">{s.capability_ids?.length ?? 0}</td>
                     <td className="p-2 border">{s.active ? "Yes" : "No"}</td>
@@ -559,29 +620,18 @@ function ShopMasterBody() {
 
             <div className="space-y-2">
               <Label className={labelCls}>Delivering line(s)</Label>
-              <div className="flex flex-wrap gap-2 max-h-28 overflow-auto border p-2">
-                {roads.length === 0 ? (
-                  <span className="text-xs opacity-70">No billing roads seeded yet.</span>
-                ) : (
-                  roads.map((r) => (
-                    <label
-                      key={r.mark}
-                      className="inline-flex items-center gap-1 text-xs border px-2 py-1"
-                    >
-                      <Checkbox
-                        checked={form.deliveringLines.includes(r.mark)}
-                        onCheckedChange={() =>
-                          setForm({
-                            ...form,
-                            deliveringLines: toggleId(form.deliveringLines, r.mark),
-                          })
-                        }
-                      />
-                      {r.mark}
-                    </label>
-                  ))
-                )}
-              </div>
+              <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+                Operating railroads (NARN / BTS) — not the billing-road table.
+                Type to search; add a manual mark if missing (flagged for review).
+              </p>
+              <DeliveringLinesPicker
+                value={form.deliveringLines}
+                onChange={(deliveringLines) =>
+                  setForm({ ...form, deliveringLines })
+                }
+                dark={dark}
+                inputClassName={inputCls}
+              />
             </div>
 
             <div className="space-y-2">

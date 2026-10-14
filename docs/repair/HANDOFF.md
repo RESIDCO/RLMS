@@ -10,7 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
-| **Migrate view fix + §B shop fields** | Apply `rlms-phase1-migrate-view-fix.bundle`. Requires **`2039b7f`** → lands **`4f87d46`**. Tracked migrations + shop mark / lines / caps / certs / Admin catalogs / top-level Shops nav. |
+| **Migrate view fix + §B shop fields** | Apply `rlms-phase1-migrate-view-fix.bundle`. Requires **`2039b7f`**. Lands tip after apply (see bundle README). Tracked migrations + shop mark / lines / caps / certs / Admin catalogs / top-level Shops nav. |
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
@@ -36,7 +36,7 @@ If PC is on **`1f6aa47`**, apply §B shops-entity first (lands `2039b7f`), then 
 | Order | Bundle | Requires | Lands |
 |---|---|---|---|
 | N+5 | `rlms-phase1-owner-ui-b-shops-entity.bundle` | `1f6aa47` | → **`2039b7f`** |
-| N+6 | **`rlms-phase1-migrate-view-fix.bundle`** | **`2039b7f`** | → **(see README)** |
+| N+6 | **`rlms-phase1-migrate-view-fix.bundle`** | **`2039b7f`** | → **`4f87d46`** |
 
 ---
 

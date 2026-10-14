@@ -3,9 +3,9 @@ RLMS repair — Windows local review mode (no Supabase)
 Requires tip: a3a17a652f8d6a94592cd830a378c65a7ce9d2ff
 (cents demo clean — step [4] = 36732.04 on draft PR #2)
 
-Bundle tip (after apply): 72246f688825217616e78b9b426b8e45d1601b02
-Bundle size: 15537 bytes
-SHA-256: 92ee01709b718863637e20b365ebcff60538a4412d209788c280e073645bc8e5
+Bundle tip (after apply): c241197c691cafa7236cfe2d3cae95bd8977fb0a
+Bundle size: 16341 bytes
+SHA-256: 630b987bd2ed2d653417240e121a9f4d636997aea9d2a03ff3b5850a344e9bd8
 
 What this adds
 ----------------------------------------------------------------

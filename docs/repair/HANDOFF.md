@@ -10,10 +10,9 @@
 
 | Tip | Meaning |
 |---|---|
-| **`f4e65cc`** (`f4e65cc1fe96aa2cb1349229b2fe0462176f7463`) | UI review feedback tip. **Requires tip** for owner-UI-spec docs bundle. |
+| **Owner UI Spec Step 1** | Docs-only. Requires **`f4e65cc`**. Apply `rlms-phase1-owner-ui-spec.bundle`. Exact lands tip: `docs/bundles/rlms-phase1-owner-ui-spec.README.txt` (store copy authoritative). |
+| **`f4e65cc`** (`f4e65cc1fe96aa2cb1349229b2fe0462176f7463`) | UI review feedback (BO rules, header pencil, lessee layout). Code baseline until Step 2. |
 | **`ac7148e`** (`ac7148e911d17f8af206ce35567277fa93e9511d`) | Local-review-mode (predecessor of f4e65cc). |
-
-Owner-UI-spec docs tip after applying `rlms-phase1-owner-ui-spec.bundle`: see `docs/bundles/rlms-phase1-owner-ui-spec.README.txt` (pin commit).
 
 ---
 
@@ -27,6 +26,8 @@ Owner-UI-spec docs tip after applying `rlms-phase1-owner-ui-spec.bundle`: see `d
 | **2** | Implement screens A–H per approved spec | **Blocked until Step 1 approved** |
 
 Screenshots `01`–`06` (estimates history, estimate review, file attachments, update responsibilities, responsibility codes, bad orders) — **awaiting screenshot attachment** in store/uploads. Spec maps from Manual_Gap_Review + tip field sets; Bruce can mark gaps when shots attach.
+
+Section C includes the Bad Order addendum (search + New BO + History; statuses Queued → Accepted-Pending → Accepted-Working → linked estimate). Match shot `06-bad-orders` when attached.
 
 **Do not invent** unmarked AAR Bad Order Reason lists.
 

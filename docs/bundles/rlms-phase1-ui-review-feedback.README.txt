@@ -3,9 +3,9 @@ RLMS repair — Phase 1 UI review feedback (Bruce 2026-10-14)
 Requires tip: ac7148e911d17f8af206ce35567277fa93e9511d
 (local-review-mode — LOCAL REVIEW MODE, no Supabase)
 
-Bundle tip (after apply): 4debe04b1344ae3a9cfdbb3db1f005c40d77949c
-Bundle size: 26806 bytes
-SHA-256: c1d32b3c273a6d9aebab1519f979e168b1e08b4a966f390a615557f75feeb396
+Bundle tip (after apply): 79fef2dcd8b78c8ecab8028140e3d6052021fdba
+Bundle size: 29135 bytes
+SHA-256: 167c1979583904d434d12c64208af65584df20c5df067a5713f76d55b2f3aad8
 
 What this adds
 ----------------------------------------------------------------

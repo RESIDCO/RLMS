@@ -11,7 +11,7 @@
 | Tip | Meaning |
 |---|---|
 | **`ac7148e`** (`ac7148e911d17f8af206ce35567277fa93e9511d`) | Local-review-mode (Windows `cross-env` + **LOCAL REVIEW MODE, no Supabase**). **Requires** tip for UI-review-feedback bundle. |
-| **UI-review-feedback tip** | After apply: see `docs/bundles/rlms-phase1-ui-review-feedback.README.txt` (this slice). |
+| **** () | UI review feedback (BO rules, header pencil, lessee layout). Apply `rlms-phase1-ui-review-feedback.bundle` on **ac7148e**. |
 
 Requires tip to apply UI-review-feedback bundle: **`ac7148e`**.
 
@@ -22,8 +22,8 @@ Requires tip to apply UI-review-feedback bundle: **`ac7148e`**.
 | Order | Bundle | Requires | Lands |
 |---|---|---|---|
 | … | (earlier chain through cents + local-review-mode) | … | … |
-| N | **`rlms-phase1-local-review-mode.bundle`** | **`a3a17a6`** | → **`ac7148e`** |
-| N+1 | **`rlms-phase1-ui-review-feedback.bundle`** | **`ac7148e`** | Bruce Phase 1 UI review feedback |
+| N | **`rlms-phase1-local-review-mode.bundle`** | **`a3a17a6`** | → **** |
+| N+1 | **`rlms-phase1-ui-review-feedback.bundle`** | **`ac7148e`** | → **** |
 
 Store copies: `/cursor/stores/self/docs/bundles/` (Bruce pulls to `C:\Users\BruceHarbridge\rlms-push`).
 

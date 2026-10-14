@@ -3,9 +3,9 @@ RLMS repair — Owner UI §D Estimate Review (owner)
 Requires tip: 468a9db8034b56570710bdd0182425dcfc364c83
 (§C Bad Orders signed off — template fields + attach carry)
 
-Bundle tip (after apply): 9b32276e4d5084a094ebf526c012aa96c1adb463
-Bundle size: 36K
-SHA-256: 6424d0947822b39ee06859f19d500fa4d840bfa3fd7cd93e1df76bf32e75d1ce
+Bundle tip (after apply): 7e809b8f1a88f47d7d550544e02f29748d769d9e
+Bundle size: 37K
+SHA-256: 397940399dab4a4e7bc72f2e5db6ee362134a4ff9a900343ec1bbc7167a3ffeb
 
 What this delivers
 ----------------------------------------------------------------
@@ -97,6 +97,6 @@ Verified (agent local Postgres)
   repair:smoke-estimate-review PASS (twice)
   repair:smoke-bad-orders PASS (§C intact)
   repair:smoke-shop-entity PASS
-  git bundle verify + pull onto 468a9db → lands 9b32276e4d5084a094ebf526c012aa96c1adb463
+  git bundle verify + pull onto 468a9db → lands 7e809b8f1a88f47d7d550544e02f29748d769d9e
 
 Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

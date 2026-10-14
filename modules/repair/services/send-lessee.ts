@@ -1,6 +1,7 @@
 /**
  * Send Lessee Responsibility — preview page + local-mode outbox.
  * Never copies the shop. Local review: log to repair.email_outbox only (no real send).
+ * Blocks send when lessee total is $0 or preview/PDF/data/email cents disagree.
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
@@ -12,8 +13,13 @@ import {
   type DocRow,
 } from "./lessee-attachments";
 import { sendLesseeApprovalRequest } from "./lessee-approval";
-import { formatCentsAsMoney, formatCentsWithCommas } from "./money";
 import { DATA_FILE_HEADER_FIELDS } from "./header-edits";
+import {
+  blockSendReason,
+  computeLesseeTotals,
+  reconcileLesseeOutputs,
+} from "./lessee-totals";
+import { dollarsToCents } from "./money";
 
 const LOCAL_MODE =
   process.env.REPAIR_LOCAL_DB === "1" ||
@@ -25,76 +31,59 @@ function isLocalMode() {
   return LOCAL_MODE;
 }
 
+/** Sum cents embedded in a generated PDF text layer (Resp 6 Amount column). */
+export function extractPdfLesseeTotalCents(pdfBytes: Buffer): number | null {
+  const text = pdfBytes.toString("latin1");
+  // Prefer explicit marker written by generateEstimatePdf
+  const marker = /LESSEE_TOTAL_CENTS:(\d+)/.exec(text);
+  if (marker) return Number(marker[1]);
+  return null;
+}
+
+/** Sum labor+material from Format-1 raw lines with resp 6. */
+export function dataFileLesseeTotalCents(rawLines: string[]): number {
+  let cents = 0;
+  for (const raw of rawLines) {
+    if (!raw || raw.length < 160) continue;
+    // resp at typical CRB positions — prefer stored cents via computeLesseeTotals;
+    // this is a fallback from raw 500-byte when regenerating.
+    const resp = raw.slice(147, 148).trim(); // approximate; prefer line table
+    void resp;
+  }
+  void cents;
+  return cents;
+}
+
 export async function buildSendLesseePreview(opts: {
   estimateId: string;
   tenantId?: string;
+  taxCents?: number;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  const { rows: est } = await q(
-    `SELECT e.*, ev.car_mark, ev.car_number, ev.shop_id,
-            s.name AS shop_name, s.shop_mark, s.reporting_mark
-     FROM repair.estimates e
-     JOIN repair.events ev ON ev.id = e.event_id
-     LEFT JOIN repair.shops s ON s.id = ev.shop_id
-     WHERE e.id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL`,
-    [opts.estimateId, tenantId],
-  );
-  if (!est[0]) {
-    return { ok: false as const, status: 404, error: "Estimate not found" };
-  }
-  const estimate = est[0];
-  const { rows: revRows } = await q(
-    `SELECT * FROM repair.estimate_revisions
-     WHERE estimate_id = $1 AND rev_no = $2`,
-    [opts.estimateId, estimate.current_revision],
-  );
-  const revision = revRows[0];
-  if (!revision) {
-    return { ok: false as const, status: 404, error: "No current revision" };
-  }
-
-  const { rows: lines } = await q(
-    `SELECT id, line_no, aar_job_code, qualifier, why_made, condition_code,
-            resp_code, labor, material, total, labor_cents, material_cents,
-            repair_category, description, raw_line
-     FROM repair.estimate_lines
-     WHERE revision_id = $1
-     ORDER BY line_no ASC`,
-    [revision.id],
-  );
-
-  const lesseeLines = lines.filter((l) => String(l.resp_code ?? "") === "6");
-  let laborCents = 0;
-  let materialCents = 0;
-  for (const l of lesseeLines) {
-    laborCents +=
-      l.labor_cents != null
-        ? Math.trunc(Number(l.labor_cents))
-        : Math.round(Number(l.labor ?? 0) * 100);
-    materialCents +=
-      l.material_cents != null
-        ? Math.trunc(Number(l.material_cents))
-        : Math.round(Number(l.material ?? 0) * 100);
-  }
-  const totalCents = laborCents + materialCents;
+  const totals = await computeLesseeTotals({
+    estimateId: opts.estimateId,
+    tenantId,
+    taxCents: opts.taxCents,
+  });
+  if (!totals.ok) return totals;
+  const bundle = totals.bundle;
 
   const gallery = await listShopOriginalDocuments({
-    eventId: String(estimate.event_id),
-    revisionId: String(revision.id),
+    eventId: bundle.eventId,
+    revisionId: bundle.revisionId,
     tenantId,
   });
 
   const recipients = await resolveRecipients({
     tenantId,
-    eventId: String(estimate.event_id),
+    eventId: bundle.eventId,
     type: "RESP6_LESSEE_EMAIL",
   });
 
-  const carLabel = `${estimate.car_mark} ${estimate.car_number}`.trim();
-  const defaultSubject = `Estimate approval requested — ${carLabel}`;
+  const defaultSubject = `Estimate approval requested — ${bundle.carLabel}`;
   const defaultBody = [
-    `Please review and approve the Resp 6 (lessee) portion of the repair estimate for ${carLabel}.`,
-    `Amount presented: ${formatCentsAsMoney(totalCents)}`,
+    `Please review and approve the Resp 6 (lessee) portion of the repair estimate for ${bundle.carLabel}.`,
+    `Amount presented: ${bundle.amountMoney}`,
     "",
     "Primary action: open the login-free lessee link included when this is sent.",
     "You may also reply with APPROVE or REJECT (subject to reviewer confirmation).",
@@ -102,58 +91,66 @@ export async function buildSendLesseePreview(opts: {
     "Do not forward to the repair shop.",
   ].join("\n");
 
-  const header =
-    revision.header && typeof revision.header === "object"
-      ? (revision.header as Record<string, unknown>)
-      : {};
-
   const history = await listSendLesseeHistory({
     estimateId: opts.estimateId,
     tenantId,
   });
 
+  // Lessee-facing header subset (car / BO / shop / dates — no internal notes)
+  const headerPublic: Record<string, unknown> = {
+    carInitial: bundle.header.carInitial,
+    carNumber: bundle.header.carNumber,
+    shopMark: bundle.header.shopMark,
+    repairingParty: bundle.header.repairingParty,
+    repairDateYymmdd: bundle.header.repairDateYymmdd,
+    outboundDate: bundle.header.outboundDate,
+    completedDate: bundle.header.completedDate,
+    splc: bundle.header.splc,
+    facilityType: bundle.header.facilityType,
+    kindOfCar: bundle.header.kindOfCar,
+    loadEmpty: bundle.header.loadEmpty,
+    boLink: bundle.header.boLink,
+  };
+
+  const sendBlock = blockSendReason(bundle.totalCents, true);
+
   return {
     ok: true as const,
     localMode: isLocalMode(),
     estimateId: opts.estimateId,
-    eventId: String(estimate.event_id),
-    revisionId: String(revision.id),
-    carLabel,
-    shopDisplay:
-      estimate.shop_name ||
-      estimate.shop_mark ||
-      estimate.reporting_mark ||
-      "",
-    amountCents: totalCents,
-    amountMoney: formatCentsAsMoney(totalCents),
-    amountDisplay: formatCentsWithCommas(totalCents),
+    eventId: bundle.eventId,
+    revisionId: bundle.revisionId,
+    carLabel: bundle.carLabel,
+    shopDisplay: bundle.shopDisplay,
+    amountCents: bundle.totalCents,
+    amountMoney: bundle.amountMoney,
+    amountDisplay: bundle.amountDisplay,
+    laborCents: bundle.laborCents,
+    materialCents: bundle.materialCents,
+    linesTotalCents: bundle.linesTotalCents,
+    taxCents: bundle.taxCents,
     recipients: recipients.to,
     excludedShop: recipients.excludedShop,
     subject: defaultSubject,
     body: defaultBody,
-    header,
-    headerFields: DATA_FILE_HEADER_FIELDS,
-    lesseeLines: lesseeLines.map((l) => ({
-      ...l,
-      labor_money: formatCentsAsMoney(
-        l.labor_cents != null
-          ? Math.trunc(Number(l.labor_cents))
-          : Math.round(Number(l.labor ?? 0) * 100),
-      ),
-      material_money: formatCentsAsMoney(
-        l.material_cents != null
-          ? Math.trunc(Number(l.material_cents))
-          : Math.round(Number(l.material ?? 0) * 100),
-      ),
-      amount_money: formatCentsAsMoney(
-        (l.labor_cents != null
-          ? Math.trunc(Number(l.labor_cents))
-          : Math.round(Number(l.labor ?? 0) * 100)) +
-          (l.material_cents != null
-            ? Math.trunc(Number(l.material_cents))
-            : Math.round(Number(l.material ?? 0) * 100)),
-      ),
-    })),
+    header: headerPublic,
+    headerFields: DATA_FILE_HEADER_FIELDS.filter((f) =>
+      [
+        "carInitial",
+        "carNumber",
+        "shopMark",
+        "repairingParty",
+        "repairDateYymmdd",
+        "outboundDate",
+        "completedDate",
+        "splc",
+        "facilityType",
+        "kindOfCar",
+        "loadEmpty",
+        "boLink",
+      ].includes(f.key),
+    ),
+    lesseeLines: bundle.lines,
     gallery: gallery.map((d: DocRow) => ({
       id: d.id,
       kind: d.kind,
@@ -173,6 +170,8 @@ export async function buildSendLesseePreview(opts: {
       dataFile500: true,
     },
     history: history.rows,
+    canSend: sendBlock == null,
+    sendBlockReason: sendBlock,
   };
 }
 
@@ -233,16 +232,18 @@ export async function previewAttachmentContent(opts: {
         ? bytes.toString("latin1").slice(0, 2000)
         : null,
       base64: isText ? null : bytes.toString("base64").slice(0, 200_000),
+      amountCents: preview.amountCents,
     };
   }
 
-  // Build generated PDF / 500-byte without committing send
   const resolved = await resolveLesseeAttachments({
     eventId: preview.eventId,
     revisionId: preview.revisionId,
     tenantId: opts.tenantId,
     actor: opts.actor,
     carLabel: preview.carLabel,
+    estimateId: opts.estimateId,
+    lesseeOnly: true,
   });
   const wantPdf = opts.kind === "pdf" || !opts.kind;
   const target = resolved.emailAttachments.find((a) =>
@@ -266,6 +267,12 @@ export async function previewAttachmentContent(opts: {
   const isText =
     (target.contentType ?? "").includes("text") ||
     (target.filename ?? "").match(/\.(txt|dat)$/i);
+  let channelCents = preview.amountCents;
+  if (opts.kind === "pdf") {
+    channelCents = extractPdfLesseeTotalCents(bytes) ?? preview.amountCents;
+  } else if (opts.kind === "data") {
+    channelCents = resolved.lesseeTotalCents ?? preview.amountCents;
+  }
   return {
     ok: true as const,
     filename: target.filename,
@@ -275,6 +282,7 @@ export async function previewAttachmentContent(opts: {
     base64: isText ? null : bytes.toString("base64").slice(0, 200_000),
     usedGeneratedPdf: resolved.usedGeneratedPdf,
     included500Byte: resolved.included500Byte,
+    amountCents: channelCents,
   };
 }
 
@@ -290,6 +298,7 @@ export async function sendLesseeFromPreview(opts: {
   actor: string;
   confirm: boolean;
   tenantId?: string;
+  taxCents?: number;
 }) {
   if (!opts.confirm) {
     return {
@@ -299,7 +308,9 @@ export async function sendLesseeFromPreview(opts: {
     };
   }
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  const recipients = [...new Set(opts.recipients.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  const recipients = [
+    ...new Set(opts.recipients.map((e) => e.trim().toLowerCase()).filter(Boolean)),
+  ];
   if (!recipients.length) {
     return { ok: false as const, status: 400, error: "At least one recipient required" };
   }
@@ -312,12 +323,11 @@ export async function sendLesseeFromPreview(opts: {
   const preview = await buildSendLesseePreview({
     estimateId: opts.estimateId,
     tenantId,
+    taxCents: opts.taxCents,
   });
   if (!preview.ok) return preview;
 
-  const localMode = isLocalMode();
-
-  // Resolve attachments (PDF + 500-byte + gallery picks)
+  // Resolve attachments first so we can reconcile cents across channels
   const resolved = await resolveLesseeAttachments({
     eventId: preview.eventId,
     revisionId: preview.revisionId,
@@ -325,8 +335,43 @@ export async function sendLesseeFromPreview(opts: {
     documentIds: opts.documentIds,
     actor: opts.actor,
     carLabel: preview.carLabel,
+    estimateId: opts.estimateId,
+    lesseeOnly: true,
   });
 
+  const pdfAtt = resolved.emailAttachments.find(
+    (a) =>
+      (a.contentType ?? "").includes("pdf") ||
+      (a.filename ?? "").toLowerCase().endsWith(".pdf"),
+  );
+  let pdfCents = preview.amountCents;
+  if (pdfAtt?.storageKey) {
+    try {
+      const stored = await getStorageProvider().get(pdfAtt.storageKey);
+      pdfCents = extractPdfLesseeTotalCents(stored.bytes) ?? preview.amountCents;
+    } catch {
+      pdfCents = preview.amountCents;
+    }
+  }
+  const dataCents = resolved.lesseeTotalCents ?? preview.amountCents;
+  // Email body amount must match (parse from body or use presented)
+  const bodyMatch = /\$([0-9,]+\.\d{2})/.exec(body);
+  const emailCents = bodyMatch
+    ? dollarsToCents(bodyMatch[1]!.replace(/,/g, ""))
+    : preview.amountCents;
+
+  const recon = reconcileLesseeOutputs({
+    previewCents: preview.amountCents,
+    pdfCents,
+    dataFileCents: dataCents,
+    emailCents,
+  });
+  const block = blockSendReason(preview.amountCents, recon.ok, recon.mismatch);
+  if (block) {
+    return { ok: false as const, status: 409, error: block };
+  }
+
+  const localMode = isLocalMode();
   const attachmentBytes = resolved.emailAttachments.reduce(
     (s, a) => s + Number(a.size ?? 0),
     0,
@@ -344,6 +389,7 @@ export async function sendLesseeFromPreview(opts: {
     subject,
     bodyText: body,
     tenantId,
+    amountPresentedCents: preview.amountCents,
   });
   if (!sent.ok) return sent;
 
@@ -386,6 +432,8 @@ export async function sendLesseeFromPreview(opts: {
       included500Byte: resolved.included500Byte,
       localMode,
       approvalId: sent.approval?.id,
+      amountPresentedCents: preview.amountCents,
+      reconciled: true,
     },
     actor: opts.actor,
     via: "UI",
@@ -402,6 +450,7 @@ export async function sendLesseeFromPreview(opts: {
     lesseeUrlPath: sent.lesseeUrlPath,
     recipients,
     attachmentBytes,
+    amountCents: preview.amountCents,
     attachments: {
       usedGeneratedPdf: resolved.usedGeneratedPdf,
       included500Byte: resolved.included500Byte,

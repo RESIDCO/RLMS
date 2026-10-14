@@ -41,6 +41,8 @@ const SPECS: TableSpec[] = [
     columns: [
       "job_code",
       "description",
+      "rule",
+      "price_list_qualifier",
       "category",
       "sub_category",
       "source",
@@ -79,6 +81,43 @@ const SPECS: TableSpec[] = [
       "description",
       "category",
       "sub_category",
+      "qualifier_type",
+      "basis",
+      "source",
+      "rule_page",
+      "effective_quarter",
+      "edition",
+    ],
+  },
+  {
+    fileBase: "ref_qualifier_generic",
+    table: "repair.ref_qualifier_generic",
+    key: ["qualifier"],
+    columns: [
+      "qualifier",
+      "qualifier_type",
+      "description",
+      "category",
+      "sub_category",
+      "source",
+      "rule_page",
+      "effective_quarter",
+      "edition",
+    ],
+  },
+  {
+    fileBase: "ref_qualifier_charts",
+    table: "repair.ref_qualifier_charts",
+    key: ["import_key"],
+    columns: [
+      "import_key",
+      "rule",
+      "chart_group",
+      "qualifier",
+      "description",
+      "chart_title",
+      "discontinued",
+      "job_codes_using_chart",
       "source",
       "rule_page",
       "effective_quarter",
@@ -281,7 +320,26 @@ function pick(row: Row, col: string): string | null {
     category: ["category", "cat"],
     sub_category: ["sub_category", "subcategory", "sub_cat", "subcat"],
     source: ["source", "source_file", "src"],
-    rule_page: ["pdf_page", "rule_page", "page", "aar_page", "rule"],
+    // rule_page is PDF page; "rule" alone is the AAR rule number (job/charts)
+    rule_page: ["pdf_page", "rule_page", "page", "aar_page"],
+    rule: ["rule", "aar_rule", "fm_rule"],
+    price_list_qualifier: [
+      "price_list_qualifier",
+      "qualifiers",
+      "qlfr",
+      "matrix_qualifier",
+    ],
+    qualifier_type: ["qualifier_type", "type"],
+    basis: ["basis"],
+    chart_group: ["chart_group", "group", "grp"],
+    chart_title: ["chart_title", "chart", "title"],
+    discontinued: ["discontinued", "disc", "obsolete"],
+    job_codes_using_chart: [
+      "job_codes_using_chart",
+      "job_codes",
+      "jobs",
+      "starred_jobs",
+    ],
     effective_quarter: [
       "effective",
       "effective_quarter",
@@ -289,7 +347,7 @@ function pick(row: Row, col: string): string | null {
       "eff_quarter",
       "edition_quarter",
     ],
-    edition: ["edition", "aar_edition", "version", "effective"],
+    edition: ["edition", "aar_edition", "version"],
     code: [
       "code",
       "wm",
@@ -354,15 +412,30 @@ async function upsertRows(
   opts: { tenantId: string; actor: string; sourceFile: string },
 ): Promise<number> {
   let n = 0;
+  let rowIndex = 0;
   for (const raw of rows) {
+    rowIndex += 1;
     const mapped: Record<string, unknown> = {};
     for (const col of spec.columns) {
+      if (col === "import_key") continue; // set below for charts
       if (col.endsWith("_cents")) mapped[col] = toBigIntOrNull(pick(raw, col));
-      else if (col === "active") mapped[col] = toBool(pick(raw, col));
+      else if (col === "active" || col === "discontinued")
+        mapped[col] = toBool(pick(raw, col), col === "active");
       else mapped[col] = pick(raw, col);
     }
 
     // Per-file derived fields
+    if (spec.fileBase === "ref_job_codes") {
+      // CSV "qualifiers" → price_list_qualifier; "rule" is AAR rule number
+      if (!mapped.price_list_qualifier) {
+        mapped.price_list_qualifier = pick(raw, "price_list_qualifier");
+      }
+      if (!mapped.rule) mapped.rule = pick(raw, "rule");
+      const jobN = Number(mapped.job_code);
+      if (Number.isFinite(jobN) && jobN >= 8000 && jobN < 9000) {
+        mapped.source = mapped.source || "Repair_Categories.xlsx";
+      }
+    }
     if (spec.fileBase === "repair_categories") {
       const job = String(mapped.job_code ?? pick(raw, "job_code") ?? "").trim();
       const qual = String(mapped.qualifier ?? pick(raw, "qualifier") ?? "").trim();
@@ -383,7 +456,30 @@ async function upsertRows(
         mapped.qualifier = qual;
         mapped.combo_key = `PART|${qual}`;
       }
+      const jobN = Number(job);
+      if (Number.isFinite(jobN) && jobN >= 8000 && jobN < 9000) {
+        mapped.source = mapped.source || "Repair_Categories.xlsx";
+      }
       void rowType;
+    }
+    if (spec.fileBase === "ref_qualifier_charts") {
+      if (!mapped.rule || !mapped.qualifier) continue;
+      if (!mapped.chart_group) mapped.chart_group = pick(raw, "chart_group") ?? "";
+      if (!mapped.chart_title) mapped.chart_title = pick(raw, "chart_title") ?? "";
+      mapped.discontinued = toBool(pick(raw, "discontinued"), false);
+      // File-order key — rule/group/qual/chart are not unique in the FM charts
+      mapped.import_key = [
+        String(mapped.rule),
+        String(mapped.chart_group ?? ""),
+        String(mapped.qualifier),
+        String(mapped.chart_title ?? ""),
+        String(mapped.description ?? ""),
+        String(mapped.rule_page ?? ""),
+        String(rowIndex),
+      ].join("|");
+    }
+    if (spec.fileBase === "ref_qualifier_generic") {
+      if (!mapped.qualifier) continue;
     }
     if (spec.fileBase === "ref_job_code_prices") {
       const job = String(mapped.job_code ?? "").trim();
@@ -561,10 +657,66 @@ async function upsertRows(
           `UPDATE repair.ref_qualifiers SET
              description=$2, category=$3, sub_category=$4, source=$5,
              rule_page=$6, effective_quarter=$7, edition=$8,
-             updated_at=now(), updated_by=$9
+             qualifier_type=$9, basis=$10,
+             updated_at=now(), updated_by=$11
            WHERE id=$1`,
           [
             existing.rows[0].id,
+            mapped.description,
+            mapped.category,
+            mapped.sub_category,
+            mapped.source,
+            mapped.rule_page,
+            mapped.effective_quarter,
+            mapped.edition,
+            mapped.qualifier_type ?? null,
+            mapped.basis ?? null,
+            opts.actor,
+          ],
+        );
+      } else {
+        await q(
+          `INSERT INTO repair.ref_qualifiers
+             (tenant_id, job_code, qualifier, description, category, sub_category,
+              source, rule_page, effective_quarter, edition, qualifier_type, basis, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [
+            opts.tenantId,
+            mapped.job_code ?? null,
+            mapped.qualifier,
+            mapped.description,
+            mapped.category,
+            mapped.sub_category,
+            mapped.source,
+            mapped.rule_page,
+            mapped.effective_quarter,
+            mapped.edition,
+            mapped.qualifier_type ?? null,
+            mapped.basis ?? null,
+            opts.actor,
+          ],
+        );
+      }
+      n += 1;
+      continue;
+    }
+
+    if (spec.table === "repair.ref_qualifier_generic") {
+      const existing = await q(
+        `SELECT id FROM repair.ref_qualifier_generic
+         WHERE tenant_id = $1 AND qualifier = $2 AND deleted_at IS NULL LIMIT 1`,
+        [opts.tenantId, mapped.qualifier],
+      );
+      if (existing.rows[0]) {
+        await q(
+          `UPDATE repair.ref_qualifier_generic SET
+             qualifier_type=$2, description=$3, category=$4, sub_category=$5,
+             source=$6, rule_page=$7, effective_quarter=$8, edition=$9,
+             updated_at=now(), updated_by=$10
+           WHERE id=$1`,
+          [
+            existing.rows[0].id,
+            mapped.qualifier_type ?? null,
             mapped.description,
             mapped.category,
             mapped.sub_category,
@@ -577,17 +729,77 @@ async function upsertRows(
         );
       } else {
         await q(
-          `INSERT INTO repair.ref_qualifiers
-             (tenant_id, job_code, qualifier, description, category, sub_category,
+          `INSERT INTO repair.ref_qualifier_generic
+             (tenant_id, qualifier, qualifier_type, description, category, sub_category,
               source, rule_page, effective_quarter, edition, created_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
           [
             opts.tenantId,
-            mapped.job_code ?? null,
             mapped.qualifier,
+            mapped.qualifier_type ?? null,
             mapped.description,
             mapped.category,
             mapped.sub_category,
+            mapped.source,
+            mapped.rule_page,
+            mapped.effective_quarter,
+            mapped.edition,
+            opts.actor,
+          ],
+        );
+      }
+      n += 1;
+      continue;
+    }
+
+    if (spec.table === "repair.ref_qualifier_charts") {
+      const existing = await q(
+        `SELECT id FROM repair.ref_qualifier_charts
+         WHERE tenant_id = $1 AND import_key = $2 AND deleted_at IS NULL
+         LIMIT 1`,
+        [opts.tenantId, mapped.import_key],
+      );
+      if (existing.rows[0]) {
+        await q(
+          `UPDATE repair.ref_qualifier_charts SET
+             rule=$2, chart_group=$3, qualifier=$4, description=$5, chart_title=$6,
+             discontinued=$7, job_codes_using_chart=$8,
+             source=$9, rule_page=$10, effective_quarter=$11, edition=$12,
+             updated_at=now(), updated_by=$13
+           WHERE id=$1`,
+          [
+            existing.rows[0].id,
+            mapped.rule,
+            mapped.chart_group ?? "",
+            mapped.qualifier,
+            mapped.description,
+            mapped.chart_title ?? "",
+            mapped.discontinued === true,
+            mapped.job_codes_using_chart ?? null,
+            mapped.source,
+            mapped.rule_page,
+            mapped.effective_quarter,
+            mapped.edition,
+            opts.actor,
+          ],
+        );
+      } else {
+        await q(
+          `INSERT INTO repair.ref_qualifier_charts
+             (tenant_id, import_key, rule, chart_group, qualifier, description, chart_title,
+              discontinued, job_codes_using_chart, source, rule_page,
+              effective_quarter, edition, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            opts.tenantId,
+            mapped.import_key,
+            mapped.rule,
+            mapped.chart_group ?? "",
+            mapped.qualifier,
+            mapped.description,
+            mapped.chart_title ?? "",
+            mapped.discontinued === true,
+            mapped.job_codes_using_chart ?? null,
             mapped.source,
             mapped.rule_page,
             mapped.effective_quarter,
@@ -772,7 +984,7 @@ async function main() {
   if (result.soft) {
     console.log(
       "SOFT OK — licensed CSVs absent. Expected full counts when present: " +
-        "job_codes≈855, qualifiers≈639, why_made≈107, categories≈2170.",
+        "job_codes≈855, qualifiers≈1259, qualifier_generic≈816, qualifier_charts≈304, why_made≈107, categories≈2170.",
     );
   }
   console.log("PASS import-ref-data");

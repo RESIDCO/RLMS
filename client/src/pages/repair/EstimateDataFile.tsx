@@ -11,9 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import { closeHover, openHover, subscribeHover } from "./codeHoverBus";
 
-const CAR_LOCKED_KEYS = new Set(["carInitial", "carNumber"]);
-const CAR_LOCK_WHY =
-  "Car initial and number are locked. Wrong car → void this estimate and have the shop resubmit under the correct car (audited).";
+type HeaderMode = "LOCK" | "EDIT_AUDIT" | "FREE";
 
 function formatDisplayMoney(cents: number): string {
   const n = Math.trunc(cents) / 100;
@@ -24,7 +22,13 @@ function formatDisplayMoney(cents: number): string {
   return `${n < 0 ? "-" : ""}$${abs}`;
 }
 
-export type HeaderFieldDef = { key: string; label: string; group: string };
+export type HeaderFieldDef = {
+  key: string;
+  label: string;
+  group: string;
+  mode?: HeaderMode;
+  lockWhy?: string;
+};
 
 export type EstimateLine = {
   id?: string;
@@ -132,10 +136,12 @@ function CodeHover({
   const [active, setActive] = useState(false);
   useEffect(() => subscribeHover((a) => setActive(a === id)), [id]);
   useEffect(() => {
-    if (!active || !code) return;
+    // Qualifier lookup may use job as code + empty/"00" qualifier → "No qualifier"
+    const isQual = kind === "qualifier" || kind === "removed_qualifier";
+    if (!active || (!code && !isQual)) return;
     let cancelled = false;
-    const qs = new URLSearchParams({ kind, code });
-    if (qualifier) qs.set("qualifier", qualifier);
+    const qs = new URLSearchParams({ kind, code: code ?? "" });
+    if (isQual || qualifier != null) qs.set("qualifier", qualifier ?? "");
     void apiRequest("GET", `/api/repair/ref/lookup?${qs}`)
       .then(async (res) => {
         const data = await res.json();
@@ -154,7 +160,8 @@ function CodeHover({
       cancelled = true;
     };
   }, [active, kind, code, qualifier]);
-  if (!code) return <>{children}</>;
+  const isQual = kind === "qualifier" || kind === "removed_qualifier";
+  if (!code && !isQual) return <>{children}</>;
   return (
     <span
       className="relative cursor-help border-b border-dotted border-muted-foreground/50"
@@ -306,6 +313,12 @@ export function EstimateDataFile(props: Props) {
                   const val = header[f.key];
                   const display = val == null || val === "" ? "—" : String(val);
                   const isEditing = editingKey === f.key;
+                  const mode: HeaderMode = f.mode ?? "EDIT_AUDIT";
+                  const locked = mode === "LOCK";
+                  const lockWhy =
+                    f.lockWhy ||
+                    `${f.label} is locked. Wrong key → void and shop resubmit (audited).`;
+                  const needsReason = mode !== "FREE";
                   return (
                     <div
                       key={f.key}
@@ -327,18 +340,28 @@ export function EstimateDataFile(props: Props) {
                               value={editValue}
                               onChange={(e) => setEditValue(e.target.value)}
                             />
-                            <Textarea
-                              className="text-xs"
-                              rows={2}
-                              placeholder="Reason for change (required)"
-                              value={editReason}
-                              onChange={(e) => setEditReason(e.target.value)}
-                            />
+                            {needsReason ? (
+                              <Textarea
+                                className="text-xs"
+                                rows={2}
+                                placeholder="Reason for change (required)"
+                                value={editReason}
+                                onChange={(e) => setEditReason(e.target.value)}
+                              />
+                            ) : (
+                              <Textarea
+                                className="text-xs"
+                                rows={2}
+                                placeholder="Optional note (still audited)"
+                                value={editReason}
+                                onChange={(e) => setEditReason(e.target.value)}
+                              />
+                            )}
                             <div className="flex gap-2">
                               <Button
                                 size="sm"
                                 onClick={savePencil}
-                                disabled={!editReason.trim()}
+                                disabled={needsReason && !editReason.trim()}
                               >
                                 Save
                               </Button>
@@ -353,18 +376,15 @@ export function EstimateDataFile(props: Props) {
                           </div>
                         )}
                       </div>
-                      {!readOnly && canPencilEdit && !isEditing && CAR_LOCKED_KEYS.has(f.key) && (
+                      {!readOnly && canPencilEdit && !isEditing && locked && (
                         <span
                           className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground"
-                          title={CAR_LOCK_WHY}
+                          title={lockWhy}
                         >
                           <Lock className="h-3.5 w-3.5" aria-label="Locked" />
                         </span>
                       )}
-                      {!readOnly &&
-                        canPencilEdit &&
-                        !isEditing &&
-                        !CAR_LOCKED_KEYS.has(f.key) && (
+                      {!readOnly && canPencilEdit && !isEditing && !locked && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -373,7 +393,7 @@ export function EstimateDataFile(props: Props) {
                           onClick={() => {
                             setEditingKey(f.key);
                             setEditValue(val == null ? "" : String(val));
-                            setEditReason("");
+                            setEditReason(mode === "FREE" ? "Free edit" : "");
                           }}
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -495,7 +515,11 @@ export function EstimateDataFile(props: Props) {
                       </CodeHover>
                     </td>
                     <td className="p-1.5">
-                      <CodeHover kind="qualifier" code={l.qualifier}>
+                      <CodeHover
+                        kind="qualifier"
+                        code={l.aar_job_code}
+                        qualifier={l.qualifier ?? ""}
+                      >
                         {l.qualifier ?? ""}
                       </CodeHover>
                     </td>
@@ -515,7 +539,11 @@ export function EstimateDataFile(props: Props) {
                       </CodeHover>
                     </td>
                     <td className="p-1.5">
-                      <CodeHover kind="qualifier" code={l.removed_qualifier}>
+                      <CodeHover
+                        kind="removed_qualifier"
+                        code={l.removed_job_code}
+                        qualifier={l.removed_qualifier ?? ""}
+                      >
                         {l.removed_qualifier ?? ""}
                       </CodeHover>
                     </td>

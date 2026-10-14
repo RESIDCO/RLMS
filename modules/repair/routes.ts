@@ -183,6 +183,8 @@ import {
   ingestLesseeReply,
   confirmLesseeReply,
   getLesseeViewForToken,
+  getLesseeAttachmentForToken,
+  assertLesseeTokenEstimateAccess,
 } from "./services/lessee-approval";
 import {
   buildSendLesseePreview,
@@ -452,6 +454,39 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       console.error("[repair/lessee/:token/decide]", err);
       return res.status(500).json({ error: "Lessee decision failed" });
     }
+  });
+
+  /** Lessee may download only attachments granted on send. */
+  app.get("/api/repair/lessee/:token/attachments/:documentId", async (req, res) => {
+    try {
+      const result = await getLesseeAttachmentForToken({
+        rawToken: String(req.params.token),
+        documentId: String(req.params.documentId),
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      res.setHeader(
+        "content-type",
+        result.document.mime || "application/octet-stream",
+      );
+      res.setHeader(
+        "content-disposition",
+        `inline; filename="${result.document.original_filename || result.document.kind}"`,
+      );
+      return res.send(result.bytes);
+    } catch (err) {
+      console.error("[repair/lessee/:token/attachments]", err);
+      return res.status(500).json({ error: "Failed to load attachment" });
+    }
+  });
+
+  /** Lessee token probing another estimate → 403. */
+  app.get("/api/repair/lessee/:token/estimates/:estimateId", async (req, res) => {
+    const access = await assertLesseeTokenEstimateAccess({
+      rawToken: String(req.params.token),
+      estimateId: String(req.params.estimateId),
+    });
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+    return res.json({ ok: true, estimateId: req.params.estimateId });
   });
 
   app.post("/api/repair/e/:token/accept", async (req, res) => {
@@ -3273,6 +3308,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const kind = String(req.query.kind ?? "job") as
       | "job"
       | "qualifier"
+      | "removed_qualifier"
       | "why_made"
       | "location"
       | "condition"
@@ -3282,7 +3318,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const hit = await lookupRefCode({
       kind,
       code: String(req.query.code ?? ""),
-      qualifier: req.query.qualifier ? String(req.query.qualifier) : null,
+      qualifier: req.query.qualifier != null ? String(req.query.qualifier) : null,
     });
     return res.json(hit);
   });

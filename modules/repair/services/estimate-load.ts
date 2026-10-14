@@ -379,11 +379,27 @@ async function applyCarEstimate(opts: {
   const material = centsToDollars(materialCentsSum);
   const total = centsToDollars(laborCentsSum + materialCentsSum);
 
-  // Data File header from first Format-1 detail line (full 500-byte header block)
+  // Data File header from first Format-1 detail line (full 500-byte header block).
+  // Shop mark from shop master — never billing-party fallback.
+  const { rows: shopRows } = await q<{ shop_mark: string | null; reporting_mark: string | null }>(
+    `SELECT s.shop_mark, s.reporting_mark
+     FROM repair.events e
+     LEFT JOIN repair.shops s ON s.id = e.shop_id
+     WHERE e.id = $1`,
+    [opts.eventId],
+  );
+  const shopMarkFromMaster =
+    (shopRows[0]?.shop_mark ?? "").trim() ||
+    (shopRows[0]?.reporting_mark ?? "").trim() ||
+    null;
   const firstFmt1 = opts.car.lines.find((l) => String(l.recordFormat) === "1") ?? opts.car.lines[0];
   const header = firstFmt1
-    ? headerFromAarFields(firstFmt1.fields as Record<string, string | number | null>)
-    : {};
+    ? headerFromAarFields(firstFmt1.fields as Record<string, string | number | null>, {
+        shopMarkFromMaster,
+      })
+    : shopMarkFromMaster
+      ? { shopMark: shopMarkFromMaster, repairingParty: shopMarkFromMaster }
+      : {};
 
   const packed = await withTransaction(async (client) => {
     const revNo = Number(estimate.current_revision) + 1;

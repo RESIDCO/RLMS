@@ -733,10 +733,37 @@ export async function getCorrectionEditorPayload(opts: {
   const canCorrect = INTERNAL_CORRECTION_STATUSES.has(String(estimate.status_code));
   const needsAdjustment = APPROVED_BLOCK_STATUSES.has(String(estimate.status_code));
 
+  // Shop mark from shop master (never billing-party fallback)
+  const { rows: shopRows } = await q<{ shop_mark: string | null; reporting_mark: string | null }>(
+    `SELECT s.shop_mark, s.reporting_mark
+     FROM repair.events e
+     LEFT JOIN repair.shops s ON s.id = e.shop_id
+     WHERE e.id = $1`,
+    [estimate.event_id],
+  );
+  const shopMarkFromMaster =
+    (shopRows[0]?.shop_mark ?? "").trim() ||
+    (shopRows[0]?.reporting_mark ?? "").trim() ||
+    null;
+
+  const headerRaw =
+    (estimate.current_header as Record<string, unknown> | null) ??
+    (latest?.header as Record<string, unknown> | null) ??
+    {};
+  const header = {
+    ...headerRaw,
+    ...(shopMarkFromMaster
+      ? { shopMark: shopMarkFromMaster, repairingParty: shopMarkFromMaster }
+      : {}),
+  };
+  // Location on car is per-line only
+  delete (header as { locationOnCar?: unknown }).locationOnCar;
+
   return {
     ok: true as const,
     estimate,
-    header: estimate.current_header ?? latest?.header ?? {},
+    header,
+    shopMarkFromMaster,
     latestRevision: latest ?? null,
     lines,
     canCorrect,

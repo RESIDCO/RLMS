@@ -8,11 +8,15 @@
 
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
-import { issueEventLink } from "./event-links";
+import { issueEventLink, revokeLesseeLinksForEstimate } from "./event-links";
 import { getEmailProvider } from "../providers/email";
 import { getInboundEmailProvider } from "../providers/inbound-email";
 import { resolveLesseeAttachments } from "./lessee-attachments";
 import { notify, resolveRecipients } from "./notifications";
+import { computeLesseeTotals } from "./lessee-totals";
+import { formatCentsAsMoney } from "./money";
+
+const LESSEE_LINK_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
 async function resp6AmountCents(revisionId: string): Promise<number> {
   const { rows } = await q(
@@ -131,6 +135,8 @@ export async function sendLesseeApprovalRequest(opts: {
   /** Override subject / body from Send Lessee preview page */
   subject?: string;
   bodyText?: string;
+  /** Cent-reconciled amount from Send page (preferred over recomputing) */
+  amountPresentedCents?: number;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
 
@@ -144,7 +150,10 @@ export async function sendLesseeApprovalRequest(opts: {
   if (!est[0]) return { ok: false as const, status: 404, error: "Estimate not found" };
 
   const carLabel = `${est[0].car_mark} ${est[0].car_number}`.trim();
-  const amountCents = await resp6AmountCents(opts.revisionId);
+  const amountCents =
+    opts.amountPresentedCents != null
+      ? Math.trunc(opts.amountPresentedCents)
+      : await resp6AmountCents(opts.revisionId);
 
   const resolved = await resolveLesseeAttachments({
     eventId: opts.eventId,
@@ -153,14 +162,28 @@ export async function sendLesseeApprovalRequest(opts: {
     documentIds: opts.documentIds,
     actor: opts.actor,
     carLabel,
+    estimateId: opts.estimateId,
+    lesseeOnly: true,
   });
 
+  // Resend / new send invalidates prior lessee tokens for this estimate
+  await revokeLesseeLinksForEstimate({
+    estimateId: opts.estimateId,
+    actor: opts.actor,
+    tenantId,
+  });
+
+  const expiresAt = new Date(Date.now() + LESSEE_LINK_TTL_MS).toISOString();
   const issued = await issueEventLink({
     eventId: opts.eventId,
     scope: "LESSEE",
     partyRef: opts.lesseeEmail?.trim().toLowerCase() || "lessee",
     actor: opts.actor,
     tenantId,
+    expiresAt,
+    estimateId: opts.estimateId,
+    revisionId: opts.revisionId,
+    grantedDocumentIds: resolved.documentIds,
   });
 
   const linkPath = `/repair/lessee/${issued.token}`;
@@ -191,7 +214,7 @@ export async function sendLesseeApprovalRequest(opts: {
     : "Attachments: shop original file(s) (pass-through), matching 500-byte data file, and reviewer-selected docs/photos.";
   const bodyText = [
     `Please review and approve the Resp 6 (lessee) portion of the repair estimate for ${carLabel}.`,
-    `Amount presented: $${(amountCents / 100).toFixed(2)}`,
+    `Amount presented: ${formatCentsAsMoney(amountCents)}`,
     "",
     `Primary action (login-free link): open ${linkPath}`,
     "You may also reply to this email with APPROVE or REJECT (subject to reviewer confirmation).",
@@ -539,74 +562,199 @@ export async function confirmLesseeReply(opts: {
   return { ok: true as const, approval: rows[0], decision, channel: "email_reply" as const };
 }
 
-/** Lessee-portion lines (Resp 6) for the login-free page. */
+/**
+ * Lessee login-free view — ONLY what the email included:
+ * scoped estimate + revision, Resp 6 lines, totals, granted attachments.
+ * No owner lines, resp 7/internal, other lessees, comments, or app nav.
+ */
 export async function getLesseeViewForToken(rawToken: string) {
   const { resolveActiveLink } = await import("./event-links");
-  const { listEstimatesForEvent, listRevisions, getRevisionLines } = await import(
-    "./estimates"
-  );
-  const { getCorrectionEditorPayload } = await import("./gap-lifecycle-06");
   const { DATA_FILE_HEADER_FIELDS } = await import("./header-edits");
-  const { listEventDocuments } = await import("./ops-grid");
   const resolved = await resolveActiveLink(rawToken, "LESSEE");
   if (!resolved) return null;
 
-  const estimates = await listEstimatesForEvent(String(resolved.event.id));
-  const estimate = estimates[0];
-  let revisions: unknown[] = [];
-  let lines: unknown[] = [];
-  let allLines: unknown[] = [];
-  let amountPresented = 0;
-  let header: Record<string, unknown> = {};
-  let documents: unknown[] = [];
-  const ownRespCodes = new Set(["6"]);
-  if (estimate) {
-    revisions = await listRevisions(estimate.id);
-    const { rows: appr } = await q(
-      `SELECT * FROM repair.lessee_approvals
-       WHERE link_id = $1 AND deleted_at IS NULL
-       ORDER BY created_at DESC LIMIT 1`,
-      [resolved.link.id],
-    );
-    const revisionId =
-      appr[0]?.revision_id ??
-      (revisions[revisions.length - 1] as { id?: string } | undefined)?.id;
-    if (revisionId) {
-      allLines = await getRevisionLines(String(revisionId));
-      // Own-responsibility lines (Resp 6) — approve/dispute scope + smoke contract
-      lines = allLines.filter((l) => ownRespCodes.has(String(l.resp_code)));
-      amountPresented = (lines as Array<{ total?: number }>).reduce(
-        (s, l) => s + Number(l.total ?? 0),
-        0,
-      );
-    }
-    const editor = await getCorrectionEditorPayload({ estimateId: String(estimate.id) });
-    if (editor.ok) {
-      header = (editor.header as Record<string, unknown>) ?? {};
-    } else {
-      const latest = revisions[revisions.length - 1] as { header?: Record<string, unknown> };
-      header = latest?.header ?? {};
-    }
-    documents = await listEventDocuments({ eventId: String(resolved.event.id) });
+  const link = resolved.link as {
+    id: string;
+    estimate_id?: string | null;
+    revision_id?: string | null;
+    granted_document_ids?: string[];
+    party_ref?: string | null;
+  };
+
+  const { rows: appr } = await q(
+    `SELECT * FROM repair.lessee_approvals
+     WHERE link_id = $1 AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [link.id],
+  );
+  const approval = appr[0];
+  const estimateId = String(
+    link.estimate_id ?? approval?.estimate_id ?? "",
+  );
+  const revisionId = String(
+    link.revision_id ?? approval?.revision_id ?? "",
+  );
+  if (!estimateId || !revisionId) {
+    return null;
   }
+
+  // Token must still match current approval revision (new revision invalidates)
+  if (
+    approval &&
+    String(approval.revision_id) !== revisionId
+  ) {
+    return null;
+  }
+
+  const totals = await computeLesseeTotals({
+    estimateId,
+    revisionId,
+  });
+  if (!totals.ok) return null;
+  const bundle = totals.bundle;
+
+  // Refuse if token's estimate/event don't match
+  if (bundle.eventId !== String(resolved.event.id)) {
+    return null;
+  }
+
+  const grantedIds: string[] = Array.isArray(link.granted_document_ids)
+    ? link.granted_document_ids.map(String)
+    : approval?.document_ids
+      ? (approval.document_ids as string[]).map(String)
+      : [];
+
+  let documents: unknown[] = [];
+  if (grantedIds.length) {
+    const { rows: docs } = await q(
+      `SELECT id, kind, original_filename, mime, size, uploaded_at, category_code
+       FROM repair.documents
+       WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL
+       ORDER BY uploaded_at ASC`,
+      [grantedIds],
+    );
+    documents = docs;
+  }
+
+  const headerPublic: Record<string, unknown> = {
+    carInitial: bundle.header.carInitial ?? resolved.event.car_mark,
+    carNumber: bundle.header.carNumber ?? resolved.event.car_number,
+    shopMark: bundle.header.shopMark,
+    repairingParty: bundle.header.repairingParty,
+    repairDateYymmdd: bundle.header.repairDateYymmdd,
+    outboundDate: bundle.header.outboundDate,
+    completedDate: bundle.header.completedDate,
+    splc: bundle.header.splc,
+    facilityType: bundle.header.facilityType,
+    kindOfCar: bundle.header.kindOfCar,
+    loadEmpty: bundle.header.loadEmpty,
+    boLink: bundle.header.boLink,
+  };
+
+  const headerFields = DATA_FILE_HEADER_FIELDS.filter((f) =>
+    Object.prototype.hasOwnProperty.call(headerPublic, f.key),
+  );
+
+  // Dollars for legacy UI that still reads amountPresented as dollars
+  const amountPresentedDollars = bundle.totalCents / 100;
+
   return {
-    link: resolved.link,
-    event: resolved.event,
-    estimate,
-    revisions,
-    lines,
-    allLines,
-    header,
-    headerFields: DATA_FILE_HEADER_FIELDS,
+    link: {
+      id: link.id,
+      scope: "LESSEE",
+      estimate_id: estimateId,
+      revision_id: revisionId,
+      expires_at: (resolved.link as { expires_at?: string }).expires_at ?? null,
+      party_ref: link.party_ref ?? null,
+    },
+    event: {
+      id: resolved.event.id,
+      car_mark: resolved.event.car_mark,
+      car_number: resolved.event.car_number,
+    },
+    estimate: { id: estimateId },
+    revisionId,
+    /** Resp 6 only — never owner / resp 7 / other lessees */
+    lines: bundle.lines.map((l) => ({
+      ...l,
+      labor: l.labor_cents / 100,
+      material: l.material_cents / 100,
+      total: l.amount_cents / 100,
+      total_cents: l.amount_cents,
+      labor_cents_label: String(l.labor_cents),
+      material_cents_label: String(l.material_cents),
+      amount_cents_label: String(l.amount_cents),
+    })),
+    /** Intentionally omitted: allLines (no owner / internal lines) */
+    allLines: undefined,
+    header: headerPublic,
+    headerFields,
     documents,
-    ownRespCodes: Array.from(ownRespCodes),
-    amountPresented,
-    /** Hide pencil / admin — lessee may only approve/dispute own responsibility lines */
+    ownRespCodes: ["6"],
+    amountPresented: amountPresentedDollars,
+    amountPresentedCents: bundle.totalCents,
+    amountMoney: bundle.amountMoney,
+    /** Hide pencil / admin / nav */
     readOnly: true,
     canPencilEdit: false,
+    hideAppNav: true,
     note:
-      "Same estimate layout as internal review (header, lines, totals, attachments). " +
-      "Read-only except approve/dispute on your responsibility lines (Resp 6). " +
-      "Approve via this link (primary). Email reply requires reviewer confirmation.",
+      "Login-free lessee view: your Resp 6 lines, totals, and the attachments from the email only. " +
+      "Approve or reject with a comment. No access to other estimates, owner lines, or internal notes.",
   };
+}
+
+/** Lessee may fetch only granted attachments for their token. */
+export async function getLesseeAttachmentForToken(opts: {
+  rawToken: string;
+  documentId: string;
+}) {
+  const view = await getLesseeViewForToken(opts.rawToken);
+  if (!view) {
+    return { ok: false as const, status: 401, error: "Invalid or expired lessee link" };
+  }
+  const granted = new Set(
+    ((view.documents as Array<{ id: string }>) ?? []).map((d) => String(d.id)),
+  );
+  if (!granted.has(opts.documentId)) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "Attachment not granted on this lessee link",
+    };
+  }
+  const { rows } = await q(
+    `SELECT id, kind, storage_key, mime, size, original_filename
+     FROM repair.documents WHERE id = $1 AND deleted_at IS NULL`,
+    [opts.documentId],
+  );
+  if (!rows[0]) {
+    return { ok: false as const, status: 404, error: "Document not found" };
+  }
+  const { getStorageProvider } = await import("../providers/storage");
+  const stored = await getStorageProvider().get(rows[0].storage_key);
+  return {
+    ok: true as const,
+    document: rows[0],
+    bytes: stored.bytes,
+  };
+}
+
+/** Guard: lessee token cannot read other estimates. */
+export async function assertLesseeTokenEstimateAccess(opts: {
+  rawToken: string;
+  estimateId: string;
+}): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const view = await getLesseeViewForToken(opts.rawToken);
+  if (!view) {
+    return { ok: false, status: 401, error: "Invalid or expired lessee link" };
+  }
+  if (String(view.estimate?.id) !== opts.estimateId) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This lessee link cannot access other estimates",
+    };
+  }
+  return { ok: true };
 }

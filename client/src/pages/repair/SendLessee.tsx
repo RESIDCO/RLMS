@@ -32,9 +32,21 @@ type Preview = {
   recipients: string[];
   subject: string;
   body: string;
+  canSend?: boolean;
+  sendBlockReason?: string | null;
   lesseeLines: Array<{
     line_no: number;
+    display_line_no?: string | null;
     aar_job_code?: string | null;
+    qualifier?: string | null;
+    why_made?: string | null;
+    condition_code?: string | null;
+    location_on_car?: string | null;
+    quantity?: string | null;
+    removed_job_code?: string | null;
+    removed_qualifier?: string | null;
+    description?: string | null;
+    aar_component_id?: string | null;
     resp_code?: string | null;
     labor_money?: string;
     material_money?: string;
@@ -250,44 +262,69 @@ export default function SendLessee() {
                 </div>
               </section>
 
+              {preview.sendBlockReason && (
+                <p className="text-sm rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive">
+                  {preview.sendBlockReason}
+                </p>
+              )}
+
               <section className="border border-border rounded-md p-4 space-y-2">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                   Lessee view (Resp 6 lines)
                 </h2>
-                <div className="overflow-auto border border-border rounded max-h-56">
-                  <table className="w-full text-xs">
+                <div className="overflow-auto border border-border rounded max-h-72">
+                  <table className="w-full text-[11px]">
                     <thead className="bg-muted/50 text-left">
                       <tr>
-                        <th className="p-2">Line</th>
-                        <th className="p-2">Job</th>
-                        <th className="p-2">Resp</th>
-                        <th className="p-2 text-right">Labor</th>
-                        <th className="p-2 text-right">Mat</th>
-                        <th className="p-2 text-right">Total</th>
+                        <th className="p-1.5">Item</th>
+                        <th className="p-1.5">Loc</th>
+                        <th className="p-1.5">Qty</th>
+                        <th className="p-1.5">C</th>
+                        <th className="p-1.5">AJOB</th>
+                        <th className="p-1.5">QA</th>
+                        <th className="p-1.5">WM</th>
+                        <th className="p-1.5">RJOB</th>
+                        <th className="p-1.5">QR</th>
+                        <th className="p-1.5">R</th>
+                        <th className="p-1.5">Description</th>
+                        <th className="p-1.5 text-right">Labor</th>
+                        <th className="p-1.5 text-right">Mat</th>
+                        <th className="p-1.5 text-right">Amount</th>
+                        <th className="p-1.5">CID</th>
                       </tr>
                     </thead>
                     <tbody>
                       {preview.lesseeLines.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="p-3 text-muted-foreground">
-                            No Resp 6 lines on current revision.
+                          <td colSpan={15} className="p-3 text-muted-foreground">
+                            No Resp 6 lines on current revision — Send blocked at $0.00.
                           </td>
                         </tr>
                       )}
                       {preview.lesseeLines.map((l) => (
-                        <tr key={l.line_no} className="border-t border-border">
-                          <td className="p-2">{l.line_no}</td>
-                          <td className="p-2 font-mono">{l.aar_job_code}</td>
-                          <td className="p-2">{l.resp_code}</td>
-                          <td className="p-2 text-right tabular-nums">
-                            {l.labor_money}
+                        <tr
+                          key={`${l.line_no}-${l.display_line_no ?? ""}`}
+                          className="border-t border-border"
+                        >
+                          <td className="p-1.5">{l.display_line_no ?? l.line_no}</td>
+                          <td className="p-1.5">{l.location_on_car}</td>
+                          <td className="p-1.5">{l.quantity}</td>
+                          <td className="p-1.5">{l.condition_code}</td>
+                          <td className="p-1.5 font-mono">{l.aar_job_code}</td>
+                          <td className="p-1.5">{l.qualifier}</td>
+                          <td className="p-1.5">{l.why_made}</td>
+                          <td className="p-1.5 font-mono">{l.removed_job_code}</td>
+                          <td className="p-1.5">{l.removed_qualifier}</td>
+                          <td className="p-1.5">{l.resp_code}</td>
+                          <td className="p-1.5 max-w-[10rem] truncate" title={l.description ?? ""}>
+                            {l.description}
                           </td>
-                          <td className="p-2 text-right tabular-nums">
-                            {l.material_money}
-                          </td>
-                          <td className="p-2 text-right tabular-nums font-medium">
+                          <td className="p-1.5 text-right tabular-nums">{l.labor_money}</td>
+                          <td className="p-1.5 text-right tabular-nums">{l.material_money}</td>
+                          <td className="p-1.5 text-right tabular-nums font-medium">
                             {l.amount_money}
                           </td>
+                          <td className="p-1.5 text-[10px]">{l.aar_component_id}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -461,7 +498,16 @@ export default function SendLessee() {
                 </Button>
                 <Button
                   onClick={() => setConfirmOpen(true)}
-                  disabled={!recipientsText.trim() || !subject.trim() || !body.trim()}
+                  disabled={
+                    !recipientsText.trim() ||
+                    !subject.trim() ||
+                    !body.trim() ||
+                    preview.canSend === false
+                  }
+                  title={
+                    preview.sendBlockReason ||
+                    (preview.canSend === false ? "Send blocked" : undefined)
+                  }
                 >
                   Send…
                 </Button>

@@ -2,9 +2,9 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §D  
 **Screenshots:** `02-estimate-review.png`, `04-update-responsibilities.png`, `05-responsibility-codes.png`, `03-file-attachments.png`  
-**Tip base:** `2d987c92399ddb5a446de5554b068d9c8aeffb4e` (§D r2)  
-**Round:** **r3** — hover close rules, car# lock, money thousands separators, Send Lessee preview + local outbox  
-**Prior:** r2 — header pencils, attachments ACL, money `$`+cents, Component Id, AAR hover, splits, carry-forward, licensed ref-data  
+**Tip base:** `d86458890085502c66f537cb4ec077b34f0df18a` (§D r3)  
+**Round:** **r4** — qualifier multi-path lookup; header LOCK / EDIT+AUDIT / FREE; lessee signed token; cent reconciliation  
+**Prior:** r3 — hover close, car# lock, money commas, Send Lessee preview + local outbox  
 **Scope:** Owner Estimate Review. Shop link + §C Bad Orders unchanged.
 
 ---
@@ -15,27 +15,33 @@ Owner/reviewer opens an estimate from Estimates History and works it like repair
 
 ---
 
-## Compact header — r2/r3
+## Header lock-down (r4)
 
-Always visible fields unchanged (Shop, Car, Estimate ID, Status, SPLC, Assignment, Entity, Road/DC, car type, dates, BO reason, Billing Category).
+`DATA_FILE_HEADER_FIELDS` modes — server **409** + UI 🔒 with reason:
 
-**Header edit UX:**
+| Mode | Fields |
+|---|---|
+| **LOCK** | Record format; billing/invoicing party mark; billed party; car initial/number; invoice #; account date YYMM; repairing party / **shop mark from shop master** (no billing-party fallback); shop invoice #; estimate ID; revision no.; BO link; entity snapshot; Railinc date stamps; resubmitted indicator; original invoice #/account date; machine-priceable; price-list currency. Wrong key → void + shop resubmit. |
+| **EDIT + AUDIT** | Billing road override; source code; document ref / CBA; kind of car; load/empty; repair/outbound/completed dates; SPLC / expanded SPLC; facility type; defect card/JIC party+date; DDCT incident ID; AAR component ID. After Approved → Adjustment (MG1). |
+| **FREE** | Notes; internal remarks; 100-byte user area; Format 6 contacts (BP contact still required). |
 
-- Per-field ✎ on hover/focus beside editable values — never over the car number.
-- **Edit header** opens More header detail + pencil/audit mode.
-- **Car initial + car number are read-only** (🔒 + tooltip). API returns **409** on change. Wrong car → void estimate + shop resubmits under the correct car (audited).
-
-**More header detail** — collapsible full Data File header groups. Pencil edits require reason + audit; after Approved → Adjustment for Approval (MG1).
+**Location on car** is **per-line only** (pos 109–111) — not a header field.
 
 ---
 
-## Line grid + money (r3)
+## Line grid + qualifier hover (r4)
 
-Money cells show **`$` + thousands separators + 2 decimals** (e.g. `$36,732.04`) with **integer cents underneath**. Inputs still accept plain numbers.
+Money: **`$` + thousands separators + 2 decimals** with **integer cents** underneath.
 
-Code hover: close on **mouseleave / blur / Esc**; **only one** tip open at a time. Unknown → **"Not in reference table"**.
+Qualifier / removed_qualifier lookup (`ref-lookup.ts`):
 
-**Component Id:** red flag when `repair.component_id_rules` requires CID and the line is blank.
+1. blank / `00` → **No qualifier**
+2. job + qualifier in `ref_qualifiers`
+3. letters-only, or job’s price-list qualifier is **VZ** → `ref_qualifier_generic` as **Car part: …**
+4. numeric → job’s rule → every matching `ref_qualifier_charts` row as **Chart / Group X: …**
+5. else **Not in reference table (valid for this job: …)**
+
+No qualifier-only fallback on `ref_qualifiers`. **8000-series** = RESIDCO internal (`Repair_Categories.xlsx`). Demo seed **1898/11 → 14**.
 
 ---
 
@@ -45,7 +51,7 @@ Code hover: close on **mouseleave / blur / Esc**; **only one** tip open at a tim
 |---|---|
 | **Approve** | → Approved (or approve Adjustment) |
 | **Reject / Request Revision** | → Revision Requested; comment; notify shop |
-| **Send Lessee Responsibility** | Full preview page `/#/repair/estimates/:id/send-lessee` (r3) |
+| **Send Lessee Responsibility** | Preview `/#/repair/estimates/:id/send-lessee` — blocked on $0 or cent mismatch |
 | **Update Responsibilities** | Full page + splits / carry-forward / tax preview |
 | **Rollback** | Rollback completed date (audited) when applicable |
 | **Issues / comments** | Thread panel; per-line issue icon |
@@ -57,17 +63,17 @@ Code hover: close on **mouseleave / blur / Esc**; **only one** tip open at a tim
 
 ---
 
-## Send Lessee (r3)
+## Send Lessee + lessee token (r4)
 
 Route: `/#/repair/estimates/:id/send-lessee`
 
-- Editable recipients (lessee contacts), subject, body
-- Lessee-view render of Resp 6 lines
-- Attachment picker: Estimate PDF (generated/previewable), 500-byte/CRB data file (previewable), gallery checkboxes (select all/none)
-- Total selected size; Back/Cancel without sending
-- Send + final confirm
-- **Local review mode:** write `repair.email_outbox` only — UI shows **"Logged (not sent – local mode)"** (no real email)
-- Send history kept on the estimate (outbox rows)
+- Full Resp 6 line fields (item, loc, qty, C, AJOB/QA, WM, RJOB/QR, R, description, labor/mat/amount, CID)
+- Header subset: car / BO / shop / dates
+- PDF + 500-byte + gallery; local outbox **"Logged (not sent – local mode)"**
+- **Reconcile** preview / PDF / data file / email to the **cent**; **$0 or mismatch blocks Send**
+- Fix: Approve/Request-revision rows often have no lines — totals use latest revision **with lines** (c6d2b8a5-class $0.00 preview)
+
+**Lessee approve URL:** signed, single-estimate, single-revision, **expiring** token scoped to Resp 6 + attachments picked on send. API checks token every call. New revision / resend **revokes** prior tokens. Smoke: other estimates / ungranted attachments → **403**.
 
 Shop is never CC’d.
 
@@ -95,7 +101,8 @@ Route: `/#/repair/estimates/:id/responsibilities`
 ## Licensed AAR ref-data
 
 Private: `modules/repair/ref-data/` (**never** public-serve). `npm run repair:import-ref-data`  
-Verified: job codes **855** · qualifiers **639** · why-made **107** · categories **2170**.
+
+Verified (r4): job codes **855** · qualifiers **1,259** · qualifier_generic **816** · qualifier_charts **304** · why-made **107** · categories **2,170**.
 
 ---
 
@@ -117,4 +124,4 @@ npm run repair:dev:local
 
 ## Next
 
-Screen **E** document polish / Screen **F** Lessee when Bruce signs off §D r3.
+Screen **E** document polish / Screen **F** Lessee when Bruce signs off §D r4.

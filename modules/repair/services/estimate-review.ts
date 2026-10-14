@@ -773,6 +773,14 @@ export async function submitResponsibilityUpdates(opts: {
     via: "UI",
   });
 
+  // New revision invalidates prior lessee access tokens
+  const { revokeLesseeLinksForEstimate } = await import("./event-links");
+  await revokeLesseeLinksForEstimate({
+    estimateId: opts.estimateId,
+    actor: opts.actor,
+    tenantId,
+  });
+
   return {
     ok: true as const,
     revision: packed.revision,

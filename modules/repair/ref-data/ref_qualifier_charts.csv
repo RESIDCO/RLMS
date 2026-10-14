@@ -1,0 +1,305 @@
+rule,group,qualifier,description,chart,discontinued,source,pdf_page,effective,job_codes_using_chart
+3,A,01,Nycopac,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,A,02,Wabcopac,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,01,Amsted Rail (Ellcon National),e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,02,EXT,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,03,Thrall Davis,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,04,TTX-(Misner),e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,05,TTX-II,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,06,TMX,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,07,Triax II,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,B,08,UBX,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,C,01,Wabcopac II,e.    Truck Mounted Piston Assembly Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),34,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,01,"S-424 Not a below the coupler arrangement 6.3, 6.4, 6.7, 6.16, 6.17",,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,02,Homemade n/a,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,03,S-4030 Trolley 6.1,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,04,S-427 Trolley A 6.6,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,05,S-427 Trolley B 6.6,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,06,S-426 6.5,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,07,S-488 6.16,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,08,S-4003 6.11,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,09,S-4003X,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,10,Former S-4003 6.12,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,11,S-4021 Yoke Mounted 6.15,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,12,S-4021 Coupler Mounted - Straight 6.14,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,13,S-4021 Coupler Mounted - Angled — 27 —,,,AAR Field Manual 2026 (Rev 2026-01-27),35,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,14,S-4028 - A 6.8,,,AAR Field Manual 2026 (Rev 2026-01-27),36,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,15,S-4028 - B 6.8,,,AAR Field Manual 2026 (Rev 2026-01-27),36,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,16,S-4029 6.9,,,AAR Field Manual 2026 (Rev 2026-01-27),36,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,01,Car passed without brake-related repairs performed including only end hose gasket replacement,Air Brake Test Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),36,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,02,Car passed with only non-billable brake-related repairs performed,Air Brake Test Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),36,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+3,,03,Car passed with billable brake-related repairs performed,Air Brake Test Qualifier Chart,,AAR Field Manual 2026 (Rev 2026-01-27),36,2026Q1 (eff Jan 01 2026),1128|1139|1140|1142|1144|1145|1146|1150|1151|1152
+8,A,01,"Ellcon-National, Inc. — No. 1340",Group A                                  Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),124,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,A,02,"Ellcon-National, Inc. — Model 1480",Group A                                  Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),124,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,A,03,Sloan Valve Co. — Model 4000,Group A                                  Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),124,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,A,04,Universal Railway Devices Co. — Model 1700,Group A                                  Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),124,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,A,05,Universal Railway Devices Co. — Model 1250,Group A                                  Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),124,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,B,01,Westinghouse Air Brake Company Type D,Group B                                  Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),124,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,C,01,Ajax-Consolidated Co. — Model 6825,Group C                                  Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),124,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,D,01,Ajax-Consolidated Co. — Model 6800,Group D,Y,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,01,American SAB Company — Model DRV 2USA-DJ Model DRV 2-1-USA-DJ,Group R     applied to all tank cars with body-mounted brakes,,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,02,Amsted Rail (Ellcon-National),Group R     applied to all tank cars with body-mounted brakes,,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,03,Sloan Valve Co. — Model 4600 DJ,Group R     applied to all tank cars with body-mounted brakes,Y,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,04,Universal Railway Devices Co. — Model 1900 DJ,Group R     applied to all tank cars with body-mounted brakes,Y,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,05,Sloan Valve Co. — Model 5000 DJ,Group R     applied to all tank cars with body-mounted brakes,Y,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,06,Sloan Valve Co. — Model 5001 DJ,Group R     applied to all tank cars with body-mounted brakes,Y,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,07,Universal Railway Devices Co. — Model 2100 DJ,Group R     applied to all tank cars with body-mounted brakes,Y,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,08,Wabtec/Universal — Model 2300 DJ,Group R     applied to all tank cars with body-mounted brakes,,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,09,New York Air Brake Co. — KRD 2A-500-AR,Group R     applied to all tank cars with body-mounted brakes,Y,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,E,10,New York Air Brake Co. — KRD-482-E,Group R     applied to all tank cars with body-mounted brakes,,AAR Field Manual 2026 (Rev 2026-01-27),125,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,F,01,American SAB Company — Type DRV-2,Group R     RP-400. Group E not to be applied to tank cars. Group R,Y,AAR Field Manual 2026 (Rev 2026-01-27),126,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,F,02,"Ellcon-National, Inc. — Model 2000",Group R     RP-400. Group E not to be applied to tank cars. Group R,Y,AAR Field Manual 2026 (Rev 2026-01-27),126,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,F,03,Sloan Valve Co. — Model 4500M,Group R     RP-400. Group E not to be applied to tank cars. Group R,Y,AAR Field Manual 2026 (Rev 2026-01-27),126,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,F,04,Universal Railway Devices Co. — Model 1900,Group R     RP-400. Group E not to be applied to tank cars. Group R,Y,AAR Field Manual 2026 (Rev 2026-01-27),126,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,G,01,Ajax-Consolidated Co. — Type FFA,Group R     RP-400. Group E not to be applied to tank cars. Group R,Y,AAR Field Manual 2026 (Rev 2026-01-27),126,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,G,02,Universal Railway Devices Co. — Type B,Group R     RP-400. Group E not to be applied to tank cars. Group R,Y,AAR Field Manual 2026 (Rev 2026-01-27),126,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,H,01,Amsted Rail (Ellcon-National) Model 2000-R — 118 —,Group H                                 Manufacturer,,AAR Field Manual 2026 (Rev 2026-01-27),126,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,J,01,American SAB Company — Model DRV 2-101KDJ,"Group J          Group J            Bill Rule 72, Job Code 6999.",,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,J,02,Amsted Rail (Ellcon-National) — Model 9100DJ,"Group J          Group J            Bill Rule 72, Job Code 6999.",,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,J,03,Sloan Valve Co. — Model 5002DJS,"Group J          Group J            Bill Rule 72, Job Code 6999.",Y,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,J,04,Universal Railway Devices Co. — Model 4,"Group J          Group J            Bill Rule 72, Job Code 6999.",Y,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,K,01,Sloan Valve Co. Model 5006-DJ,Group K                                 Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,K,02,"Wabtec/Universal Model 10, 10S",Group K                                 Manufacturer,,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,K,03,Ellcon-National Model 9100-12,Group K                                 Manufacturer,Y,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,L,01,Universal Railway Devices Co. Model 7 70 ton,Group L       Group L          Group L,Y,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,L,02,Wabtec/Universal Model 5 70 ton,Group L       Group L          Group L,,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,L,03,Amsted Rail (Ellcon-National) Model 7100-10 70 ton,Group L       Group L          Group L,Y,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,L,04,Amsted Rail (Ellcon-National) Model 7100-21 70 ton,Group L       Group L          Group L,,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,L,05,Triax-YSD TTC-357 70 ton,Group L       Group L          Group L,Y,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,L,06,NYAB KRD-133L 70 ton,Group L       Group L          Group L,,AAR Field Manual 2026 (Rev 2026-01-27),127,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,M,01,"Universal Railway Devices Co. Model 7D 70, 100 & 125 ton",Group M     Group M     Group M,Y,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,M,02,"Wabtec/Universal Model 5D 70, 100 & 125 ton",Group M     Group M     Group M,,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,M,03,"Amsted Rail (Ellcon-National) Model 7100-30 70, 100 & 125 ton",Group M     Group M     Group M,Y,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,M,04,"Amsted Rail (Ellcon-National) Model 7100-40 70, 100 & 125 ton",Group M     Group M     Group M,,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,M,05,"Triax-YSD TTC-356 70, 100 & 125 ton",Group M     Group M     Group M,Y,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,M,06,"Triax-YSD TTC-356-E 70, 100 & 125 ton",Group M     Group M     Group M,Y,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,N,01,Amsted Rail (Ellcon-National) Model 7100-26/26R 70 & 100 ton,Group N     Group N     Group N,,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,N,02,Amsted Rail (Ellcon-National) Model 7100-22/22R 125 ton,Group N     Group N     Group N,,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,N,03,Amsted Rail (Ellcon-National) Model 7100-25/25R 100 ton,Group N     Group N     Group N,,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,N,04,Amsted Rail (Ellcon-National) Model 7100-28/28R 100 ton,Group N     Group N     Group N,,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,O,01,"Wabtec/Universal Model C-1000-DJ 70, 100 & 125 ton — 120 —",Group O     Group O     Group O,,AAR Field Manual 2026 (Rev 2026-01-27),128,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,P,01,Wabtec/Universal Model 85A 70 & 100 ton,Group P       Group P      Group P,,AAR Field Manual 2026 (Rev 2026-01-27),129,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,Q,01,Amsted Rail (Ellcon-National) Model 70 & 100 ton 7100-35,"Group Q       Group Q      Bill Rule 72, Job Code 6999.",,AAR Field Manual 2026 (Rev 2026-01-27),129,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,R,01,New York Air Brake Co. — KRD-482-R,Group R           Group R        Group R,,AAR Field Manual 2026 (Rev 2026-01-27),129,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,R,02,Amsted Rail (Ellcon-National) — Model 2000 DJ,Group R           Group R        Group R,,AAR Field Manual 2026 (Rev 2026-01-27),129,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+8,R,03,Wabtec/Universal. — Model 2500 DJ,Group R           Group R        Group R,,AAR Field Manual 2026 (Rev 2026-01-27),129,2026Q1 (eff Jan 01 2026),1574|1576|1592|1594|1596|1598|1600|1603
+16,,01,American Steel Foundries (ASF) Indiana Harbor,,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,02,American Steel Foundries (ASF) Alliance,,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,03,Buckeye Steel Castings (Buckeye),,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,04,Canadian Steel Foundries (CSF),,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,05,"Dominion Foundries & Steel, Ltd. (DOFASCO)",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,06,Dresser Transportation Equipment (Gould),,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,07,"Fundiciones de Hierro y Acero, S.A. (FHASA)",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,08,"McConway & Torley Corporation (M&T) Kutztown, PA",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,09,"McConway & Torley Corporation (M&T) Pittsburgh, PA",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,10,"National Castings Div., Sharon (National)",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,11,"National Castings Div., Melrose Park (National)",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,12,"National Castings Div., Cicero (National)",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,13,Omaha Steel Castings Co. (Omaha),,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,14,"Siderurgica Nacional, S.A. (Sidena)",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,15,"Fundidora DeAceros Tepeyac, S.A. (FATSA)",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,16,Columbus Steel Castings,,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,17,American Steel Foundries (ASF) Granite City,,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,18,"National Castings Div., Mexico Sahagun, Hidalgo, Mexico",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,19,A Alliance Castings Company,,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,20,SM ASF-K de Mexico,,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,21,"Bedloe Industries , Sivyer Steel, Bettendorf, IA",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,22,Other,,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,23,"NY Workhorse Rail (WR)—Baotou First Machinery Group Foundry Co., Baotou, China",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,24,"YW Workhorse Rail (WR), Shengyu Machinery Manufacturing Co., Baotou, China",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,25,"Strato —Tongyao Castings and Forgings Co., Pingqiao, China",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,26,"MJ Strato —CRRC Mudanjiang Jinyuan Casting Co., LTD. Mudanjiang, China — 220 —",,,AAR Field Manual 2026 (Rev 2026-01-27),228,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,27,"KM Strato —Kharagpur Metal Reforming Industries Pvt Ltd, Kharagpur, India",,,AAR Field Manual 2026 (Rev 2026-01-27),229,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,28,"TEX WABTEC - Texmaco Rail and Engineering Limited, Kolkata, India",,,AAR Field Manual 2026 (Rev 2026-01-27),229,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+16,,29,"KH WABTEC - CKD Kutná Hora a.s., Kutná Hora, Czech Republic FIGURE 16.21",,,AAR Field Manual 2026 (Rev 2026-01-27),229,2026Q1 (eff Jan 01 2026),2001|2004|2009|2010|2012|2013|2016|2017|2018|2019|2021|2022|2023|2024|2026|2037|2038|2041|2043|2044|2047|2049|4474
+36,B,01,"Timken Company. 1, 1A “AP” 51⁄2 × 10, 6 × 11, (**Orange) 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,03,"Brenco, Incorporated 5, 5A 51⁄2 × 10, 6 × 11, (**Green) 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,04,"Hyatt Manufacturing 6, 6A Hyatt 51⁄2 × 10, 6 × 11, (**Blue) 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,08,"Hyatt Manufacturing 6B Hyatt 51⁄2 × 10, 6 × 11, (**Blue) 61⁄2 × 12, 7 × 12 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,11,"FAG Kugelfischer 13 FAG-Tarol 51⁄2 × 10, 6 × 11, (**Red) 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,12,"Koyo Seiko Company, Limited 14 Koyo 51⁄2 × 10, 6 × 11, (**White) 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,14,"Nippon Seiko Kabushki 11A NSK 51⁄2 × 10, 6 × 11, Kaisha 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,15,"NTN Corporation (NTN Toyo 10A, 19 NTN-Titan 51⁄2 × 10, 6 × 11, Bearing Mfg. Co. Ltd.) (**Purple) 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,16,"Nippon Seiko Kabushiki 22 NSK 51⁄2 × 10, 6 × 11, Kaisha 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,17,"Aktiebolaget SKF 23 SKF 51⁄2 × 10, 6 × 11, (**Yellow) 61⁄2 × 12, 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,B,18,"FAG 26 FAG 51⁄2 × 10, 6 × 11, (**Brown) 61⁄2 × 12, 7 × 12 Incorporated (**Gold) 7 × 12",Group B                   Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),328,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,01,Timken Company 20 “XP” 61⁄2 × 12,Group B1                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,02,Hyatt Manufacturing 21 61⁄2 × 12,Group B1                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,03,"Koyo Seiko Company, Limited 24 “MF” 61⁄2 × 12",Group B1                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,04,"Brenco, Incorporated 25 “XL” 61⁄2 × 12 What Can Be",Group B1                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,03,"Bower Roller Bearing Division 8 6 × 11, 61⁄2 × 12",Group B2                Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,04,"Nippon Seiko Kabushiki 11 NSK 51⁄2 × 10, 6 × 11, Kaisha 7 × 12",Group B2                Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,05,"Magnus Metal Division, 16 Magnus 6 × 11, 61⁄2 × 12 National Lead Company",Group B2                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,06,"NTN Corporation (NTN Toyo 10 NTN 51⁄2 × 10, 6 × 11, Bearing Mfg. Co. Ltd.) 61⁄2 × 12",Group B2                Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),329,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,01,"Timken Company 27 61⁄2 × 9, 7 × 12",Group B3           Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),330,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,02,"Brenco, Inc. 28 61⁄2 × 9",Group B3           Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),330,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,03,"SKF 30 61⁄2 × 9, 7 × 12",Group B3           Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),330,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,04,"Brenco, Inc. 31 61⁄2 × 9",Group B3           Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),330,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,01,"Timken Company 1, 1A “AP” 6 × 11, 61⁄2 × 12 (**Orange)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,03,"Brenco, Incorporated 5, 5A 6 × 11, 61⁄2 × 12 (**Green)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,04,"Hyatt Manufacturing 6, 6A Hyatt 6 × 11, 61⁄2 × 12 (**Blue)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,08,"Hyatt Manufacturing 6B Hyatt 6 × 11, 61⁄2 × 12 (**Blue)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,10,"Nachi Fujikoshi, Limited 12 Nachi 61⁄2 × 12",Group B4                Certificate,Y,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,11,"FAG Kugelfischer 13 FAG-Tarol 6 × 11, 61⁄2 × 12 (**Red)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,12,"Koyo Seiko Company, 14 Koyo 6 × 11, 61⁄2 × 12 Limited (**White)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,14,"Nippon Seiko Kabushki 11A NSK 6 × 11, 61⁄2 × 12 Kaisha",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,15,"NTN Corporation (NTN Toyo 10A, 19 NTN-Titan 6 × 11, 61⁄2 × 12 Bearing Mfg. Co. Ltd.) (**Purple)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,16,"Nippon Seiko Kabushiki Kaisha 22 NSK 6 × 11, 61⁄2 × 12",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,17,"Aktiebolaget SKF 23 SKF 6 × 11, 61⁄2 × 12 (**Yellow)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,18,"FAG 26 FAG 6 × 11, 61⁄2 × 12 (**Brown)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,19,"Roller Bearing Industries, 29 RBI 6 × 11, 61⁄2 × 12 Incorporated (**Gold)",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,20,FAG 32 FAG 6 × 11,Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,21,"Koyo Seiko Company, 24(*) Koyo 6 × 11, 61⁄2 × 12 Limited",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,22,"Magnus Metal Division, National 16(*) Magnus 6 × 11, 61⁄2 × 12 Lead Company",Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,23,Bower Roller Bearing Division 8 61⁄2 × 12,Group B4                Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),331,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,01,Timken Company. 27 61⁄2 × 9 (with Universal Fitted Backing Ring),Group B3             Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),332,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,,02,"Brenco, Inc. 28 61⁄2 × 9 (with Universal Fitted Backing Ring) — 324 —",Group B3             Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),332,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,01,"SKF Industries, Incorporated 7 Piggybacker 6 × 11",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,02,Hyatt Division of General 2 Hy-Roll All sizes Motors Corporation,Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,03,"SKF Industries, Incorporated 4 Expediter All sizes",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,04,"SKF Industries, Incorporated 4A Expediter All sizes",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,05,"SKF Industries, Incorporated 4B Expediter All sizes",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,06,Nippon Seiko Kabushiki Kaisha 11 NSK 61⁄2 × 12,Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,07,"Timken Company Cartridge Type C & CL, non- rotating end cover (for integral boxes)",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,08,"Timken Company Heavy-duty type WP and WPL, non-rotating end cover (for wide pedestal)",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,09,"Hyatt Bearing Division General-purpose package type, non-rotating end cover (for integral boxes)",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,10,"Hyatt Bearing Division Full-size housing type, non- rotating end cover (for wide pedestal)",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,11,"SKF Industries, Incorporated Housing type, non-rotating end cover",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,12,Bower Franklin Rotating endcap,Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,13,"A B Svenska Kullagerfabriken 3 SKF-RBU 5 × 9, 51⁄2 × 10, 6 × 11, 61⁄2 × 12",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,14,"A B Svenska Kullagerfabriken 3A SKF-RBU 5 × 9, 51⁄2 × 10, 6 × 11, 61⁄2 × 12",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,15,"A B Svenska Kullagerfabriken 3B SKF-RBU 41⁄4 × 8, 5 × 9, 51⁄2 × 10, 6 × 11, 61⁄2 × 12",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,16,"SKF Industries, Incorporated L17 Dispatcher 6 × 11, 61⁄2 × 12",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,17,"A B Svenska Kullagerfabriken L18 LMU 41⁄4 × 8, 5 × 9, 51⁄2 × 10, 6 × 11, 61⁄2 × 12, 7 × 12",Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+36,E,18,All Equipped with cap screw seal rings — 325 —,Group E                    Certificate,,AAR Field Manual 2026 (Rev 2026-01-27),333,2026Q1 (eff Jan 01 2026),2814|2816|2820|2822|2848|2861|2862|2863|2864|2865|2866|2867
+41,A,01,CB-28,Group B-1               minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,02,AAR-X-8,Group B-1               minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,03,Wheel without design designation,Group B-1               minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,04,CD-28,Group B-1               minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,05,E-28,Group B-1               minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,06,CE-28,Group B-1               minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,07,AAR CS-1 Griffin What Can Be,Group B-1               minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,01,CB-28,Group B-1               mum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,02,AAR-X-8,Group B-1               mum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,03,Wheel without design designation,Group B-1               mum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,A,04,AAR CS-1 Griffin,Group B-1               mum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),358,2026Q1 (eff Jan 01 2026),
+41,B,01,A-28,Group A-1                 minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,B,02,Wheel without design designation,Group A-1                 minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,B,03,CA-28,Group A-1                 minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,B,01,A-28,Group A-1                 minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,B,02,Wheel without design designation,Group A-1                 minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,B,03,CA-28,Group A-1                 minimum rim thickness and standard full,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,C,01,CA-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,C,02,J-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,C,03,CJ-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,C,04,Wheel without design designation,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,C,06,AAR-CS-1 — 351 —,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),359,2026Q1 (eff Jan 01 2026),
+41,C,01,CA-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,C,02,J-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,C,03,CJ-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,C,04,Wheel without design designation,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,C,06,AAR-CS-1 What Can Be,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,01,CK-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,02,M-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,03,CM-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,04,AAR-X-9,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,05,Wheel without design designation,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,07,"AAR CS-2 except Griffin, 2-Wear, 3-Riser (Marked CS-2) Manufactured 1960-1963 What Can Be",Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,01,CK-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,02,M-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,03,CM-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,04,AAR-X-9,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,05,Wheel Steel without design designation,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,D,07,"AAR CS-2 except Griffin, 2-Wear, 3-Riser (Marked CS-2) Manufactured 1960-1963 — 352 —",Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),360,2026Q1 (eff Jan 01 2026),
+41,E,01,CN-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,02,CR-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,03,AAR-CS-M,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,04,Wheel without design designation,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,06,CG-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,07,P-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,08,CP-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,09,S-33* See NOTES,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,01,CN-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,02,CR-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,03,AAR-CS-M,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,04,Wheel Steel without design designation,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,06,CG-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,07,P-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,E,08,CP-33 — 353 —,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),361,2026Q1 (eff Jan 01 2026),
+41,G,01,Davis,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,02,AAR X-2,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,03,"Southern dated prior to May 7, 1958,","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,04,"Griffin 70-ton, 3-riser ball rim design,","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,05,AAR X-4,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,06,Wheels manufactured prior to 1-1-27,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,07,"Griffin 2-wear, 3-riser (marked CS-2), manufactured 1960-1963","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,08,AAR X-5,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,09,"Southern 1-wear, 70-ton, manufactured 5-7-58 through 12-31-63,","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,10,"Southern 1-wear, 70-ton marked “U1” manufactured 1-1-64 through 12-31-69,","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,11,All Cast Iron Wheels,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,12,B-28 or X-14,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,13,1-Wear 28 inch wheels without design designation,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,14,D-28,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,15,28 inch ARMCO Wheels,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,16,33 inch ARMCO Wheels,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,17,36 inch ARMCO Wheels,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,18,38 inch ARMCO Wheels,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,19,Straight-plate wheels,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,20,"Valdunes, Creusot-Loire non-heat-treated, 36 inch, straight-plate wheels marked “F” or “FW” manufactured in 1980 and 1981","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,21,"Mafersa or Edgewater wheels, 33 inch or 36 inch, manufactured in 1995–1998, and without legible UT stencil","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,22,Any 36 inch wheels as identified by the marks “SO” ABEX (Southern),"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,23,H-36 wheels stamped HW manufactured by Maan- shan in 2005 or 2006.,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,24,CJ-33 wheels stamped SO manufactured by Southern in 1995 or 1999,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,25,H-36 wheels stamped VK manufactured by Vyksa in 2005 — 354 —,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),362,2026Q1 (eff Jan 01 2026),
+41,G,01,"Wheels with rims 1 inch or less, and no or illegible manufacture date","Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),363,2026Q1 (eff Jan 01 2026),
+41,G,02,CJ-33 wheels identified by the marks SO What Can Be,"Groups Q-1, R-1, S-1,",,AAR Field Manual 2026 (Rev 2026-01-27),363,2026Q1 (eff Jan 01 2026),
+41,J,01,H-36,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),363,2026Q1 (eff Jan 01 2026),
+41,J,02,CH-36,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),363,2026Q1 (eff Jan 01 2026),
+41,J,03,AAR-X-15,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),363,2026Q1 (eff Jan 01 2026),
+41,J,04,Wheel without design designation,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),363,2026Q1 (eff Jan 01 2026),
+41,J,06,AAR CS-1 What Can Be,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),363,2026Q1 (eff Jan 01 2026),
+41,J,01,H-36,"Group J-2 – 36 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,J,02,CH-36,"Group J-2 – 36 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,J,03,AAR-X-15,"Group J-2 – 36 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,J,04,Wheel without design designation,"Group J-2 – 36 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,J,06,AAR CS-1 What Can Be,"Group J-2 – 36 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,01,J-36,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,02,CJ-36,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,03,Wheel without design designation,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,05,AAR CS-2 What Can Be,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,01,J-36,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,02,CJ-36,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,03,Wheel without design designation,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,K,05,AAR CS-2,Group S-1,,AAR Field Manual 2026 (Rev 2026-01-27),364,2026Q1 (eff Jan 01 2026),
+41,L,01,CK-36,Group S-1             prohibited.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,L,02,Wheel without design designation,Group S-1             prohibited.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,L,03,AAR CS-M What Can Be,Group S-1             prohibited.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,L,01,CK-36,Group S-1             is prohibited.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,L,02,Wheel without design designation,Group S-1             is prohibited.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,L,03,AAR CS-M,Group S-1             is prohibited.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,M,01,B-38,Group T-1               narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,M,02,CB-38,Group T-1               narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,M,03,Wheel without design designation,Group T-1               narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,M,05,AAR CS-1 Griffin What Can Be,Group T-1               narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),365,2026Q1 (eff Jan 01 2026),
+41,M,01,B-38,"Group M-2 – 38 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,M,02,CB-38,"Group M-2 – 38 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,M,03,Wheel without design designation,"Group M-2 – 38 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,M,05,AAR CS-1 Griffin What Can Be,"Group M-2 – 38 Inch Wheels 1-Wear, Non Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,01,C-38,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,02,CC-38,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,03,Wheel without design designation,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,05,AAR CS-2 Griffin What Can Be,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,01,C-38,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,02,CC-38,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,03,Wheel without design designation,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,N,05,AAR CS-2 Griffin,Group T-1                 narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),366,2026Q1 (eff Jan 01 2026),
+41,Q,01,D-38,"Group Q-1 – 38 inch Wheels Multiple Wear, Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,Q,02,CD-38 What Can Be,"Group Q-1 – 38 inch Wheels Multiple Wear, Heat Treated Curved Plate",,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,R,01,CH-36,Group L-1,,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,R,02,H-36 What Can Be,Group L-1,,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,S,01,CJ-36,Group L-1,,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,S,02,J-36 What Can Be,Group L-1,,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,T,01,CB-38,Group N-1             narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,T,02,B-38 — 359 —,Group N-1             narrow flange thickness.,,AAR Field Manual 2026 (Rev 2026-01-27),367,2026Q1 (eff Jan 01 2026),
+41,U,01,CJ-33,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),368,2026Q1 (eff Jan 01 2026),
+41,U,02,J-33 — 360 —,Group U-1,,AAR Field Manual 2026 (Rev 2026-01-27),368,2026Q1 (eff Jan 01 2026),

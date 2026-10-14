@@ -20,6 +20,12 @@ export async function issueEventLink(opts: {
   actor?: string;
   expiresAt?: string | null;
   reissuedFrom?: string | null;
+  /** LESSEE: single estimate this token may access */
+  estimateId?: string | null;
+  /** LESSEE: single revision; new revision / resend revokes prior */
+  revisionId?: string | null;
+  /** LESSEE: attachment ids granted on Send page */
+  grantedDocumentIds?: string[];
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const raw = mintRawToken();
@@ -27,9 +33,11 @@ export async function issueEventLink(opts: {
 
   const { rows } = await q(
     `INSERT INTO repair.event_links
-       (tenant_id, event_id, scope, party_ref, token_hash, expires_at, reissued_from, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING id, event_id, scope, party_ref, issued_at, expires_at, revoked_at`,
+       (tenant_id, event_id, scope, party_ref, token_hash, expires_at, reissued_from,
+        estimate_id, revision_id, granted_document_ids, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::uuid[],$11)
+     RETURNING id, event_id, scope, party_ref, issued_at, expires_at, revoked_at,
+               estimate_id, revision_id, granted_document_ids`,
     [
       tenantId,
       opts.eventId,
@@ -38,6 +46,9 @@ export async function issueEventLink(opts: {
       tokenHash,
       opts.expiresAt ?? null,
       opts.reissuedFrom ?? null,
+      opts.estimateId ?? null,
+      opts.revisionId ?? null,
+      opts.grantedDocumentIds ?? [],
       opts.actor ?? "system",
     ],
   );
@@ -47,13 +58,55 @@ export async function issueEventLink(opts: {
     entity: "event_link",
     entityId: rows[0].id,
     action: "LINK_ISSUED",
-    after: { scope: opts.scope, eventId: opts.eventId },
+    after: {
+      scope: opts.scope,
+      eventId: opts.eventId,
+      estimateId: opts.estimateId ?? null,
+      revisionId: opts.revisionId ?? null,
+      grantedDocumentCount: (opts.grantedDocumentIds ?? []).length,
+    },
     actor: opts.actor ?? "system",
     via: "UI",
   });
 
   // Return raw token ONCE — never stored.
   return { link: rows[0], token: raw };
+}
+
+/** Revoke all active LESSEE links for an estimate (resend / new revision). */
+export async function revokeLesseeLinksForEstimate(opts: {
+  estimateId: string;
+  actor?: string;
+  tenantId?: string;
+  exceptLinkId?: string | null;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { rows } = await q(
+    `UPDATE repair.event_links
+     SET revoked_at = now(), revoked_by = $3
+     WHERE estimate_id = $1 AND tenant_id = $2
+       AND scope = 'LESSEE' AND revoked_at IS NULL
+       AND ($4::uuid IS NULL OR id <> $4)
+     RETURNING id`,
+    [
+      opts.estimateId,
+      tenantId,
+      opts.actor ?? "system",
+      opts.exceptLinkId ?? null,
+    ],
+  );
+  for (const r of rows) {
+    await writeAudit({
+      tenantId,
+      entity: "event_link",
+      entityId: r.id,
+      action: "LINK_REVOKED",
+      after: { reason: "lessee_resend_or_new_revision", estimateId: opts.estimateId },
+      actor: opts.actor ?? "system",
+      via: "UI",
+    });
+  }
+  return rows.length;
 }
 
 export async function revokeEventLink(opts: {
@@ -143,6 +196,9 @@ export async function resolveActiveLink(
       party_ref: row.party_ref,
       issued_at: row.issued_at,
       expires_at: row.expires_at,
+      estimate_id: row.estimate_id ?? null,
+      revision_id: row.revision_id ?? null,
+      granted_document_ids: row.granted_document_ids ?? [],
     },
     event: {
       id: row.event_id,

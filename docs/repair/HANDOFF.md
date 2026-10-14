@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§D Estimate Review r3** | Apply `rlms-phase1-owner-ui-d-estimate-review-r3.bundle`. Requires **`2d987c9`**. Lands tip in bundle README. Hover close; car# lock 409; money commas; send-lessee preview + local outbox. |
+| **§D Estimate Review r4** | Apply `rlms-phase1-owner-ui-d-estimate-review-r4.bundle`. Requires **`d864588`**. Lands tip in bundle README. Qualifier multi-path; header LOCK/EDIT/FREE; lessee token 403; cent reconcile; $0 Send block. |
+| **§D Estimate Review r3** | Prior: `rlms-phase1-owner-ui-d-estimate-review-r3.bundle`. Requires **`2d987c9`** → **`d864588`**. Hover close; car# lock 409; money commas; send-lessee preview + local outbox. |
 | **§D Estimate Review r2** | Prior: `rlms-phase1-owner-ui-d-estimate-review-r2.bundle`. Requires **`f853e48`** → **`2d987c9`**. Licensed AAR CSVs + `npm run repair:import-ref-data`. |
 | **§D Estimate Review (initial)** | Prior: `rlms-phase1-owner-ui-d-estimate-review.bundle` → **`f853e48`**. |
 | **§C Template fields + attach carry** | Prior / signed off: `rlms-phase1-owner-ui-c-template-fields.bundle` → **`468a9db`**. |
@@ -24,7 +25,7 @@
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`2d987c9`**, apply the §D **estimate-review-r3** bundle next.
+If PC is on **`d864588`**, apply the §D **estimate-review-r4** bundle next.
 
 ---
 
@@ -35,7 +36,7 @@ If PC is on **`2d987c9`**, apply the §D **estimate-review-r3** bundle next.
 | **1** | Estimates History `/#/repair` (spec §A) | Done |
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
 | **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Signed off** (`468a9db`) |
-| **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r3 tip** (awaiting Bruce sign-off) |
+| **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r4 tip** (awaiting Bruce sign-off) |
 | 5+ | Documents polish / Lessee, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md)  
@@ -54,7 +55,8 @@ If PC is on **`2d987c9`**, apply the §D **estimate-review-r3** bundle next.
 | N+13 | `rlms-phase1-owner-ui-c-template-fields.bundle` | `8a9378e` | → **`468a9db`** |
 | N+14 | `rlms-phase1-owner-ui-d-estimate-review.bundle` | `468a9db` | → **`f853e48`** |
 | N+15 | `rlms-phase1-owner-ui-d-estimate-review-r2.bundle` | `f853e48` | → **`2d987c9`** |
-| N+16 | **`rlms-phase1-owner-ui-d-estimate-review-r3.bundle`** | **`2d987c9`** | → **(see README)** |
+| N+16 | `rlms-phase1-owner-ui-d-estimate-review-r3.bundle` | `2d987c9` | → **`d864588`** |
+| N+17 | **`rlms-phase1-owner-ui-d-estimate-review-r4.bundle`** | **`d864588`** | → **(see README)** |
 
 ---
 

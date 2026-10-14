@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import PageHeader from "@/components/PageHeader";
 import {
   EstimateDataFile,
@@ -9,20 +10,30 @@ import {
   type DocRow,
 } from "./EstimateDataFile";
 
+function formatDisplayMoney(cents: number): string {
+  const n = Math.trunc(cents) / 100;
+  const abs = Math.abs(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${n < 0 ? "-" : ""}$${abs}`;
+}
+
 export default function LesseeApproval() {
   const [, params] = useRoute("/repair/lessee/:token");
   const token = params?.token ?? "";
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
   const [car, setCar] = useState("");
-  const [allLines, setAllLines] = useState<EstimateLine[]>([]);
   const [ownLines, setOwnLines] = useState<EstimateLine[]>([]);
   const [ownResp, setOwnResp] = useState<string[]>(["6"]);
-  const [total, setTotal] = useState(0);
+  const [totalCents, setTotalCents] = useState(0);
+  const [amountMoney, setAmountMoney] = useState("$0.00");
   const [header, setHeader] = useState<Record<string, unknown>>({});
   const [headerFields, setHeaderFields] = useState<HeaderFieldDef[]>([]);
   const [documents, setDocuments] = useState<DocRow[]>([]);
   const [note, setNote] = useState("");
+  const [comment, setComment] = useState("");
 
   useEffect(() => {
     if (!token) return;
@@ -31,19 +42,26 @@ export default function LesseeApproval() {
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || "Failed to load");
         setCar(`${data.event?.car_mark ?? ""} ${data.event?.car_number ?? ""}`.trim());
+        // Only Resp 6 lines — never allLines / owner / internal
         const own = (data.lines ?? []) as EstimateLine[];
-        const all = (data.allLines ?? data.lines ?? []) as EstimateLine[];
         setOwnLines(own);
-        setAllLines(all.length ? all : own);
         setOwnResp(data.ownRespCodes ?? ["6"]);
         setHeader(data.header ?? {});
         setHeaderFields(data.headerFields ?? []);
         setDocuments(data.documents ?? []);
-        const t =
-          data.amountPresented != null
-            ? Number(data.amountPresented)
-            : own.reduce((s, l) => s + Number(l.total ?? 0), 0);
-        setTotal(t);
+        const cents =
+          data.amountPresentedCents != null
+            ? Math.trunc(Number(data.amountPresentedCents))
+            : own.reduce(
+                (s, l) =>
+                  s +
+                  (l.total_cents != null
+                    ? Math.trunc(Number(l.total_cents))
+                    : Math.round(Number(l.total ?? 0) * 100)),
+                0,
+              );
+        setTotalCents(cents);
+        setAmountMoney(data.amountMoney ?? formatDisplayMoney(cents));
         setNote(data.note ?? "");
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
@@ -56,7 +74,7 @@ export default function LesseeApproval() {
       const res = await fetch(`/api/repair/lessee/${token}/decide`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ decision, comment: comment.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Decision failed");
@@ -85,7 +103,7 @@ export default function LesseeApproval() {
           <EstimateDataFile
             header={header}
             headerFields={headerFields}
-            lines={allLines}
+            lines={ownLines}
             documents={documents}
             readOnly
             canPencilEdit={false}
@@ -95,12 +113,20 @@ export default function LesseeApproval() {
             }}
           />
 
-          <div className="border-t border-border pt-4 space-y-2">
+          <div className="border-t border-border pt-4 space-y-3">
             <p className="text-sm">
               Your responsibility lines ({ownResp.join(", ")}):{" "}
               <strong>{ownLines.length}</strong> · presented total{" "}
-              <strong>${total.toFixed(2)}</strong>
+              <strong className="tabular-nums">{amountMoney}</strong>{" "}
+              <span className="text-xs text-muted-foreground">({totalCents}¢)</span>
             </p>
+            <Textarea
+              className="text-sm"
+              rows={2}
+              placeholder="Comment (optional for approve; recommended for dispute)"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+            />
             <div className="flex gap-2">
               <Button onClick={() => decide("APPROVE")}>Approve my lines</Button>
               <Button variant="outline" onClick={() => decide("REJECT")}>

@@ -17,7 +17,8 @@ const autoTable =
     : (autoTableImport as { default: typeof autoTableImport }).default;
 import { getStorageProvider } from "../providers/storage";
 import type { OutboundEmail } from "../providers/email";
-import { formatDollars } from "./money";
+import { formatCentsAsDollars, formatCentsAsMoney } from "./money";
+import { computeLesseeTotals } from "./lessee-totals";
 
 export type DocRow = {
   id: string;
@@ -157,42 +158,100 @@ async function generateEstimatePdf(opts: {
   revisionId: string;
   actor: string;
   carLabel: string;
-}): Promise<DocRow> {
-  const { rows: lines } = await q(
-    `SELECT line_no, aar_job_code, qualifier, why_made, resp_code,
-            labor, material, total, repair_category
-     FROM repair.estimate_lines
-     WHERE revision_id = $1
-     ORDER BY line_no ASC`,
-    [opts.revisionId],
-  );
+  estimateId?: string;
+  lesseeOnly?: boolean;
+}): Promise<{ doc: DocRow; lesseeTotalCents: number }> {
+  let lesseeTotalCents = 0;
+  let bodyRows: string[][] = [];
+
+  if (opts.lesseeOnly && opts.estimateId) {
+    const totals = await computeLesseeTotals({
+      estimateId: opts.estimateId,
+      revisionId: opts.revisionId,
+      tenantId: opts.tenantId,
+    });
+    if (totals.ok) {
+      lesseeTotalCents = totals.bundle.totalCents;
+      bodyRows = totals.bundle.lines.map((l) => [
+        String(l.display_line_no ?? l.line_no),
+        l.location_on_car ?? "",
+        l.quantity ?? "",
+        l.condition_code ?? "",
+        l.aar_job_code ?? "",
+        l.qualifier ?? "",
+        l.why_made ?? "",
+        l.removed_job_code ?? "",
+        l.removed_qualifier ?? "",
+        "6",
+        (l.description ?? "").slice(0, 40),
+        formatCentsAsDollars(l.labor_cents),
+        formatCentsAsDollars(l.material_cents),
+        formatCentsAsDollars(l.amount_cents),
+        l.aar_component_id ?? "",
+      ]);
+    }
+  } else {
+    const { rows: lines } = await q(
+      `SELECT line_no, aar_job_code, qualifier, why_made, resp_code,
+              labor_cents, material_cents, labor, material, total, repair_category,
+              location_on_car, quantity, condition_code, removed_job_code,
+              removed_qualifier, description, aar_component_id
+       FROM repair.estimate_lines
+       WHERE revision_id = $1
+       ORDER BY line_no ASC`,
+      [opts.revisionId],
+    );
+    const filtered = opts.lesseeOnly
+      ? lines.filter((l) => String(l.resp_code ?? "") === "6")
+      : lines;
+    for (const l of filtered) {
+      const labor =
+        l.labor_cents != null
+          ? Math.trunc(Number(l.labor_cents))
+          : Math.round(Number(l.labor ?? 0) * 100);
+      const material =
+        l.material_cents != null
+          ? Math.trunc(Number(l.material_cents))
+          : Math.round(Number(l.material ?? 0) * 100);
+      const amount = labor + material;
+      if (String(l.resp_code ?? "") === "6") lesseeTotalCents += amount;
+      bodyRows.push([
+        String(l.line_no),
+        String(l.location_on_car ?? ""),
+        String(l.quantity ?? ""),
+        String(l.condition_code ?? ""),
+        String(l.aar_job_code ?? ""),
+        String(l.qualifier ?? ""),
+        String(l.why_made ?? ""),
+        String(l.removed_job_code ?? ""),
+        String(l.removed_qualifier ?? ""),
+        String(l.resp_code ?? ""),
+        String(l.description ?? l.repair_category ?? "").slice(0, 40),
+        formatCentsAsDollars(labor),
+        formatCentsAsDollars(material),
+        formatCentsAsDollars(amount),
+        String(l.aar_component_id ?? ""),
+      ]);
+    }
+  }
 
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   doc.setFontSize(14);
-  doc.text("Repair estimate (generated — shop did not attach a PDF)", 40, 40);
+  doc.text("Repair estimate — lessee responsibility (Resp 6)", 40, 40);
   doc.setFontSize(10);
   doc.text(`Car: ${opts.carLabel}`, 40, 58);
-  doc.text(
-    `Generated for lessee review — pass-through preferred when shop PDF exists.`,
-    40,
-    72,
-  );
+  doc.text(`Lessee total: ${formatCentsAsMoney(lesseeTotalCents)}`, 40, 72);
+  // Machine-readable marker for cent reconciliation (also embedded in content stream)
+  doc.text(`LESSEE_TOTAL_CENTS:${lesseeTotalCents}`, 40, 84);
 
   autoTable(doc, {
-    startY: 90,
-    head: [["Line", "Resp", "Job", "Qual", "Why", "Category", "Labor", "Mat", "Total"]],
-    body: lines.map((l) => [
-      String(l.line_no),
-      String(l.resp_code ?? ""),
-      String(l.aar_job_code ?? ""),
-      String(l.qualifier ?? ""),
-      String(l.why_made ?? ""),
-      String(l.repair_category ?? ""),
-      formatDollars(l.labor as number | string | null),
-      formatDollars(l.material as number | string | null),
-      formatDollars(l.total as number | string | null),
-    ]),
-    styles: { fontSize: 8 },
+    startY: 96,
+    head: [[
+      "Item", "Loc", "Qty", "C", "AJOB", "QA", "WM", "RJOB", "QR", "R",
+      "Description", "Labor", "Mat", "Amount", "CID",
+    ]],
+    body: bodyRows,
+    styles: { fontSize: 7 },
   });
 
   const bytes = Buffer.from(doc.output("arraybuffer"));
@@ -221,7 +280,7 @@ async function generateEstimatePdf(opts: {
       opts.actor,
     ],
   );
-  return rows[0];
+  return { doc: rows[0], lesseeTotalCents };
 }
 
 export type ResolvedLesseeAttachments = {
@@ -230,11 +289,14 @@ export type ResolvedLesseeAttachments = {
   usedGeneratedPdf: boolean;
   shopOriginalCount: number;
   included500Byte: boolean;
+  /** Resp 6 total cents used in PDF / reconciliation */
+  lesseeTotalCents: number;
 };
 
 /**
  * Build lessee email attachments:
  * shop originals + matching 500-byte; PDF only if shop sent none.
+ * When lesseeOnly, PDF contains Resp 6 lines only with cent-reconciled total.
  */
 export async function resolveLesseeAttachments(opts: {
   eventId: string;
@@ -243,6 +305,8 @@ export async function resolveLesseeAttachments(opts: {
   documentIds?: string[];
   actor: string;
   carLabel: string;
+  estimateId?: string;
+  lesseeOnly?: boolean;
 }): Promise<ResolvedLesseeAttachments> {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const shopDocs = await listShopOriginalDocuments({
@@ -266,6 +330,31 @@ export async function resolveLesseeAttachments(opts: {
     docs.push(aarDoc);
   }
 
+  let lesseeTotalCents = 0;
+  if (opts.estimateId) {
+    const t = await computeLesseeTotals({
+      estimateId: opts.estimateId,
+      revisionId: opts.revisionId,
+      tenantId,
+    });
+    if (t.ok) lesseeTotalCents = t.bundle.totalCents;
+  } else {
+    const { rows } = await q(
+      `SELECT labor_cents, material_cents, labor, material FROM repair.estimate_lines
+       WHERE revision_id = $1 AND resp_code = '6'`,
+      [opts.revisionId],
+    );
+    for (const l of rows) {
+      lesseeTotalCents +=
+        (l.labor_cents != null
+          ? Math.trunc(Number(l.labor_cents))
+          : Math.round(Number(l.labor ?? 0) * 100)) +
+        (l.material_cents != null
+          ? Math.trunc(Number(l.material_cents))
+          : Math.round(Number(l.material ?? 0) * 100));
+    }
+  }
+
   const attachments: NonNullable<OutboundEmail["attachments"]> = docs.map((d) => ({
     filename: filenameOf(d),
     contentType: d.mime || "application/octet-stream",
@@ -276,20 +365,26 @@ export async function resolveLesseeAttachments(opts: {
   let usedGeneratedPdf = false;
   const ids = docs.map((d) => d.id);
 
-  if (!docs.some(isPdf)) {
+  // Always generate a lessee PDF for cent-reconciled preview when lesseeOnly,
+  // or when shop sent no PDF.
+  const needGenerated = opts.lesseeOnly || !docs.some(isPdf);
+  if (needGenerated) {
     const pdf = await generateEstimatePdf({
       tenantId,
       eventId: opts.eventId,
       revisionId: opts.revisionId,
       actor: opts.actor,
       carLabel: opts.carLabel,
+      estimateId: opts.estimateId,
+      lesseeOnly: opts.lesseeOnly !== false,
     });
-    ids.push(pdf.id);
+    lesseeTotalCents = pdf.lesseeTotalCents || lesseeTotalCents;
+    ids.push(pdf.doc.id);
     attachments.push({
-      filename: filenameOf(pdf),
+      filename: filenameOf(pdf.doc),
       contentType: "application/pdf",
-      storageKey: pdf.storage_key,
-      size: Number(pdf.size),
+      storageKey: pdf.doc.storage_key,
+      size: Number(pdf.doc.size),
     });
     usedGeneratedPdf = true;
   }
@@ -300,5 +395,6 @@ export async function resolveLesseeAttachments(opts: {
     usedGeneratedPdf,
     shopOriginalCount: shopDocs.length,
     included500Byte: Boolean(aarDoc),
+    lesseeTotalCents,
   };
 }

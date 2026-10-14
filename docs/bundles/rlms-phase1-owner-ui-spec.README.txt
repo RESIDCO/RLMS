@@ -3,7 +3,7 @@ RLMS repair — Phase 1 Owner UI Spec (Step 1 — docs only)
 Requires tip: f4e65cc1fe96aa2cb1349229b2fe0462176f7463
 (UI review feedback — BO rules, header pencil, lessee layout)
 
-Bundle tip (after apply): SEE_PIN_COMMIT
+Docs content tip: ffd1867cf7fa14d929ef0fb2c2302335ec31829f
 Bundle size: SEE_STORE_README
 SHA-256: SEE_STORE_README
 

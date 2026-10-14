@@ -1,0 +1,37 @@
+RLMS repair — Owner UI wreck dual-track SPEC (docs only)
+====================================================================
+Requires tip: 0c0be23f9187a4ccf97f1ef172a5dfe03bd07542
+(§D Estimate Review r5)
+
+Canonical Bundle tip / size / SHA-256: see Project store copy
+  /cursor/stores/self/docs/bundles/rlms-phase1-owner-ui-wreck-spec.README.txt
+(or the same filenames next to this README after Bruce receives the bundle zip).
+
+What this delivers
+----------------------------------------------------------------
+  Docs only — NO wreck UI, load APIs, or validation code.
+
+  1) docs/repair/OWNER_UI_WRECK.md
+     - Bruce's six corrections WIN (one event; two shop files;
+       Resp 3 HARD REJECT vs flag; quarterly rates; owner-only
+       Rule 107 DV; JIC deadline tracker from shop arrival)
+     - HARD REJECT critical billing fields listed with App. G / Railinc
+       / Manual_Gap_Review citations
+     - OPEN: gaps from missing WRECK_DUAL_TRACK.md
+
+  2) docs/owner-ui-wreck.md — short top-level pointer
+
+  3) docs/repair/HANDOFF.md — wreck spec next; build after §D r5 sign-off
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect 0c0be23… (§D r5)
+  # If still on f911faa, pull rlms-phase1-owner-ui-d-estimate-review-r5.bundle first
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-wreck-spec.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-wreck-spec.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+Then open: docs\repair\OWNER_UI_WRECK.md
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.
+No wreck feature build until §D r5 sign-off + Bruce accepts this spec.

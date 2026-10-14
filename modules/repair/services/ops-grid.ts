@@ -265,6 +265,8 @@ export type EstimateGridFilters = {
   minTotal?: number;
   maxTotal?: number;
   includeHidden?: boolean;
+  /** When true, include Queued shop-only drafts (owner_visible=false) */
+  includeShopDraft?: boolean;
   tenantId?: string;
   limit?: number;
   offset?: number;
@@ -275,14 +277,35 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
   const limit = Math.min(filters.limit ?? 200, 1000);
   const offset = filters.offset ?? 0;
 
+  // Manual_Gap #16: default open statuses when none specified
+  const defaultOpen = [
+    "QUEUED",
+    "AWAITING_APPROVAL",
+    "REVISION_REQUESTED",
+    "ADJUSTMENT_FOR_APPROVAL",
+    "APPROVED",
+    "AWAITING_TERMINATE",
+    "AWAITING_DELETE",
+  ];
+  const statusCodes =
+    filters.statusCodes?.length ? filters.statusCodes : defaultOpen;
+
   const { rows } = await q(
     `SELECT e.id AS estimate_id, e.event_id, e.current_revision, e.locked,
             e.completed_at, e.created_at,
             s.code AS status_code, s.display_name AS status_name,
             s.owner_visible, s.hidden,
-            ev.car_mark, ev.car_number, ev.shop_id,
+            ev.car_mark, ev.car_number, ev.shop_id, ev.is_wreck, ev.is_tank_car,
+            ev.yard_arrived_at, ev.target_outbound_at, ev.actual_outbound_at,
             sh.reporting_mark AS shop_mark, sh.name AS shop_name,
-            r.labor, r.material, r.total
+            r.labor, r.material, r.total,
+            EXISTS (
+              SELECT 1 FROM repair.estimate_load_cars lc
+              JOIN repair.estimate_load_findings f ON f.load_run_id = lc.load_run_id
+              WHERE lc.estimate_id = e.id AND f.severity IN ('ERROR','WARNING')
+            ) AS has_issues,
+            (SELECT COUNT(*)::int FROM repair.documents d
+             WHERE d.event_id = e.event_id AND d.deleted_at IS NULL) AS attachment_count
      FROM repair.estimates e
      JOIN repair.statuses s ON s.id = e.status_id
      JOIN repair.events ev ON ev.id = e.event_id
@@ -292,6 +315,7 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
      WHERE e.tenant_id = $1
        AND (e.deleted_at IS NULL OR $2::boolean = true)
        AND (s.hidden = false OR $2::boolean = true)
+       AND (s.owner_visible = true OR $2::boolean = true OR $13::boolean = true)
        AND ($3::text[] IS NULL OR s.code = ANY($3))
        AND ($4::uuid IS NULL OR ev.shop_id = $4)
        AND ($5::text IS NULL OR upper(ev.car_mark) = upper($5))
@@ -305,7 +329,7 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
     [
       tenantId,
       filters.includeHidden ?? false,
-      filters.statusCodes?.length ? filters.statusCodes : null,
+      statusCodes,
       filters.shopId ?? null,
       filters.carMark ?? null,
       filters.carNumber ?? null,
@@ -315,6 +339,7 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
       filters.maxTotal ?? null,
       limit,
       offset,
+      filters.includeShopDraft ?? false,
     ],
   );
 

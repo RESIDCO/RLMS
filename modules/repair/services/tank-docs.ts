@@ -18,6 +18,15 @@ async function gateEnabled(tenantId: string): Promise<boolean> {
   return true;
 }
 
+/** Manual_Gap #11: gate applies to tank cars only (is_tank_car on event). */
+async function eventIsTankCar(eventId: string): Promise<boolean> {
+  const { rows } = await q(
+    `SELECT is_tank_car FROM repair.events WHERE id = $1`,
+    [eventId],
+  );
+  return Boolean(rows[0]?.is_tank_car);
+}
+
 export async function setTankCarDocGate(opts: {
   tenantId?: string;
   enabled: boolean;
@@ -52,6 +61,9 @@ export async function ensureTankPacket(opts: {
   if (!(await gateEnabled(tenantId))) {
     return { ok: true as const, skipped: true as const, reason: "gate_disabled" };
   }
+  if (!(await eventIsTankCar(opts.eventId))) {
+    return { ok: true as const, skipped: true as const, reason: "not_tank_car" };
+  }
   const { rows } = await q(
     `INSERT INTO repair.tank_doc_packets
        (tenant_id, event_id, estimate_id, status, created_by)
@@ -81,12 +93,19 @@ export async function shopMarkTankDocsComplete(opts: {
   }
   if (!eventId) return { ok: false as const, status: 400, error: "eventId required" };
   if (!(await gateEnabled(tenantId))) {
-    return { ok: true as const, skipped: true as const };
+    return { ok: true as const, skipped: true as const, reason: "gate_disabled" };
+  }
+  if (!(await eventIsTankCar(eventId))) {
+    return { ok: true as const, skipped: true as const, reason: "not_tank_car" };
   }
 
   const ensured = await ensureTankPacket({ eventId, tenantId, actor: opts.actor });
   if (!ensured.ok || ensured.skipped || !("packet" in ensured)) {
-    return { ok: false as const, status: 500, error: "Could not ensure tank packet" };
+    return {
+      ok: false as const,
+      status: 500,
+      error: "Could not ensure tank packet",
+    };
   }
   const packet = ensured.packet;
 
@@ -148,6 +167,7 @@ export async function ownerDecideTankDocs(opts: {
     return { ok: false as const, status: 400, error: "Reject reason required" };
   }
   const status = opts.decision === "VERIFY" ? "VERIFIED" : "REJECTED";
+  // Owner may verify first (PENDING_SHOP) or after shop complete (PENDING_OWNER)
   const { rows } = await q(
     `UPDATE repair.tank_doc_packets
      SET status = $1,
@@ -155,12 +175,14 @@ export async function ownerDecideTankDocs(opts: {
          owner_decided_by = $2,
          owner_decision = $3,
          owner_reason = $4
-     WHERE id = $5 AND tenant_id = $6 AND status = 'PENDING_OWNER' AND deleted_at IS NULL
+     WHERE id = $5 AND tenant_id = $6
+       AND status IN ('PENDING_OWNER', 'PENDING_SHOP')
+       AND deleted_at IS NULL
      RETURNING *`,
     [status, opts.actor, opts.decision, opts.reason ?? null, opts.packetId, tenantId],
   );
   if (!rows[0]) {
-    return { ok: false as const, status: 409, error: "Packet not pending owner" };
+    return { ok: false as const, status: 409, error: "Packet not pending owner/shop" };
   }
   await q(
     `INSERT INTO repair.tank_doc_decisions
@@ -199,13 +221,14 @@ export async function assertOutboundAllowed(opts: {
 }): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   if (!(await gateEnabled(tenantId))) return { ok: true };
+  // Manual_Gap #11: only tank cars
+  if (!(await eventIsTankCar(opts.eventId))) return { ok: true };
   const { rows } = await q(
     `SELECT status FROM repair.tank_doc_packets
      WHERE event_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
     [opts.eventId, tenantId],
   );
   if (!rows[0]) {
-    // Gate on but no packet yet — still block until verified path created+verified
     return {
       ok: false,
       status: 409,
@@ -220,4 +243,33 @@ export async function assertOutboundAllowed(opts: {
     };
   }
   return { ok: true };
+}
+
+/** Owner may verify first (before shop marks complete) — Manual_Gap #11 */
+export async function ownerVerifyTankDocsFirst(opts: {
+  eventId: string;
+  actor: string;
+  tenantId?: string;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  if (!(await gateEnabled(tenantId))) {
+    return { ok: true as const, skipped: true as const };
+  }
+  if (!(await eventIsTankCar(opts.eventId))) {
+    return { ok: true as const, skipped: true as const, reason: "not_tank_car" };
+  }
+  const ensured = await ensureTankPacket({
+    eventId: opts.eventId,
+    tenantId,
+    actor: opts.actor,
+  });
+  if (!ensured.ok || ensured.skipped || !("packet" in ensured)) {
+    return { ok: false as const, status: 500, error: "Could not ensure packet" };
+  }
+  return ownerDecideTankDocs({
+    packetId: String(ensured.packet.id),
+    decision: "VERIFY",
+    actor: opts.actor,
+    tenantId,
+  });
 }

@@ -62,6 +62,20 @@ import {
   buildMonthlyBillSummary,
   getPhase2Hooks,
 } from "./services/ops-grid";
+import {
+  assertAttachmentAllowed,
+  shopRequestDeleteEstimate,
+  approveDeleteToVoid,
+  bulkSubmitForApproval,
+  shopRequestTerminate,
+  requestDispo,
+  updateResponsibility,
+  exportEstimatesAar500,
+  setActualOutboundAndComplete,
+  runRailincValidation,
+  setEventTankCar,
+} from "./services/gap-lifecycle-05";
+import { ownerVerifyTankDocsFirst } from "./services/tank-docs";
 import { listResponsibilityCodes } from "./services/categories";
 import {
   sendLesseeApprovalRequest,
@@ -650,6 +664,26 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       }
     },
   );
+
+  app.post("/api/repair/e/:token/request-delete", async (req, res) => {
+    const result = await shopRequestDeleteEstimate({
+      rawToken: String(req.params.token),
+      actor: String(req.body?.email ?? "shop@unknown"),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/e/:token/request-terminate", async (req, res) => {
+    const result = await shopRequestTerminate({
+      rawToken: String(req.params.token),
+      actor: String(req.body?.email ?? "shop@unknown"),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
 }
 
 function nextShopActions(
@@ -1507,11 +1541,18 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     if (!uid) return;
     const result = await bulkCreateBadOrders({
       pastedCars: String(req.body?.cars ?? req.body?.pastedCars ?? ""),
+      headerInitials: req.body?.headerInitials
+        ? String(req.body.headerInitials)
+        : undefined,
       shopId: req.body?.shopId ? String(req.body.shopId) : undefined,
       rule: req.body?.rule === "RULE_107" ? "RULE_107" : "RULE_1",
       shoppingReason: req.body?.shoppingReason
         ? String(req.body.shoppingReason)
         : undefined,
+      boCity: req.body?.boCity ? String(req.body.boCity) : undefined,
+      boState: req.body?.boState ? String(req.body.boState) : undefined,
+      destCity: req.body?.destCity ? String(req.body.destCity) : undefined,
+      destState: req.body?.destState ? String(req.body.destState) : undefined,
       actor: actorFrom(req),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
@@ -1596,8 +1637,11 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       lineId: req.body?.lineId ? String(req.body.lineId) : undefined,
       parentId: req.body?.parentId ? String(req.body.parentId) : undefined,
       body: String(req.body?.body ?? ""),
+      subject: req.body?.subject ? String(req.body.subject) : undefined,
+      issue: req.body?.issue ? String(req.body.issue) : undefined,
       author: actorFrom(req),
-      notify: req.body?.notify !== false,
+      // Manual_Gap #8: opt-in (default false)
+      notify: req.body?.notify === true,
       notifyEmails: Array.isArray(req.body?.notifyEmails)
         ? req.body.notifyEmails.map(String)
         : undefined,
@@ -1853,5 +1897,154 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       hooks: await getPhase2Hooks(),
       note: "Phase 2 design hooks only — carMARQS/CROP not built in Phase 1",
     });
+  });
+
+  // ── Manual_Gap_Review lifecycle-05 reconciliations ──
+
+  app.post("/api/repair/estimates/bulk-submit", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const ids = Array.isArray(req.body?.estimateIds)
+      ? req.body.estimateIds.map(String)
+      : [];
+    return res.json(
+      await bulkSubmitForApproval({ estimateIds: ids, actor: actorFrom(req) }),
+    );
+  });
+
+  app.post("/api/repair/estimates/:id/request-delete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopRequestDeleteEstimate({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/approve-delete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await approveDeleteToVoid({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/request-terminate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopRequestTerminate({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/dispo/request", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const eventIds = Array.isArray(req.body?.eventIds)
+      ? req.body.eventIds.map(String)
+      : req.body?.eventId
+        ? [String(req.body.eventId)]
+        : [];
+    const result = await requestDispo({
+      eventIds,
+      actor: actorFrom(req),
+      instructions: req.body?.instructions
+        ? String(req.body.instructions)
+        : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/update-responsibility", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const lineUpdates = Array.isArray(req.body?.lineUpdates)
+      ? req.body.lineUpdates.map((u: { lineId?: string; respCode?: string }) => ({
+          lineId: String(u.lineId ?? ""),
+          respCode: String(u.respCode ?? ""),
+        }))
+      : [];
+    const result = await updateResponsibility({
+      estimateId: String(req.params.id),
+      lineUpdates,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/export-aar", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const ids = Array.isArray(req.body?.estimateIds)
+      ? req.body.estimateIds.map(String)
+      : [];
+    return res.json(await exportEstimatesAar500({ estimateIds: ids }));
+  });
+
+  app.get("/api/repair/estimates/:id/railinc-validate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await runRailincValidation({
+      estimateId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/events/:id/tank-car", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setEventTankCar({
+      eventId: String(req.params.id),
+      isTankCar: Boolean(req.body?.isTankCar),
+      actor: actorFrom(req),
+    });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/events/:id/tank-docs/verify-first", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await ownerVerifyTankDocsFirst({
+      eventId: String(req.params.id),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status ?? 400).json(result);
+    return res.json(result);
+  });
+
+  app.post("/api/repair/events/:id/outbound/actual-complete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setActualOutboundAndComplete({
+      eventId: String(req.params.id),
+      actualDate: String(req.body?.actualDate ?? ""),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/attachments/assert-allowed", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await assertAttachmentAllowed({
+      filename: String(req.body?.filename ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 }

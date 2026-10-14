@@ -17,7 +17,7 @@ npm run repair:migrate:local
 That script:
 
 1. Applies `modules/repair/dev/local-public-stubs.sql` (dev-only public stubs for an empty local DB — never against prod)
-2. Applies every file in this folder in date/name order (foundation → events → catalog → seeds → POD/invoice → ready-to-close → monthly close → CRB billing rules → inbound invoice audit → Q18–Q20 invoice rules → estimate load → statuses/BO → collab/tank → ops grid)
+2. Applies every file in this folder in date/name order (foundation → events → catalog → seeds → POD/invoice → ready-to-close → monthly close → CRB billing rules → inbound invoice audit → Q18–Q20 invoice rules → estimate load → statuses/BO → collab/tank → ops grid → estimate lifecycle 05)
 
 Do **not** create a Supabase branch. Do **not** run these via drizzle-kit (`drizzle.config.ts` points at sqlite `./migrations` for host tooling and is unrelated).
 

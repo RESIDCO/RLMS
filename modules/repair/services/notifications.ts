@@ -156,7 +156,7 @@ export async function resolveRecipients(opts: {
   };
 }
 
-export async function notify(opts: NotifyOpts) {
+export async function notify(opts: NotifyOpts & { amountCents?: number }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const equipment = await equipmentLabel(opts.eventId);
   const resolved = await resolveRecipients({
@@ -166,6 +166,43 @@ export async function notify(opts: NotifyOpts) {
     extraTo: opts.extraTo,
     forceExclude: opts.forceExclude,
   });
+
+  // Manual_Gap #20: $ threshold on notification_rules
+  if (opts.amountCents != null && resolved.rule) {
+    const min = resolved.rule.min_amount_cents;
+    if (min != null && Number(min) > 0 && opts.amountCents < Number(min)) {
+      return {
+        ok: true as const,
+        skipped: true as const,
+        reason: "below_min_amount",
+        logId: null,
+        to: [] as string[],
+        excludedShop: resolved.excludedShop,
+        providerMessageId: null,
+      };
+    }
+  }
+
+  // Manual_Gap #20: per-user email opt-out
+  let to = resolved.to;
+  if (to.length) {
+    const { rows: prefs } = await q(
+      `SELECT email, opted_out, opt_out_types FROM repair.user_email_prefs
+       WHERE tenant_id = $1 AND deleted_at IS NULL AND lower(email) = ANY($2::text[])`,
+      [tenantId, to.map((e) => e.toLowerCase())],
+    ).catch(() => ({ rows: [] as Array<{ email: string; opted_out: boolean; opt_out_types: unknown }> }));
+    const blocked = new Set<string>();
+    for (const p of prefs) {
+      const email = String(p.email).toLowerCase();
+      if (p.opted_out) {
+        blocked.add(email);
+        continue;
+      }
+      const types = Array.isArray(p.opt_out_types) ? p.opt_out_types.map(String) : [];
+      if (types.includes(opts.type)) blocked.add(email);
+    }
+    to = to.filter((e) => !blocked.has(e.toLowerCase()));
+  }
 
   const fill = (tmpl: string) =>
     tmpl
@@ -179,7 +216,17 @@ export async function notify(opts: NotifyOpts) {
     opts.bodyText ??
     fill(String(resolved.rule?.template_body ?? `${opts.type} for {Equipment}`));
 
-  const to = resolved.to.length > 0 ? resolved.to : ["unconfigured@repair.local"];
+  if (to.length === 0) {
+    return {
+      ok: true as const,
+      skipped: true as const,
+      reason: "all_recipients_opted_out_or_empty",
+      logId: null,
+      to: [] as string[],
+      excludedShop: resolved.excludedShop,
+      providerMessageId: null,
+    };
+  }
   const send = await getEmailProvider().send({
     tenantId,
     eventId: opts.eventId,

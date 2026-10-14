@@ -3,6 +3,7 @@ import { DEFAULT_TENANT_ID, q, withTransaction } from "../db";
 import { requireVcfCar } from "./vcf";
 import { getStatusByCode } from "./status-machine";
 import { writeAudit } from "./audit";
+import { notify } from "./notifications";
 
 export type CreateBadOrderInput = {
   tenantId?: string;
@@ -17,6 +18,13 @@ export type CreateBadOrderInput = {
   shopId?: string;
   isWreck?: boolean;
   actor?: string;
+  /** Manual_Gap #6 required B/O fields */
+  boDate?: string;
+  boCity?: string;
+  boState?: string;
+  destCity?: string;
+  destState?: string;
+  isTankCar?: boolean;
 };
 
 export async function createBadOrder(input: CreateBadOrderInput) {
@@ -45,8 +53,9 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     const event = await client.query(
       `INSERT INTO repair.events
          (tenant_id, car_mark, car_number, rlms_railcar_id, shop_id, rule,
-          damaging_road, ddct_event_id, ddct_incident_id, origin, status_id, is_wreck, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'BO',$10,$11,$12)
+          damaging_road, ddct_event_id, ddct_incident_id, origin, status_id,
+          is_wreck, is_tank_car, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'BO',$10,$11,$12,$13)
        RETURNING *`,
       [
         tenantId,
@@ -60,6 +69,7 @@ export async function createBadOrder(input: CreateBadOrderInput) {
         input.ddctIncidentId ?? null,
         statusId,
         Boolean(input.isWreck || input.shoppingReason === "WRECK"),
+        Boolean(input.isTankCar),
         input.actor ?? "system",
       ],
     );
@@ -67,14 +77,20 @@ export async function createBadOrder(input: CreateBadOrderInput) {
 
     const bo = await client.query(
       `INSERT INTO repair.bad_orders
-         (tenant_id, event_id, source, shopping_reason, created_by)
-       VALUES ($1,$2,$3,$4,$5)
+         (tenant_id, event_id, source, shopping_reason, bo_date, bo_city, bo_state,
+          dest_city, dest_state, lifecycle_status, created_by)
+       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6,$7,$8,$9,'QUEUED',$10)
        RETURNING *`,
       [
         tenantId,
         ev.id,
         source,
         input.shoppingReason ?? null,
+        input.boDate ?? null,
+        input.boCity ?? null,
+        input.boState ?? null,
+        input.destCity ?? null,
+        input.destState ?? null,
         input.actor ?? "system",
       ],
     );
@@ -99,6 +115,15 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     actor: input.actor ?? "system",
     via: "UI",
   });
+
+  // Manual_Gap #6: creating a B/O emails both shop and owner
+  await notify({
+    tenantId,
+    eventId: String(result.event.id),
+    type: "BO_CREATED",
+    bodyText: `Bad order created for ${input.carMark} ${input.carNumber}. Reason: ${input.shoppingReason ?? "(none)"}.`,
+    actor: input.actor ?? "system",
+  }).catch(() => undefined);
 
   return { ok: true as const, ...result };
 }

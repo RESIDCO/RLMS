@@ -524,8 +524,9 @@ export async function loadEstimateAar(opts: {
     if (!event) {
       findings.push({
         severity: "WARNING",
-        code: "NO_OPEN_EVENT",
-        message: `No open event for ${car.carMark} ${car.carNumber}; owner must link or create BO`,
+        // Manual_Gap #2 wording
+        code: "NO_BAD_ORDERS_FOUND",
+        message: `No Bad Orders Found for ${car.carMark} ${car.carNumber}`,
         carMark: car.carMark,
         carNumber: car.carNumber,
       });
@@ -726,6 +727,18 @@ export async function loadEstimateAar(opts: {
         opts.actor,
       ],
     );
+
+    // Manual_Gap #6: loading an estimate and picking the B/O also accepts it
+    await q(
+      `UPDATE repair.bad_orders
+       SET lifecycle_status = CASE
+             WHEN lifecycle_status IN ('QUEUED', 'ACCEPTED_PENDING') THEN 'ACCEPTED_WORKING'
+             ELSE lifecycle_status
+           END
+       WHERE event_id = $1 AND deleted_at IS NULL`,
+      [event.id],
+    ).catch(() => undefined);
+
     applied.push({
       carMark: car.carMark,
       carNumber: car.carNumber,

@@ -40,7 +40,12 @@ export async function addComment(opts: {
   lineId?: string;
   parentId?: string;
   body: string;
+  /** Manual_Gap #8 — Subject on comment thread */
+  subject?: string;
+  /** Manual_Gap #8 — Issue classification */
+  issue?: string;
   author: string;
+  /** Opt-in per comment (default false — RS "Send email notice…") */
   notify?: boolean;
   notifyRoles?: string[];
   notifyEmails?: string[];
@@ -61,15 +66,16 @@ export async function addComment(opts: {
     }
   }
 
-  const shouldNotify = opts.notify !== false;
+  // Manual_Gap #8: emailing is opt-in per comment (default off)
+  const shouldNotify = opts.notify === true;
   const notifyRoles = opts.notifyRoles ?? ["reviewer", "mech_manager"];
   const notifyEmails = opts.notifyEmails ?? [];
 
   const { rows } = await q(
     `INSERT INTO repair.comments
        (tenant_id, event_id, estimate_id, revision_id, line_id, parent_id,
-        body, notify_roles, notify_emails, did_notify, author, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$11)
+        body, subject, issue, notify_roles, notify_emails, did_notify, author, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$13)
      RETURNING *`,
     [
       tenantId,
@@ -79,6 +85,8 @@ export async function addComment(opts: {
       opts.lineId ?? null,
       opts.parentId ?? null,
       body,
+      opts.subject?.trim() || null,
+      opts.issue?.trim() || null,
       JSON.stringify(notifyRoles),
       JSON.stringify(notifyEmails),
       false,

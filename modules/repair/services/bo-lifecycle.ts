@@ -21,6 +21,13 @@ export async function shopAcknowledge(rawToken: string, actorEmail: string) {
      WHERE id = $2`,
     [actorEmail, resolved.event.id],
   );
+  await q(
+    `UPDATE repair.bad_orders
+     SET lifecycle_status = 'ACCEPTED_PENDING'
+     WHERE event_id = $1 AND deleted_at IS NULL
+       AND lifecycle_status = 'QUEUED'`,
+    [resolved.event.id],
+  ).catch(() => undefined);
   await writeAudit({
     tenantId: String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID),
     entity: "event",
@@ -52,6 +59,12 @@ export async function shopDeclineWork(
      WHERE id = $3`,
     [actorEmail, text, resolved.event.id],
   );
+  await q(
+    `UPDATE repair.bad_orders
+     SET lifecycle_status = 'DECLINED'
+     WHERE event_id = $1 AND deleted_at IS NULL`,
+    [resolved.event.id],
+  ).catch(() => undefined);
   await writeAudit({
     tenantId: String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID),
     entity: "event",
@@ -114,14 +127,25 @@ export async function shopArrivalDate(
  *   ARSX,100002
  *   OFOX528313
  */
-export function parsePastedCarList(text: string): Array<{ carMark: string; carNumber: string }> {
+export function parsePastedCarList(
+  text: string,
+  headerInitials?: string,
+): Array<{ carMark: string; carNumber: string }> {
+  const header = (headerInitials ?? "").trim().toUpperCase();
   const out: Array<{ carMark: string; carNumber: string }> = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     let m = line.match(/^([A-Za-z]{2,4})\s*[,\s]+\s*(\d{1,6})\s*$/);
     if (!m) m = line.match(/^([A-Za-z]{2,4})(\d{1,6})\s*$/);
-    if (!m) continue;
+    if (!m) {
+      // Manual_Gap #7: blank initials fall back to header initials
+      const numOnly = line.match(/^(\d{1,6})\s*$/);
+      if (numOnly && header) {
+        out.push({ carMark: header, carNumber: String(Number(numOnly[1])) });
+      }
+      continue;
+    }
     out.push({
       carMark: m[1].toUpperCase(),
       carNumber: String(Number(m[2])), // strip leading zeros consistently with VCF
@@ -132,14 +156,20 @@ export function parsePastedCarList(text: string): Array<{ carMark: string; carNu
 
 export async function bulkCreateBadOrders(opts: {
   pastedCars: string;
+  /** Header initials for blank-initial lines (Manual_Gap #7) */
+  headerInitials?: string;
   shopId?: string;
   rule?: "RULE_1" | "RULE_107";
   shoppingReason?: string;
   actor: string;
   tenantId?: string;
+  boCity?: string;
+  boState?: string;
+  destCity?: string;
+  destState?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  const cars = parsePastedCarList(opts.pastedCars);
+  const cars = parsePastedCarList(opts.pastedCars, opts.headerInitials);
   if (cars.length === 0) {
     return { ok: false as const, status: 400, error: "No cars parsed from pasted list" };
   }
@@ -162,6 +192,10 @@ export async function bulkCreateBadOrders(opts: {
       shoppingReason: opts.shoppingReason,
       actor: opts.actor,
       source: "INTERNAL",
+      boCity: opts.boCity,
+      boState: opts.boState,
+      destCity: opts.destCity,
+      destState: opts.destState,
     };
     const result = await createBadOrder(input);
     if (!result.ok) {

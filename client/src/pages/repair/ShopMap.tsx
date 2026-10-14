@@ -39,6 +39,11 @@ type Props = {
   carTypes: CatalogItem[];
   panelClass: string;
   inputClass: string;
+  /** When set, clicking a pin selects that shop (BO "Pick on map"). */
+  onSelectShop?: (pin: ShopMapPin) => void;
+  /** Compact height for modal pickers. */
+  height?: string;
+  hideFilters?: boolean;
 };
 
 function colorForMark(mark: string): string {
@@ -92,7 +97,12 @@ export default function ShopMap({
   carTypes,
   panelClass,
   inputClass,
+  onSelectShop,
+  height = "min(70vh, 640px)",
+  hideFilters = false,
 }: Props) {
+  const onSelectRef = useRef(onSelectShop);
+  onSelectRef.current = onSelectShop;
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const railLayerRef = useRef<L.GeoJSON | null>(null);
@@ -276,15 +286,24 @@ export default function ShopMap({
     if (!map || !group) return;
     group.clearLayers();
     const bounds: L.LatLngExpression[] = [];
+    const pickMode = Boolean(onSelectRef.current);
     for (const p of pins) {
       const marker = L.circleMarker([p.lat, p.lng], {
-        radius: 7,
+        radius: pickMode ? 9 : 7,
         color: "#8B1E1E",
         fillColor: "#c43c3c",
         fillOpacity: 0.9,
         weight: 2,
       });
-      marker.bindPopup(pinPopupHtml(p));
+      if (pickMode) {
+        marker.bindTooltip(
+          `${p.name}${p.shop_mark ? ` (${p.shop_mark})` : ""} — click to select`,
+          { direction: "top" },
+        );
+        marker.on("click", () => onSelectRef.current?.(p));
+      } else {
+        marker.bindPopup(pinPopupHtml(p));
+      }
       marker.addTo(group);
       bounds.push([p.lat, p.lng]);
     }
@@ -304,79 +323,81 @@ export default function ShopMap({
 
   return (
     <div className="space-y-2" data-testid="shop-map">
-      <div className={`flex flex-wrap gap-3 items-end border p-2 ${panelClass}`}>
-        <label className="space-y-1">
-          <span className={labelCls}>Delivering railroad</span>
-          <select
-            className={`${inputClass} min-w-[12rem]`}
-            value={railroad}
-            onChange={(e) => setRailroad(e.target.value)}
-            data-testid="map-filter-railroad"
+      {!hideFilters && (
+        <div className={`flex flex-wrap gap-3 items-end border p-2 ${panelClass}`}>
+          <label className="space-y-1">
+            <span className={labelCls}>Delivering railroad</span>
+            <select
+              className={`${inputClass} min-w-[12rem]`}
+              value={railroad}
+              onChange={(e) => setRailroad(e.target.value)}
+              data-testid="map-filter-railroad"
+            >
+              <option value="">All</option>
+              {railroadOptions.map((r) => (
+                <option key={r.mark} value={r.mark}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className={labelCls}>Capability</span>
+            <select
+              className={`${inputClass} min-w-[10rem]`}
+              value={capabilityId}
+              onChange={(e) => setCapabilityId(e.target.value)}
+              data-testid="map-filter-capability"
+            >
+              <option value="">All</option>
+              {capabilities.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className={labelCls}>Car type</span>
+            <select
+              className={`${inputClass} min-w-[10rem]`}
+              value={carTypeId}
+              onChange={(e) => setCarTypeId(e.target.value)}
+              data-testid="map-filter-car-type"
+            >
+              <option value="">All</option>
+              {carTypes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="inline-flex items-center gap-2 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={showRails}
+              onChange={(e) => setShowRails(e.target.checked)}
+            />
+            NARN rail overlay
+          </label>
+          <label className="inline-flex items-center gap-2 text-xs font-semibold">
+            <input
+              type="checkbox"
+              checked={showOrm}
+              onChange={(e) => setShowOrm(e.target.checked)}
+            />
+            OpenRailwayMap tiles
+          </label>
+          <button
+            type="button"
+            className="text-xs underline"
+            onClick={() => void loadPins()}
           >
-            <option value="">All</option>
-            {railroadOptions.map((r) => (
-              <option key={r.mark} value={r.mark}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1">
-          <span className={labelCls}>Capability</span>
-          <select
-            className={`${inputClass} min-w-[10rem]`}
-            value={capabilityId}
-            onChange={(e) => setCapabilityId(e.target.value)}
-            data-testid="map-filter-capability"
-          >
-            <option value="">All</option>
-            {capabilities.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1">
-          <span className={labelCls}>Car type</span>
-          <select
-            className={`${inputClass} min-w-[10rem]`}
-            value={carTypeId}
-            onChange={(e) => setCarTypeId(e.target.value)}
-            data-testid="map-filter-car-type"
-          >
-            <option value="">All</option>
-            {carTypes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="inline-flex items-center gap-2 text-xs font-semibold">
-          <input
-            type="checkbox"
-            checked={showRails}
-            onChange={(e) => setShowRails(e.target.checked)}
-          />
-          NARN rail overlay
-        </label>
-        <label className="inline-flex items-center gap-2 text-xs font-semibold">
-          <input
-            type="checkbox"
-            checked={showOrm}
-            onChange={(e) => setShowOrm(e.target.checked)}
-          />
-          OpenRailwayMap tiles
-        </label>
-        <button
-          type="button"
-          className="text-xs underline"
-          onClick={() => void loadPins()}
-        >
-          Refresh pins
-        </button>
-      </div>
+            Refresh pins
+          </button>
+        </div>
+      )}
 
       {error ? (
         <div className="text-red-700 bg-red-50 border border-red-300 px-3 py-2 rounded text-xs">
@@ -384,9 +405,15 @@ export default function ShopMap({
         </div>
       ) : null}
 
+      {onSelectShop ? (
+        <p className={`text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Click a shop pin to select it for this Bad Order.
+        </p>
+      ) : null}
+
       <div
         className={`relative border ${panelClass}`}
-        style={{ height: "min(70vh, 640px)" }}
+        style={{ height }}
       >
         <div ref={mapEl} className="absolute inset-0 z-0" />
         {(loading || railLoading) && (

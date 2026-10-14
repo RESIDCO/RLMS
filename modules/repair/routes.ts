@@ -1178,12 +1178,30 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     const body = req.body ?? {};
+    const eventRuleRaw = String(body.eventRule ?? "RULE_1").toUpperCase();
+    const eventRule =
+      eventRuleRaw === "RULE_107"
+        ? ("RULE_107" as const)
+        : eventRuleRaw === "OTHER"
+          ? ("OTHER" as const)
+          : ("RULE_1" as const);
     const result = await createBoRule({
-      code: String(body.code ?? ""),
-      description: String(body.description ?? ""),
-      eventRule: body.eventRule === "RULE_107" ? "RULE_107" : "RULE_1",
-      requiresOtherText: Boolean(body.requiresOtherText),
+      code: body.code != null ? String(body.code) : undefined,
+      shortName:
+        body.shortName != null
+          ? String(body.shortName)
+          : body.code != null
+            ? String(body.code)
+            : undefined,
+      description: String(body.description ?? body.name ?? ""),
+      eventRule,
+      isRuleBased: Boolean(body.isRuleBased),
+      requiresOtherText:
+        body.requiresOtherText != null
+          ? Boolean(body.requiresOtherText)
+          : undefined,
       allowsAdditionalDetail: body.allowsAdditionalDetail !== false,
+      sortOrder: body.sortOrder != null ? Number(body.sortOrder) : undefined,
       actor: actorFrom(req),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
@@ -1194,9 +1212,30 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     const body = req.body ?? {};
+    const eventRuleRaw =
+      body.eventRule != null ? String(body.eventRule).toUpperCase() : null;
+    const eventRule =
+      eventRuleRaw == null
+        ? undefined
+        : eventRuleRaw === "RULE_107"
+          ? ("RULE_107" as const)
+          : eventRuleRaw === "OTHER"
+            ? ("OTHER" as const)
+            : ("RULE_1" as const);
     const result = await updateBoRule({
       id: String(req.params.id),
-      description: body.description != null ? String(body.description) : undefined,
+      description:
+        body.description != null
+          ? String(body.description)
+          : body.name != null
+            ? String(body.name)
+            : undefined,
+      shortName:
+        body.shortName !== undefined
+          ? body.shortName == null
+            ? null
+            : String(body.shortName)
+          : undefined,
       active: body.active != null ? Boolean(body.active) : undefined,
       requiresOtherText:
         body.requiresOtherText != null ? Boolean(body.requiresOtherText) : undefined,
@@ -1204,6 +1243,9 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
         body.allowsAdditionalDetail != null
           ? Boolean(body.allowsAdditionalDetail)
           : undefined,
+      isRuleBased:
+        body.isRuleBased != null ? Boolean(body.isRuleBased) : undefined,
+      eventRule,
       sortOrder: body.sortOrder != null ? Number(body.sortOrder) : undefined,
       actor: actorFrom(req),
     });
@@ -1455,9 +1497,14 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
         const uid = await maybeRequireUser(deps, req, res);
         if (!uid) return;
         if (!req.file) return res.status(400).json({ error: "file required" });
+        const categoryCode = String(
+          req.body?.categoryCode ?? req.body?.category ?? req.body?.kind ?? "other",
+        );
         const result = await uploadEventDocument({
           eventId: String(req.params.id),
-          kind: String(req.body?.kind ?? "bo_attachment"),
+          kind: String(req.body?.kind ?? categoryCode ?? "bo_attachment"),
+          categoryCode,
+          comment: req.body?.comment != null ? String(req.body.comment) : undefined,
           actorEmail: actorFrom(req),
           file: {
             filename: req.file.originalname || "upload.bin",
@@ -1473,6 +1520,38 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       }
     },
   );
+
+  /** Single-document viewer / download (Bad Order History attachment icon). */
+  app.get("/api/repair/documents/:id/content", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const { rows } = await q(
+        `SELECT id, storage_key, mime, original_filename, kind, category_code, comment
+         FROM repair.documents
+         WHERE id = $1 AND deleted_at IS NULL
+           AND COALESCE(lifecycle_status, 'ACTIVE') <> 'VOIDED'`,
+        [String(req.params.id)],
+      );
+      if (!rows[0]) return res.status(404).json({ error: "Document not found" });
+      const stored = await getStorageProvider().get(String(rows[0].storage_key));
+      const filename = String(
+        rows[0].original_filename || rows[0].kind || "document",
+      );
+      res.setHeader(
+        "Content-Type",
+        String(rows[0].mime || "application/octet-stream"),
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${filename.replace(/"/g, "")}"`,
+      );
+      return res.send(stored.bytes);
+    } catch (err) {
+      console.error("[repair/documents/:id/content]", err);
+      return res.status(500).json({ error: "Document download failed" });
+    }
+  });
 
   app.get("/api/repair/events/:id", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);

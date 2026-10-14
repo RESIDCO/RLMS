@@ -362,7 +362,8 @@ async function main() {
   });
   await q(
     `INSERT INTO public.railcars (id, car_number, car_initial, reporting_marks, active, entity)
-     SELECT 3, '100002', 'ARSX', 'ARSX', true, 'Coal'
+     SELECT GREATEST(COALESCE((SELECT MAX(id) FROM public.railcars), 0), 50000) + 1,
+            '100002', 'ARSX', 'ARSX', true, 'Coal'
      WHERE NOT EXISTS (
        SELECT 1 FROM public.railcars WHERE car_initial = 'ARSX' AND car_number = '100002'
      )`,

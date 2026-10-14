@@ -239,12 +239,18 @@ export async function queryBadOrderGrid(filters: BoGridFilters = {}) {
     return {
       bad_order_id: String(r.bad_order_id),
       event_id: String(r.event_id),
+      shop_id: r.shop_id != null ? String(r.shop_id) : null,
       shop_display: shop_display || null,
       car_mark: String(r.car_mark ?? ""),
       car_number: String(r.car_number ?? ""),
       attachment_count: Number(r.attachment_count ?? 0),
       bo_date: r.bo_date,
+      bo_city: r.bo_city != null ? String(r.bo_city) : null,
+      bo_state: r.bo_state != null ? String(r.bo_state) : null,
       bad_order_reason: r.bad_order_reason,
+      bo_rule_code: r.bo_rule_code != null ? String(r.bo_rule_code) : null,
+      bo_rule_other_text:
+        r.bo_rule_other_text != null ? String(r.bo_rule_other_text) : null,
       dest_city: r.dest_city,
       dest_state: r.dest_state,
       lifecycle_status: String(r.lifecycle_status),

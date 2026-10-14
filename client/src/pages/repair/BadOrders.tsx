@@ -33,10 +33,27 @@ import {
   GripVertical,
   Columns3,
   FileText,
+  MapPin,
+  Copy,
+  Upload,
+  X,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceBanner } from "./WorkspaceTitle";
 import { repairUserStorageKey, useRepairTheme } from "./repairTheme";
+import MultiSelectFilter from "./MultiSelectFilter";
+import ShopPickMapModal from "./ShopPickMapModal";
 
 type Shop = {
   id: string;
@@ -50,10 +67,25 @@ type Shop = {
 
 type BoRule = {
   code: string;
+  short_name?: string | null;
   description: string;
   requires_other_text: boolean;
   allows_additional_detail: boolean;
   active: boolean;
+};
+
+const DOC_CATEGORIES = [
+  { value: "sds", label: "SDS" },
+  { value: "scope_of_work", label: "Scope of Work" },
+  { value: "photograph", label: "Photograph" },
+  { value: "other", label: "Other" },
+] as const;
+
+type StagedDoc = {
+  id: string;
+  file: File;
+  category: string;
+  comment: string;
 };
 
 type Stcc = { code: string; description?: string | null };
@@ -61,17 +93,23 @@ type Stcc = { code: string; description?: string | null };
 type GridRow = {
   bad_order_id: string;
   event_id: string;
+  shop_id?: string | null;
   shop_display: string | null;
   car_mark: string;
   car_number: string;
   attachment_count: number;
   bo_date: string | null;
+  bo_city?: string | null;
+  bo_state?: string | null;
   bad_order_reason: string | null;
+  bo_rule_code?: string | null;
+  bo_rule_other_text?: string | null;
   dest_city: string | null;
   dest_state: string | null;
   lifecycle_status: string;
   status_display: string;
   yard_arrived_at: string | null;
+  arrival_date?: string | null;
   estimate_id: string | null;
   wreck_estimate: boolean;
   is_wreck: boolean;
@@ -81,6 +119,15 @@ type GridRow = {
   assignment: string | null;
   entity_code?: string | null;
   ddct_event_id?: string | null;
+  ddct_incident_id?: string | null;
+  reporting_road?: string | null;
+  dc_road?: string | null;
+  routing?: string | null;
+  last_contents?: string | null;
+  car_load?: string | null;
+  cleaned?: boolean;
+  comments?: string | null;
+  multi_car_group_id?: string | null;
 };
 
 type ColId =
@@ -115,7 +162,7 @@ const DEFAULT_COLUMNS: ColDef[] = [
   { id: "shop", label: "Shop", width: 220, filterable: true },
   { id: "car_mark", label: "Car Initials", width: 90, filterable: true },
   { id: "car_number", label: "Car Number", width: 100, filterable: true },
-  { id: "attachment", label: "", width: 44, align: "center" },
+  { id: "attachment", label: "", width: 52, align: "center" },
   { id: "bo_date", label: "Bad Order", width: 100, filterable: true },
   { id: "reason", label: "Bad Order Reason", width: 160, filterable: true },
   { id: "dest_city", label: "Destination City", width: 130, filterable: true },
@@ -131,6 +178,8 @@ const DEFAULT_COLUMNS: ColDef[] = [
   { id: "assignment", label: "Assignment", width: 200, filterable: true },
   { id: "entity", label: "Entity", width: 70, filterable: true },
 ];
+
+// Copy column is always shown first in the action strip (not in DEFAULT_COLUMNS drag list).
 
 const DEFAULT_COL_ORDER = DEFAULT_COLUMNS.map((c) => c.id);
 const DEFAULT_WIDTHS = Object.fromEntries(
@@ -311,13 +360,13 @@ type FormState = {
   ddctEventId: string;
   comments: string;
   shopId: string;
-  billingRoad: string;
-  billingRoadOverrideReason: string;
   allowDuplicates: boolean;
   isWreck: boolean;
   wreckEstimate: boolean;
   distributionEmails: string;
 };
+
+type FormErrors = Partial<Record<keyof FormState | "multiCarList", string>>;
 
 function emptyForm(): FormState {
   return {
@@ -346,13 +395,39 @@ function emptyForm(): FormState {
     ddctEventId: "",
     comments: "",
     shopId: "",
-    billingRoad: "",
-    billingRoadOverrideReason: "",
     allowDuplicates: false,
     isWreck: false,
     wreckEstimate: false,
     distributionEmails: "",
   };
+}
+
+function validateForm(form: FormState, rules: BoRule[]): FormErrors {
+  const errors: FormErrors = {};
+  if (!form.carMark.trim()) errors.carMark = "Car Initials required";
+  if (form.multiCar) {
+    if (!form.multiCarList.trim()) errors.multiCarList = "Multi Car list required";
+  } else if (!form.carNumber.trim()) {
+    errors.carNumber = "Car Number required";
+  }
+  if (!form.shopId) errors.shopId = "Shop required";
+  if (!form.boRuleCode) errors.boRuleCode = "Bad Order Reason required";
+  if (!form.boDate) errors.boDate = "B/O Date required";
+  if (!form.boCity.trim()) errors.boCity = "B/O City required";
+  if (!form.boState.trim()) errors.boState = "B/O ST required";
+  const selected = rules.find((r) => r.code === form.boRuleCode);
+  if (selected?.requires_other_text && !form.boRuleOtherText.trim()) {
+    errors.boRuleOtherText = "Keyed detail required for this reason";
+  }
+  return errors;
+}
+
+function reqLabel(text: string) {
+  return (
+    <>
+      {text} <span className="text-red-600">*</span>
+    </>
+  );
 }
 
 function BadOrdersBody() {
@@ -368,7 +443,26 @@ function BadOrdersBody() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [pendingDocs, setPendingDocs] = useState(0);
+  const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
+  const [stagedDocs, setStagedDocs] = useState<StagedDoc[]>([]);
+  const [docCategory, setDocCategory] = useState<string>("photograph");
+  const [docComment, setDocComment] = useState("");
+  const [shopMapOpen, setShopMapOpen] = useState(false);
+  const [shopSearch, setShopSearch] = useState("");
+  const [shopPopoverOpen, setShopPopoverOpen] = useState(false);
+  const [lastCopySource, setLastCopySource] = useState<GridRow | null>(null);
+  const [viewer, setViewer] = useState<{
+    eventId: string;
+    docs: Array<{
+      id: string;
+      original_filename?: string;
+      kind?: string;
+      category_code?: string;
+      comment?: string | null;
+      mime?: string;
+    }>;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [entitySnap, setEntitySnap] = useState<{
     code: string | null;
     sourceValue: string | null;
@@ -509,20 +603,34 @@ function BadOrdersBody() {
     return () => clearTimeout(t);
   }, [form.carMark, form.carNumber, form.multiCar, form.multiCarList]);
 
-  // Prefill billing road + BO city/ST from shop
+  // Prefill B/O city/ST from shop (billing road stays on shop record)
   useEffect(() => {
     if (!form.shopId) return;
     const shop = shops.find((s) => s.id === form.shopId);
     if (!shop) return;
     setForm((f) => ({
       ...f,
-      billingRoad: f.billingRoad || shop.billing_road || "",
       boCity: f.boCity || shop.city || "",
       boState: f.boState || shop.state || "",
       destCity: f.destCity || shop.city || "",
       destState: f.destState || shop.state || "",
     }));
   }, [form.shopId, shops]);
+
+  const filteredShops = useMemo(() => {
+    const needle = shopSearch.trim().toLowerCase();
+    if (!needle) return shops;
+    return shops.filter((s) => {
+      const label = (s.display_label || s.name || "").toLowerCase();
+      return (
+        label.includes(needle) ||
+        (s.shop_mark || "").toLowerCase().includes(needle) ||
+        (s.city || "").toLowerCase().includes(needle)
+      );
+    });
+  }, [shops, shopSearch]);
+
+  const selectedShop = shops.find((s) => s.id === form.shopId);
 
   const loadGrid = useCallback(async () => {
     setLoading(true);
@@ -640,34 +748,116 @@ function BadOrdersBody() {
 
   const resetForm = () => {
     setForm(emptyForm());
-    setPendingDocs(0);
+    setStagedDocs([]);
+    setDocComment("");
+    setFieldErrors({});
     setEntitySnap(null);
     setEntitySnapsMulti([]);
     setMsg("");
+  };
+
+  const stageFiles = (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (!list.length) return;
+    setStagedDocs((prev) => [
+      ...prev,
+      ...list.map((file) => ({
+        id: `staged-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        file,
+        category: docCategory,
+        comment: docComment,
+      })),
+    ]);
+    setDocComment("");
+  };
+
+  const uploadStagedDocs = async (eventIds: string[]) => {
+    if (!stagedDocs.length || !eventIds.length) return;
+    for (const eventId of eventIds) {
+      for (const doc of stagedDocs) {
+        const fd = new FormData();
+        fd.set("file", doc.file);
+        fd.set("kind", doc.category);
+        fd.set("categoryCode", doc.category);
+        if (doc.comment) fd.set("comment", doc.comment);
+        const res = await fetch(`/api/repair/events/${eventId}/documents`, {
+          method: "POST",
+          credentials: "include",
+          body: fd,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Failed to upload ${doc.file.name}`);
+        }
+      }
+    }
+  };
+
+  const copyFromRow = (row: GridRow) => {
+    const next = emptyForm();
+    next.multiCar = Boolean(row.multi_car_group_id);
+    // Intentionally leave car number(s), dates, incident ID, attachments blank
+    next.carMark = "";
+    next.carNumber = "";
+    next.multiCarList = "";
+    next.reportingRoad = row.reporting_road ? String(row.reporting_road) : "";
+    next.dcRoad = row.dc_road ? String(row.dc_road) : "";
+    next.stcc = row.stcc ? String(row.stcc) : "";
+    next.destCity = row.dest_city ? String(row.dest_city) : "";
+    next.destState = row.dest_state ? String(row.dest_state) : "";
+    next.routing = row.routing ? String(row.routing) : "";
+    next.boRuleCode = row.bo_rule_code || "RULE_1";
+    next.boRuleOtherText = row.bo_rule_other_text
+      ? String(row.bo_rule_other_text)
+      : "";
+    next.lastContents = row.last_contents ? String(row.last_contents) : "";
+    next.carLoad = row.car_load === "LOADED" ? "LOADED" : "EMPTY";
+    next.cleaned = Boolean(row.cleaned);
+    next.travelOnOwnWheels = Boolean(row.travel_on_own_wheels);
+    next.boCity = row.bo_city ? String(row.bo_city) : "";
+    next.boState = row.bo_state ? String(row.bo_state) : "";
+    next.comments = row.comments ? String(row.comments) : "";
+    next.shopId = row.shop_id ? String(row.shop_id) : "";
+    next.isWreck = Boolean(row.is_wreck);
+    next.wreckEstimate = Boolean(row.wreck_estimate);
+    next.ddctEventId = row.ddct_event_id ? String(row.ddct_event_id) : "";
+    next.boDate = todayIso();
+    setForm(next);
+    setStagedDocs([]);
+    setFieldErrors({});
+    setLastCopySource(row);
+    setMsg(
+      `Copied fields from ${row.car_mark} ${row.car_number} — enter car number(s) and dates, then Submit.`,
+    );
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const openDocViewer = async (eventId: string) => {
+    try {
+      const r = await apiRequest(
+        "GET",
+        `/api/repair/events/${eventId}/documents`,
+      );
+      const d = await r.json();
+      setViewer({ eventId, docs: d.documents ?? [] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load documents");
+    }
   };
 
   const submitNew = async () => {
     setSubmitting(true);
     setError("");
     setMsg("");
-    try {
-      const selectedRule = rules.find((r) => r.code === form.boRuleCode);
-      if (selectedRule?.requires_other_text && !form.boRuleOtherText.trim()) {
-        setError("This Bad Order Reason requires keyed detail");
-        setSubmitting(false);
-        return;
-      }
-      if (!form.shopId) {
-        setError("Shop is required");
-        setSubmitting(false);
-        return;
-      }
-      if (!form.boCity.trim() || !form.boState.trim()) {
-        setError("B/O City and State are required");
-        setSubmitting(false);
-        return;
-      }
+    const errors = validateForm(form, rules);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) {
+      setError("Fix required fields marked with *");
+      setSubmitting(false);
+      return;
+    }
 
+    try {
       // Distribution list: add any new emails before create
       const emails = form.distributionEmails
         .split(/[,;\s]+/)
@@ -679,6 +869,7 @@ function BadOrdersBody() {
         }).catch(() => undefined);
       }
 
+      const eventIds: string[] = [];
       if (form.multiCar) {
         const r = await apiRequest("POST", "/api/repair/bad-orders/bulk", {
           pastedCars: form.multiCarList,
@@ -702,8 +893,6 @@ function BadOrdersBody() {
           incidentDate: form.incidentDate || undefined,
           comments: form.comments || undefined,
           arrivalDate: form.arrivalDate || undefined,
-          billingRoad: form.billingRoad || undefined,
-          billingRoadOverrideReason: form.billingRoadOverrideReason || undefined,
           ddctEventId: form.ddctEventId || undefined,
           ddctIncidentId: form.ddctIncidentId || undefined,
           allowDuplicates: form.allowDuplicates,
@@ -712,9 +901,17 @@ function BadOrdersBody() {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || "Bulk create failed");
+        for (const c of d.created ?? []) {
+          if (c.eventId) eventIds.push(String(c.eventId));
+          else if (c.event?.id) eventIds.push(String(c.event.id));
+        }
+        await uploadStagedDocs(eventIds);
         setMsg(
           `Created ${d.created?.length ?? 0} Bad Order(s)` +
-            (d.rejected?.length ? `; ${d.rejected.length} rejected` : ""),
+            (d.rejected?.length ? `; ${d.rejected.length} rejected` : "") +
+            (stagedDocs.length
+              ? ` · ${stagedDocs.length} document(s) attached`
+              : ""),
         );
       } else {
         const r = await apiRequest("POST", "/api/repair/bad-orders", {
@@ -739,8 +936,6 @@ function BadOrdersBody() {
           incidentDate: form.incidentDate || undefined,
           comments: form.comments || undefined,
           arrivalDate: form.arrivalDate || undefined,
-          billingRoad: form.billingRoad || undefined,
-          billingRoadOverrideReason: form.billingRoadOverrideReason || undefined,
           ddctEventId: form.ddctEventId || undefined,
           ddctIncidentId: form.ddctIncidentId || undefined,
           allowDuplicates: form.allowDuplicates,
@@ -749,9 +944,14 @@ function BadOrdersBody() {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || "Create failed");
+        if (d.event?.id) eventIds.push(String(d.event.id));
+        await uploadStagedDocs(eventIds);
         setMsg(
           `Bad Order Queued for ${form.carMark} ${form.carNumber}` +
-            (d.event?.entity_code ? ` · Entity ${d.event.entity_code}` : ""),
+            (d.event?.entity_code ? ` · Entity ${d.event.entity_code}` : "") +
+            (stagedDocs.length
+              ? ` · ${stagedDocs.length} document(s) attached`
+              : ""),
         );
       }
       resetForm();
@@ -870,12 +1070,17 @@ function BadOrdersBody() {
         return row.car_number;
       case "attachment":
         return row.attachment_count > 0 ? (
-          <span className="inline-flex items-center gap-0.5 text-sky-700">
+          <button
+            type="button"
+            className="inline-flex items-center gap-0.5 text-sky-700 underline"
+            title="Open documents"
+            onClick={() => void openDocViewer(row.event_id)}
+          >
             <Paperclip className="h-3.5 w-3.5" />
             {row.attachment_count}
-          </span>
+          </button>
         ) : (
-          ""
+          <span className="text-slate-400">0</span>
         );
       case "bo_date":
         return fmtDate(row.bo_date);
@@ -938,43 +1143,39 @@ function BadOrdersBody() {
     <div className={dark ? "bg-slate-950 text-slate-100" : "bg-white text-slate-900"}>
       <WorkspaceBanner subtitle="Bad Orders" />
 
-      {/* C1 — Search */}
-      <div className={`border-b px-3 py-2 flex flex-wrap items-end gap-2 ${panel}`}>
-        <div className="min-w-[140px]">
-          <Label className="text-xs">Shops</Label>
-          <select
-            multiple
-            className={`${inputCls} w-full min-h-[32px] text-sm rounded-md border px-1`}
-            value={shopIds}
-            onChange={(e) =>
-              setShopIds([...e.target.selectedOptions].map((o) => o.value))
-            }
-          >
-            {shops.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.display_label || s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="min-w-[200px]">
-          <Label className="text-xs">Statuses</Label>
-          <select
-            multiple
-            className={`${inputCls} w-full min-h-[32px] text-sm rounded-md border px-1`}
-            value={statuses}
-            onChange={(e) =>
-              setStatuses([...e.target.selectedOptions].map((o) => o.value))
-            }
-          >
-            {BO_STATUSES.map((s) => (
-              <option key={s.code} value={s.code}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
+      {/* C1 — Search (dropdown multi-selects; date inputs fit at 1280px+) */}
+      <div
+        className={`border-b px-3 py-2 flex flex-wrap xl:flex-nowrap items-end gap-2 min-w-0 ${panel}`}
+      >
+        <MultiSelectFilter
+          label="Shops"
+          options={shops.map((s) => ({
+            value: s.id,
+            label: s.display_label || s.name,
+          }))}
+          value={shopIds}
+          onChange={setShopIds}
+          emptyMeansAll
+          allLabel="All shops"
+          dark={dark}
+          className="min-w-[180px] max-w-[240px] shrink-0"
+          triggerClassName={inputCls}
+        />
+        <MultiSelectFilter
+          label="Statuses"
+          options={BO_STATUSES.map((s) => ({
+            value: s.code,
+            label: s.label,
+          }))}
+          value={statuses}
+          onChange={setStatuses}
+          emptyMeansAll={false}
+          allLabel="All statuses"
+          dark={dark}
+          className="min-w-[200px] max-w-[260px] shrink-0"
+          triggerClassName={inputCls}
+        />
+        <div className="shrink-0">
           <Label className="text-xs">Initials</Label>
           <Input
             className={`${inputCls} w-20`}
@@ -982,7 +1183,7 @@ function BadOrdersBody() {
             onChange={(e) => setCarMark(e.target.value.toUpperCase())}
           />
         </div>
-        <div>
+        <div className="shrink-0">
           <Label className="text-xs">Number</Label>
           <Input
             className={`${inputCls} w-24`}
@@ -990,24 +1191,25 @@ function BadOrdersBody() {
             onChange={(e) => setCarNumber(e.target.value)}
           />
         </div>
-        <div>
+        <div className="shrink-0 min-w-[288px]">
           <Label className="text-xs">Date Range</Label>
-          <div className="flex gap-1">
+          <div className="flex gap-1.5 items-center">
             <Input
               type="date"
-              className={`${inputCls} w-[130px]`}
+              className={`${inputCls} w-[138px] min-w-[138px]`}
               value={from}
               onChange={(e) => setFrom(e.target.value)}
             />
+            <span className="text-xs text-slate-500">–</span>
             <Input
               type="date"
-              className={`${inputCls} w-[130px]`}
+              className={`${inputCls} w-[138px] min-w-[138px]`}
               value={to}
               onChange={(e) => setTo(e.target.value)}
             />
           </div>
         </div>
-        <div className="min-w-[160px]">
+        <div className="min-w-[168px] shrink-0">
           <Label className="text-xs">Date Range Filter</Label>
           <Select value={dateField} onValueChange={setDateField}>
             <SelectTrigger className={inputCls}>
@@ -1024,7 +1226,7 @@ function BadOrdersBody() {
         </div>
         <Button
           size="sm"
-          className="h-8"
+          className="h-8 shrink-0"
           onClick={() => {
             setPage(1);
             void loadGrid();
@@ -1035,7 +1237,7 @@ function BadOrdersBody() {
         <Button
           size="sm"
           variant="outline"
-          className="h-8"
+          className="h-8 shrink-0"
           onClick={() => applyView("default")}
         >
           <RotateCcw className="h-4 w-4" />
@@ -1044,37 +1246,60 @@ function BadOrdersBody() {
 
       {/* C2 — New Bad Order */}
       <div className={`border-b px-3 py-3 ${panel}`}>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <h2 className="text-sm font-semibold tracking-wide uppercase">
             New Bad Order
           </h2>
-          <Link
-            href="/repair/bo-reasons"
-            className="text-xs text-sky-700 underline"
-          >
-            Manage Bad Order Reasons
-          </Link>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={!lastCopySource && !rows[0]}
+              onClick={() => {
+                const src = lastCopySource ?? rows[0];
+                if (src) copyFromRow(src);
+              }}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              Copy last
+            </Button>
+            <Link
+              href="/repair/bo-reasons"
+              className="text-xs text-sky-700 underline"
+            >
+              Manage Bad Order Reasons
+            </Link>
+          </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <div className="space-y-2">
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <Label className="text-xs">Car Initials</Label>
+                <Label className="text-xs">{reqLabel("Car Initials")}</Label>
                 <Input
-                  className={`${inputCls} w-24`}
+                  className={`${inputCls} w-24 ${fieldErrors.carMark ? "border-red-500" : ""}`}
                   value={form.carMark}
                   onChange={(e) => setField("carMark", e.target.value.toUpperCase())}
-                  disabled={form.multiCar && !form.carMark}
                 />
+                {fieldErrors.carMark && (
+                  <p className="text-[11px] text-red-600">{fieldErrors.carMark}</p>
+                )}
               </div>
               <div>
-                <Label className="text-xs">Car Number</Label>
+                <Label className="text-xs">
+                  {form.multiCar ? "Car Number" : reqLabel("Car Number")}
+                </Label>
                 <Input
-                  className={`${inputCls} w-28`}
+                  className={`${inputCls} w-28 ${fieldErrors.carNumber ? "border-red-500" : ""}`}
                   value={form.carNumber}
                   onChange={(e) => setField("carNumber", e.target.value)}
                   disabled={form.multiCar}
                 />
+                {fieldErrors.carNumber && (
+                  <p className="text-[11px] text-red-600">{fieldErrors.carNumber}</p>
+                )}
               </div>
               <label className="flex items-center gap-1.5 pb-1 text-xs">
                 <Checkbox
@@ -1087,14 +1312,20 @@ function BadOrdersBody() {
             {form.multiCar && (
               <div>
                 <Label className="text-xs">
-                  Car list (one per line; blank initials use header Initials)
+                  {reqLabel("Multi Car list")}{" "}
+                  <span className="font-normal text-slate-500">
+                    (one per line; blank initials use header Initials)
+                  </span>
                 </Label>
                 <textarea
-                  className={`w-full min-h-[72px] rounded-md border px-2 py-1 text-sm ${inputCls}`}
+                  className={`w-full min-h-[72px] rounded-md border px-2 py-1 text-sm ${inputCls} ${fieldErrors.multiCarList ? "border-red-500" : ""}`}
                   value={form.multiCarList}
                   onChange={(e) => setField("multiCarList", e.target.value)}
                   placeholder={"OFOX 528313\nARSX 100001"}
                 />
+                {fieldErrors.multiCarList && (
+                  <p className="text-[11px] text-red-600">{fieldErrors.multiCarList}</p>
+                )}
               </div>
             )}
             <div className="flex flex-wrap gap-2">
@@ -1182,67 +1413,99 @@ function BadOrdersBody() {
               </div>
             </div>
             <div className="min-w-[220px]">
-              <Label className="text-xs">Shop</Label>
-              <Select
-                value={form.shopId || "__none"}
-                onValueChange={(v) => setField("shopId", v === "__none" ? "" : v)}
-              >
-                <SelectTrigger className={inputCls}>
-                  <SelectValue placeholder="Select shop…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">—</SelectItem>
-                  {shops.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.display_label || s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label className="text-xs">{reqLabel("Shop")}</Label>
+              <div className="flex flex-wrap gap-1.5 items-start">
+                <Popover open={shopPopoverOpen} onOpenChange={setShopPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className={`${inputCls} flex-1 min-w-[200px] justify-between font-normal ${fieldErrors.shopId ? "border-red-500" : ""}`}
+                    >
+                      <span className="truncate text-left text-xs">
+                        {selectedShop
+                          ? selectedShop.display_label || selectedShop.name
+                          : "Select shop…"}
+                      </span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className={`w-80 p-2 ${dark ? "bg-slate-900 border-slate-600" : ""}`}
+                    align="start"
+                  >
+                    <Input
+                      className="h-8 mb-2 text-xs"
+                      placeholder="Search shops…"
+                      value={shopSearch}
+                      onChange={(e) => setShopSearch(e.target.value)}
+                      autoFocus
+                    />
+                    <div className="max-h-56 overflow-auto">
+                      {filteredShops.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/60"
+                          onClick={() => {
+                            setField("shopId", s.id);
+                            setShopPopoverOpen(false);
+                            setShopSearch("");
+                          }}
+                        >
+                          {s.display_label || s.name}
+                        </button>
+                      ))}
+                      {!filteredShops.length && (
+                        <p className="text-xs text-slate-500 px-2 py-2">No shops</p>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8"
+                  onClick={() => setShopMapOpen(true)}
+                >
+                  <MapPin className="h-3.5 w-3.5 mr-1" />
+                  Pick on map
+                </Button>
+              </div>
+              {selectedShop?.billing_road && (
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Billing road from shop: {selectedShop.billing_road}
+                </p>
+              )}
+              {fieldErrors.shopId && (
+                <p className="text-[11px] text-red-600">{fieldErrors.shopId}</p>
+              )}
               {!shops.length && (
                 <p className="text-xs text-amber-700 mt-0.5">
                   No shops yet — create one under Shops.
                 </p>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <div>
-                <Label className="text-xs">Billing road (optional)</Label>
-                <Input
-                  className={`${inputCls} w-28`}
-                  value={form.billingRoad}
-                  onChange={(e) =>
-                    setField("billingRoad", e.target.value.toUpperCase())
-                  }
-                />
-              </div>
-              <div className="flex-1">
-                <Label className="text-xs">Billing override reason</Label>
-                <Input
-                  className={inputCls}
-                  value={form.billingRoadOverrideReason}
-                  onChange={(e) =>
-                    setField("billingRoadOverrideReason", e.target.value)
-                  }
-                />
-              </div>
-            </div>
           </div>
 
           <div className="space-y-2">
             <div>
-              <Label className="text-xs">Reason</Label>
+              <Label className="text-xs">{reqLabel("Bad Order Reason")}</Label>
               <Select
                 value={form.boRuleCode}
                 onValueChange={(v) => setField("boRuleCode", v)}
               >
-                <SelectTrigger className={inputCls}>
+                <SelectTrigger
+                  className={`${inputCls} ${fieldErrors.boRuleCode ? "border-red-500" : ""}`}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {rules.map((r) => (
                     <SelectItem key={r.code} value={r.code}>
-                      {r.description} ({r.code})
+                      {r.description}
+                      {r.short_name ? ` (${r.short_name})` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1250,7 +1513,7 @@ function BadOrdersBody() {
               {(selectedRule?.requires_other_text ||
                 selectedRule?.allows_additional_detail) && (
                 <Input
-                  className={`${inputCls} mt-1`}
+                  className={`${inputCls} mt-1 ${fieldErrors.boRuleOtherText ? "border-red-500" : ""}`}
                   placeholder={
                     selectedRule?.requires_other_text
                       ? "Keyed detail (required)"
@@ -1260,33 +1523,44 @@ function BadOrdersBody() {
                   onChange={(e) => setField("boRuleOtherText", e.target.value)}
                 />
               )}
+              {fieldErrors.boRuleOtherText && (
+                <p className="text-[11px] text-red-600">
+                  {fieldErrors.boRuleOtherText}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <div>
-                <Label className="text-xs">B/O Date</Label>
+                <Label className="text-xs">{reqLabel("B/O Date")}</Label>
                 <Input
                   type="date"
-                  className={`${inputCls} w-[140px]`}
+                  className={`${inputCls} w-[140px] ${fieldErrors.boDate ? "border-red-500" : ""}`}
                   value={form.boDate}
                   onChange={(e) => setField("boDate", e.target.value)}
                 />
               </div>
               <div>
-                <Label className="text-xs">B/O City</Label>
+                <Label className="text-xs">{reqLabel("B/O City")}</Label>
                 <Input
-                  className={`${inputCls} w-32`}
+                  className={`${inputCls} w-32 ${fieldErrors.boCity ? "border-red-500" : ""}`}
                   value={form.boCity}
                   onChange={(e) => setField("boCity", e.target.value)}
                 />
+                {fieldErrors.boCity && (
+                  <p className="text-[11px] text-red-600">{fieldErrors.boCity}</p>
+                )}
               </div>
               <div>
-                <Label className="text-xs">ST</Label>
+                <Label className="text-xs">{reqLabel("B/O ST")}</Label>
                 <Input
-                  className={`${inputCls} w-14`}
+                  className={`${inputCls} w-14 ${fieldErrors.boState ? "border-red-500" : ""}`}
                   maxLength={2}
                   value={form.boState}
                   onChange={(e) => setField("boState", e.target.value.toUpperCase())}
                 />
+                {fieldErrors.boState && (
+                  <p className="text-[11px] text-red-600">{fieldErrors.boState}</p>
+                )}
               </div>
             </div>
             <div>
@@ -1422,6 +1696,109 @@ function BadOrdersBody() {
           ) : null}
         </div>
 
+        {/* Documents & Photos — staged before submit */}
+        <div
+          className={`mt-3 border rounded p-3 ${dark ? "border-slate-600 bg-slate-950/40" : "border-slate-300 bg-white"}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5">
+              <FileText className="h-3.5 w-3.5" />
+              Documents & Photos
+            </h3>
+            <span className="text-[11px] text-slate-500">
+              {stagedDocs.length
+                ? `${stagedDocs.length} staged — saved with Submit`
+                : "Optional — attach before submit"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2 items-end mb-2">
+            <div>
+              <Label className="text-xs">Category</Label>
+              <Select value={docCategory} onValueChange={setDocCategory}>
+                <SelectTrigger className={`${inputCls} w-40`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DOC_CATEGORIES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex-1 min-w-[160px]">
+              <Label className="text-xs">Comment</Label>
+              <Input
+                className={inputCls}
+                value={docComment}
+                onChange={(e) => setDocComment(e.target.value)}
+                placeholder="Optional note"
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-3.5 w-3.5 mr-1" /> Browse
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) stageFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <div
+            className={`border border-dashed rounded px-3 py-4 text-center text-xs ${dark ? "border-slate-600 text-slate-400" : "border-slate-300 text-slate-500"}`}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (e.dataTransfer.files?.length) stageFiles(e.dataTransfer.files);
+            }}
+          >
+            Drag & drop files here, or use Browse
+          </div>
+          {stagedDocs.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {stagedDocs.map((d) => (
+                <li
+                  key={d.id}
+                  className="flex items-center gap-2 text-xs border rounded px-2 py-1"
+                >
+                  <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate flex-1">{d.file.name}</span>
+                  <span className="text-slate-500">
+                    {DOC_CATEGORIES.find((c) => c.value === d.category)?.label ||
+                      d.category}
+                  </span>
+                  {d.comment ? (
+                    <span className="text-slate-500 truncate max-w-[120px]">
+                      {d.comment}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="opacity-60 hover:opacity-100"
+                    onClick={() =>
+                      setStagedDocs((prev) => prev.filter((x) => x.id !== d.id))
+                    }
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button
             variant="destructive"
@@ -1446,15 +1823,6 @@ function BadOrdersBody() {
             />
             Allow Duplicates
           </label>
-          <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-slate-600">
-            <FileText className="h-4 w-4" />
-            {pendingDocs > 0
-              ? `${pendingDocs} documents`
-              : "No New Bad Order Documents"}
-            <span className="text-[10px] text-slate-500">
-              (SDS / scope / photos attach after submit on the event)
-            </span>
-          </span>
         </div>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         {msg && <p className="mt-2 text-sm text-emerald-700">{msg}</p>}
@@ -1625,6 +1993,7 @@ function BadOrdersBody() {
           <table className="text-xs border-collapse min-w-full">
             <thead className={dark ? "bg-slate-800 sticky top-0" : "bg-slate-200 sticky top-0"}>
               <tr>
+                <th className="border px-1 py-1 w-14 text-center">Copy</th>
                 {visibleCols.map((id) => {
                   const def = DEFAULT_COLUMNS.find((c) => c.id === id)!;
                   return (
@@ -1662,6 +2031,7 @@ function BadOrdersBody() {
                 })}
               </tr>
               <tr>
+                <th className="border px-0.5 py-0.5" />
                 {visibleCols.map((id) => {
                   const def = DEFAULT_COLUMNS.find((c) => c.id === id)!;
                   return (
@@ -1687,7 +2057,7 @@ function BadOrdersBody() {
               {loading && (
                 <tr>
                   <td
-                    colSpan={visibleCols.length}
+                    colSpan={visibleCols.length + 1}
                     className="p-4 text-center text-slate-500"
                   >
                     Loading…
@@ -1697,7 +2067,7 @@ function BadOrdersBody() {
               {!loading && filteredRows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={visibleCols.length}
+                    colSpan={visibleCols.length + 1}
                     className="p-4 text-center text-slate-500"
                   >
                     No Bad Orders match the current filters.
@@ -1710,7 +2080,7 @@ function BadOrdersBody() {
                     {g.key && (
                       <tr className={dark ? "bg-slate-800" : "bg-slate-100"}>
                         <td
-                          colSpan={visibleCols.length}
+                          colSpan={visibleCols.length + 1}
                           className="px-2 py-1 font-semibold"
                         >
                           {g.key}
@@ -1730,6 +2100,18 @@ function BadOrdersBody() {
                               : "bg-sky-50/60"
                         }
                       >
+                        <td className="border px-1 py-1 text-center">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-1.5 text-xs"
+                            title="Copy Bad Order"
+                            onClick={() => copyFromRow(row)}
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </Button>
+                        </td>
                         {visibleCols.map((id) => (
                           <td
                             key={id}
@@ -1752,6 +2134,54 @@ function BadOrdersBody() {
           </p>
         )}
       </div>
+
+      <ShopPickMapModal
+        open={shopMapOpen}
+        onOpenChange={setShopMapOpen}
+        dark={dark}
+        onSelect={(shopId) => setField("shopId", shopId)}
+      />
+
+      <Dialog
+        open={Boolean(viewer)}
+        onOpenChange={(o) => {
+          if (!o) setViewer(null);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">Documents & Photos</DialogTitle>
+          </DialogHeader>
+          {!viewer?.docs.length ? (
+            <p className="text-sm text-slate-500">No documents on this Bad Order.</p>
+          ) : (
+            <ul className="space-y-2 max-h-[60vh] overflow-auto">
+              {viewer.docs.map((d) => (
+                <li
+                  key={d.id}
+                  className="flex items-center gap-2 text-sm border rounded px-2 py-1.5"
+                >
+                  <Paperclip className="h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <a
+                      className="text-sky-700 underline truncate block"
+                      href={`/api/repair/documents/${d.id}/content`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {d.original_filename || d.kind || d.id}
+                    </a>
+                    <p className="text-[11px] text-slate-500">
+                      {d.category_code || d.kind}
+                      {d.comment ? ` · ${d.comment}` : ""}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

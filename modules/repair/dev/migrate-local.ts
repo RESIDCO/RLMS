@@ -55,6 +55,7 @@ export const LOCAL_MIGRATE_SQL_FILES = [
   "modules/repair/migrations/20261014_repair_railroads.sql",
   "modules/repair/migrations/20261014_repair_shop_map.sql",
   "modules/repair/migrations/20261014_repair_bad_orders_c.sql",
+  "modules/repair/migrations/20261014_repair_bad_orders_c_r2.sql",
 ] as const;
 
 /**
@@ -83,6 +84,12 @@ const MIGRATION_BASELINE_PROBES: Partial<Record<string, string>> = {
       SELECT 1 FROM information_schema.columns
       WHERE table_schema = 'repair' AND table_name = 'bad_orders'
         AND column_name = 'stcc'
+    )`,
+  "modules/repair/migrations/20261014_repair_bad_orders_c_r2.sql": `
+    EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'repair' AND table_name = 'bo_rules'
+        AND column_name = 'short_name'
     )`,
 };
 

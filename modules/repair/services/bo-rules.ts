@@ -1,15 +1,20 @@
 /**
- * Bad-order rule lookup (code + description + active).
- * Admins can add; seeded RULE_1 / RULE_107 / OTHER.
+ * Bad Order Reasons (owner-managed).
+ * Name + optional short name + active + sort order.
+ * Optional rule-based flag with Rule 1 / Rule 107 / Other.
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
 
+export type EventRuleCode = "RULE_1" | "RULE_107" | "OTHER";
+
 export type BoRule = {
   id: string;
   code: string;
+  short_name: string | null;
   description: string;
-  event_rule: "RULE_1" | "RULE_107";
+  event_rule: EventRuleCode;
+  is_rule_based: boolean;
   requires_other_text: boolean;
   /** Rule-based reasons may accept optional keyed detail. */
   allows_additional_detail: boolean;
@@ -17,12 +22,20 @@ export type BoRule = {
   sort_order: number;
 };
 
+function mapEventRule(v: unknown): EventRuleCode {
+  if (v === "RULE_107") return "RULE_107";
+  if (v === "OTHER") return "OTHER";
+  return "RULE_1";
+}
+
 function mapBoRule(row: Record<string, unknown>): BoRule {
   return {
     id: String(row.id),
     code: String(row.code),
+    short_name: row.short_name != null ? String(row.short_name) : null,
     description: String(row.description),
-    event_rule: row.event_rule === "RULE_107" ? "RULE_107" : "RULE_1",
+    event_rule: mapEventRule(row.event_rule),
+    is_rule_based: Boolean(row.is_rule_based),
     requires_other_text: Boolean(row.requires_other_text),
     allows_additional_detail:
       row.allows_additional_detail == null
@@ -33,6 +46,16 @@ function mapBoRule(row: Record<string, unknown>): BoRule {
   };
 }
 
+function slugCode(raw: string): string {
+  const s = raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+  return s || `REASON_${Date.now().toString(36).toUpperCase()}`;
+}
+
 export async function listBoRules(opts?: {
   tenantId?: string;
   activeOnly?: boolean;
@@ -40,13 +63,15 @@ export async function listBoRules(opts?: {
   const tenantId = opts?.tenantId ?? DEFAULT_TENANT_ID;
   const activeOnly = opts?.activeOnly !== false;
   const { rows } = await q(
-    `SELECT id, code, description, event_rule, requires_other_text,
+    `SELECT id, code, short_name, description, event_rule,
+            COALESCE(is_rule_based, false) AS is_rule_based,
+            requires_other_text,
             COALESCE(allows_additional_detail, true) AS allows_additional_detail,
             active, sort_order
      FROM repair.bo_rules
      WHERE tenant_id = $1 AND deleted_at IS NULL
        AND ($2::boolean IS FALSE OR active)
-     ORDER BY sort_order, code`,
+     ORDER BY sort_order, description, code`,
     [tenantId, activeOnly],
   );
   return rows.map((r) => mapBoRule(r as Record<string, unknown>));
@@ -57,7 +82,9 @@ export async function getBoRuleByCode(
   tenantId = DEFAULT_TENANT_ID,
 ): Promise<BoRule | null> {
   const { rows } = await q(
-    `SELECT id, code, description, event_rule, requires_other_text,
+    `SELECT id, code, short_name, description, event_rule,
+            COALESCE(is_rule_based, false) AS is_rule_based,
+            requires_other_text,
             COALESCE(allows_additional_detail, true) AS allows_additional_detail,
             active, sort_order
      FROM repair.bo_rules
@@ -69,34 +96,49 @@ export async function getBoRuleByCode(
 }
 
 export async function createBoRule(opts: {
-  code: string;
+  /** Internal code; optional — derived from shortName or description when omitted. */
+  code?: string;
+  shortName?: string | null;
   description: string;
-  eventRule?: "RULE_1" | "RULE_107";
+  eventRule?: EventRuleCode;
+  isRuleBased?: boolean;
   requiresOtherText?: boolean;
   allowsAdditionalDetail?: boolean;
+  sortOrder?: number;
   actor: string;
   tenantId?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  const code = opts.code.trim().toUpperCase();
-  if (!code) return { ok: false as const, status: 400, error: "code required" };
   if (!opts.description.trim()) {
-    return { ok: false as const, status: 400, error: "description required" };
+    return { ok: false as const, status: 400, error: "name required" };
   }
+  const shortName = (opts.shortName ?? "").trim() || null;
+  const code = slugCode(opts.code || shortName || opts.description);
+  const isRuleBased = Boolean(opts.isRuleBased);
+  const eventRule: EventRuleCode = isRuleBased
+    ? mapEventRule(opts.eventRule)
+    : "RULE_1";
+  const requiresOther =
+    opts.requiresOtherText != null
+      ? Boolean(opts.requiresOtherText)
+      : eventRule === "OTHER" || code === "OTHER";
   try {
     const { rows } = await q(
       `INSERT INTO repair.bo_rules
-         (tenant_id, code, description, event_rule, requires_other_text,
-          allows_additional_detail, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+         (tenant_id, code, short_name, description, event_rule, is_rule_based,
+          requires_other_text, allows_additional_detail, sort_order, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
         tenantId,
         code,
+        shortName,
         opts.description.trim(),
-        opts.eventRule === "RULE_107" ? "RULE_107" : "RULE_1",
-        Boolean(opts.requiresOtherText),
+        eventRule,
+        isRuleBased,
+        requiresOther,
         opts.allowsAdditionalDetail !== false,
+        opts.sortOrder ?? 100,
         opts.actor,
       ],
     );
@@ -113,7 +155,7 @@ export async function createBoRule(opts: {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("unique") || msg.includes("duplicate")) {
-      return { ok: false as const, status: 409, error: `Reason code ${code} already exists` };
+      return { ok: false as const, status: 409, error: `Reason ${code} already exists` };
     }
     throw err;
   }
@@ -150,9 +192,12 @@ export async function deactivateBoRule(opts: {
 export async function updateBoRule(opts: {
   id: string;
   description?: string;
+  shortName?: string | null;
   active?: boolean;
   requiresOtherText?: boolean;
   allowsAdditionalDetail?: boolean;
+  isRuleBased?: boolean;
+  eventRule?: EventRuleCode;
   sortOrder?: number;
   actor: string;
   tenantId?: string;
@@ -161,18 +206,27 @@ export async function updateBoRule(opts: {
   const { rows } = await q(
     `UPDATE repair.bo_rules
      SET description = COALESCE($1, description),
-         active = COALESCE($2, active),
-         requires_other_text = COALESCE($3, requires_other_text),
-         allows_additional_detail = COALESCE($4, allows_additional_detail),
-         sort_order = COALESCE($5, sort_order)
-     WHERE id = $6 AND tenant_id = $7 AND deleted_at IS NULL
+         short_name = CASE WHEN $2::boolean THEN $3 ELSE short_name END,
+         active = COALESCE($4, active),
+         requires_other_text = COALESCE($5, requires_other_text),
+         allows_additional_detail = COALESCE($6, allows_additional_detail),
+         sort_order = COALESCE($7, sort_order),
+         is_rule_based = COALESCE($8, is_rule_based),
+         event_rule = COALESCE($9, event_rule)
+     WHERE id = $10 AND tenant_id = $11 AND deleted_at IS NULL
      RETURNING *`,
     [
       opts.description?.trim() || null,
+      opts.shortName !== undefined,
+      opts.shortName === undefined
+        ? null
+        : opts.shortName?.trim() || null,
       opts.active ?? null,
       opts.requiresOtherText ?? null,
       opts.allowsAdditionalDetail ?? null,
       opts.sortOrder ?? null,
+      opts.isRuleBased ?? null,
+      opts.eventRule != null ? mapEventRule(opts.eventRule) : null,
       opts.id,
       tenantId,
     ],
@@ -213,16 +267,19 @@ export async function resolveBoRuleSelection(opts: {
 
   const rule = await getBoRuleByCode(code, tenantId);
   if (!rule || !rule.active) {
-    return { ok: false, status: 400, error: `Unknown or inactive BO rule: ${code}` };
+    return { ok: false, status: 400, error: `Unknown or inactive Bad Order Reason: ${code}` };
   }
   const otherText = (opts.otherText ?? "").trim();
   if (rule.requires_other_text && !otherText) {
-    return { ok: false, status: 400, error: "Other rule requires manual text" };
+    return { ok: false, status: 400, error: "This Bad Order Reason requires keyed detail" };
   }
+  // Track behavior: only RULE_107 opens two tracks; OTHER / non-rule-based → RULE_1
+  const eventRule: "RULE_1" | "RULE_107" =
+    rule.is_rule_based && rule.event_rule === "RULE_107" ? "RULE_107" : "RULE_1";
   return {
     ok: true,
     code: rule.code,
-    eventRule: rule.event_rule,
+    eventRule,
     otherText: otherText || null,
     description: rule.description,
   };

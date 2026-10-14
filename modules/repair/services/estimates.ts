@@ -640,6 +640,9 @@ export async function uploadEventDocument(opts: {
   eventId?: string;
   tenantId?: string;
   kind: string;
+  /** Attachment category (sds / scope_of_work / photograph / other). */
+  categoryCode?: string;
+  comment?: string;
   actorEmail: string;
   file: { filename: string; mime: string; bytes: Buffer };
 }) {
@@ -657,9 +660,14 @@ export async function uploadEventDocument(opts: {
     return { ok: false as const, status: 400, error: "eventId or token required" };
   }
 
+  const categoryCode = (opts.categoryCode || opts.kind || "other")
+    .trim()
+    .toLowerCase();
+  const kind = opts.kind?.trim() || categoryCode || "other";
+
   const stored = await getStorageProvider().put({
     tenantId,
-    kind: opts.kind || "other",
+    kind,
     filename: opts.file.filename,
     mime: opts.file.mime,
     bytes: opts.file.bytes,
@@ -667,14 +675,16 @@ export async function uploadEventDocument(opts: {
 
   const { rows } = await q(
     `INSERT INTO repair.documents
-       (tenant_id, event_id, kind, storage_key, sha256, size, mime,
+       (tenant_id, event_id, kind, category_code, comment, storage_key, sha256, size, mime,
         uploaded_by, created_by, original_filename)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)
      RETURNING *`,
     [
       tenantId,
       eventId,
-      opts.kind || "other",
+      kind,
+      categoryCode,
+      opts.comment?.trim() || null,
       stored.storageKey,
       stored.sha256,
       stored.size,
@@ -689,7 +699,12 @@ export async function uploadEventDocument(opts: {
     entity: "document",
     entityId: rows[0].id,
     action: "DOCUMENT_UPLOADED",
-    after: { kind: opts.kind, sha256: stored.sha256 },
+    after: {
+      kind,
+      categoryCode,
+      comment: opts.comment?.trim() || null,
+      sha256: stored.sha256,
+    },
     actor: opts.actorEmail,
     via: opts.rawToken ? "event_link" : "UI",
   });

@@ -100,22 +100,23 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     shopState = shops[0].state != null ? String(shops[0].state) : null;
   }
 
-  const requestedBilling = (input.billingRoad ?? "").trim().toUpperCase() || null;
+  // Billing road comes from the shop record on BO create.
+  // Corrections belong on the estimate header (pencil), not the BO form.
   const defaultBilling = (shopBillingRoad ?? "").trim().toUpperCase() || null;
-  let billingRoad = requestedBilling ?? defaultBilling;
+  const requestedBilling = (input.billingRoad ?? "").trim().toUpperCase() || null;
+  let billingRoad = defaultBilling ?? requestedBilling;
   let overrideReason: string | null = null;
   if (
     requestedBilling &&
     defaultBilling &&
     requestedBilling !== defaultBilling
   ) {
+    // Legacy API callers may still send an override + reason; owner UI no longer does.
     overrideReason = (input.billingRoadOverrideReason ?? "").trim();
     if (!overrideReason) {
-      return {
-        ok: false as const,
-        status: 400,
-        error: "Billing road override requires a reason",
-      };
+      billingRoad = defaultBilling;
+    } else {
+      billingRoad = requestedBilling;
     }
   } else if (requestedBilling && !defaultBilling) {
     billingRoad = requestedBilling;
@@ -145,10 +146,10 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     }
   }
 
-  // B/O City/State required (RS #6). Fall back to shop city/ST for API/smoke callers.
-  // Last-resort placeholders keep legacy smoke paths working; owner UI always sends values.
-  const boCity = (input.boCity ?? shopCity ?? "Pending").trim();
-  const boState = (input.boState ?? shopState ?? "XX").trim().toUpperCase();
+  // B/O City/State required (RS #6). Empty string treated as missing → shop city/ST.
+  // Last-resort placeholders keep legacy smoke paths working; owner UI validates required.
+  const boCity = (input.boCity?.trim() || shopCity || "Pending").trim();
+  const boState = (input.boState?.trim() || shopState || "XX").trim().toUpperCase();
 
   const carLoad =
     input.carLoad === "LOADED" || input.carLoad === "EMPTY"

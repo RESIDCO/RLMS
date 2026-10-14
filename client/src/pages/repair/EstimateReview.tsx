@@ -7,12 +7,12 @@ import { Link, useRoute } from "wouter";
 import {
   ChevronDown,
   FileText,
+  Lock,
   Pencil,
   RefreshCw,
   Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
@@ -88,18 +88,25 @@ const BILLING_CATEGORIES = [
   "Other",
 ];
 
+const CAR_LOCK_WHY =
+  "Car initial and number are locked. Wrong car → void this estimate and have the shop resubmit under the correct car (audited).";
+
 function Field({
   label,
   value,
   mono,
   onEdit,
   canEdit,
+  locked,
+  lockWhy,
 }: {
   label: string;
   value?: string | null;
   mono?: boolean;
   onEdit?: () => void;
   canEdit?: boolean;
+  locked?: boolean;
+  lockWhy?: string;
 }) {
   return (
     <div className="group/field text-xs leading-snug flex items-start gap-1 min-w-0">
@@ -109,7 +116,14 @@ function Field({
           {value || "—"}
         </span>
       </div>
-      {canEdit && onEdit ? (
+      {locked ? (
+        <span
+          className="shrink-0 p-0.5 text-muted-foreground"
+          title={lockWhy || CAR_LOCK_WHY}
+        >
+          <Lock className="h-3 w-3" aria-label="Locked" />
+        </span>
+      ) : canEdit && onEdit ? (
         <button
           type="button"
           className="opacity-0 group-hover/field:opacity-100 focus:opacity-100 shrink-0 p-0.5 rounded hover:bg-muted text-muted-foreground"
@@ -152,7 +166,6 @@ export default function EstimateReview() {
   const [needsAdjustment, setNeedsAdjustment] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [lesseeEmail, setLesseeEmail] = useState("");
   const [msg, setMsg] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [menu, setMenu] = useState<MenuKey>(null);
@@ -160,7 +173,6 @@ export default function EstimateReview() {
   const [showCompare, setShowCompare] = useState(false);
   const [cmpFrom, setCmpFrom] = useState<number | "">("");
   const [cmpTo, setCmpTo] = useState<number | "">("");
-  const [showLessee, setShowLessee] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showRollback, setShowRollback] = useState(false);
@@ -252,26 +264,6 @@ export default function EstimateReview() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "billing category failed");
-    }
-  }
-
-  async function sendLessee() {
-    setMsg("");
-    setError("");
-    try {
-      const res = await apiRequest(
-        "POST",
-        `/api/repair/estimates/${estimateId}/lessee-approval`,
-        { lesseeEmail, note: note || undefined },
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "lessee-approval failed");
-      setMsg(
-        `Lessee email logged (dev). Link path: ${data.lesseeUrlPath} — shop was not copied.`,
-      );
-      setShowLessee(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "lessee send failed");
     }
   }
 
@@ -442,11 +434,9 @@ export default function EstimateReview() {
                           label="Reject / Request Revision"
                         />
                         <MenuItem
-                          onClick={() => {
-                            setShowLessee(true);
-                            setMenu(null);
-                          }}
+                          href={`#/repair/estimates/${estimateId}/send-lessee`}
                           label="Send Lessee Responsibility"
+                          onClick={() => setMenu(null)}
                         />
                         <MenuItem
                           href={`#/repair/estimates/${estimateId}/responsibilities`}
@@ -558,8 +548,18 @@ export default function EstimateReview() {
                   <Field label="Detail Source" value={ctx.detailSource} canEdit={canPencil} onEdit={() => { setPencilOpen(true); setMoreOpen(true); }} />
                 </div>
                 <div className="space-y-0.5">
-                  <Field label="Car Initial" value={ctx.carInitial} canEdit={canPencil} onEdit={() => { setPencilOpen(true); setMoreOpen(true); }} />
-                  <Field label="Car Number" value={ctx.carNumber} canEdit={canPencil} onEdit={() => { setPencilOpen(true); setMoreOpen(true); }} />
+                  <Field
+                    label="Car Initial"
+                    value={ctx.carInitial}
+                    locked
+                    lockWhy={CAR_LOCK_WHY}
+                  />
+                  <Field
+                    label="Car Number"
+                    value={ctx.carNumber}
+                    locked
+                    lockWhy={CAR_LOCK_WHY}
+                  />
                   <Field label="Car Type" value={ctx.carType} canEdit={canPencil} onEdit={() => { setPencilOpen(true); setMoreOpen(true); }} />
                   <Field label="Kind of Car" value={ctx.kindOfCar} canEdit={canPencil} onEdit={() => { setPencilOpen(true); setMoreOpen(true); }} />
                   <Field label="Road" value={ctx.road} canEdit={canPencil} onEdit={() => { setPencilOpen(true); setMoreOpen(true); }} />
@@ -700,30 +700,6 @@ export default function EstimateReview() {
                 }}
               >
                 Request revision
-              </Button>
-            </div>
-          </Modal>
-        )}
-
-        {showLessee && (
-          <Modal title="Send Lessee Responsibility (Resp 6)" onClose={() => setShowLessee(false)}>
-            <p className="text-xs text-muted-foreground mb-2">
-              Shop is never copied on lessee emails.
-            </p>
-            <Label htmlFor="lessee">Lessee email</Label>
-            <Input
-              id="lessee"
-              type="email"
-              className="mt-1"
-              value={lesseeEmail}
-              onChange={(e) => setLesseeEmail(e.target.value)}
-            />
-            <div className="flex gap-2 mt-3 justify-end">
-              <Button variant="ghost" onClick={() => setShowLessee(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => void sendLessee()} disabled={!lesseeEmail}>
-                Send
               </Button>
             </div>
           </Modal>

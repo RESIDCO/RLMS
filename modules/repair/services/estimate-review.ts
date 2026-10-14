@@ -33,6 +33,7 @@ import {
   dollarsToCents,
   formatCentsAsDollars,
   formatCentsAsMoney,
+  formatCentsWithCommas,
   formatMoneyParts,
   lineLaborCents,
   lineMaterialCents,
@@ -516,7 +517,12 @@ export function summarizeByResp(
     /** Pending new code override for UI recalculate */
     resp_new?: string | null;
   }>,
-): Array<{ code: string; totalCents: number; totalDisplay: string }> {
+): Array<{
+  code: string;
+  totalCents: number;
+  totalDisplay: string;
+  totalMoney: string;
+}> {
   const map = new Map<string, number>();
   for (const l of lines) {
     const code = String(l.resp_new || l.resp_code || "(none)");
@@ -536,7 +542,8 @@ export function summarizeByResp(
     .map(([code, totalCents]) => ({
       code,
       totalCents,
-      totalDisplay: formatCentsAsDollars(totalCents),
+      totalDisplay: formatCentsWithCommas(totalCents),
+      totalMoney: formatCentsAsMoney(totalCents),
     }));
 }
 

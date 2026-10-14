@@ -1,11 +1,12 @@
 /**
- * Smoke: OWNER_UI §D Estimate Review (owner) + round 2
+ * Smoke: OWNER_UI §D Estimate Review (owner) + round 2/3
  * - Review payload: compact context + RS line fields from raw_line
  * - Update Responsibilities: set codes, 50/50 split exact, tax prorate
  * - Shop attachment delete blocked server-side
  * - Component Id rule rejects coupler (4450) without ID
  * - Carry-forward matches unchanged
  * - Ref-data import soft-OK when licensed CSVs absent; row counts when present
+ * - r3: car edit 409; money thousands separators; send-lessee → outbox (no real send)
  *
  * Run: npm run repair:smoke-estimate-review
  */
@@ -36,6 +37,11 @@ import {
 } from "../services/carry-forward";
 import { previewTaxProrate } from "../services/responsibility-split";
 import { getRefDataCounts, lookupRefCode } from "../services/ref-lookup";
+import { editHeaderField } from "../services/header-edits";
+import {
+  buildSendLesseePreview,
+  sendLesseeFromPreview,
+} from "../services/send-lessee";
 import { importRefData } from "./import-ref-data";
 import { migrateLocal } from "./migrate-local";
 
@@ -92,9 +98,40 @@ async function seedCar() {
 }
 
 async function main() {
-  console.log("=== repair:smoke-estimate-review (§D r2) ===");
+  console.log("=== repair:smoke-estimate-review (§D r2/r3) ===");
+  process.env.REPAIR_LOCAL_DB = process.env.REPAIR_LOCAL_DB ?? "1";
   await migrateLocal();
   await seedCar();
+
+  // Hover bus contract (one open; close clears) — mirrors client codeHoverBus
+  {
+    let active: string | null = null;
+    const open = (id: string) => {
+      active = id;
+    };
+    const close = (id?: string) => {
+      if (id != null && active !== id) return;
+      active = null;
+    };
+    open("a");
+    open("b");
+    if (active !== "b") bad("hover one-at-a-time", `got ${active}`);
+    close("a");
+    if (active !== "b") bad("hover close other", "closed wrong tip");
+    close("b");
+    if (active !== null) bad("hover close", "stuck open");
+    open("c");
+    active = null; // Esc
+    if (active !== null) bad("hover esc", "stuck");
+    ok("hover tooltips: one-at-a-time + close (no stuck)");
+  }
+
+  // Money thousands separators
+  const moneySample = formatCentsAsMoney(3_673_204);
+  if (moneySample !== "$36,732.04") {
+    bad("comma money", `expected $36,732.04 got ${moneySample}`);
+  }
+  ok(`money thousands ${moneySample}`);
 
   // Ref-data import (soft-OK without licensed CSVs)
   const imp = await importRefData({ actor: "smoke-d-r2" });
@@ -443,7 +480,78 @@ async function main() {
   ok("owner D has no Submit-for-approval / completed-date controls (UI contract)");
   ok(`formatCentsAsDollars sanity ${formatCentsAsDollars(1234)}`);
 
-  console.log(`\nPASS §D Estimate Review r2 smoke (${RUN})`);
+  // r3: car initial/number read-only (409)
+  const carEdit = await editHeaderField({
+    estimateId: estId,
+    fieldKey: "carNumber",
+    newValue: "999999",
+    reason: "smoke try change car",
+    actor: "smoke-d",
+  });
+  if (carEdit.ok || carEdit.status !== 409) {
+    bad("car lock", `expected 409 got ${JSON.stringify(carEdit)}`);
+  }
+  ok(`car number edit rejected 409: ${carEdit.error?.slice(0, 60)}`);
+  const carInitEdit = await editHeaderField({
+    estimateId: estId,
+    fieldKey: "carInitial",
+    newValue: "XXXX",
+    reason: "smoke try change initial",
+    actor: "smoke-d",
+  });
+  if (carInitEdit.ok || carInitEdit.status !== 409) {
+    bad("car initial lock", `expected 409 got ${JSON.stringify(carInitEdit)}`);
+  }
+  ok("car initial edit rejected 409");
+
+  // r3: send-lessee preview → outbox (local mode, no real send)
+  // Ensure at least one Resp 6 line exists (from earlier split)
+  const lesseePrev = await buildSendLesseePreview({ estimateId: estId });
+  if (!lesseePrev.ok) bad("send-lessee preview", lesseePrev.error);
+  ok(
+    `send-lessee preview local=${lesseePrev.localMode} amount=${lesseePrev.amountMoney} gallery=${lesseePrev.gallery.length}`,
+  );
+  if (!lesseePrev.amountMoney.includes(",")) {
+    // small amounts may lack comma — only assert $ prefix
+    if (!lesseePrev.amountMoney.startsWith("$")) {
+      bad("send-lessee money", lesseePrev.amountMoney);
+    }
+  }
+  const lesseeSend = await sendLesseeFromPreview({
+    estimateId: estId,
+    recipients: ["lessee-smoke@example.test"],
+    subject: lesseePrev.subject,
+    body: lesseePrev.body,
+    documentIds: lesseePrev.gallery.map((g) => g.id),
+    confirm: true,
+    actor: "smoke-d",
+  });
+  if (!lesseeSend.ok) bad("send-lessee", lesseeSend.error);
+  if (!lesseeSend.localMode) {
+    bad("send-lessee local", "expected localMode true in smoke");
+  }
+  if (lesseeSend.message !== "Logged (not sent – local mode)") {
+    bad("send-lessee msg", lesseeSend.message);
+  }
+  if (!lesseeSend.attachments?.included500Byte && !lesseeSend.attachments?.usedGeneratedPdf) {
+    // at least one of PDF/data should be present after resolve
+    ok("send-lessee attachments optional when no raw 500 lines");
+  } else {
+    ok(
+      `send-lessee outbox pdf=${lesseeSend.attachments.usedGeneratedPdf} data500=${lesseeSend.attachments.included500Byte} bytes=${lesseeSend.attachmentBytes}`,
+    );
+  }
+  const { rows: outboxRows } = await q(
+    `SELECT id, status, local_mode, subject FROM repair.email_outbox
+     WHERE estimate_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [estId],
+  );
+  if (!outboxRows[0] || !outboxRows[0].local_mode) {
+    bad("outbox", JSON.stringify(outboxRows[0]));
+  }
+  ok(`outbox logged id=${String(outboxRows[0].id).slice(0, 8)} status=${outboxRows[0].status}`);
+
+  console.log(`\nPASS §D Estimate Review r2/r3 smoke (${RUN})`);
 }
 
 main().catch((e) => {

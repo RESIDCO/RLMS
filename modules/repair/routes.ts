@@ -184,6 +184,12 @@ import {
   confirmLesseeReply,
   getLesseeViewForToken,
 } from "./services/lessee-approval";
+import {
+  buildSendLesseePreview,
+  sendLesseeFromPreview,
+  previewAttachmentContent,
+  listSendLesseeHistory,
+} from "./services/send-lessee";
 import { enterPodErd, listPodDates, latestPodErd, runPodReminders } from "./services/pod";
 import { setCompletedDate, rollbackCompletedDate } from "./services/completion";
 import { submitShopInvoice, listInvoicesForEvent, approveInvoiceMatch } from "./services/invoices";
@@ -1816,6 +1822,70 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       documentIds: docs,
       actor: actorFrom(req),
       note: body.note ? String(body.note) : undefined,
+      subject: body.subject ? String(body.subject) : undefined,
+      bodyText: body.bodyText ? String(body.bodyText) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/estimates/:id/send-lessee", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await buildSendLesseePreview({
+      estimateId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/estimates/:id/send-lessee/history", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json(
+      await listSendLesseeHistory({ estimateId: String(req.params.id) }),
+    );
+  });
+
+  app.get("/api/repair/estimates/:id/send-lessee/attachment-preview", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const kindRaw = String(req.query.kind ?? "");
+    const kind =
+      kindRaw === "pdf" || kindRaw === "data" ? (kindRaw as "pdf" | "data") : undefined;
+    const result = await previewAttachmentContent({
+      estimateId: String(req.params.id),
+      documentId: req.query.documentId ? String(req.query.documentId) : undefined,
+      kind,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/send-lessee", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const recipients = Array.isArray(body.recipients)
+      ? body.recipients.map(String)
+      : body.lesseeEmail
+        ? [String(body.lesseeEmail)]
+        : [];
+    const docs = Array.isArray(body.documentIds)
+      ? body.documentIds.map(String)
+      : [];
+    const result = await sendLesseeFromPreview({
+      estimateId: String(req.params.id),
+      recipients,
+      subject: String(body.subject ?? ""),
+      body: String(body.body ?? body.bodyText ?? ""),
+      documentIds: docs,
+      includePdf: body.includePdf !== false,
+      includeDataFile: body.includeDataFile !== false,
+      note: body.note ? String(body.note) : undefined,
+      actor: actorFrom(req),
+      confirm: Boolean(body.confirm),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.status(201).json(result);

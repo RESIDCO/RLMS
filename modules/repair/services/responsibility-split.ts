@@ -255,7 +255,14 @@ export function previewTaxProrate(opts: {
       respCode: r.code,
       basisCents: r.basis,
       taxCents: r.tax,
-      taxDisplay: (r.tax / 100).toFixed(2),
+      taxDisplay: (r.tax / 100).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+      taxMoney: `$${(r.tax / 100).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`,
     })),
     totalTaxCents: allocated,
     exact: allocated === tax,

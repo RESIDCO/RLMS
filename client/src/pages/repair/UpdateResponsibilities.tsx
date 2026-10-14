@@ -580,7 +580,9 @@ export default function UpdateResponsibilities() {
             </Button>
             {taxPreview.map((s) => (
               <span key={s.respCode} className="text-xs tabular-nums">
-                R{s.respCode}: ${s.taxDisplay} ({s.taxCents}¢ / basis {s.basisCents}¢)
+                R{s.respCode}:{" "}
+                {(s as { taxMoney?: string }).taxMoney ?? `$${s.taxDisplay}`} (
+                {s.taxCents}¢ / basis {s.basisCents}¢)
               </span>
             ))}
           </div>
@@ -697,13 +699,16 @@ export default function UpdateResponsibilities() {
                     </select>
                   </td>
                   <td className="p-1.5 text-right tabular-nums">
-                    ${l.labor_display ?? Number(l.labor).toFixed(2)}
+                    {l.labor_money ??
+                      `$${l.labor_display ?? Number(l.labor).toFixed(2)}`}
                   </td>
                   <td className="p-1.5 text-right tabular-nums">
-                    ${l.material_display ?? Number(l.material).toFixed(2)}
+                    {l.material_money ??
+                      `$${l.material_display ?? Number(l.material).toFixed(2)}`}
                   </td>
                   <td className="p-1.5 text-right tabular-nums font-medium">
-                    ${l.amount_display ?? Number(l.total).toFixed(2)}
+                    {l.amount_money ??
+                      `$${l.amount_display ?? Number(l.total).toFixed(2)}`}
                   </td>
                 </tr>
               ))}
@@ -716,7 +721,12 @@ export default function UpdateResponsibilities() {
           <div>
             {summary.length === 0
               ? "—"
-              : summary.map((s) => `${s.code} = $${s.totalDisplay}`).join("; ")}
+              : summary
+                  .map(
+                    (s) =>
+                      `${s.code} = ${(s as { totalMoney?: string }).totalMoney ?? `$${s.totalDisplay}`}`,
+                  )
+                  .join("; ")}
           </div>
           <Button
             size="sm"

@@ -116,6 +116,15 @@ export async function editHeaderField(opts: {
   if (!HEADER_KEY_SET.has(fieldKey)) {
     return { ok: false as const, status: 400, error: `Unknown header field: ${fieldKey}` };
   }
+  /** Car initial + number are immutable on the estimate — wrong car → void + shop resubmit. */
+  if (fieldKey === "carInitial" || fieldKey === "carNumber") {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Car initial and car number are read-only. If the car is wrong, void this estimate and have the shop resubmit under the correct car (audited).",
+    };
+  }
   if (!reason) {
     return { ok: false as const, status: 400, error: "Edit reason is required" };
   }

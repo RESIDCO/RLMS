@@ -2,13 +2,27 @@
  * Shared Data File header + RS line grid + totals + attachments for
  * internal estimate review and lessee estimate (read-only mode).
  */
-import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, FileCode2, Flag, Pencil } from "lucide-react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { AlertCircle, FileCode2, Flag, Lock, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { closeHover, openHover, subscribeHover } from "./codeHoverBus";
+
+const CAR_LOCKED_KEYS = new Set(["carInitial", "carNumber"]);
+const CAR_LOCK_WHY =
+  "Car initial and number are locked. Wrong car → void this estimate and have the shop resubmit under the correct car (audited).";
+
+function formatDisplayMoney(cents: number): string {
+  const n = Math.trunc(cents) / 100;
+  const abs = Math.abs(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${n < 0 ? "-" : ""}$${abs}`;
+}
 
 export type HeaderFieldDef = { key: string; label: string; group: string };
 
@@ -81,20 +95,21 @@ function moneyCell(opts: {
   cents?: number;
   centsLabel?: string;
 }) {
+  const cents =
+    opts.cents != null
+      ? Math.trunc(opts.cents)
+      : Math.round(Number(opts.dollars ?? 0) * 100);
   const dollars =
-    opts.money ??
-    (opts.display
-      ? opts.display.startsWith("$")
-        ? opts.display
-        : `$${opts.display}`
-      : `$${(Math.round(Number(opts.dollars ?? 0) * 100) / 100).toFixed(2)}`);
+    opts.money && opts.money.includes(",")
+      ? opts.money
+      : formatDisplayMoney(cents);
   const centsLabel =
     opts.centsLabel ??
-    (opts.cents != null ? String(opts.cents) : undefined);
+    (opts.cents != null ? String(opts.cents) : String(cents));
   return (
     <div className="leading-tight">
       <div className="tabular-nums">{dollars}</div>
-      {centsLabel != null && centsLabel !== "" ? (
+      {centsLabel !== "" ? (
         <div className="text-[9px] text-muted-foreground tabular-nums">{centsLabel}¢</div>
       ) : null}
     </div>
@@ -112,10 +127,12 @@ function CodeHover({
   qualifier?: string | null;
   children: React.ReactNode;
 }) {
+  const id = useId();
   const [tip, setTip] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(false);
+  useEffect(() => subscribeHover((a) => setActive(a === id)), [id]);
   useEffect(() => {
-    if (!open || !code) return;
+    if (!active || !code) return;
     let cancelled = false;
     const qs = new URLSearchParams({ kind, code });
     if (qualifier) qs.set("qualifier", qualifier);
@@ -136,18 +153,23 @@ function CodeHover({
     return () => {
       cancelled = true;
     };
-  }, [open, kind, code, qualifier]);
+  }, [active, kind, code, qualifier]);
   if (!code) return <>{children}</>;
   return (
     <span
       className="relative cursor-help border-b border-dotted border-muted-foreground/50"
-      title={tip ?? "Loading…"}
-      onMouseEnter={() => setOpen(true)}
-      onFocus={() => setOpen(true)}
+      tabIndex={0}
+      onMouseEnter={() => openHover(id)}
+      onMouseLeave={() => closeHover(id)}
+      onFocus={() => openHover(id)}
+      onBlur={() => closeHover(id)}
     >
       {children}
-      {open && tip ? (
-        <span className="pointer-events-none absolute z-20 left-0 top-full mt-1 max-w-[16rem] rounded border border-border bg-popover px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-normal">
+      {active && tip ? (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute z-20 left-0 top-full mt-1 max-w-[16rem] rounded border border-border bg-popover px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-normal"
+        >
           {tip}
         </span>
       ) : null}
@@ -231,9 +253,9 @@ export function EstimateDataFile(props: Props) {
       laborCents: labor,
       materialCents: material,
       totalCents: total,
-      labor: `$${(labor / 100).toFixed(2)}`,
-      material: `$${(material / 100).toFixed(2)}`,
-      total: `$${(total / 100).toFixed(2)}`,
+      labor: formatDisplayMoney(labor),
+      material: formatDisplayMoney(material),
+      total: formatDisplayMoney(total),
     };
   }, [lines]);
 
@@ -331,7 +353,18 @@ export function EstimateDataFile(props: Props) {
                           </div>
                         )}
                       </div>
-                      {!readOnly && canPencilEdit && !isEditing && (
+                      {!readOnly && canPencilEdit && !isEditing && CAR_LOCKED_KEYS.has(f.key) && (
+                        <span
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground"
+                          title={CAR_LOCK_WHY}
+                        >
+                          <Lock className="h-3.5 w-3.5" aria-label="Locked" />
+                        </span>
+                      )}
+                      {!readOnly &&
+                        canPencilEdit &&
+                        !isEditing &&
+                        !CAR_LOCKED_KEYS.has(f.key) && (
                         <Button
                           size="icon"
                           variant="ghost"

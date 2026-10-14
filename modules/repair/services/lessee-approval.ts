@@ -128,6 +128,9 @@ export async function sendLesseeApprovalRequest(opts: {
   tenantId?: string;
   /** Optional note shown in email body */
   note?: string;
+  /** Override subject / body from Send Lessee preview page */
+  subject?: string;
+  bodyText?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
 
@@ -201,7 +204,10 @@ export async function sendLesseeApprovalRequest(opts: {
     .filter(Boolean)
     .join("\n");
 
-  const subject = `Estimate approval requested — ${carLabel}`;
+  const subject =
+    (opts.subject ?? "").trim() || `Estimate approval requested — ${carLabel}`;
+  const finalBody =
+    (opts.bodyText ?? "").trim() || bodyText;
   const send = await getEmailProvider().send({
     tenantId,
     eventId: opts.eventId,
@@ -210,7 +216,7 @@ export async function sendLesseeApprovalRequest(opts: {
     // Shop never copied
     cc: [],
     subject,
-    bodyText,
+    bodyText: finalBody,
     replyTo: `lessee-reply+${issued.link.id}@repair.local`,
     attachments: resolved.emailAttachments,
   });
@@ -226,7 +232,7 @@ export async function sendLesseeApprovalRequest(opts: {
       opts.eventId,
       JSON.stringify(recipients.to),
       subject,
-      bodyText,
+      finalBody,
       JSON.stringify(resolved.emailAttachments ?? []),
       send.providerMessageId,
       send.status,

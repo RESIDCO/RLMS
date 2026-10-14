@@ -36,16 +36,28 @@ export function centsToDollars(cents: number): number {
   return Number((Math.trunc(cents) / 100).toFixed(2));
 }
 
-/** Display / log formatting (always exactly 2 decimals). */
+/** Display / log formatting (always exactly 2 decimals, no thousands sep). */
 export function formatCentsAsDollars(cents: number): string {
   return (Math.trunc(cents) / 100).toFixed(2);
 }
 
-/** Always `$` + 2 decimals (e.g. `$12.34`). */
+/**
+ * Display dollars with thousands separators (e.g. `36,732.04`).
+ * Use for UI only — inputs stay plain numbers via formatCentsAsDollars / parse.
+ */
+export function formatCentsWithCommas(cents: number): string {
+  const n = Math.trunc(cents) / 100;
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Always `$` + 2 decimals with thousands separators (e.g. `$36,732.04`). */
 export function formatCentsAsMoney(cents: number): string {
   const n = Math.trunc(cents);
   const sign = n < 0 ? "-" : "";
-  return `${sign}$${formatCentsAsDollars(Math.abs(n))}`;
+  return `${sign}$${formatCentsWithCommas(Math.abs(n))}`;
 }
 
 /** UI pair: dollar string + integer cents underneath. */

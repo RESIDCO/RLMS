@@ -272,5 +272,5 @@ export REPAIR_LOCAL_DB=1
 npm run repair:demo:local
 ```
 
-Windows step-by-step: [PHASE1_DEMO_WINDOWS.md](./PHASE1_DEMO_WINDOWS.md).  
+Windows step-by-step (Node 22 / `npm install --ignore-scripts`, portable Postgres on **5433**): [PHASE1_DEMO_WINDOWS.md](./PHASE1_DEMO_WINDOWS.md).  
 Hand-test list: [PHASE1_REVIEW_CHECKLIST.md](./PHASE1_REVIEW_CHECKLIST.md).

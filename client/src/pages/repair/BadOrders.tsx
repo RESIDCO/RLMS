@@ -88,6 +88,18 @@ type StagedDoc = {
   comment: string;
 };
 
+/** Source-BO attachment staged for link-on-submit (same storage_key, not a copy). */
+type TemplateLinkedDoc = {
+  id: string;
+  sourceDocumentId: string;
+  /** Display: "From BO <car> <date>" */
+  label: string;
+  filename: string;
+  category: string;
+  comment: string;
+  include: boolean;
+};
+
 type Stcc = { code: string; description?: string | null };
 
 type GridRow = {
@@ -283,6 +295,53 @@ function filterTemplateCandidates(rows: GridRow[], needle: string): GridRow[] {
   return rows
     .filter((r) => templateMatchHaystack(r).includes(q))
     .slice(0, 40);
+}
+
+/** Pure mapper — shop / reason+keyed / comments must land in FormState (and thus controls). */
+function formStateFromTemplateRow(
+  row: GridRow,
+  distributionEmails: string,
+): FormState {
+  const next = emptyForm();
+  next.multiCar = Boolean(row.multi_car_group_id);
+  // Left blank for entry
+  next.carMark = "";
+  next.carNumber = "";
+  next.multiCarList = "";
+  next.arrivalDate = "";
+  next.incidentDate = "";
+  next.ddctIncidentId = "";
+  next.ddctEventId = "";
+  next.boDate = todayIso();
+  // Carried
+  next.reportingRoad = row.reporting_road ? String(row.reporting_road) : "";
+  next.dcRoad = row.dc_road ? String(row.dc_road) : "";
+  next.stcc = row.stcc ? String(row.stcc) : "";
+  next.destCity = row.dest_city ? String(row.dest_city) : "";
+  next.destState = row.dest_state ? String(row.dest_state) : "";
+  next.routing = row.routing ? String(row.routing) : "";
+  next.boRuleCode = row.bo_rule_code ? String(row.bo_rule_code) : "RULE_1";
+  next.boRuleOtherText = row.bo_rule_other_text
+    ? String(row.bo_rule_other_text)
+    : "";
+  next.lastContents = row.last_contents ? String(row.last_contents) : "";
+  next.carLoad = row.car_load === "LOADED" ? "LOADED" : "EMPTY";
+  next.cleaned = Boolean(row.cleaned);
+  next.travelOnOwnWheels = Boolean(row.travel_on_own_wheels);
+  next.boCity = row.bo_city ? String(row.bo_city) : "";
+  next.boState = row.bo_state ? String(row.bo_state) : "";
+  next.comments = row.comments != null ? String(row.comments) : "";
+  next.shopId = row.shop_id ? String(row.shop_id) : "";
+  next.isWreck = Boolean(row.is_wreck);
+  next.wreckEstimate = Boolean(row.wreck_estimate);
+  next.distributionEmails = distributionEmails;
+  return next;
+}
+
+function templateDocLabel(row: GridRow): string {
+  const car = `${row.car_mark ?? ""} ${row.car_number ?? ""}`.trim() || "—";
+  const date = fmtDate(row.bo_date) || "—";
+  return `From BO ${car} ${date}`;
 }
 
 function statusClass(code: string): string {
@@ -493,7 +552,15 @@ function BadOrdersBody() {
   const [templateOpen, setTemplateOpen] = useState(false);
   const [templatePool, setTemplatePool] = useState<GridRow[]>([]);
   const [templateLoading, setTemplateLoading] = useState(false);
+  /** Bumps on each template apply so Select/textarea remount with filled values. */
+  const [templateGen, setTemplateGen] = useState(0);
+  const [templateShopLabel, setTemplateShopLabel] = useState("");
+  const [linkedTemplateDocs, setLinkedTemplateDocs] = useState<
+    TemplateLinkedDoc[]
+  >([]);
   const [defaultDistribution, setDefaultDistribution] = useState("");
+  const commentsRef = useRef<HTMLTextAreaElement | null>(null);
+  const shopTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [viewer, setViewer] = useState<{
     eventId: string;
     docs: Array<{
@@ -677,6 +744,31 @@ function BadOrdersBody() {
   }, [shops, shopSearch]);
 
   const selectedShop = shops.find((s) => s.id === form.shopId);
+  const shopControlLabel =
+    selectedShop?.display_label ||
+    selectedShop?.name ||
+    (form.shopId && templateShopLabel ? templateShopLabel : "") ||
+    (form.shopId ? `Shop ${form.shopId.slice(0, 8)}…` : "");
+
+  /** Ensure reason Select always has an item for the filled code (inactive/missing). */
+  const reasonOptions = useMemo(() => {
+    const list = [...rules];
+    if (
+      form.boRuleCode &&
+      !list.some((r) => r.code === form.boRuleCode)
+    ) {
+      list.push({
+        code: form.boRuleCode,
+        description:
+          templateSource?.bad_order_reason || form.boRuleCode,
+        short_name: form.boRuleCode,
+        requires_other_text: Boolean(form.boRuleOtherText),
+        allows_additional_detail: true,
+        active: true,
+      });
+    }
+    return list;
+  }, [rules, form.boRuleCode, form.boRuleOtherText, templateSource]);
 
   const loadGrid = useCallback(async () => {
     setLoading(true);
@@ -797,11 +889,13 @@ function BadOrdersBody() {
     next.distributionEmails = defaultDistribution;
     setForm(next);
     setStagedDocs([]);
+    setLinkedTemplateDocs([]);
     setDocComment("");
     setFieldErrors({});
     setEntitySnap(null);
     setEntitySnapsMulti([]);
     setTemplateSource(null);
+    setTemplateShopLabel("");
     setTemplateSearch("");
     setMsg("");
   };
@@ -871,42 +965,28 @@ function BadOrdersBody() {
     }
   };
 
-  /** One-step "Start from previous BO" — fill form in place; leave entry fields blank. */
+  const linkCheckedTemplateDocs = async (eventIds: string[]) => {
+    const ids = linkedTemplateDocs
+      .filter((d) => d.include)
+      .map((d) => d.sourceDocumentId);
+    if (!ids.length || !eventIds.length) return;
+    for (const eventId of eventIds) {
+      const res = await apiRequest(
+        "POST",
+        `/api/repair/events/${eventId}/documents/link`,
+        { documentIds: ids },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to link template documents");
+      }
+    }
+  };
+
+  /** One-step "Start from previous BO" — fill form controls in place; leave entry fields blank. */
   const fillFromTemplate = (row: GridRow) => {
-    const next = emptyForm();
-    next.multiCar = Boolean(row.multi_car_group_id);
-    // Leave blank for entry: car initials/number (or Multi Car list), B/O date (today),
-    // arrival, incident date/ID, DDCT Event ID, attachments.
-    next.carMark = "";
-    next.carNumber = "";
-    next.multiCarList = "";
-    next.arrivalDate = "";
-    next.incidentDate = "";
-    next.ddctIncidentId = "";
-    next.ddctEventId = "";
-    next.boDate = todayIso();
-    // Filled from source
-    next.reportingRoad = row.reporting_road ? String(row.reporting_road) : "";
-    next.dcRoad = row.dc_road ? String(row.dc_road) : "";
-    next.stcc = row.stcc ? String(row.stcc) : "";
-    next.destCity = row.dest_city ? String(row.dest_city) : "";
-    next.destState = row.dest_state ? String(row.dest_state) : "";
-    next.routing = row.routing ? String(row.routing) : "";
-    next.boRuleCode = row.bo_rule_code || "RULE_1";
-    next.boRuleOtherText = row.bo_rule_other_text
-      ? String(row.bo_rule_other_text)
-      : "";
-    next.lastContents = row.last_contents ? String(row.last_contents) : "";
-    next.carLoad = row.car_load === "LOADED" ? "LOADED" : "EMPTY";
-    next.cleaned = Boolean(row.cleaned);
-    next.travelOnOwnWheels = Boolean(row.travel_on_own_wheels);
-    next.boCity = row.bo_city ? String(row.bo_city) : "";
-    next.boState = row.bo_state ? String(row.bo_state) : "";
-    next.comments = row.comments ? String(row.comments) : "";
-    next.shopId = row.shop_id ? String(row.shop_id) : "";
-    next.isWreck = Boolean(row.is_wreck);
-    next.wreckEstimate = Boolean(row.wreck_estimate);
-    next.distributionEmails = defaultDistribution;
+    const next = formStateFromTemplateRow(row, defaultDistribution);
+    // Replace form atomically so controlled inputs (Select/textarea/shop button) show values.
     setForm(next);
     setStagedDocs([]);
     setDocComment("");
@@ -914,11 +994,58 @@ function BadOrdersBody() {
     setEntitySnap(null);
     setEntitySnapsMulti([]);
     setTemplateSource(row);
+    setTemplateShopLabel(row.shop_display ? String(row.shop_display) : "");
+    setTemplateGen((n) => n + 1);
     setTemplateOpen(false);
     setTemplateSearch("");
+    setShopSearch("");
+    setShopPopoverOpen(false);
     setMsg("");
+    setLinkedTemplateDocs([]);
+
+    // Carry source BO attachments as linkable refs (checked by default).
+    if (row.event_id) {
+      const label = templateDocLabel(row);
+      void apiRequest(
+        "GET",
+        `/api/repair/events/${row.event_id}/documents/template-refs`,
+      )
+        .then((r) => r.json())
+        .then((d) => {
+          const docs = (d.documents ?? []) as Array<{
+            sourceDocumentId: string;
+            originalFilename?: string;
+            categoryCode?: string;
+            comment?: string | null;
+          }>;
+          setLinkedTemplateDocs(
+            docs.map((doc, i) => ({
+              id: `tpl-doc-${doc.sourceDocumentId}-${i}`,
+              sourceDocumentId: String(doc.sourceDocumentId),
+              label,
+              filename: String(doc.originalFilename || "attachment"),
+              category: String(doc.categoryCode || "other"),
+              comment: doc.comment != null ? String(doc.comment) : "",
+              include: true,
+            })),
+          );
+        })
+        .catch(() => setLinkedTemplateDocs([]));
+    }
+
     requestAnimationFrame(() => {
       formPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Belt-and-suspenders: ensure comments textarea DOM value matches state.
+      if (commentsRef.current) {
+        commentsRef.current.value = next.comments;
+      }
+      shopTriggerRef.current?.setAttribute("data-shop-id", next.shopId);
+      formPanelRef.current?.setAttribute("data-bo-rule", next.boRuleCode);
+      formPanelRef.current?.setAttribute(
+        "data-bo-rule-other",
+        next.boRuleOtherText,
+      );
+      formPanelRef.current?.setAttribute("data-comments-len", String(next.comments.length));
     });
   };
 
@@ -1000,11 +1127,13 @@ function BadOrdersBody() {
           else if (c.event?.id) eventIds.push(String(c.event.id));
         }
         await uploadStagedDocs(eventIds);
+        await linkCheckedTemplateDocs(eventIds);
+        const linkedN = linkedTemplateDocs.filter((x) => x.include).length;
         setMsg(
           `Created ${d.created?.length ?? 0} Bad Order(s)` +
             (d.rejected?.length ? `; ${d.rejected.length} rejected` : "") +
-            (stagedDocs.length
-              ? ` · ${stagedDocs.length} document(s) attached`
+            (stagedDocs.length || linkedN
+              ? ` · ${stagedDocs.length + linkedN} document(s) attached`
               : ""),
         );
       } else {
@@ -1040,11 +1169,13 @@ function BadOrdersBody() {
         if (!r.ok) throw new Error(d.error || "Create failed");
         if (d.event?.id) eventIds.push(String(d.event.id));
         await uploadStagedDocs(eventIds);
+        await linkCheckedTemplateDocs(eventIds);
+        const linkedN = linkedTemplateDocs.filter((x) => x.include).length;
         setMsg(
           `Bad Order Queued for ${form.carMark} ${form.carNumber}` +
             (d.event?.entity_code ? ` · Entity ${d.event.entity_code}` : "") +
-            (stagedDocs.length
-              ? ` · ${stagedDocs.length} document(s) attached`
+            (stagedDocs.length || linkedN
+              ? ` · ${stagedDocs.length + linkedN} document(s) attached`
               : ""),
         );
       }
@@ -1145,7 +1276,11 @@ function BadOrdersBody() {
     setActiveView(v.id);
   };
 
-  const selectedRule = rules.find((r) => r.code === form.boRuleCode);
+  const selectedRule = reasonOptions.find((r) => r.code === form.boRuleCode);
+  const showKeyedDetail =
+    Boolean(form.boRuleOtherText?.trim()) ||
+    Boolean(selectedRule?.requires_other_text) ||
+    Boolean(selectedRule?.allows_additional_detail);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const panel = dark
     ? "bg-slate-900/60 border-slate-700 text-slate-100"
@@ -1339,7 +1474,14 @@ function BadOrdersBody() {
       </div>
 
       {/* C2 — New Bad Order */}
-      <div ref={formPanelRef} className={`border-b px-3 py-3 ${panel}`}>
+      <div
+        ref={formPanelRef}
+        className={`border-b px-3 py-3 ${panel}`}
+        data-shop-id={form.shopId || undefined}
+        data-bo-rule={form.boRuleCode || undefined}
+        data-bo-rule-other={form.boRuleOtherText || undefined}
+        data-comments-len={form.comments.length}
+      >
         <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <h2 className="text-sm font-semibold tracking-wide uppercase">
             New Bad Order
@@ -1589,15 +1731,16 @@ function BadOrdersBody() {
                 <Popover open={shopPopoverOpen} onOpenChange={setShopPopoverOpen}>
                   <PopoverTrigger asChild>
                     <Button
+                      key={`shop-ctl-${templateGen}-${form.shopId}`}
+                      ref={shopTriggerRef}
                       type="button"
                       variant="outline"
                       size="sm"
+                      data-shop-id={form.shopId || undefined}
                       className={`${inputCls} flex-1 min-w-[200px] justify-between font-normal ${fieldErrors.shopId ? "border-red-500" : ""}`}
                     >
                       <span className="truncate text-left text-xs">
-                        {selectedShop
-                          ? selectedShop.display_label || selectedShop.name
-                          : "Select shop…"}
+                        {shopControlLabel || "Select shop…"}
                       </span>
                     </Button>
                   </PopoverTrigger>
@@ -1664,16 +1807,18 @@ function BadOrdersBody() {
             <div>
               <Label className="text-xs">{reqLabel("Bad Order Reason")}</Label>
               <Select
-                value={form.boRuleCode}
+                key={`reason-ctl-${templateGen}-${form.boRuleCode}`}
+                value={form.boRuleCode || undefined}
                 onValueChange={(v) => setField("boRuleCode", v)}
               >
                 <SelectTrigger
+                  data-bo-rule={form.boRuleCode || undefined}
                   className={`${inputCls} ${fieldErrors.boRuleCode ? "border-red-500" : ""}`}
                 >
-                  <SelectValue />
+                  <SelectValue placeholder="Select reason…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {rules.map((r) => (
+                  {reasonOptions.map((r) => (
                     <SelectItem key={r.code} value={r.code}>
                       {r.description}
                       {r.short_name ? ` (${r.short_name})` : ""}
@@ -1681,9 +1826,9 @@ function BadOrdersBody() {
                   ))}
                 </SelectContent>
               </Select>
-              {(selectedRule?.requires_other_text ||
-                selectedRule?.allows_additional_detail) && (
+              {showKeyedDetail && (
                 <Input
+                  key={`reason-other-ctl-${templateGen}`}
                   className={`${inputCls} mt-1 ${fieldErrors.boRuleOtherText ? "border-red-500" : ""}`}
                   placeholder={
                     selectedRule?.requires_other_text
@@ -1691,6 +1836,7 @@ function BadOrdersBody() {
                       : "Additional keyed detail (optional)"
                   }
                   value={form.boRuleOtherText}
+                  data-bo-rule-other={form.boRuleOtherText || undefined}
                   onChange={(e) => setField("boRuleOtherText", e.target.value)}
                 />
               )}
@@ -1821,8 +1967,11 @@ function BadOrdersBody() {
             <div>
               <Label className="text-xs">Comments</Label>
               <textarea
+                key={`comments-ctl-${templateGen}`}
+                ref={commentsRef}
                 className={`w-full min-h-[64px] rounded-md border px-2 py-1 text-sm ${inputCls}`}
                 value={form.comments}
+                data-comments-len={form.comments.length}
                 onChange={(e) => setField("comments", e.target.value)}
               />
             </div>
@@ -1867,11 +2016,11 @@ function BadOrdersBody() {
           ) : null}
         </div>
 
-        {/* Documents & Photos — staged before submit (never copied from template) */}
+        {/* Documents & Photos — new uploads + optional linked refs from template BO */}
         <div
           className={`mt-3 border rounded p-3 ${
             dark ? "border-slate-600 bg-slate-950/40" : "border-slate-300 bg-white"
-          } ${templateSource ? "ring-2 ring-amber-400" : ""}`}
+          }`}
         >
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5">
@@ -1879,11 +2028,45 @@ function BadOrdersBody() {
               Documents & Photos
             </h3>
             <span className="text-[11px] text-slate-500">
-              {stagedDocs.length
-                ? `${stagedDocs.length} staged — saved with Submit`
+              {stagedDocs.length || linkedTemplateDocs.some((d) => d.include)
+                ? `${stagedDocs.length + linkedTemplateDocs.filter((d) => d.include).length} staged — saved with Submit`
                 : "Optional — attach before submit"}
             </span>
           </div>
+          {linkedTemplateDocs.length > 0 && (
+            <ul className="mb-3 space-y-1">
+              {linkedTemplateDocs.map((d) => (
+                <li
+                  key={d.id}
+                  className="flex items-center gap-2 text-xs border rounded px-2 py-1.5"
+                >
+                  <Checkbox
+                    checked={d.include}
+                    onCheckedChange={(v) =>
+                      setLinkedTemplateDocs((prev) =>
+                        prev.map((x) =>
+                          x.id === d.id ? { ...x, include: Boolean(v) } : x,
+                        ),
+                      )
+                    }
+                  />
+                  <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate flex-1 font-medium">{d.label}</span>
+                  <span className="text-slate-500 truncate max-w-[140px]">
+                    {d.filename}
+                  </span>
+                  <span className="text-slate-500">
+                    {DOC_CATEGORIES.find((c) => c.value === d.category)?.label ||
+                      d.category}
+                  </span>
+                </li>
+              ))}
+              <li className="text-[11px] text-slate-500 px-1">
+                Untick to skip. Submit links the same stored file (no copy). Removing
+                later only unlinks from the new BO.
+              </li>
+            </ul>
+          )}
           <div className="flex flex-wrap gap-2 items-end mb-2">
             <div>
               <Label className="text-xs">Category</Label>

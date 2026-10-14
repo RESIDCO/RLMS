@@ -89,6 +89,10 @@ import {
   uploadEventDocument,
 } from "./services/estimates";
 import {
+  linkEventDocumentRefs,
+  listTemplateDocumentRefs,
+} from "./services/bo-template";
+import {
   loadEstimateAar,
   decideEstimateLoadWarnings,
   getEstimateLoadRun,
@@ -1520,6 +1524,51 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       }
     },
   );
+
+  /**
+   * Template carry-over: list source BO document refs (client stages checkboxes).
+   * Prefer this lightweight listing when filling "New from existing…".
+   */
+  app.get("/api/repair/events/:id/documents/template-refs", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const documents = await listTemplateDocumentRefs({
+        eventId: String(req.params.id),
+      });
+      return res.json({ documents });
+    } catch (err) {
+      console.error("[repair/events/:id/documents/template-refs]", err);
+      return res.status(500).json({ error: "Document list failed" });
+    }
+  });
+
+  /**
+   * Link existing stored files onto a new BO event (copy document row / storage
+   * reference — do not duplicate file bytes). Used by Start-from-previous template.
+   */
+  app.post("/api/repair/events/:id/documents/link", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const body = req.body ?? {};
+      const ids = Array.isArray(body.documentIds)
+        ? body.documentIds.map((x: unknown) => String(x))
+        : Array.isArray(body.sourceDocumentIds)
+          ? body.sourceDocumentIds.map((x: unknown) => String(x))
+          : [];
+      const result = await linkEventDocumentRefs({
+        eventId: String(req.params.id),
+        sourceDocumentIds: ids,
+        actor: actorFrom(req),
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.status(201).json(result);
+    } catch (err) {
+      console.error("[repair/events/:id/documents/link]", err);
+      return res.status(500).json({ error: "Document link failed" });
+    }
+  });
 
   /** Single-document viewer / download (Bad Order History attachment icon). */
   app.get("/api/repair/documents/:id/content", async (req, res) => {

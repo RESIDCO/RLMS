@@ -2,10 +2,9 @@
  * Smoke: OWNER_UI §C Bad Orders (template-from-previous flow)
  * - Unique test cars per run (never hard-delete; close own BOs)
  * - Required-field validation
- * - "Start from previous BO" grid field set (shop/reason/roads/STCC/routing/
- *   dest/last contents/car load/cleaned/wheels/comments) — excludes car #s,
- *   B/O+arrival+incident dates/IDs, DDCT Event ID, attachments
- * - Staged attachments saved with BO
+ * - Template fill: shop, reason + keyed detail, comments land in form fields
+ * - Template attachments: list refs + link same storage_key on new BO
+ * - Left blank: car #s, B/O date (today), arrival, incident date/ID, DDCT Event ID
  * - Bad Order Reasons: short name + optional rule-based
  *
  * Run: npm run repair:smoke-bad-orders
@@ -24,6 +23,12 @@ import {
   listStccCodes,
   queryBadOrderGrid,
 } from "../services/bo-grid";
+import {
+  assertTemplateFormContract,
+  formFieldsFromTemplateRow,
+  linkEventDocumentRefs,
+  listTemplateDocumentRefs,
+} from "../services/bo-template";
 import { getContactsProvider } from "../providers/contacts";
 import {
   createShop,
@@ -33,6 +38,7 @@ import {
 import { issueEventLink } from "../services/event-links";
 import { approveEstimate } from "../services/estimates";
 import { uploadEventDocument } from "../services/estimates";
+import { softDeleteDocument } from "../services/gap-lifecycle-06";
 import { migrateLocal } from "./migrate-local";
 
 function ok(msg: string) {
@@ -320,9 +326,7 @@ async function main() {
   }
   ok(`multi-car group (${bulk.created.length} cars)`);
 
-  // Template-from-previous: grid exposes fields needed to fill New BO in place
-  // (shop, reason+keyed, roads, STCC, routing, dest, last contents, car load,
-  // cleaned, wheels, comments). Entry fields stay blank in the UI.
+  // Template-from-previous: grid + pure form mapper + document-ref link
   const grid = await queryBadOrderGrid({
     statusCodes: [
       "QUEUED",
@@ -338,6 +342,12 @@ async function main() {
   if (!row) bad("grid", "BO missing");
   if (!row.shop_id) bad("template fields", "shop_id missing");
   if (!row.bo_rule_code) bad("template fields", "bo_rule_code missing");
+  if (!row.bo_rule_other_text) {
+    bad("template fields", "bo_rule_other_text (keyed detail) missing");
+  }
+  if (String(row.bo_rule_other_text) !== "dent left side") {
+    bad("keyed detail", String(row.bo_rule_other_text));
+  }
   if (!row.bo_city) bad("template fields", "bo_city missing");
   if (!row.reporting_road) bad("template fields", "reporting_road missing");
   if (!row.dc_road) bad("template fields", "dc_road missing");
@@ -346,6 +356,83 @@ async function main() {
   if (!row.last_contents) bad("template fields", "last_contents missing");
   if (!row.comments) bad("template fields", "comments missing");
   if (Number(row.attachment_count) < 1) bad("grid attachments", "count");
+
+  const filled = formFieldsFromTemplateRow(row, { today: "2099-01-15" });
+  const contractErrs = assertTemplateFormContract(filled);
+  if (contractErrs.length) bad("template contract", contractErrs.join("; "));
+  if (filled.shopId !== String(row.shop_id)) {
+    bad("template shop", `${filled.shopId} != ${row.shop_id}`);
+  }
+  if (filled.boRuleCode !== String(row.bo_rule_code)) {
+    bad("template reason", `${filled.boRuleCode} != ${row.bo_rule_code}`);
+  }
+  if (filled.boRuleOtherText !== "dent left side") {
+    bad("template keyed", filled.boRuleOtherText);
+  }
+  if (filled.comments !== String(row.comments)) {
+    bad("template comments", filled.comments);
+  }
+  if (filled.boDate !== "2099-01-15") bad("template boDate", filled.boDate);
+  if (filled.ddctEventId || filled.ddctIncidentId || filled.arrivalDate) {
+    bad("template blanks", "incident/arrival/ddct must stay blank");
+  }
+  ok(
+    `template form fill shop=${filled.shopId.slice(0, 8)}… reason=${filled.boRuleCode} keyed+comments`,
+  );
+
+  const srcRefs = await listTemplateDocumentRefs({
+    eventId: String(bo1.event.id),
+  });
+  if (srcRefs.length < 1) bad("template refs", "expected source attachment");
+  ok(`template attachment refs listed (${srcRefs.length})`);
+
+  // Create a fresh BO and link the same stored file (reference copy, not bytes).
+  const carLink = String(Number(car1) + 3);
+  await ensureCar(carLink);
+  await closeOpenBosForCar(carLink);
+  const boLink = await createBadOrder({
+    carMark: MARK,
+    carNumber: carLink,
+    shopId,
+    actor: "smoke-c-r2",
+    boRuleCode: reason.rule.code,
+    boRuleOtherText: "link target",
+    boCity: "Walbridge",
+    boState: "OH",
+    allowDuplicates: true,
+  });
+  if (!boLink.ok) bad("link-target BO", boLink.error);
+  const linked = await linkEventDocumentRefs({
+    eventId: String(boLink.event.id),
+    sourceDocumentIds: srcRefs.map((r) => r.sourceDocumentId),
+    actor: "smoke-c-r2",
+  });
+  if (!linked.ok) bad("link docs", linked.error);
+  if (linked.documents.length < 1) bad("link docs", "no rows created");
+  const srcKey = srcRefs[0].storageKey;
+  const newKey = String(linked.documents[0].storage_key);
+  if (newKey !== srcKey) bad("link storage_key", `${newKey} != ${srcKey}`);
+  const srcId = srcRefs[0].sourceDocumentId;
+  const newId = String(linked.documents[0].id);
+  if (newId === srcId) bad("link id", "expected new document row id");
+  ok("template attachments linked (same storage_key, new document row)");
+
+  // Untick/remove on new BO only unlinks the new row — source stays.
+  const unlinked = await softDeleteDocument({
+    documentId: newId,
+    actor: "smoke-c-r2",
+    reason: "smoke untick unlink",
+  });
+  if (!unlinked.ok) bad("unlink", unlinked.error);
+  const srcStill = await q(
+    `SELECT id FROM repair.documents
+     WHERE id = $1 AND deleted_at IS NULL
+       AND COALESCE(lifecycle_status, 'ACTIVE') <> 'VOIDED'`,
+    [srcId],
+  );
+  if (!srcStill.rows[0]) bad("unlink source", "source document was removed");
+  ok("unlink new BO doc leaves source attachment intact");
+
   // Search haystack used by "New from existing…" (car / date / shop / reason)
   const hay = [
     row.car_mark,
@@ -367,6 +454,8 @@ async function main() {
   ok(
     `template-ready grid row shop=${row.shop_display} reason=${row.bo_rule_code} attachments=${row.attachment_count}`,
   );
+
+  await closeOpenBosForCar(carLink);
 
   const csv = await exportBadOrderGridCsv({
     shopIds: [shopId],

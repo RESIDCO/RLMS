@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§C Copy BO template** | Apply `rlms-phase1-owner-ui-c-copy-template.bundle`. Requires **`1b6e660`**. Lands tip in bundle README. |
+| **§C Template fields + attach carry** | Apply `rlms-phase1-owner-ui-c-template-fields.bundle`. Requires **`8a9378e`**. Lands tip in bundle README. |
+| **§C Copy BO template** | Prior: `rlms-phase1-owner-ui-c-copy-template.bundle` → **`8a9378e`**. |
 | **§C Bad Orders r2** | Prior: `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` → **`1b6e660`**. |
 | **§C Bad Orders (initial)** | Prior: `rlms-phase1-owner-ui-c-bad-orders.bundle` → **`d4a2bfb`**. |
 | **§B Shop map (part 3)** | Prior: `rlms-phase1-owner-ui-b-shop-map.bundle` → **`dd5acc7`**. |
@@ -20,7 +21,7 @@
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`1b6e660`**, apply the §C **copy-template** bundle next.
+If PC is on **`8a9378e`**, apply the §C **template-fields** bundle next.
 
 ---
 
@@ -30,7 +31,7 @@ If PC is on **`1b6e660`**, apply the §C **copy-template** bundle next.
 |---|---|---|
 | **1** | Estimates History `/#/repair` (spec §A) | Done |
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
-| **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Template flow in this tip** |
+| **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Template fields + attach carry (this tip)** |
 | 4+ | Estimate Review rebuild, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md)  
@@ -45,7 +46,8 @@ If PC is on **`1b6e660`**, apply the §C **copy-template** bundle next.
 | N+9 | `rlms-phase1-owner-ui-b-shop-map.bundle` | `eeffc61` | → **`dd5acc7`** |
 | N+10 | `rlms-phase1-owner-ui-c-bad-orders.bundle` | `dd5acc7` | → **`d4a2bfb`** |
 | N+11 | `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` | `d4a2bfb` | → **`1b6e660`** |
-| N+12 | **`rlms-phase1-owner-ui-c-copy-template.bundle`** | **`1b6e660`** | → **(see README)** |
+| N+12 | `rlms-phase1-owner-ui-c-copy-template.bundle` | `1b6e660` | → **`8a9378e`** |
+| N+13 | **`rlms-phase1-owner-ui-c-template-fields.bundle`** | **`8a9378e`** | → **(see README)** |
 
 ---
 
@@ -72,13 +74,13 @@ If PC is on **`1b6e660`**, apply the §C **copy-template** bundle next.
 
 ---
 
-## Apply §C copy-template (on tip `1b6e660`)
+## Apply §C template-fields (on tip `8a9378e`)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect 1b6e660…
-git bundle verify PATH\TO\rlms-phase1-owner-ui-c-copy-template.bundle
-git pull PATH\TO\rlms-phase1-owner-ui-c-copy-template.bundle HEAD
+git rev-parse HEAD   # expect 8a9378e…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-c-template-fields.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-c-template-fields.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -97,7 +99,7 @@ npm run repair:dev:local
 # http://127.0.0.1:5000/#/repair/bo-reasons
 ```
 
-Expect: **New from existing…** search fills form in place; History **Use as template**; banner **Filled from BO … – Clear**; entry fields highlighted blank; no Copy / Copy last; smoke template-ready fields PASS.
+Expect: **New from existing…** / **Use as template** fills Shop, Reason (+ keyed detail), Comments in the form controls; source attachments shown as **From BO &lt;car&gt; &lt;date&gt;** (checked); car #s / B/O date today / arrival / incident / DDCT left blank; smoke asserts shop/reason/keyed/comments + attachment link PASS.
 
 ---
 

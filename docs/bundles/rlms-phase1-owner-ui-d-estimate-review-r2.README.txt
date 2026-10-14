@@ -1,0 +1,94 @@
+RLMS repair — Owner UI §D Estimate Review r2
+====================================================================
+Requires tip: f853e48b4c754c01c186312c02ebb4f713c61714
+(§D Estimate Review initial)
+
+Bundle tip (after apply): bbea12c5ab27866a10246e29d9fedac395321d3d
+Bundle size: ~138K
+SHA-256: 56ea264188a59bdeefcaa6e028413d57109c477e41b7eaefce06aa96a3fdc630
+
+What this delivers
+----------------------------------------------------------------
+  1) Header layout fix: per-field pencils on hover + "Edit header"
+     button; no absolute pencil over car # (any width, light/dark).
+
+  2) Attachment ACL: Owner/system manager add/recategorize/void
+     (VOIDED, recoverable, audited). Shop add-only — delete/void/
+     recategorize blocked server-side (403). Viewer: View all
+     gallery/slideshow (thumbnails, next/prev, keyboard arrows).
+
+  3) Money: Labor/Material/Amount always $ + 2 decimals with integer
+     cents underneath.
+
+  4) Component Id rules (repair.component_id_rules): reject
+     finals/invoices missing required CID (per-line); red flag on
+     review; admin CSV/editable.
+
+  5) Code hover help from licensed repair.ref_job_codes,
+     ref_qualifiers, ref_why_made, ref_location_codes, condition, etc.
+     Unknown → "Not in reference table".
+
+  6) Splits: % or fixed $ → child lines 1a/1b linked; remainder cent
+     on owner line; exact sum. Tax prorate by responsibility + preview.
+     Unsplit/undo before approval; audited.
+
+  7) Carry-forward: fingerprint match; green apply prior; amber
+     Changed + hover diff; blue New; Removed list; never auto-commit.
+
+  8) Importer: npm run repair:import-ref-data (CSV/Excel upsert by key;
+     edition/quarter/source/rule_page). Licensed pack under
+     modules/repair/ref-data/ (private — never public-serve).
+
+Verified ref counts (Bruce pack)
+----------------------------------------------------------------
+  ref_job_codes          855
+  ref_qualifiers         639
+  ref_why_made           107
+  ref_repair_categories 2170
+
+Files (highlights)
+----------------------------------------------------------------
+  modules/repair/ref-data/*                               (licensed CSVs)
+  modules/repair/dev/import-ref-data.ts
+  modules/repair/migrations/20261014_repair_owner_ui_d_r2.sql
+  modules/repair/migrations/20261014_repair_owner_ui_d_r2b.sql
+  modules/repair/services/{ref-lookup,component-id-rules,
+    carry-forward,responsibility-split}.ts
+  modules/repair/services/{estimate-review,money,gap-lifecycle-06,
+    estimates}.ts
+  modules/repair/routes.ts
+  modules/repair/dev/smoke-estimate-review-d.ts
+  client/src/pages/repair/{EstimateReview,EstimateDataFile,
+    EstimateDocuments,UpdateResponsibilities}.tsx
+  docs/repair/{OWNER_UI_D_ESTIMATE_REVIEW,HANDOFF}.md
+  package.json  (repair:import-ref-data)
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect f853e48…
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-d-estimate-review-r2.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-d-estimate-review-r2.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:import-ref-data
+  npm run repair:smoke-estimate-review
+  npm run repair:smoke-bad-orders
+  npm run repair:smoke-shop-entity
+  npm run repair:dev:local
+
+Verified (agent local Postgres)
+-------------------------------
+  repair:import-ref-data PASS (855/639/107/2170 + hover)
+  repair:smoke-estimate-review PASS (shop 403; 50/50 exact; tax; CID; carry-forward)
+  repair:smoke-bad-orders PASS
+  repair:smoke-shop-entity PASS
+  git bundle verify + pull onto f853e48 → lands bbea12c…
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

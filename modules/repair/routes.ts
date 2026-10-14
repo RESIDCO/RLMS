@@ -35,6 +35,13 @@ import {
 import { enterPodErd, listPodDates, latestPodErd, runPodReminders } from "./services/pod";
 import { setCompletedDate, rollbackCompletedDate } from "./services/completion";
 import { submitShopInvoice, listInvoicesForEvent, approveInvoiceMatch } from "./services/invoices";
+import {
+  submitShopCrbInvoice,
+  ingestCrbInvoiceFromInboundEmail,
+  decideInvoiceReview,
+  listPrepayChecks,
+  listInvoiceReviewQueue,
+} from "./services/inbound-invoice-audit";
 import { relayDispo, listDispo } from "./services/dispo";
 import {
   listContacts,
@@ -101,7 +108,7 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
     res.json({
       ok: true,
       module: "repair",
-      phase: "1-slice-pod-invoice-contacts",
+      phase: "1-slice-inbound-invoice-audit",
       db: Boolean(process.env.DATABASE_URL || process.env.REPAIR_DATABASE_URL),
       providers: {
         email: "LogEmailProvider",
@@ -134,6 +141,13 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
   app.post("/api/repair/public/inbound-dev", async (req, res) => {
     try {
       const body = req.body ?? {};
+      const attachments = Array.isArray(body.attachments)
+        ? body.attachments.map((a: Record<string, unknown>) => ({
+            filename: String(a.filename ?? "attachment.bin"),
+            mime: a.mime ? String(a.mime) : undefined,
+            contentBase64: a.contentBase64 ? String(a.contentBase64) : undefined,
+          }))
+        : undefined;
       const result = await getInboundEmailProvider().ingest({
         from: String(body.from ?? ""),
         to: String(body.to ?? ""),
@@ -141,10 +155,40 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
         raw: String(body.raw ?? body.body ?? ""),
         receivedAt: new Date().toISOString(),
         messageId: body.messageId ? String(body.messageId) : undefined,
+        eventToken: body.eventToken ? String(body.eventToken) : undefined,
+        eventId: body.eventId ? String(body.eventId) : undefined,
+        attachments,
       });
+
+      // If a 500-byte shop invoice attachment is present, run CRB intake + pre-pay audit
+      let invoiceIntake: unknown = null;
+      const shopAtt = result.attachments.find(
+        (a) =>
+          result.parsed.shopInvoiceAttachment &&
+          a.filename === result.parsed.shopInvoiceAttachment.filename,
+      );
+      if (shopAtt && (result.eventToken || result.eventId || body.eventToken || body.eventId)) {
+        invoiceIntake = await ingestCrbInvoiceFromInboundEmail({
+          bytes: shopAtt.bytes,
+          filename: shopAtt.filename,
+          mime: shopAtt.mime,
+          actorEmail: String(body.from ?? "shop@inbound.dev"),
+          eventToken: result.eventToken ?? (body.eventToken ? String(body.eventToken) : undefined),
+          eventId: result.eventId ?? (body.eventId ? String(body.eventId) : undefined),
+          inboundEmailId: result.id,
+        });
+      }
+
       return res.status(202).json({
-        ...result,
-        note: "Parsed decision is advisory until a reviewer confirms.",
+        id: result.id,
+        parsed: result.parsed,
+        eventToken: result.eventToken,
+        eventId: result.eventId,
+        attachmentCount: result.attachments.length,
+        invoiceIntake,
+        note: invoiceIntake
+          ? "Shop invoice attachment routed to CRB pre-pay audit (human review)."
+          : "Parsed decision is advisory until a reviewer confirms.",
       });
     } catch (err) {
       console.error("[repair/public/inbound-dev]", err);
@@ -356,6 +400,39 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       } catch (err) {
         console.error("[repair/e/:token/invoice]", err);
         return res.status(500).json({ error: "Invoice submit failed" });
+      }
+    },
+  );
+
+  /** Shop event-link upload of a 500-byte AAR/CRB invoice (OTP if shop-enabled). */
+  app.post(
+    "/api/repair/e/:token/invoice-aar",
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        if (!req.file?.buffer?.length) {
+          return res.status(400).json({ error: "500-byte invoice file required" });
+        }
+        const result = await submitShopCrbInvoice({
+          rawToken: String(req.params.token),
+          bytes: req.file.buffer,
+          filename: req.file.originalname || "shop-invoice.txt",
+          mime: req.file.mimetype || "text/plain",
+          actorEmail: String(req.body?.email ?? "shop@unknown"),
+          otpCode: req.body?.otpCode ? String(req.body.otpCode) : undefined,
+        });
+        if (!result.ok) {
+          return res.status(result.status).json({
+            error: result.error,
+            otpRequired: "otpRequired" in result ? result.otpRequired : undefined,
+            carMark: "carMark" in result ? result.carMark : undefined,
+            carNumber: "carNumber" in result ? result.carNumber : undefined,
+          });
+        }
+        return res.status(201).json(result);
+      } catch (err) {
+        console.error("[repair/e/:token/invoice-aar]", err);
+        return res.status(500).json({ error: "CRB invoice intake failed" });
       }
     },
   );
@@ -851,6 +928,44 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     if (!uid) return;
     const result = await approveInvoiceMatch({
       invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** Pre-pay review queue (CRB inbound invoices awaiting ACH approve / reject). */
+  app.get("/api/repair/invoices/prepay-queue", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ invoices: await listInvoiceReviewQueue() });
+  });
+
+  app.get("/api/repair/invoices/:id/prepay-checks", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      checks: await listPrepayChecks(String(req.params.id)),
+    });
+  });
+
+  /**
+   * Reviewer decision: APPROVED_FOR_ACH (payment outside RLMS) or REJECTED (reason required).
+   * Append-only decision row; original file remains immutable.
+   */
+  app.post("/api/repair/invoices/:id/prepay-decision", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const decision = String(req.body?.decision ?? "");
+    if (decision !== "APPROVED_FOR_ACH" && decision !== "REJECTED") {
+      return res.status(400).json({
+        error: "decision must be APPROVED_FOR_ACH or REJECTED",
+      });
+    }
+    const result = await decideInvoiceReview({
+      invoiceId: String(req.params.id),
+      decision,
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
       actor: actorFrom(req),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });

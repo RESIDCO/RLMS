@@ -36,6 +36,13 @@ export { resolveLesseeAttachments, listShopOriginalDocuments } from "./services/
 export { enterPodErd, listPodDates, runPodReminders } from "./services/pod";
 export { setCompletedDate, rollbackCompletedDate } from "./services/completion";
 export { submitShopInvoice, listInvoicesForEvent } from "./services/invoices";
+export {
+  submitShopCrbInvoice,
+  ingestCrbInvoiceFromInboundEmail,
+  decideInvoiceReview,
+  listPrepayChecks,
+  listInvoiceReviewQueue,
+} from "./services/inbound-invoice-audit";
 export { relayDispo, listDispo } from "./services/dispo";
 export {
   listContacts,

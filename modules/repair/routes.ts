@@ -128,6 +128,19 @@ import {
   validateComponentIds,
 } from "./services/component-id-rules";
 import {
+  listRefTableMeta,
+  listRefRows,
+  upsertRefRow,
+  retireRefRow,
+  restoreRefRow,
+  listRefHistory,
+  dryRunRefImport,
+  confirmRefImport,
+  exportRefCsv,
+  checkRefCodeForNewLine,
+  canManageRefData,
+} from "./services/ref-data-admin";
+import {
   previewCarryForward,
   applyCarryForwardSelections,
   auditCarryForwardPreview,
@@ -261,6 +274,18 @@ function actorFrom(req: Request): string {
   return (
     (req as Request & { authUser?: { email?: string } }).authUser?.email ||
     String(req.headers["x-repair-actor"] || "user")
+  );
+}
+
+function roleFrom(req: Request): string {
+  if (process.env.REPAIR_DEV_BYPASS_AUTH === "1") {
+    return String(req.headers["x-repair-role"] || req.body?.actorRole || "dev-bypass");
+  }
+  return String(
+    req.headers["x-repair-role"] ||
+      req.body?.actorRole ||
+      req.query.actorRole ||
+      "reviewer",
   );
 }
 
@@ -3336,6 +3361,175 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       actor: actorFrom(req),
       dir: req.body?.dir ? String(req.body.dir) : undefined,
     });
+    return res.json(result);
+  });
+
+  // ── Reference Data admin (owner / system manager) ─────────────────
+  app.get("/api/repair/admin/ref-data/tables", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    if (!canManageRefData(roleFrom(req))) {
+      return res.status(403).json({ error: "Owner or system manager only" });
+    }
+    return res.json({ tables: listRefTableMeta() });
+  });
+
+  app.post("/api/repair/admin/ref-data/check-new-line", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await checkRefCodeForNewLine({
+      tableKey: String(req.body?.tableKey ?? "job_codes") as
+        | "job_codes"
+        | "why_made"
+        | "condition"
+        | "location"
+        | "qualifiers",
+      code: String(req.body?.code ?? ""),
+      qualifier: req.body?.qualifier != null ? String(req.body.qualifier) : null,
+      jobCode: req.body?.jobCode != null ? String(req.body.jobCode) : null,
+      rejectRetired: Boolean(req.body?.rejectRetired),
+    });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/admin/ref-data/:tableKey/history", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    if (!canManageRefData(roleFrom(req))) {
+      return res.status(403).json({ error: "Owner or system manager only" });
+    }
+    const result = await listRefHistory({
+      tableKey: String(req.params.tableKey),
+      rowId: req.query.rowId != null ? String(req.query.rowId) : undefined,
+      limit: req.query.limit != null ? Number(req.query.limit) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/admin/ref-data/:tableKey/export", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    if (!canManageRefData(roleFrom(req))) {
+      return res.status(403).json({ error: "Owner or system manager only" });
+    }
+    const result = await exportRefCsv({
+      tableKey: String(req.params.tableKey),
+      activeOnly: req.query.activeOnly === "1",
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${result.filename}"`,
+    );
+    return res.send(result.csv);
+  });
+
+  app.post("/api/repair/admin/ref-data/:tableKey/import/dry-run", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const csvText =
+      req.body?.csvText != null
+        ? String(req.body.csvText)
+        : req.body?.csv != null
+          ? String(req.body.csv)
+          : "";
+    const result = await dryRunRefImport({
+      tableKey: String(req.params.tableKey),
+      csvText,
+      edition: req.body?.edition != null ? String(req.body.edition) : undefined,
+      quarter: req.body?.quarter != null ? String(req.body.quarter) : undefined,
+      actor: actorFrom(req),
+      actorRole: roleFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/admin/ref-data/:tableKey/import/confirm", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const csvText =
+      req.body?.csvText != null
+        ? String(req.body.csvText)
+        : req.body?.csv != null
+          ? String(req.body.csv)
+          : "";
+    const result = await confirmRefImport({
+      tableKey: String(req.params.tableKey),
+      csvText,
+      dryRunId: req.body?.dryRunId != null ? String(req.body.dryRunId) : undefined,
+      edition: req.body?.edition != null ? String(req.body.edition) : undefined,
+      quarter: req.body?.quarter != null ? String(req.body.quarter) : undefined,
+      reason: String(req.body?.reason ?? "Quarterly AAR import"),
+      actor: actorFrom(req),
+      actorRole: roleFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/admin/ref-data/:tableKey", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    if (!canManageRefData(roleFrom(req))) {
+      return res.status(403).json({ error: "Owner or system manager only" });
+    }
+    const result = await listRefRows({
+      tableKey: String(req.params.tableKey),
+      q: req.query.q != null ? String(req.query.q) : undefined,
+      activeOnly: req.query.activeOnly === "1" || req.query.activeOnly === "true",
+      sort: req.query.sort != null ? String(req.query.sort) : undefined,
+      dir: req.query.dir === "desc" ? "desc" : "asc",
+      limit: req.query.limit != null ? Number(req.query.limit) : undefined,
+      offset: req.query.offset != null ? Number(req.query.offset) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/admin/ref-data/:tableKey", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await upsertRefRow({
+      tableKey: String(req.params.tableKey),
+      id: req.body?.id ? String(req.body.id) : undefined,
+      values: (req.body?.values ?? req.body ?? {}) as Record<string, unknown>,
+      reason: String(req.body?.reason ?? ""),
+      actor: actorFrom(req),
+      actorRole: roleFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/admin/ref-data/:tableKey/:id/retire", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await retireRefRow({
+      tableKey: String(req.params.tableKey),
+      id: String(req.params.id),
+      reason: String(req.body?.reason ?? ""),
+      actor: actorFrom(req),
+      actorRole: roleFrom(req),
+      effectiveTo: req.body?.effectiveTo != null ? String(req.body.effectiveTo) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/admin/ref-data/:tableKey/:id/restore", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await restoreRefRow({
+      tableKey: String(req.params.tableKey),
+      id: String(req.params.id),
+      reason: String(req.body?.reason ?? ""),
+      actor: actorFrom(req),
+      actorRole: roleFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
   });
 

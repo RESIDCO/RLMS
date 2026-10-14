@@ -65,6 +65,7 @@ const RAW_SLICES: Record<string, { start: number; length: number }> = {
   removed_qualifier: { start: 135, length: 3 },
   description: { start: 167, length: 50 },
   machine_priceable: { start: 165, length: 1 },
+  aar_component_id: { start: 327, length: 14 },
 };
 
 function sliceRaw(
@@ -87,6 +88,7 @@ export type EnrichedLine = Record<string, unknown> & {
   removed_qualifier: string | null;
   description: string | null;
   machine_priceable: string | null;
+  aar_component_id: string | null;
   labor_cents: number;
   material_cents: number;
   total_cents: number;
@@ -151,6 +153,7 @@ export function enrichLineFromRaw(
     removed_qualifier: pick("removed_qualifier", line.removed_qualifier),
     description: pick("description", line.description),
     machine_priceable: pick("machine_priceable", line.machine_priceable),
+    aar_component_id: pick("aar_component_id", line.aar_component_id),
     labor_cents: laborCents,
     material_cents: materialCents,
     total_cents: totalCents,

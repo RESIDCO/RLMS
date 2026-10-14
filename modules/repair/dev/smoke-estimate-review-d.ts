@@ -8,6 +8,7 @@
  * - Ref-data import; r4: qualifiers 1259 + generic/charts; multi-path lookup
  * - r3: car edit 409; money thousands separators; send-lessee → outbox
  * - r4: header LOCK 409; lessee token scope 403; cent reconciliation; $0 block
+ * - r5: lessee preview / token / PDF line fields match owner grid (enrichLineFromRaw)
  *
  * Run: npm run repair:smoke-estimate-review
  */
@@ -50,6 +51,15 @@ import {
   assertLesseeTokenEstimateAccess,
 } from "../services/lessee-approval";
 import { computeLesseeTotals, reconcileLesseeOutputs } from "../services/lessee-totals";
+import {
+  listRefTableMeta,
+  upsertRefRow,
+  retireRefRow,
+  restoreRefRow,
+  dryRunRefImport,
+  checkRefCodeForNewLine,
+  canManageRefData,
+} from "../services/ref-data-admin";
 import { getStorageProvider } from "../providers/storage";
 import { importRefData } from "./import-ref-data";
 import { migrateLocal } from "./migrate-local";
@@ -574,6 +584,82 @@ async function main() {
   ok(
     `send-lessee preview local=${lesseePrev.localMode} amount=${lesseePrev.amountMoney} gallery=${lesseePrev.gallery.length}`,
   );
+
+  // r5: every lessee line matches owner-grid enrich field-for-field
+  // (Description, Loc, Qty, RJOB, QR, CID — plus codes / money)
+  {
+    const ownerReview = await buildEstimateReviewPayload({ estimateId: estId });
+    if (!ownerReview.ok) bad("owner review for lessee match", ownerReview.error);
+    const ownerLatest =
+      ownerReview.revisions[ownerReview.revisions.length - 1]?.lines ?? [];
+    const ownerById = new Map(
+      ownerLatest.map((l) => [String((l as { id?: string }).id ?? ""), l] as const),
+    );
+    const fields: Array<
+      | "location_on_car"
+      | "quantity"
+      | "removed_job_code"
+      | "removed_qualifier"
+      | "description"
+      | "aar_component_id"
+      | "aar_job_code"
+      | "qualifier"
+      | "why_made"
+      | "condition_code"
+      | "resp_code"
+    > = [
+      "location_on_car",
+      "quantity",
+      "removed_job_code",
+      "removed_qualifier",
+      "description",
+      "aar_component_id",
+      "aar_job_code",
+      "qualifier",
+      "why_made",
+      "condition_code",
+      "resp_code",
+    ];
+    if (lesseePrev.lesseeLines.length === 0) {
+      bad("lessee lines", "expected Resp 6 lines after split");
+    }
+    let matched = 0;
+    for (const ll of lesseePrev.lesseeLines) {
+      const owner = ownerById.get(String(ll.id));
+      if (!owner) bad("lessee↔owner", `no owner line for ${ll.id}`);
+      for (const f of fields) {
+        const a = String((ll as Record<string, unknown>)[f] ?? "").trim();
+        const b = String((owner as Record<string, unknown>)[f] ?? "").trim();
+        if (a !== b) {
+          bad(
+            "lessee field match",
+            `line ${ll.display_line_no ?? ll.line_no} ${f}: lessee="${a}" owner="${b}"`,
+          );
+        }
+      }
+      // Blank Loc/Qty/Desc/RJOB/QR/CID must not all be empty when raw_line exists
+      const raw = String(ll.raw_line ?? "");
+      if (raw.length >= 180) {
+        const filled = [
+          ll.location_on_car,
+          ll.quantity,
+          ll.description,
+          ll.removed_job_code,
+          ll.removed_qualifier,
+        ].some((v) => String(v ?? "").trim() !== "");
+        if (!filled) {
+          bad(
+            "lessee enrich",
+            `line ${ll.display_line_no ?? ll.line_no} still blank after enrich`,
+          );
+        }
+      }
+      matched += 1;
+    }
+    ok(
+      `lessee lines match owner grid field-for-field (${matched} Resp 6 lines incl. splits)`,
+    );
+  }
   if (!lesseePrev.amountMoney.includes(",")) {
     // small amounts may lack comma — only assert $ prefix
     if (!lesseePrev.amountMoney.startsWith("$")) {
@@ -679,6 +765,30 @@ async function main() {
   ok(
     `lessee view cents=${view.amountPresentedCents} money=${view.amountMoney} lines=${view.lines.length}`,
   );
+  // Token page lines must match send-lessee preview (same enrich source)
+  {
+    const byId = new Map(lesseePrev.lesseeLines.map((l) => [String(l.id), l] as const));
+    const check: Array<keyof (typeof lesseePrev.lesseeLines)[0]> = [
+      "location_on_car",
+      "quantity",
+      "removed_job_code",
+      "removed_qualifier",
+      "description",
+      "aar_component_id",
+    ];
+    for (const tl of view.lines as Array<Record<string, unknown>>) {
+      const prev = byId.get(String(tl.id ?? ""));
+      if (!prev) bad("token line", `missing preview twin for ${tl.id}`);
+      for (const f of check) {
+        const a = String(tl[f] ?? "").trim();
+        const b = String((prev as Record<string, unknown>)[f] ?? "").trim();
+        if (a !== b) {
+          bad("token field match", `${f}: token="${a}" preview="${b}"`);
+        }
+      }
+    }
+    ok(`lessee token page fields match preview (${view.lines.length} lines)`);
+  }
 
   const otherEst = "00000000-0000-4000-8000-00000000dead";
   const cross = await assertLesseeTokenEstimateAccess({
@@ -770,7 +880,105 @@ async function main() {
   if (!sampleTxt.includes("189814")) bad("sample seed", "missing 1898/14");
   ok("sample 500-byte seed 1898/11 → 14");
 
-  console.log(`\nPASS §D Estimate Review r2/r3/r4 smoke (${RUN})`);
+  // ── r5: Reference Data admin ───────────────────────────────────────
+  if (!canManageRefData("owner") || canManageRefData("shop")) {
+    bad("ref-admin ACL", "owner yes / shop no");
+  }
+  const tabs = listRefTableMeta();
+  if (tabs.length !== 11) bad("ref tabs", `expected 11 got ${tabs.length}`);
+  ok(`ref-data admin tabs=${tabs.map((t) => t.key).join(",")}`);
+
+  const smokeCode = `S${RUN.slice(-4)}`;
+  const addRef = await upsertRefRow({
+    tableKey: "why_made",
+    values: {
+      code: smokeCode,
+      description: "§D r5 smoke why-made",
+      source: "RESIDCO",
+    },
+    reason: "smoke add reference row",
+    actor: "smoke-d",
+    actorRole: "owner",
+  });
+  if (!addRef.ok) bad("ref add", addRef.error);
+  ok(`ref add ${smokeCode} source=RESIDCO`);
+
+  const editRef = await upsertRefRow({
+    tableKey: "why_made",
+    id: String(addRef.row.id),
+    values: { description: "§D r5 smoke why-made (edited)" },
+    reason: "smoke edit reference row",
+    actor: "smoke-d",
+    actorRole: "owner",
+  });
+  if (!editRef.ok) bad("ref edit", editRef.error);
+  ok("ref edit audited");
+
+  const retireRef = await retireRefRow({
+    tableKey: "why_made",
+    id: String(addRef.row.id),
+    reason: "smoke retire",
+    actor: "smoke-d",
+    actorRole: "owner",
+  });
+  if (!retireRef.ok) bad("ref retire", retireRef.error);
+  if (retireRef.row.active) bad("ref retire", "still active");
+  ok(`ref retire effective_to=${retireRef.row.effective_to}`);
+
+  const histHit = await lookupRefCode({ kind: "why_made", code: smokeCode });
+  if (!histHit.found || !histHit.retired) {
+    bad("retired resolves", JSON.stringify(histHit));
+  }
+  if (!/smoke why-made/i.test(histHit.description)) {
+    bad("retired description", histHit.description);
+  }
+  ok(`retired code still resolves on old estimate: ${histHit.description.slice(0, 40)}`);
+
+  const newLine = await checkRefCodeForNewLine({
+    tableKey: "why_made",
+    code: smokeCode,
+  });
+  if (!newLine.warning) bad("new-line warn", "missing warning for retired");
+  ok(`new line warns: ${newLine.warning?.slice(0, 60)}`);
+
+  const dry = await dryRunRefImport({
+    tableKey: "why_made",
+    csvText: `code,description,source\n${smokeCode},Imported desc,AAR\n`,
+    edition: "smoke-r5",
+    quarter: "2026Q4",
+    actor: "smoke-d",
+    actorRole: "owner",
+  });
+  if (!dry.ok) bad("import dry-run", dry.error);
+  if (dry.committed !== false) bad("import dry-run", "committed unexpectedly");
+  ok(
+    `import dry-run no commit: added=${dry.counts.added} changed=${dry.counts.changed} conflicts=${dry.counts.conflicts}`,
+  );
+
+  const restoreRef = await restoreRefRow({
+    tableKey: "why_made",
+    id: String(addRef.row.id),
+    reason: "smoke restore",
+    actor: "smoke-d",
+    actorRole: "owner",
+  });
+  if (!restoreRef.ok) bad("ref restore", restoreRef.error);
+  if (!restoreRef.row.active) bad("ref restore", "not active");
+  ok("ref restore");
+
+  const shopDenied = await upsertRefRow({
+    tableKey: "why_made",
+    values: { code: "XX", description: "nope" },
+    reason: "shop try",
+    actor: "shop@smoke",
+    actorRole: "shop",
+  });
+  if (shopDenied.ok || shopDenied.status !== 403) {
+    bad("ref shop ACL", JSON.stringify(shopDenied));
+  }
+  ok("ref-data admin shop denied 403");
+
+  console.log(`\nPASS §D Estimate Review r2/r3/r4/r5 smoke (${RUN})`);
 }
 
 main().catch((e) => {

@@ -1,8 +1,11 @@
 /**
  * Lessee (Resp 6) totals — integer cents only.
  * Shared by Send Lessee preview, PDF, data file, email, and lessee view.
+ * Line display fields (Loc/Qty/RJOB/QR/Description/CID) use the same
+ * enrichLineFromRaw path as the owner Estimate Review grid.
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
+import { enrichLineFromRaw } from "./estimate-review";
 import { formatCentsAsMoney, formatCentsWithCommas } from "./money";
 import { previewTaxProrate } from "./responsibility-split";
 
@@ -144,33 +147,40 @@ export async function computeLesseeTotals(opts: {
     [revisionId],
   );
 
+  // Same source as owner grid: DB columns, else App. G slices from raw_line.
+  // Includes split children and tax lines that carry resp_code 6.
   const lesseeRaw = allLines.filter((l) => String(l.resp_code ?? "") === "6");
   const lines: LesseeLineCents[] = lesseeRaw.map((l) => {
-    const { labor, material } = lineCents(l);
+    const enriched = enrichLineFromRaw(l as Record<string, unknown>);
+    const labor = enriched.labor_cents;
+    const material = enriched.material_cents;
     const amount = labor + material;
     return {
-      id: String(l.id),
-      line_no: Number(l.line_no),
-      display_line_no: l.display_line_no != null ? String(l.display_line_no) : null,
-      aar_job_code: l.aar_job_code != null ? String(l.aar_job_code) : null,
-      qualifier: l.qualifier != null ? String(l.qualifier) : null,
-      why_made: l.why_made != null ? String(l.why_made) : null,
-      condition_code: l.condition_code != null ? String(l.condition_code) : null,
+      id: String(enriched.id),
+      line_no: Number(enriched.line_no),
+      display_line_no: enriched.display_line_no != null ? String(enriched.display_line_no) : null,
+      aar_job_code:
+        enriched.aar_job_code != null ? String(enriched.aar_job_code) : null,
+      qualifier: enriched.qualifier != null ? String(enriched.qualifier) : null,
+      why_made: enriched.why_made != null ? String(enriched.why_made) : null,
+      condition_code:
+        enriched.condition_code != null ? String(enriched.condition_code) : null,
       resp_code: "6",
-      location_on_car: l.location_on_car != null ? String(l.location_on_car) : null,
-      quantity: l.quantity != null ? String(l.quantity) : null,
-      removed_job_code: l.removed_job_code != null ? String(l.removed_job_code) : null,
-      removed_qualifier: l.removed_qualifier != null ? String(l.removed_qualifier) : null,
-      description: l.description != null ? String(l.description) : null,
-      repair_category: l.repair_category != null ? String(l.repair_category) : null,
-      aar_component_id: l.aar_component_id != null ? String(l.aar_component_id) : null,
+      location_on_car: enriched.location_on_car,
+      quantity: enriched.quantity,
+      removed_job_code: enriched.removed_job_code,
+      removed_qualifier: enriched.removed_qualifier,
+      description: enriched.description,
+      repair_category:
+        enriched.repair_category != null ? String(enriched.repair_category) : null,
+      aar_component_id: enriched.aar_component_id,
       labor_cents: labor,
       material_cents: material,
       amount_cents: amount,
       labor_money: formatCentsAsMoney(labor),
       material_money: formatCentsAsMoney(material),
       amount_money: formatCentsAsMoney(amount),
-      raw_line: l.raw_line != null ? String(l.raw_line) : null,
+      raw_line: enriched.raw_line != null ? String(enriched.raw_line) : null,
     };
   });
 

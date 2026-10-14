@@ -170,7 +170,18 @@ export default function RepairModuleNav() {
   const [location] = useLocation();
   const path = pathOf(location);
   const { theme, toggleTheme } = useRepairTheme();
-  const adminActive = path.startsWith("/repair/admin");
+  const adminActive =
+    path.startsWith("/repair/admin") || path.startsWith("/repair/reference-data");
+  const [gearOpen, setGearOpen] = useState(false);
+  const gearRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!gearRef.current?.contains(e.target as Node)) setGearOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
   return (
     <nav
@@ -224,20 +235,55 @@ export default function RepairModuleNav() {
             <Sun className="h-4 w-4" />
           )}
         </button>
-        <Link
-          href="/repair/admin"
-          aria-label="Admin"
-          title="Admin"
-          className={cn(
-            "inline-flex items-center justify-center px-3 py-2 transition-colors",
-            adminActive
-              ? "bg-[#1e3a5f] text-white"
-              : "text-white/95 hover:bg-white/10",
-          )}
-          data-testid="repair-admin-gear"
-        >
-          <Settings className="h-4 w-4" />
-        </Link>
+        <div className="relative" ref={gearRef}>
+          <button
+            type="button"
+            aria-label="Admin menu"
+            aria-expanded={gearOpen}
+            title="Admin"
+            className={cn(
+              "inline-flex items-center justify-center px-3 py-2 transition-colors",
+              adminActive || gearOpen
+                ? "bg-[#1e3a5f] text-white"
+                : "text-white/95 hover:bg-white/10",
+            )}
+            data-testid="repair-admin-gear"
+            onClick={() => setGearOpen((o) => !o)}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+          {gearOpen ? (
+            <div
+              role="menu"
+              className="absolute right-0 top-full mt-0 min-w-[12rem] bg-white text-slate-900 shadow-lg border border-slate-200 z-50"
+            >
+              <Link
+                href="/repair/admin"
+                role="menuitem"
+                onClick={() => setGearOpen(false)}
+                className={cn(
+                  "block px-3 py-2 text-sm hover:bg-sky-50",
+                  path.startsWith("/repair/admin") && "bg-sky-100 font-semibold",
+                )}
+              >
+                Shop catalogs
+              </Link>
+              <Link
+                href="/repair/reference-data"
+                role="menuitem"
+                onClick={() => setGearOpen(false)}
+                className={cn(
+                  "block px-3 py-2 text-sm hover:bg-sky-50",
+                  path.startsWith("/repair/reference-data") &&
+                    "bg-sky-100 font-semibold",
+                )}
+                data-testid="repair-reference-data"
+              >
+                Reference Data
+              </Link>
+            </div>
+          ) : null}
+        </div>
       </div>
     </nav>
   );

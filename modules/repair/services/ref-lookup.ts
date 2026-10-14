@@ -29,6 +29,10 @@ export type RefLookupHit = {
   effective_quarter?: string | null;
   edition?: string | null;
   fromTable: string;
+  /** false when row is soft-retired (still resolves for old estimates). */
+  active?: boolean;
+  retired?: boolean;
+  warning?: string;
 };
 
 const NOT_FOUND = "Not in reference table";
@@ -47,9 +51,11 @@ async function firstHit(
       rule_page?: string | null;
       effective_quarter?: string | null;
       edition?: string | null;
+      active?: boolean | null;
     }>(qy.sql, qy.params);
     const r = rows[0];
     if (r) {
+      const active = r.active == null ? true : Boolean(r.active);
       return {
         kind,
         code,
@@ -62,6 +68,11 @@ async function firstHit(
         effective_quarter: r.effective_quarter ?? null,
         edition: r.edition ?? null,
         fromTable: qy.table,
+        active,
+        retired: !active,
+        warning: active
+          ? undefined
+          : "Retired code — shown for historical estimates; do not use on new lines",
       };
     }
   }
@@ -101,7 +112,7 @@ async function validQualifiersForJob(
 ): Promise<string[]> {
   const { rows } = await q<{ qualifier: string }>(
     `SELECT qualifier FROM repair.ref_qualifiers
-     WHERE tenant_id = $1 AND job_code = $2 AND deleted_at IS NULL AND active
+     WHERE tenant_id = $1 AND job_code = $2 AND deleted_at IS NULL
      ORDER BY qualifier`,
     [tenantId, jobCode],
   );
@@ -151,15 +162,18 @@ export async function lookupQualifier(opts: {
       rule_page: string | null;
       effective_quarter: string | null;
       edition: string | null;
+      active: boolean;
     }>(
-      `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition
+      `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition, active
        FROM repair.ref_qualifiers
        WHERE tenant_id = $1 AND job_code = $2 AND UPPER(qualifier) = $3
-         AND deleted_at IS NULL AND active
+         AND deleted_at IS NULL
+       ORDER BY active DESC
        LIMIT 1`,
       [tenantId, jobCode, qual],
     );
     if (rows[0]) {
+      const active = Boolean(rows[0].active);
       return {
         kind: opts.kind,
         code: displayCode,
@@ -172,6 +186,11 @@ export async function lookupQualifier(opts: {
         effective_quarter: rows[0].effective_quarter,
         edition: rows[0].edition,
         fromTable: "repair.ref_qualifiers",
+        active,
+        retired: !active,
+        warning: active
+          ? undefined
+          : "Retired code — shown for historical estimates; do not use on new lines",
       };
     }
   }
@@ -203,15 +222,17 @@ export async function lookupQualifier(opts: {
       effective_quarter: string | null;
       edition: string | null;
     }>(
-      `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition
+      `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition, active
        FROM repair.ref_qualifier_generic
        WHERE tenant_id = $1 AND UPPER(qualifier) = $2
-         AND deleted_at IS NULL AND active
+         AND deleted_at IS NULL
+       ORDER BY active DESC
        LIMIT 1`,
       [tenantId, qual],
     );
     if (rows[0]) {
       const desc = rows[0].description?.trim() || qual;
+      const active = Boolean((rows[0] as { active?: boolean }).active ?? true);
       return {
         kind: opts.kind,
         code: displayCode,
@@ -224,15 +245,20 @@ export async function lookupQualifier(opts: {
         effective_quarter: rows[0].effective_quarter,
         edition: rows[0].edition,
         fromTable: "repair.ref_qualifier_generic",
+        active,
+        retired: !active,
+        warning: active
+          ? undefined
+          : "Retired code — shown for historical estimates; do not use on new lines",
       };
     }
     // Also try legacy car_part_codes
     const car = await firstHit(opts.kind, displayCode, [
       {
         table: "repair.ref_car_part_codes",
-        sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition
+        sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition, active
               FROM repair.ref_car_part_codes
-              WHERE tenant_id=$1 AND UPPER(code)=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+              WHERE tenant_id=$1 AND UPPER(code)=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
         params: [tenantId, qual],
       },
     ]);
@@ -260,7 +286,7 @@ export async function lookupQualifier(opts: {
               effective_quarter, edition, job_codes_using_chart
        FROM repair.ref_qualifier_charts
        WHERE tenant_id = $1 AND rule = $2 AND UPPER(qualifier) = $3
-         AND deleted_at IS NULL AND active
+         AND deleted_at IS NULL
        ORDER BY chart_group NULLS FIRST, chart_title NULLS FIRST`,
       [tenantId, jobRule, qual],
     );
@@ -363,7 +389,7 @@ export async function lookupRefCode(opts: {
                   FROM repair.ref_repair_categories
                   WHERE tenant_id=$1 AND job_code=$2
                     AND (qualifier IS NULL OR qualifier='')
-                    AND deleted_at IS NULL AND active LIMIT 1`,
+                    AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
             params: [tenantId, code],
           },
           {
@@ -375,7 +401,7 @@ export async function lookupRefCode(opts: {
                   FROM repair.repair_categories
                   WHERE tenant_id=$1 AND job_code=$2
                     AND (qualifier IS NULL OR qualifier='')
-                    AND deleted_at IS NULL AND active LIMIT 1`,
+                    AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
             params: [tenantId, code],
           },
         ]);
@@ -390,9 +416,9 @@ export async function lookupRefCode(opts: {
       return firstHit(opts.kind, code, [
         {
           table: "repair.ref_job_codes",
-          sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition
+          sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition, active
                 FROM repair.ref_job_codes
-                WHERE tenant_id=$1 AND job_code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND job_code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
         {
@@ -402,7 +428,7 @@ export async function lookupRefCode(opts: {
                 FROM repair.repair_categories
                 WHERE tenant_id=$1 AND job_code=$2
                   AND (qualifier IS NULL OR qualifier='')
-                  AND deleted_at IS NULL AND active LIMIT 1`,
+                  AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
       ]);
@@ -412,18 +438,18 @@ export async function lookupRefCode(opts: {
         {
           table: "repair.ref_why_made",
           sql: `SELECT description, NULL::text AS category, NULL::text AS sub_category,
-                       source, rule_page, effective_quarter, edition
+                       source, rule_page, effective_quarter, edition, active
                 FROM repair.ref_why_made
-                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
         {
           table: "repair.why_made_codes",
           sql: `SELECT description, NULL::text AS category, NULL::text AS sub_category,
                        NULL::text AS source, NULL::text AS rule_page,
-                       NULL::text AS effective_quarter, NULL::text AS edition
+                       NULL::text AS effective_quarter, NULL::text AS edition, active
                 FROM repair.why_made_codes
-                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
       ]);
@@ -432,9 +458,9 @@ export async function lookupRefCode(opts: {
         {
           table: "repair.ref_location_codes",
           sql: `SELECT description, NULL::text AS category, NULL::text AS sub_category,
-                       source, rule_page, effective_quarter, edition
+                       source, rule_page, effective_quarter, edition, active
                 FROM repair.ref_location_codes
-                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
       ]);
@@ -443,9 +469,9 @@ export async function lookupRefCode(opts: {
         {
           table: "repair.ref_condition_codes",
           sql: `SELECT description, NULL::text AS category, NULL::text AS sub_category,
-                       source, rule_page, effective_quarter, edition
+                       source, rule_page, effective_quarter, edition, active
                 FROM repair.ref_condition_codes
-                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
       ]);
@@ -454,9 +480,9 @@ export async function lookupRefCode(opts: {
         {
           table: "repair.ref_responsibility_codes",
           sql: `SELECT description, NULL::text AS category, NULL::text AS sub_category,
-                       source, rule_page, effective_quarter, edition
+                       source, rule_page, effective_quarter, edition, active
                 FROM repair.ref_responsibility_codes
-                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
         {
@@ -466,7 +492,7 @@ export async function lookupRefCode(opts: {
                        NULL::text AS source, NULL::text AS rule_page,
                        NULL::text AS effective_quarter, NULL::text AS edition
                 FROM repair.responsibility_codes
-                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
       ]);
@@ -477,14 +503,14 @@ export async function lookupRefCode(opts: {
           sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition
                 FROM repair.ref_qualifier_generic
                 WHERE tenant_id=$1 AND UPPER(qualifier)=UPPER($2)
-                  AND deleted_at IS NULL AND active LIMIT 1`,
+                  AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
         {
           table: "repair.ref_car_part_codes",
-          sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition
+          sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition, active
                 FROM repair.ref_car_part_codes
-                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND code=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, code],
         },
       ]);
@@ -493,9 +519,9 @@ export async function lookupRefCode(opts: {
       return firstHit(opts.kind, combo, [
         {
           table: "repair.ref_repair_categories",
-          sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition
+          sql: `SELECT description, category, sub_category, source, rule_page, effective_quarter, edition, active
                 FROM repair.ref_repair_categories
-                WHERE tenant_id=$1 AND combo_key=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND combo_key=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, combo],
         },
         {
@@ -503,7 +529,7 @@ export async function lookupRefCode(opts: {
           sql: `SELECT description, category, sub_category, NULL::text AS source, NULL::text AS rule_page,
                        NULL::text AS effective_quarter, NULL::text AS edition
                 FROM repair.repair_categories
-                WHERE tenant_id=$1 AND combo_key=$2 AND deleted_at IS NULL AND active LIMIT 1`,
+                WHERE tenant_id=$1 AND combo_key=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`,
           params: [tenantId, combo],
         },
       ]);

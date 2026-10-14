@@ -1,4 +1,7 @@
 -- Generated from Shop_Payee_List.xlsx — bank/email left NULL (encrypted-ready columns exist)
+-- OWNER_UI §B: these rows are NOT shops. Migration 20261014_repair_shop_master_entity.sql
+-- soft-removes them from repair.shops and copies marks into repair.billing_roads.
+-- Do not add new payee/railroad rows here — use billing_roads / shop master create instead.
 BEGIN;
 INSERT INTO repair.shops (tenant_id, reporting_mark, name, remit_address, default_inbox, routing_number_enc, account_number_enc, email_enc, created_by)
 VALUES ('00000000-0000-4000-8000-000000000001', 'A001', 'TTX Company', '93167 Network Place | Lockbox # 93167 | Chicago, IL | US | 60673-1229', NULL, NULL, NULL, NULL, 'seed:payee-list')

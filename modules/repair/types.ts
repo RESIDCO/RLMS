@@ -23,6 +23,8 @@ export type CarsRefRow = {
   fleet_status: string | null;
   managed: string | null;
   managed_category: string | null;
+  /** railcars.entity source value (Main / Coal / Rail Partners Select) */
+  entity_source?: string | null;
 };
 
 export type VcfCheckResult =

@@ -36,6 +36,8 @@ export type CloseEligibleGroup = {
   carMark: string;
   carNumber: string;
   leaseRider: string | null;
+  /** Snapshot entity tag (MAIN / COAL / RPS) for accounting segregation */
+  entityCode: string | null;
   partyRole: PartyRole;
   billedPartyMark: string;
   paymentTermsDays: number | null;
@@ -53,6 +55,14 @@ export type CloseEligibleGroup = {
     whyMade: string | null;
     conditionCode: string | null;
   }>;
+};
+
+export type EntityCloseSubtotal = {
+  entityCode: string;
+  rebillCents: number;
+  inboundShopPaymentCents: number;
+  resp7Cents: number;
+  totalCents: number;
 };
 
 async function tenantSettings(tenantId: string): Promise<Record<string, unknown>> {
@@ -121,6 +131,7 @@ export async function collectRebillEvents(opts: {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const { rows } = await q(
     `SELECT e.id AS event_id, e.car_mark, e.car_number,
+            COALESCE(est.entity_code, e.entity_code) AS entity_code,
             est.id AS estimate_id, rev.id AS revision_id
      FROM repair.events e
      JOIN repair.statuses s ON s.id = e.status_id
@@ -231,6 +242,7 @@ export async function collectRebillEvents(opts: {
         carMark,
         carNumber,
         leaseRider,
+        entityCode: r.entity_code != null ? String(r.entity_code) : null,
         partyRole,
         billedPartyMark: resolved.resolved.mark,
         paymentTermsDays: resolved.resolved.paymentTermsDays,
@@ -434,6 +446,11 @@ export async function runMonthlyClose(opts: {
   const localPath = join(exportDir, built.filename);
 
   if (opts.dryRun) {
+    const entitySubtotals = await buildEntityCloseSubtotals({
+      tenantId,
+      accountMonth,
+      rebillGroups: groups,
+    });
     return {
       ok: true as const,
       dryRun: true,
@@ -445,6 +462,7 @@ export async function runMonthlyClose(opts: {
       validation,
       laborCents: built.laborCents,
       materialCents: built.materialCents,
+      entitySubtotals,
     };
   }
 
@@ -485,8 +503,8 @@ export async function runMonthlyClose(opts: {
         `INSERT INTO repair.close_run_events
            (tenant_id, close_run_id, event_id, estimate_id, revision_id,
             lessee_mark, lessee_email, labor_cents, material_cents,
-            account_month, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            account_month, created_by, entity_code)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
           tenantId,
           closeRun.id,
@@ -499,6 +517,7 @@ export async function runMonthlyClose(opts: {
           ev.materialCents,
           accountMonth,
           opts.actor,
+          ev.entityCode,
         ],
       );
 
@@ -514,8 +533,9 @@ export async function runMonthlyClose(opts: {
           `INSERT INTO repair.billing_lines
              (tenant_id, period_id, close_run_id, event_id, source, car_mark, car_number,
               resp_code, labor_cents, material_cents, total_cents, billed_party,
-              invoice_number, raw_record, car_lease_snapshot, account_month, created_by)
-           VALUES ($1,$2,$3,$4,'REBUTTAL',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16)`,
+              invoice_number, raw_record, car_lease_snapshot, account_month, created_by,
+              entity_code)
+           VALUES ($1,$2,$3,$4,'REBUTTAL',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17)`,
           [
             tenantId,
             periodRes.period.id,
@@ -538,9 +558,11 @@ export async function runMonthlyClose(opts: {
               leaseRider: ev.leaseRider,
               billingParty,
               direction: "outbound_rebuttal",
+              entityCode: ev.entityCode,
             }),
             accountMonth,
             opts.actor,
+            ev.entityCode,
           ],
         );
       }
@@ -612,6 +634,13 @@ export async function runMonthlyClose(opts: {
     return closeRun;
   });
 
+  const entitySubtotals = await buildEntityCloseSubtotals({
+    tenantId,
+    accountMonth,
+    closeRunId: String(result.id),
+    rebillGroups: groups,
+  });
+
   await writeAudit({
     tenantId,
     entity: "close_run",
@@ -629,6 +658,7 @@ export async function runMonthlyClose(opts: {
       laborCents: built.laborCents,
       materialCents: built.materialCents,
       validationOk: validation.ok,
+      entitySubtotals,
     },
     actor: opts.actor,
     via: "UI",
@@ -647,8 +677,112 @@ export async function runMonthlyClose(opts: {
     validation,
     laborCents: built.laborCents,
     materialCents: built.materialCents,
+    entitySubtotals,
     rebuttalInvoices: rebuttalMeta,
   };
+}
+
+/**
+ * Monthly close totals subtotaled by entity for accounting segregation:
+ * inbound shop payments, rebills (Resp 6/3), and Resp 7 lines.
+ */
+export async function buildEntityCloseSubtotals(opts: {
+  tenantId: string;
+  accountMonth: string;
+  closeRunId?: string;
+  rebillGroups: CloseEligibleGroup[];
+}): Promise<EntityCloseSubtotal[]> {
+  const map = new Map<
+    string,
+    { rebillCents: number; inboundShopPaymentCents: number; resp7Cents: number }
+  >();
+
+  const bump = (
+    entityCode: string | null | undefined,
+    field: "rebillCents" | "inboundShopPaymentCents" | "resp7Cents",
+    cents: number,
+  ) => {
+    const key = (entityCode || "UNASSIGNED").toUpperCase();
+    const cur = map.get(key) ?? {
+      rebillCents: 0,
+      inboundShopPaymentCents: 0,
+      resp7Cents: 0,
+    };
+    cur[field] += cents;
+    map.set(key, cur);
+  };
+
+  for (const g of opts.rebillGroups) {
+    bump(g.entityCode, "rebillCents", g.laborCents + g.materialCents);
+  }
+
+  // Inbound shop payments: matched / ACH-approved invoices (integer cents)
+  const { rows: inbound } = await q(
+    `SELECT COALESCE(i.entity_code, e.entity_code, est.entity_code) AS entity_code,
+            COALESCE(
+              i.total_cents,
+              ROUND(COALESCE(i.total, 0) * 100)::bigint
+            ) AS cents
+     FROM repair.invoices i
+     JOIN repair.events e ON e.id = i.event_id
+     LEFT JOIN LATERAL (
+       SELECT entity_code FROM repair.estimates
+       WHERE event_id = e.id AND deleted_at IS NULL
+       ORDER BY created_at ASC LIMIT 1
+     ) est ON true
+     WHERE i.tenant_id = $1 AND i.deleted_at IS NULL
+       AND (
+         COALESCE(i.account_month, '') = $2
+         OR i.match_status IN ('MATCHED', 'APPROVED', 'APPROVED_FOR_ACH')
+       )`,
+    [opts.tenantId, opts.accountMonth],
+  ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
+
+  for (const r of inbound.rows) {
+    bump(
+      r.entity_code != null ? String(r.entity_code) : null,
+      "inboundShopPaymentCents",
+      Number(r.cents) || 0,
+    );
+  }
+
+  // Resp 7 lines on estimates closed in this period / unlocked at close
+  const { rows: resp7 } = await q(
+    `SELECT COALESCE(est.entity_code, e.entity_code) AS entity_code,
+            COALESCE(el.labor_cents, 0) + COALESCE(el.material_cents, 0) AS cents
+     FROM repair.estimate_lines el
+     JOIN repair.estimate_revisions rev ON rev.id = el.revision_id
+     JOIN repair.estimates est ON est.id = rev.estimate_id
+     JOIN repair.events e ON e.id = est.event_id
+     JOIN repair.statuses s ON s.id = e.status_id
+     WHERE est.tenant_id = $1
+       AND el.resp_code = '7'
+       AND est.deleted_at IS NULL
+       AND e.deleted_at IS NULL
+       AND s.code IN ('CLOSED', 'READY_TO_CLOSE')
+       AND ($2::uuid IS NULL OR e.billing_close_run_id = $2::uuid
+            OR e.billing_locked_at IS NOT NULL)`,
+    [opts.tenantId, opts.closeRunId ?? null],
+  ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
+
+  for (const r of resp7.rows) {
+    bump(
+      r.entity_code != null ? String(r.entity_code) : null,
+      "resp7Cents",
+      Number(r.cents) || 0,
+    );
+  }
+
+  return [...map.entries()]
+    .map(([entityCode, v]) => ({
+      entityCode,
+      rebillCents: v.rebillCents,
+      inboundShopPaymentCents: v.inboundShopPaymentCents,
+      resp7Cents: v.resp7Cents,
+      totalCents:
+        v.rebillCents + v.inboundShopPaymentCents + v.resp7Cents,
+    }))
+    .sort((a, b) => a.entityCode.localeCompare(b.entityCode));
 }
 
 export async function listCloseRuns(tenantId = DEFAULT_TENANT_ID) {

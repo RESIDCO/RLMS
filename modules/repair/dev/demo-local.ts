@@ -151,13 +151,15 @@ async function seedOfox528313() {
 }
 
 async function apaShopId(): Promise<string> {
-  const { rows } = await q(
-    `SELECT id FROM repair.shops
-     WHERE tenant_id = $1 AND reporting_mark = 'APA' AND deleted_at IS NULL`,
-    [DEFAULT_TENANT_ID],
-  );
-  if (!rows[0]) throw new Error("APA shop not seeded — did migrations run?");
-  return String(rows[0].id);
+  const { ensureDemoShop } = await import("../services/shops");
+  return ensureDemoShop({
+    mark: "APA",
+    legalName: "Apache Railway Shop",
+    city: "Snowflake",
+    state: "AZ",
+    splc: "859370",
+    actor: "demo:local",
+  });
 }
 
 /** Build a two-car Format-1 file to trigger MULTI_CAR WARNING. */

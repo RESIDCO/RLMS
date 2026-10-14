@@ -17,8 +17,12 @@ CREATE TABLE IF NOT EXISTS public.railcars (
   comment_event_note text,
   fleet_status text,
   managed text,
-  managed_category text
+  managed_category text,
+  -- RLMS owning entity: Main | Coal | Rail Partners Select (OWNER_UI entity tags)
+  entity text
 );
+
+ALTER TABLE public.railcars ADD COLUMN IF NOT EXISTS entity text;
 
 CREATE TABLE IF NOT EXISTS public.v_valid_export_rows_data (
   export_src smallint,
@@ -38,11 +42,14 @@ CREATE OR REPLACE VIEW public.v_valid_export_rows AS
 SELECT * FROM public.v_valid_export_rows_data;
 
 -- Sample VCF car + non-VCF car for local smoke tests
-INSERT INTO public.railcars (id, car_number, car_initial, reporting_marks, active, assignment_label, lessee_name)
+INSERT INTO public.railcars (id, car_number, car_initial, reporting_marks, active, assignment_label, lessee_name, entity)
 VALUES
-  (1, '100001', 'ARSX', 'ARSX', true, 'DEMO-ASSIGN', 'Demo Lessee'),
-  (2, '999999', 'ZZZX', 'ZZZX', true, NULL, NULL)
+  (1, '100001', 'ARSX', 'ARSX', true, 'DEMO-ASSIGN', 'Demo Lessee', 'Main'),
+  (2, '999999', 'ZZZX', 'ZZZX', true, NULL, NULL, 'Coal')
 ON CONFLICT (id) DO NOTHING;
+
+UPDATE public.railcars SET entity = COALESCE(entity, 'Main') WHERE id = 1;
+UPDATE public.railcars SET entity = COALESCE(entity, 'Coal') WHERE id = 2;
 
 INSERT INTO public.v_valid_export_rows_data
   (export_src, export_id, car_initial, car_number, active, rider, assignment, assignment_id, lessee, start_date, end_date)

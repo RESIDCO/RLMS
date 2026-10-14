@@ -17,6 +17,7 @@ import { DEFAULT_TENANT_ID, q } from "../db";
 import { getStatusByCode } from "../services/status-machine";
 import { migrateLocal } from "./migrate-local";
 import { centsToDollars } from "../services/money";
+import { ensureDemoShop } from "../services/shops";
 
 type SeedRow = {
   mark: string;
@@ -28,6 +29,8 @@ type SeedRow = {
   reason: string;
   assignment: string;
   leaseType: string;
+  /** RLMS railcars.entity source → MAIN / COAL / RPS tag */
+  entitySource?: "Main" | "Coal" | "Rail Partners Select";
   yardDaysAgo: number;
   approvalReqDaysAgo?: number;
   outboundTargetDays?: number; // negative = overdue (red)
@@ -36,6 +39,14 @@ type SeedRow = {
   dispo?: boolean;
   resp6DaysAgo?: number | null;
 };
+
+function entityCodeFromSource(
+  source: SeedRow["entitySource"] | undefined,
+): string {
+  if (source === "Coal") return "COAL";
+  if (source === "Rail Partners Select") return "RPS";
+  return "MAIN";
+}
 
 const SEED: SeedRow[] = [
   // Actionable (default filter)
@@ -48,6 +59,7 @@ const SEED: SeedRow[] = [
     reason: "Door - bent",
     assignment: "Geneus LLC dba Savatran LLC - OL1517",
     leaseType: "MODIFIED",
+    entitySource: "Main",
     yardDaysAgo: 12,
     approvalReqDaysAgo: 10,
     outboundTargetDays: -1,
@@ -63,6 +75,7 @@ const SEED: SeedRow[] = [
     reason: "Body Damage",
     assignment: "Demo Fleet - OL2201",
     leaseType: "FULL SERVICE",
+    entitySource: "Coal",
     yardDaysAgo: 20,
     approvalReqDaysAgo: 18,
     outboundTargetDays: 5,
@@ -78,6 +91,7 @@ const SEED: SeedRow[] = [
     reason: "Lease Preparation",
     assignment: "RESIDCO Demo - R-OFOX",
     leaseType: "FULL SERVICE",
+    entitySource: "Rail Partners Select",
     yardDaysAgo: 30,
     approvalReqDaysAgo: 25,
     outboundTargetDays: 2,
@@ -274,6 +288,7 @@ function daysFromNow(n: number): Date {
 }
 
 async function ensureCar(row: SeedRow) {
+  const entitySource = row.entitySource ?? "Main";
   // Keep identity sequence ahead of existing stub rows (id 1, 2, …).
   await q(
     `SELECT setval(
@@ -283,21 +298,22 @@ async function ensureCar(row: SeedRow) {
   );
   await q(
     `INSERT INTO public.railcars
-       (car_number, car_initial, reporting_marks, active, assignment_label, lessee_name, managed_category)
-     SELECT $1, $2, $2, true, $3, $4, $5
+       (car_number, car_initial, reporting_marks, active, assignment_label, lessee_name, managed_category, entity)
+     SELECT $1, $2, $2, true, $3, $4, $5, $6
      WHERE NOT EXISTS (
        SELECT 1 FROM public.railcars
        WHERE car_number = $1 AND COALESCE(car_initial,'') = $2
      )`,
-    [row.number, row.mark, row.assignment, "Demo Lessee", row.leaseType],
+    [row.number, row.mark, row.assignment, "Demo Lessee", row.leaseType, entitySource],
   );
   await q(
     `UPDATE public.railcars
      SET assignment_label = COALESCE(assignment_label, $3),
          managed_category = COALESCE(managed_category, $5),
-         lessee_name = COALESCE(lessee_name, $4)
+         lessee_name = COALESCE(lessee_name, $4),
+         entity = $6
      WHERE car_number = $1 AND COALESCE(car_initial,'') = $2`,
-    [row.number, row.mark, row.assignment, "Demo Lessee", row.leaseType],
+    [row.number, row.mark, row.assignment, "Demo Lessee", row.leaseType, entitySource],
   );
   await q(
     `INSERT INTO public.v_valid_export_rows_data
@@ -312,14 +328,34 @@ async function ensureCar(row: SeedRow) {
 }
 
 async function shopIdFor(mark: string): Promise<string> {
-  const { rows } = await q(
-    `SELECT id FROM repair.shops
-     WHERE tenant_id = $1 AND reporting_mark = $2 AND deleted_at IS NULL
-     LIMIT 1`,
-    [DEFAULT_TENANT_ID, mark],
-  );
-  if (!rows[0]) throw new Error(`Shop ${mark} not found — run repair:migrate:local first`);
-  return String(rows[0].id);
+  if (mark === "APA") {
+    return ensureDemoShop({
+      mark: "APA",
+      legalName: "Apache Railway Shop",
+      city: "Snowflake",
+      state: "AZ",
+      splc: "859370",
+      actor: "seed:estimates-history",
+    });
+  }
+  if (mark === "DEMO") {
+    return ensureDemoShop({
+      mark: "DEMO",
+      legalName: "Demo Repair Shop",
+      city: "Demo City",
+      state: "TX",
+      splc: "750001",
+      actor: "seed:estimates-history",
+    });
+  }
+  return ensureDemoShop({
+    mark,
+    legalName: `${mark} Shop`,
+    city: "Local",
+    state: "IL",
+    splc: "000000",
+    actor: "seed:estimates-history",
+  });
 }
 
 async function clearPriorSeed() {
@@ -355,7 +391,19 @@ async function clearPriorSeed() {
 }
 
 async function seedOne(row: SeedRow, shopId: string) {
-  await ensureCar(row);
+  // Rotate entities across seed cars when not explicitly set (MAIN / COAL / RPS)
+  const rotate: Array<SeedRow["entitySource"]> = [
+    "Main",
+    "Coal",
+    "Rail Partners Select",
+  ];
+  const entitySource =
+    row.entitySource ??
+    rotate[Math.abs(Number(row.number.replace(/\D/g, "")) || 0) % 3];
+  const entityCode = entityCodeFromSource(entitySource);
+  const rowWithEntity: SeedRow = { ...row, entitySource };
+
+  await ensureCar(rowWithEntity);
   const eventStatus = await getStatusByCode(DEFAULT_TENANT_ID, "EVENT", "ON_HAND");
   const estStatus = await getStatusByCode(DEFAULT_TENANT_ID, "ESTIMATE", row.status);
   if (!eventStatus || !estStatus) {
@@ -370,10 +418,10 @@ async function seedOne(row: SeedRow, shopId: string) {
     `INSERT INTO repair.events
        (tenant_id, car_mark, car_number, shop_id, rule, origin, status_id,
         is_wreck, yard_arrived_at, target_outbound_at, billing_road, created_by,
-        dispo_requested_at)
+        dispo_requested_at, entity_code, entity_source_value)
      VALUES ($1,$2,$3,$4,'RULE_1','BO',$5,$6,$7,$8,
              (SELECT billing_road FROM repair.shops WHERE id = $4),
-             'seed:estimates-history', $9)
+             'seed:estimates-history', $9, $10, $11)
      RETURNING id`,
     [
       DEFAULT_TENANT_ID,
@@ -385,6 +433,8 @@ async function seedOne(row: SeedRow, shopId: string) {
       yard.toISOString(),
       target ? target.toISOString().slice(0, 10) : null,
       row.dispo ? new Date().toISOString() : null,
+      entityCode,
+      entitySource,
     ],
   );
   const eventId = String(ev[0].id);
@@ -399,9 +449,9 @@ async function seedOne(row: SeedRow, shopId: string) {
   const { rows: est } = await q(
     `INSERT INTO repair.estimates
        (tenant_id, event_id, current_revision, status_id, created_by,
-        completed_at, locked)
+        completed_at, locked, entity_code, entity_source_value)
      VALUES ($1,$2,1,$3,'seed:estimates-history',
-             $4, $5)
+             $4, $5, $6, $7)
      RETURNING id`,
     [
       DEFAULT_TENANT_ID,
@@ -409,6 +459,8 @@ async function seedOne(row: SeedRow, shopId: string) {
       estStatus.id,
       row.status === "COMPLETED" ? new Date().toISOString() : null,
       row.status === "COMPLETED",
+      entityCode,
+      entitySource,
     ],
   );
   const estimateId = String(est[0].id);

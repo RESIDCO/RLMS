@@ -23,12 +23,15 @@ import { DEFAULT_TENANT_ID, q } from "../db";
 async function main() {
   process.env.REPAIR_DEV_OTP_ECHO = "1";
 
-  const { rows: shopRows } = await q(
-    `SELECT id FROM repair.shops WHERE tenant_id = $1 AND deleted_at IS NULL LIMIT 1`,
-    [DEFAULT_TENANT_ID],
-  );
-  if (!shopRows[0]) throw new Error("No shop seeded");
-  const effectiveShopId = String(shopRows[0].id);
+  const { ensureDemoShop } = await import("../services/shops");
+  const effectiveShopId = await ensureDemoShop({
+    mark: "APA",
+    legalName: "Apache Railway Shop",
+    city: "Snowflake",
+    state: "AZ",
+    splc: "859370",
+    actor: "smoke-rtc",
+  });
 
   // OTP default off (before any enable)
   const otpOff = await isOtpRequired("invoice_submit", { shopId: effectiveShopId });

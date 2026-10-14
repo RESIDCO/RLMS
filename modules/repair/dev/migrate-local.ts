@@ -43,6 +43,7 @@ export const LOCAL_MIGRATE_SQL_FILES = [
   "modules/repair/migrations/20261014_repair_estimate_lifecycle_05.sql",
   "modules/repair/migrations/20261014_repair_estimate_lifecycle_06.sql",
   "modules/repair/migrations/20261014_repair_ui_review_feedback.sql",
+  "modules/repair/migrations/20261014_repair_shop_master_entity.sql",
 ] as const;
 
 export function resolveDatabaseUrl(): string {

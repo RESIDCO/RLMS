@@ -67,9 +67,20 @@ async function main() {
   if (!added.ok) bad("admin add rule", added.error);
   ok("admin can add bo_rule");
 
+  const { ensureDemoShop } = await import("../services/shops");
+  await ensureDemoShop({
+    mark: "APA",
+    legalName: "Apache Railway Shop",
+    city: "Snowflake",
+    state: "AZ",
+    splc: "859370",
+    actor: "smoke@local",
+  });
   const shops = await listDemoShop();
-  const apa = shops.find((s) => s.reporting_mark === "APA");
-  if (!apa) bad("shops", "APA missing");
+  const apa = shops.find(
+    (s) => s.reporting_mark === "APA" || s.billing_road === "APA",
+  );
+  if (!apa) bad("shops", "APA missing after ensureDemoShop");
   if (!apa.city || !apa.state) bad("shop city/state", `APA city/state missing: ${apa.city}/${apa.state}`);
   const label = formatShopLabel(apa);
   if (!label.includes("–") || !label.includes(String(apa.city))) {

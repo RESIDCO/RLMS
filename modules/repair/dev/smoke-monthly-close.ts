@@ -46,13 +46,15 @@ async function seedClosedEventWithResp6(opts: {
   actor: string;
   withShopAar?: boolean;
 }) {
-  const { rows: shopRows } = await q(
-    `SELECT id, reporting_mark FROM repair.shops
-     WHERE tenant_id = $1 AND deleted_at IS NULL LIMIT 1`,
-    [DEFAULT_TENANT_ID],
-  );
-  if (!shopRows[0]) throw new Error("No shop seeded");
-  const shopId = String(shopRows[0].id);
+  const { ensureDemoShop } = await import("../services/shops");
+  const shopId = await ensureDemoShop({
+    mark: "APA",
+    legalName: "Apache Railway Shop",
+    city: "Snowflake",
+    state: "AZ",
+    splc: "859370",
+    actor: opts.actor,
+  });
 
   // Local VCF stub only seeds ARSX 100001 — reuse it for every smoke event.
   const bo = await createBadOrder({

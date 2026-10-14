@@ -7,6 +7,20 @@ import multer from "multer";
 import { requireVcfCar } from "./services/vcf";
 import { listStatuses, listTransitions } from "./services/status-machine";
 import { createBadOrder, getEvent, listDemoShop } from "./services/bo";
+import {
+  createShop,
+  deactivateShop,
+  getShopMaster,
+  listBillingRoads,
+  listShopMaster,
+  updateShop,
+} from "./services/shops";
+import {
+  correctEventEntity,
+  getEventEntitySnapshot,
+  listOwnerEntityTags,
+  workspaceTitle,
+} from "./services/entity";
 import { listBoRules, createBoRule } from "./services/bo-rules";
 import {
   listDistributionEntries,
@@ -768,10 +782,138 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     }
   });
 
+  /** Active shops for dropdowns — empty until owner creates at least one. */
   app.get("/api/repair/shops", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
-    return res.json({ shops: await listDemoShop() });
+    const master = String(req.query.master ?? "") === "1";
+    if (master) {
+      const activeOnly = String(req.query.activeOnly ?? "1") !== "0";
+      const shops = await listShopMaster({
+        activeOnly,
+        search: req.query.q ? String(req.query.q) : undefined,
+      });
+      return res.json({ shops, workspaceTitle: await workspaceTitle() });
+    }
+    return res.json({
+      shops: await listDemoShop(),
+      workspaceTitle: await workspaceTitle(),
+    });
+  });
+
+  app.get("/api/repair/shops/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    // Avoid colliding with /shops/:id/otp-steps — only UUID-like ids
+    if (String(req.params.id) === "otp-steps") return;
+    const shop = await getShopMaster(String(req.params.id));
+    if (!shop) return res.status(404).json({ error: "Shop not found" });
+    return res.json({ shop });
+  });
+
+  app.post("/api/repair/shops", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await createShop({
+      legalName: String(body.legalName ?? body.name ?? ""),
+      city: String(body.city ?? ""),
+      state: String(body.state ?? ""),
+      splc: String(body.splc ?? ""),
+      billingRoad: body.billingRoad != null ? String(body.billingRoad) : null,
+      active: body.active !== false,
+      contacts: Array.isArray(body.contacts) ? body.contacts : undefined,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.patch("/api/repair/shops/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await updateShop({
+      shopId: String(req.params.id),
+      legalName: body.legalName != null ? String(body.legalName) : undefined,
+      city: body.city != null ? String(body.city) : undefined,
+      state: body.state != null ? String(body.state) : undefined,
+      splc: body.splc != null ? String(body.splc) : undefined,
+      billingRoad:
+        body.billingRoad !== undefined
+          ? body.billingRoad == null
+            ? null
+            : String(body.billingRoad)
+          : undefined,
+      active: body.active != null ? Boolean(body.active) : undefined,
+      contacts: Array.isArray(body.contacts) ? body.contacts : undefined,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/shops/:id/deactivate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await deactivateShop({
+      shopId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** Billing roads — validation lookup only (not the shop list). */
+  app.get("/api/repair/billing-roads", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const roads = await listBillingRoads(undefined, {
+      q: req.query.q ? String(req.query.q) : undefined,
+      activeOnly: String(req.query.activeOnly ?? "1") !== "0",
+    });
+    return res.json({ billingRoads: roads });
+  });
+
+  app.get("/api/repair/workspace", async (_req, res) => {
+    return res.json({
+      title: await workspaceTitle(),
+      entityTags: await listOwnerEntityTags(),
+    });
+  });
+
+  app.get("/api/repair/entity-tags", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      tags: await listOwnerEntityTags(undefined, {
+        includeInactive: String(req.query.includeInactive ?? "") === "1",
+      }),
+    });
+  });
+
+  app.get("/api/repair/events/:id/entity", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const snap = await getEventEntitySnapshot(String(req.params.id));
+    if (!snap) return res.status(404).json({ error: "Event not found" });
+    return res.json({ entity: snap });
+  });
+
+  app.post("/api/repair/events/:id/entity-correct", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await correctEventEntity({
+      eventId: String(req.params.id),
+      newCode: String(body.newCode ?? body.entityCode ?? ""),
+      reason: String(body.reason ?? ""),
+      actor: actorFrom(req),
+      estimateId: body.estimateId ? String(body.estimateId) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 
   app.get("/api/repair/bo-rules", async (req, res) => {
@@ -2012,6 +2154,12 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
         ? dateFieldRaw
         : "ignore"
     ) as EstimateGridDateField;
+    const entityCodes = req.query.entity
+      ? String(req.query.entity)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : undefined;
     const grid = await queryEstimateGrid({
       statusCodes,
       shopId: req.query.shopId ? String(req.query.shopId) : undefined,
@@ -2020,6 +2168,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       fromDate: req.query.from ? String(req.query.from) : undefined,
       toDate: req.query.to ? String(req.query.to) : undefined,
       dateField,
+      entityCodes,
       minTotal: req.query.minTotal != null ? Number(req.query.minTotal) : undefined,
       maxTotal: req.query.maxTotal != null ? Number(req.query.maxTotal) : undefined,
       includeHidden: String(req.query.includeHidden ?? "") === "1",
@@ -2041,6 +2190,12 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const statusCodes = req.query.status
       ? String(req.query.status).split(",").map((s) => s.trim()).filter(Boolean)
       : undefined;
+    const entityCodes = req.query.entity
+      ? String(req.query.entity)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : undefined;
     const exported = await exportEstimateGridCsv({
       statusCodes,
       shopId: req.query.shopId ? String(req.query.shopId) : undefined,
@@ -2051,6 +2206,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       dateField: req.query.dateField
         ? (String(req.query.dateField) as EstimateGridDateField)
         : "ignore",
+      entityCodes,
       includeHidden: String(req.query.includeHidden ?? "") === "1",
       sortBy: req.query.sortBy ? String(req.query.sortBy) : undefined,
       sortDir: req.query.sortDir === "asc" ? "asc" : "desc",

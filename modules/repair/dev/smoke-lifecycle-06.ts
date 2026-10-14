@@ -54,10 +54,15 @@ async function seedCar(mark: string, number: string, id: number) {
 async function main() {
   console.log("=== repair:smoke-lifecycle-06 (MG1–MG4) ===");
   await seedCar("ARSX", "300001", 300001);
-  const { rows: shops } = await q(
-    `SELECT id FROM repair.shops WHERE reporting_mark='APA' LIMIT 1`,
-  );
-  const shopId = String(shops[0].id);
+  const { ensureDemoShop } = await import("../services/shops");
+  const shopId = await ensureDemoShop({
+    mark: "APA",
+    legalName: "Apache Railway Shop",
+    city: "Snowflake",
+    state: "AZ",
+    splc: "859370",
+    actor: "smoke06",
+  });
 
   const bo = await createBadOrder({
     carMark: "ARSX",

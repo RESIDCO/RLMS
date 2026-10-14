@@ -282,6 +282,8 @@ export type EstimateGridFilters = {
   toDate?: string;
   /** Which date column Date Range applies to (shot 01 "Date Range Filter"). */
   dateField?: EstimateGridDateField;
+  /** Entity tag filter (MAIN / COAL / RPS) — snapshot on estimate/event */
+  entityCodes?: string[];
   minTotal?: number;
   maxTotal?: number;
   includeHidden?: boolean;
@@ -332,6 +334,7 @@ const SORT_COLUMNS: Record<string, string> = {
   outbound_date: "ev.actual_outbound_at",
   created: "e.created_at",
   estimate: "ev.car_mark || ev.car_number",
+  entity: "COALESCE(e.entity_code, ev.entity_code)",
 };
 
 export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
@@ -355,6 +358,10 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
     (filters.sortBy && SORT_COLUMNS[filters.sortBy]) || "e.created_at";
   const sortDir = filters.sortDir === "asc" ? "ASC" : "DESC";
 
+  const entityCodes = filters.entityCodes?.length
+    ? filters.entityCodes.map((c) => c.trim().toUpperCase()).filter(Boolean)
+    : null;
+
   const { rows } = await q(
     `SELECT e.id AS estimate_id, e.event_id, e.current_revision, e.locked,
             e.completed_at, e.created_at,
@@ -363,6 +370,9 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
             ev.car_mark, ev.car_number, ev.shop_id, ev.is_wreck, ev.is_tank_car,
             ev.yard_arrived_at, ev.target_outbound_at, ev.actual_outbound_at,
             ev.billing_road, ev.dispo_requested_at,
+            COALESCE(e.entity_code, ev.entity_code) AS entity_code,
+            COALESCE(e.entity_source_value, ev.entity_source_value) AS entity_source_value,
+            cr.entity_source AS current_entity_source,
             sh.reporting_mark AS shop_mark, sh.name AS shop_name,
             sh.city AS shop_city, sh.state AS shop_state,
             r.labor, r.material, r.total,
@@ -446,6 +456,10 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
        )
        AND ($9::numeric IS NULL OR COALESCE(r.total,0) >= $9)
        AND ($10::numeric IS NULL OR COALESCE(r.total,0) <= $10)
+       AND (
+         $15::text[] IS NULL
+         OR upper(COALESCE(e.entity_code, ev.entity_code, '')) = ANY($15)
+       )
      ORDER BY ${sortCol} ${sortDir} NULLS LAST, e.created_at DESC
      LIMIT $11 OFFSET $12`,
     [
@@ -463,6 +477,7 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
       filters.forSummary ? 0 : offset,
       filters.includeShopDraft ?? false,
       useDateRange,
+      entityCodes,
     ],
   );
 
@@ -473,8 +488,12 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
   ).size;
   // Integer cents for all money math
   let totalCents = 0;
+  const byEntityCents = new Map<string, number>();
   for (const r of rows) {
-    totalCents += dollarsToCents(r.total);
+    const c = dollarsToCents(r.total);
+    totalCents += c;
+    const ek = String(r.entity_code || "UNASSIGNED").toUpperCase();
+    byEntityCents.set(ek, (byEntityCents.get(ek) ?? 0) + c);
   }
 
   const mapped = rows.map((r) => {
@@ -489,10 +508,25 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
       else if (shopCity) shopLabel = `${shopName} – ${shopCity}`;
       else shopLabel = shopName;
     }
+    const entityCode =
+      r.entity_code != null ? String(r.entity_code).toUpperCase() : null;
+    // Warn when live railcars.entity would map differently (simple source compare)
+    const currentSource =
+      r.current_entity_source != null ? String(r.current_entity_source) : null;
+    const snapSource =
+      r.entity_source_value != null ? String(r.entity_source_value) : null;
+    const entityWarn = Boolean(
+      entityCode &&
+        currentSource &&
+        snapSource &&
+        currentSource.trim().toLowerCase() !== snapSource.trim().toLowerCase(),
+    );
     return {
       ...r,
       estimate_label: `${r.car_mark} ${r.car_number}`.trim(),
       shop_display: shopLabel,
+      entity_code: entityCode,
+      entity_warn: entityWarn,
       total_cents: totalCentsRow,
       total_display: formatCentsAsDollars(totalCentsRow),
       issues: r.has_issues ? "Yes" : "No",
@@ -500,6 +534,16 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
       dispo_reqd: r.dispo_requested ? "Yes" : "No",
     };
   });
+
+  const byEntity = [...byEntityCents.entries()]
+    .map(([entityCode, totalCostCents]) => ({
+      entityCode,
+      totalCostCents,
+      totalCostDisplay: formatCentsAsDollars(totalCostCents),
+      estimates: mapped.filter((r) => (r.entity_code || "UNASSIGNED") === entityCode)
+        .length,
+    }))
+    .sort((a, b) => a.entityCode.localeCompare(b.entityCode));
 
   return {
     rows: mapped,
@@ -524,6 +568,7 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
       perClientDisplay: formatCentsAsDollars(
         clients ? Math.round(totalCents / clients) : 0,
       ),
+      byEntity,
     },
   };
 }
@@ -533,6 +578,7 @@ export async function exportEstimateGridCsv(filters: EstimateGridFilters = {}) {
   const header = [
     "Estimate",
     "Status",
+    "Entity",
     "Total",
     "Issues?",
     "Attachments",
@@ -559,6 +605,7 @@ export async function exportEstimateGridCsv(filters: EstimateGridFilters = {}) {
       [
         r.estimate_label,
         r.status_name,
+        r.entity_code ?? "",
         r.total_display,
         r.issues,
         r.attachment_count,

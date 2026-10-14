@@ -6,6 +6,15 @@ import { writeAudit } from "./audit";
 import { notify } from "./notifications";
 import { resolveBoRuleSelection } from "./bo-rules";
 import { activeDistributionEmails } from "./distribution-list";
+import { resolveEntitySnapshot } from "./entity";
+import {
+  formatShopLabel,
+  listShopsForDropdown,
+  type ShopListRow,
+} from "./shops";
+
+export type { ShopListRow };
+export { formatShopLabel };
 
 export type CreateBadOrderInput = {
   tenantId?: string;
@@ -108,14 +117,22 @@ export async function createBadOrder(input: CreateBadOrderInput) {
 
   const statusId = input.shopId ? shopStatus.id : boStatus.id;
 
+  // Snapshot entity tag (MAIN/COAL/RPS) from railcars.entity at BO create
+  const entitySnap = await resolveEntitySnapshot({
+    carMark: vcf.car.car_mark,
+    carNumber: vcf.car.car_number,
+    tenantId,
+  });
+
   const result = await withTransaction(async (client) => {
     const event = await client.query(
       `INSERT INTO repair.events
          (tenant_id, car_mark, car_number, rlms_railcar_id, shop_id, rule,
           damaging_road, ddct_event_id, ddct_incident_id, origin, status_id,
           is_wreck, is_tank_car, created_by,
-          bo_rule_code, bo_rule_other_text, billing_road, billing_road_override_reason)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'BO',$10,$11,$12,$13,$14,$15,$16,$17)
+          bo_rule_code, bo_rule_other_text, billing_road, billing_road_override_reason,
+          entity_code, entity_source_value)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'BO',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         tenantId,
@@ -135,6 +152,8 @@ export async function createBadOrder(input: CreateBadOrderInput) {
         resolvedRule.otherText,
         billingRoad,
         overrideReason,
+        entitySnap.code,
+        entitySnap.sourceValue,
       ],
     );
     const ev = event.rows[0];
@@ -236,51 +255,12 @@ export async function getEvent(eventId: string, tenantId = DEFAULT_TENANT_ID) {
   return { ...rows[0], tracks: tracks.rows, badOrders: bos.rows };
 }
 
-export type ShopListRow = {
-  id: string;
-  reporting_mark: string;
-  name: string;
-  default_inbox: string | null;
-  city: string | null;
-  state: string | null;
-  billing_road: string | null;
-  remit_address: string | null;
-  display_label: string;
-};
-
-export async function listDemoShop(tenantId = DEFAULT_TENANT_ID): Promise<ShopListRow[]> {
-  const { rows } = await q(
-    `SELECT id, reporting_mark, name, default_inbox, city, state, billing_road,
-            remit_address
-     FROM repair.shops
-     WHERE tenant_id = $1 AND deleted_at IS NULL
-     ORDER BY name, reporting_mark`,
-    [tenantId],
-  );
-  return rows.map((s) => ({
-    id: String(s.id),
-    reporting_mark: String(s.reporting_mark),
-    name: String(s.name),
-    default_inbox: s.default_inbox != null ? String(s.default_inbox) : null,
-    city: s.city != null ? String(s.city) : null,
-    state: s.state != null ? String(s.state) : null,
-    billing_road: s.billing_road != null ? String(s.billing_road) : null,
-    remit_address: s.remit_address != null ? String(s.remit_address) : null,
-    /** Display: "Name – City, ST" */
-    display_label: formatShopLabel(s),
-  }));
-}
-
-export function formatShopLabel(s: {
-  name?: string | null;
-  city?: string | null;
-  state?: string | null;
-  reporting_mark?: string | null;
-}): string {
-  const name = (s.name || s.reporting_mark || "Shop").trim();
-  const city = (s.city || "").trim();
-  const state = (s.state || "").trim();
-  if (city && state) return `${name} – ${city}, ${state}`;
-  if (city) return `${name} – ${city}`;
-  return name;
+/**
+ * Owner shop dropdown — EMPTY until at least one shop is created.
+ * Does not include billing-road / payee-list seeds (retired from shop master).
+ */
+export async function listDemoShop(
+  tenantId = DEFAULT_TENANT_ID,
+): Promise<ShopListRow[]> {
+  return listShopsForDropdown(tenantId);
 }

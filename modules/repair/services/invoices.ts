@@ -131,11 +131,24 @@ export async function submitShopInvoice(opts: {
     ],
   );
 
+  const entityCode =
+    event.entity_code != null
+      ? String(event.entity_code)
+      : (
+          await q(
+            `SELECT entity_code FROM repair.estimates
+             WHERE event_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+             ORDER BY created_at ASC LIMIT 1`,
+            [eventId, tenantId],
+          )
+        ).rows[0]?.entity_code ?? null;
+
   const { rows } = await q(
     `INSERT INTO repair.invoices
        (tenant_id, event_id, shop_id, invoice_no, total, estimate_total,
-        document_id, match_status, mismatch_flagged, submitted_by_email, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+        document_id, match_status, mismatch_flagged, submitted_by_email, created_by,
+        entity_code)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)
      RETURNING *`,
     [
       tenantId,
@@ -148,6 +161,7 @@ export async function submitShopInvoice(opts: {
       matchStatus,
       !matched,
       opts.actorEmail,
+      entityCode,
     ],
   );
 

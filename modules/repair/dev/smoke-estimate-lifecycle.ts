@@ -77,13 +77,15 @@ async function seedCar(mark: string, number: string, id: number) {
 }
 
 async function apaShopId(): Promise<string> {
-  const { rows } = await q(
-    `SELECT id FROM repair.shops
-     WHERE tenant_id = $1 AND reporting_mark = 'APA' AND deleted_at IS NULL`,
-    [DEFAULT_TENANT_ID],
-  );
-  if (!rows[0]) throw new Error("APA shop not seeded");
-  return String(rows[0].id);
+  const { ensureDemoShop } = await import("../services/shops");
+  return ensureDemoShop({
+    mark: "APA",
+    legalName: "Apache Railway Shop",
+    city: "Snowflake",
+    state: "AZ",
+    splc: "859370",
+    actor: "smoke",
+  });
 }
 
 /** Patch car fields into Format 1 lines of a 500-byte file (cols 48-57). */

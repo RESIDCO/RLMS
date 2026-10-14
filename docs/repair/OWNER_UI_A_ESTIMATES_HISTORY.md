@@ -46,7 +46,9 @@ Local review seeds ~15 estimates across statuses so the default queue and “fil
 
 ### Columns (shot 01 order — user-reorderable)
 
-Select · Estimate · Status (colored) · Total · Issues? · Attachment · Shop Name · Arrived At Yard · Approval Requested · Approved · Terminated · Action · Outbound Target · Outbound Date · Invoice # · Bad Order Reason · CTC · Assignment · Wreck? · Dispo Req'd · Lease Type · Resp 6 Email
+Select · Estimate · Status (colored) · **Entity** (MAIN/COAL/RPS — added with §B) · Total · Issues? · Attachment · Shop Name · Arrived At Yard · Approval Requested · Approved · Terminated · Action · Outbound Target · Outbound Date · Invoice # · Bad Order Reason · CTC · Assignment · Wreck? · Dispo Req'd · Lease Type · Resp 6 Email
+
+Entity is filterable / groupable; Summary includes by-entity breakdown; Excel export includes Entity. Title bar shows **RESIDCO** (single workspace).
 
 ---
 
@@ -85,6 +87,6 @@ npm run repair:dev:local
 
 ---
 
-## Next (do not start)
+## Next
 
-**§A final awaiting Bruce sign-off.** After approve → **Shop master** (OWNER_UI_SPEC §B).
+Entity column / RESIDCO workspace title ride with **§B Shop master** — see [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md).

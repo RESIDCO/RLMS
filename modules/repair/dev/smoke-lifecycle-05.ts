@@ -55,10 +55,15 @@ async function main() {
   console.log("=== repair:smoke-lifecycle-05 ===");
   await seedCar("ARSX", "200001", 200001);
   await seedCar("ARSX", "200002", 200002);
-  const { rows: shops } = await q(
-    `SELECT id FROM repair.shops WHERE reporting_mark='APA' LIMIT 1`,
-  );
-  const shopId = String(shops[0].id);
+  const { ensureDemoShop } = await import("../services/shops");
+  const shopId = await ensureDemoShop({
+    mark: "APA",
+    legalName: "Apache Railway Shop",
+    city: "Snowflake",
+    state: "AZ",
+    splc: "859370",
+    actor: "smoke05",
+  });
 
   // #7 header initials
   const parsed = parsePastedCarListWithHeader("200001\n200002\n", "ARSX");

@@ -37,6 +37,7 @@ import {
   Columns3,
 } from "lucide-react";
 import RepairOwnerShell from "./RepairOwnerShell";
+import { WorkspaceBanner } from "./WorkspaceTitle";
 import { repairUserStorageKey, useRepairTheme } from "./repairTheme";
 
 type Shop = {
@@ -75,6 +76,8 @@ type GridRow = {
   dispo_reqd: string;
   lease_type: string | null;
   resp6_email_at: string | null;
+  entity_code?: string | null;
+  entity_warn?: boolean;
 };
 
 type Summary = {
@@ -85,6 +88,11 @@ type Summary = {
   perEstimateDisplay: string;
   perCarDisplay: string;
   perClientDisplay: string;
+  byEntity?: Array<{
+    entityCode: string;
+    totalCostDisplay: string;
+    estimates: number;
+  }>;
 };
 
 type ColId =
@@ -108,7 +116,8 @@ type ColId =
   | "wreck"
   | "dispo"
   | "lease"
-  | "resp6";
+  | "resp6"
+  | "entity";
 
 type ColDef = {
   id: ColId;
@@ -122,6 +131,7 @@ type ColDef = {
 const DEFAULT_COLUMNS: ColDef[] = [
   { id: "estimate", label: "Estimate", width: 110, filterable: true },
   { id: "status", label: "Status", width: 150, filterable: true },
+  { id: "entity", label: "Entity", width: 80, filterable: true },
   { id: "total", label: "Total", width: 100, align: "right", filterable: true },
   { id: "issues", label: "Issues?", width: 70, filterable: true },
   { id: "attachment", label: "Attachment", width: 80, align: "center" },
@@ -293,6 +303,8 @@ function colFilterValue(row: GridRow, id: ColId): string {
       return row.estimate_label ?? "";
     case "status":
       return row.status_name ?? "";
+    case "entity":
+      return row.entity_code ?? "";
     case "total":
       return row.total_display ?? "";
     case "issues":
@@ -748,6 +760,7 @@ function EstimatesHistoryBody() {
       let key = "";
       if (groupBy === "status") key = r.status_name;
       else if (groupBy === "shop") key = r.shop_display || "(no shop)";
+      else if (groupBy === "entity") key = r.entity_code || "(no entity)";
       else if (groupBy === "wreck") key = r.wreck;
       else key = "";
       if (!map.has(key)) map.set(key, []);
@@ -819,6 +832,24 @@ function EstimatesHistoryBody() {
         );
       case "status":
         return r.status_name;
+      case "entity":
+        return (
+          <span
+            className={
+              r.entity_warn
+                ? "font-semibold text-amber-800 dark:text-amber-300"
+                : "font-medium"
+            }
+            title={
+              r.entity_warn
+                ? "Car's current entity differs from snapshot"
+                : undefined
+            }
+          >
+            {r.entity_code ?? "—"}
+            {r.entity_warn ? " ⚠" : ""}
+          </span>
+        );
       case "total":
         return (
           <span className="font-bold tabular-nums">{money(r.total_display)}</span>
@@ -930,18 +961,18 @@ function EstimatesHistoryBody() {
           : "min-h-full bg-[#f3f4f6] text-sm text-slate-900"
       }
     >
-      <div className="bg-[#8B1E1E] text-white px-4 py-2 flex items-center justify-between">
-        <div className="font-semibold tracking-wide">
-          Residco — Main — Default :: Estimates History
-        </div>
-        <button
-          type="button"
-          className="text-white hover:text-white text-xs underline font-medium"
-          onClick={() => loadGrid()}
-        >
-          Refresh
-        </button>
-      </div>
+      <WorkspaceBanner
+        pageTitle="Estimates History"
+        right={
+          <button
+            type="button"
+            className="text-white hover:text-white text-xs underline font-medium"
+            onClick={() => loadGrid()}
+          >
+            Refresh
+          </button>
+        }
+      />
 
       <div className="p-3 space-y-3">
         <div className={`flex flex-wrap gap-2 items-center text-xs ${dark ? "text-slate-100" : "text-slate-900"}`}>
@@ -1179,6 +1210,23 @@ function EstimatesHistoryBody() {
               <dd className="text-right font-bold">{money(summary?.perCarDisplay)}</dd>
               <dt className="font-medium">$ per client:</dt>
               <dd className="text-right font-bold">{money(summary?.perClientDisplay)}</dd>
+              {(summary?.byEntity?.length ?? 0) > 0 ? (
+                <>
+                  <dt className="font-bold pt-1 col-span-2">By entity</dt>
+                  {summary!.byEntity!.map((e) => (
+                    <Fragment key={e.entityCode}>
+                      <dt className="font-medium pl-2">{e.entityCode}:</dt>
+                      <dd className="text-right font-bold">
+                        {money(e.totalCostDisplay)}
+                        <span className="opacity-70 font-normal">
+                          {" "}
+                          ({e.estimates})
+                        </span>
+                      </dd>
+                    </Fragment>
+                  ))}
+                </>
+              ) : null}
             </dl>
           </fieldset>
         </div>
@@ -1273,6 +1321,7 @@ function EstimatesHistoryBody() {
             <SelectContent>
               <SelectItem value="none">None</SelectItem>
               <SelectItem value="status">Status</SelectItem>
+              <SelectItem value="entity">Entity</SelectItem>
               <SelectItem value="shop">Shop</SelectItem>
               <SelectItem value="wreck">Wreck?</SelectItem>
             </SelectContent>
@@ -1285,6 +1334,7 @@ function EstimatesHistoryBody() {
             <SelectContent>
               <SelectItem value="created">Created</SelectItem>
               <SelectItem value="status">Status</SelectItem>
+              <SelectItem value="entity">Entity</SelectItem>
               <SelectItem value="total">Total</SelectItem>
               <SelectItem value="shop">Shop</SelectItem>
               <SelectItem value="estimate">Estimate</SelectItem>

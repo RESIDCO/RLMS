@@ -68,10 +68,43 @@ async function ensureEstimate(opts: {
   const queued = await getStatusByCode(opts.tenantId, "ESTIMATE", "QUEUED");
   if (!queued) throw new Error("ESTIMATE/QUEUED status missing");
 
+  // Carry entity snapshot from event (set at BO create); fall back to live lookup
+  const { rows: evEntity } = await q(
+    `SELECT entity_code, entity_source_value, car_mark, car_number
+     FROM repair.events WHERE id = $1 AND tenant_id = $2`,
+    [opts.eventId, opts.tenantId],
+  );
+  let entityCode =
+    evEntity[0]?.entity_code != null ? String(evEntity[0].entity_code) : null;
+  let entitySource =
+    evEntity[0]?.entity_source_value != null
+      ? String(evEntity[0].entity_source_value)
+      : null;
+  if (!entityCode && evEntity[0]) {
+    const { resolveEntitySnapshot } = await import("./entity");
+    const snap = await resolveEntitySnapshot({
+      carMark: String(evEntity[0].car_mark),
+      carNumber: String(evEntity[0].car_number),
+      tenantId: opts.tenantId,
+    });
+    entityCode = snap.code;
+    entitySource = snap.sourceValue;
+    if (entityCode) {
+      await q(
+        `UPDATE repair.events
+         SET entity_code = COALESCE(entity_code, $1),
+             entity_source_value = COALESCE(entity_source_value, $2)
+         WHERE id = $3 AND tenant_id = $4`,
+        [entityCode, entitySource, opts.eventId, opts.tenantId],
+      );
+    }
+  }
+
   const { rows } = await q(
     `INSERT INTO repair.estimates
-       (tenant_id, event_id, track_id, current_revision, status_id, created_by)
-     VALUES ($1,$2,$3,0,$4,$5)
+       (tenant_id, event_id, track_id, current_revision, status_id, created_by,
+        entity_code, entity_source_value)
+     VALUES ($1,$2,$3,0,$4,$5,$6,$7)
      RETURNING *`,
     [
       opts.tenantId,
@@ -79,6 +112,8 @@ async function ensureEstimate(opts: {
       opts.trackId ?? null,
       queued.id,
       opts.actor,
+      entityCode,
+      entitySource,
     ],
   );
   return rows[0];
@@ -262,8 +297,8 @@ export async function uploadEstimate(opts: {
            (tenant_id, revision_id, line_no, aar_job_code, qualifier, why_made,
             condition_code, resp_code, labor, material, total,
             repair_category, sub_category, labor_cents, material_cents,
-            aar_component_id, ddct_incident_id, raw_line, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+            aar_component_id, ddct_incident_id, raw_line, created_by, entity_code)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
         [
           tenantId,
           rev.rows[0].id,
@@ -284,6 +319,7 @@ export async function uploadEstimate(opts: {
           line.ddctIncidentId ?? null,
           line.rawLine ?? null,
           opts.actorEmail ?? opts.actorName,
+          (estimate as { entity_code?: string | null }).entity_code ?? null,
         ],
       );
     }

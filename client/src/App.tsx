@@ -40,6 +40,7 @@ import ShopEventLink from "@/pages/repair/ShopEventLink";
 import EstimateReview from "@/pages/repair/EstimateReview";
 import LesseeApproval from "@/pages/repair/LesseeApproval";
 import RepairComingSoon from "@/pages/repair/RepairComingSoon";
+import ShopMaster from "@/pages/repair/ShopMaster";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -121,7 +122,7 @@ function AppRouter() {
       <Route path="/repair/outbound-dispos" component={RepairComingSoon} />
       <Route path="/repair/invoices" component={RepairComingSoon} />
       <Route path="/repair/assignments" component={RepairComingSoon} />
-      <Route path="/repair/shops" component={RepairComingSoon} />
+      <Route path="/repair/shops" component={ShopMaster} />
       <Route path="/repair/bo-reasons" component={RepairComingSoon} />
       <Route path="/repair/billing-roads" component={RepairComingSoon} />
       <Route path="/repair/admin" component={RepairComingSoon} />

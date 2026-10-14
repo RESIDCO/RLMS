@@ -4,6 +4,7 @@
 import { useLocation } from "wouter";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { useRepairTheme } from "./repairTheme";
+import { WorkspaceBanner } from "./WorkspaceTitle";
 
 const TITLES: Record<string, string> = {
   "/repair/bad-orders": "Bad Orders",
@@ -27,18 +28,20 @@ function ComingSoonBody({ title }: { title: string }) {
   const dark = theme === "dark";
   return (
     <>
-      <div className="bg-[#8B1E1E] text-white px-4 py-2 font-semibold tracking-wide">
-        Residco — Main — Default :: {title}
-      </div>
+      <WorkspaceBanner pageTitle={title} />
       <div className={`p-8 max-w-xl ${dark ? "text-slate-100" : "text-slate-900"}`}>
         <h1 className="text-xl font-semibold mb-2">{title}</h1>
         <p className={`text-sm leading-relaxed ${dark ? "text-slate-300" : "text-slate-800"}`}>
-          Coming soon. This screen is on the Owner UI map but is not part of the
-          current Estimates History (§A) delivery. Use{" "}
+          Coming soon. This screen is on the Owner UI map but is not built in the
+          current slice. Use{" "}
           <a href="#/repair" className="text-blue-700 dark:text-sky-300 underline font-medium">
             Estimates History
           </a>{" "}
-          for the actionable queue.
+          or{" "}
+          <a href="#/repair/shops" className="text-blue-700 dark:text-sky-300 underline font-medium">
+            Shop Master
+          </a>
+          .
         </p>
       </div>
     </>

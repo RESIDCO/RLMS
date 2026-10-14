@@ -48,15 +48,22 @@ export async function getCarsRef(
 ): Promise<CarsRefRow | null> {
   const mark = normalizeMark(carMark);
   const number = normalizeCarNumber(carNumber);
+  const padded = number.replace(/\D/g, "").padStart(6, "0");
   const { rows } = await q<CarsRefRow>(
     `SELECT
        rlms_railcar_id, car_mark, car_number, active_flag, in_vcf,
        lease_rider, current_assignment, current_assignment_id,
-       lessee_name, remarks, fleet_status, managed, managed_category
+       lessee_name, remarks, fleet_status, managed, managed_category,
+       entity_source
      FROM repair.cars_ref
-     WHERE car_number = $1 AND upper(car_mark) = $2
+     WHERE upper(car_mark) = $2
+       AND (
+         car_number = $1
+         OR lpad(regexp_replace(COALESCE(car_number, ''), '[^0-9]', '', 'g'), 6, '0') = $3
+       )
+     ORDER BY CASE WHEN car_number = $1 THEN 0 ELSE 1 END
      LIMIT 1`,
-    [number, mark],
+    [number, mark, padded],
   );
   return rows[0] ?? null;
 }

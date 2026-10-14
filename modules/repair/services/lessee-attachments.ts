@@ -1,13 +1,20 @@
 /**
  * Lessee email attachments:
- * - Pass through the shop’s original files when they exist (exact bytes/mime).
+ * - Pass through the shop’s original estimate files as-is.
+ * - Always include the matching 500-byte file (shop upload or regenerated from raw lines).
  * - Generate a PDF only when the shop did not send one.
+ * - Reviewer-selected docs/photos when documentIds provided.
  * Shop is never copied on the outbound email (handled by caller).
  */
 
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import autoTableImport from "jspdf-autotable";
 import { DEFAULT_TENANT_ID, q } from "../db";
+
+const autoTable =
+  typeof autoTableImport === "function"
+    ? autoTableImport
+    : (autoTableImport as { default: typeof autoTableImport }).default;
 import { getStorageProvider } from "../providers/storage";
 import type { OutboundEmail } from "../providers/email";
 
@@ -33,7 +40,6 @@ const SHOP_ORIGINAL_KINDS = new Set([
 function filenameOf(doc: DocRow): string {
   if (doc.original_filename?.trim()) return doc.original_filename.trim();
   const base = doc.storage_key.split("/").pop() || "attachment";
-  // strip leading uuid-
   return base.replace(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i,
     "",
@@ -44,6 +50,17 @@ function isPdf(doc: DocRow): boolean {
   const mime = (doc.mime ?? "").toLowerCase();
   const name = filenameOf(doc).toLowerCase();
   return mime.includes("pdf") || name.endsWith(".pdf");
+}
+
+function isAar500(doc: DocRow): boolean {
+  const mime = (doc.mime ?? "").toLowerCase();
+  const name = filenameOf(doc).toLowerCase();
+  return (
+    doc.kind === "aar_500byte" ||
+    name.endsWith(".txt") ||
+    name.endsWith(".dat") ||
+    mime.includes("text/plain")
+  );
 }
 
 /** Shop originals for this event/revision (excludes generated_* kinds). */
@@ -65,7 +82,8 @@ export async function listShopOriginalDocuments(opts: {
     [tenantId, opts.eventId],
   );
 
-  let docs = rows.filter((d) => SHOP_ORIGINAL_KINDS.has(d.kind) || !d.kind.startsWith("generated_"));
+  // Only shop estimate originals / photos — never invoices or generated_* 
+  let docs = rows.filter((d) => SHOP_ORIGINAL_KINDS.has(d.kind));
   if (opts.revisionId) {
     const forRev = docs.filter(
       (d) => d.revision_id == null || String(d.revision_id) === opts.revisionId,
@@ -74,9 +92,62 @@ export async function listShopOriginalDocuments(opts: {
   }
   if (opts.documentIds?.length) {
     const allow = new Set(opts.documentIds);
-    docs = docs.filter((d) => allow.has(d.id));
+    // Always keep aar_500byte even if not in reviewer selection
+    docs = docs.filter((d) => allow.has(d.id) || d.kind === "aar_500byte");
   }
   return docs;
+}
+
+async function ensureMatching500Byte(opts: {
+  tenantId: string;
+  eventId: string;
+  revisionId: string;
+  actor: string;
+  carLabel: string;
+  existing: DocRow[];
+}): Promise<DocRow | null> {
+  const existingAar = opts.existing.find(
+    (d) => d.kind === "aar_500byte" || isAar500(d),
+  );
+  if (existingAar) return existingAar;
+
+  const { rows: lines } = await q(
+    `SELECT raw_line FROM repair.estimate_lines
+     WHERE revision_id = $1 AND raw_line IS NOT NULL AND length(raw_line) = 500
+     ORDER BY line_no ASC`,
+    [opts.revisionId],
+  );
+  if (!lines.length) return null;
+
+  const body = lines.map((l) => String(l.raw_line) + "\r\n").join("");
+  const bytes = Buffer.from(body, "latin1");
+  const filename = `estimate-${opts.carLabel.replace(/\s+/g, "_")}-500byte.txt`;
+  const stored = await getStorageProvider().put({
+    tenantId: opts.tenantId,
+    kind: "aar_500byte",
+    filename,
+    mime: "text/plain",
+    bytes,
+  });
+
+  const { rows } = await q<DocRow>(
+    `INSERT INTO repair.documents
+       (tenant_id, event_id, revision_id, kind, storage_key, sha256, size, mime,
+        original_filename, uploaded_by, created_by)
+     VALUES ($1,$2,$3,'aar_500byte',$4,$5,$6,'text/plain',$7,$8,$8)
+     RETURNING id, kind, storage_key, mime, size, original_filename, revision_id`,
+    [
+      opts.tenantId,
+      opts.eventId,
+      opts.revisionId,
+      stored.storageKey,
+      stored.sha256,
+      stored.size,
+      filename,
+      opts.actor,
+    ],
+  );
+  return rows[0] ?? null;
 }
 
 async function generateEstimatePdf(opts: {
@@ -100,7 +171,11 @@ async function generateEstimatePdf(opts: {
   doc.text("Repair estimate (generated — shop did not attach a PDF)", 40, 40);
   doc.setFontSize(10);
   doc.text(`Car: ${opts.carLabel}`, 40, 58);
-  doc.text(`Generated for lessee review — pass-through preferred when shop PDF exists.`, 40, 72);
+  doc.text(
+    `Generated for lessee review — pass-through preferred when shop PDF exists.`,
+    40,
+    72,
+  );
 
   autoTable(doc, {
     startY: 90,
@@ -153,10 +228,12 @@ export type ResolvedLesseeAttachments = {
   emailAttachments: NonNullable<OutboundEmail["attachments"]>;
   usedGeneratedPdf: boolean;
   shopOriginalCount: number;
+  included500Byte: boolean;
 };
 
 /**
- * Build lessee email attachments: shop originals first; PDF only if shop sent none.
+ * Build lessee email attachments:
+ * shop originals + matching 500-byte; PDF only if shop sent none.
  */
 export async function resolveLesseeAttachments(opts: {
   eventId: string;
@@ -174,7 +251,21 @@ export async function resolveLesseeAttachments(opts: {
     documentIds: opts.documentIds,
   });
 
-  const attachments: NonNullable<OutboundEmail["attachments"]> = shopDocs.map((d) => ({
+  const aarDoc = await ensureMatching500Byte({
+    tenantId,
+    eventId: opts.eventId,
+    revisionId: opts.revisionId,
+    actor: opts.actor,
+    carLabel: opts.carLabel,
+    existing: shopDocs,
+  });
+
+  const docs = [...shopDocs];
+  if (aarDoc && !docs.some((d) => d.id === aarDoc.id)) {
+    docs.push(aarDoc);
+  }
+
+  const attachments: NonNullable<OutboundEmail["attachments"]> = docs.map((d) => ({
     filename: filenameOf(d),
     contentType: d.mime || "application/octet-stream",
     storageKey: d.storage_key,
@@ -182,9 +273,9 @@ export async function resolveLesseeAttachments(opts: {
   }));
 
   let usedGeneratedPdf = false;
-  const ids = shopDocs.map((d) => d.id);
+  const ids = docs.map((d) => d.id);
 
-  if (!shopDocs.some(isPdf)) {
+  if (!docs.some(isPdf)) {
     const pdf = await generateEstimatePdf({
       tenantId,
       eventId: opts.eventId,
@@ -207,5 +298,6 @@ export async function resolveLesseeAttachments(opts: {
     emailAttachments: attachments,
     usedGeneratedPdf,
     shopOriginalCount: shopDocs.length,
+    included500Byte: Boolean(aarDoc),
   };
 }

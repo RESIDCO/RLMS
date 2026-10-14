@@ -29,6 +29,8 @@ export {
   sendLesseeApprovalRequest,
   approveViaLesseeLink,
   confirmLesseeReply,
+  ingestLesseeReply,
+  getLesseeViewForToken,
 } from "./services/lessee-approval";
 export { resolveLesseeAttachments, listShopOriginalDocuments } from "./services/lessee-attachments";
 export { enterPodErd, listPodDates, runPodReminders } from "./services/pod";
@@ -49,6 +51,14 @@ export {
   getShopOtpSteps,
 } from "./services/otp";
 export { maybeMarkReadyToClose, closeEvent } from "./services/close";
+export {
+  runMonthlyClose,
+  collectLesseeRebillEvents,
+  listCloseRuns,
+  ensureBillingPeriod,
+} from "./services/monthly-close";
+export { buildCripFile } from "./services/crb-writer";
+export { validateCripBytes, validateCripRecords } from "./services/crb-validate";
 export { notify, resolveRecipients } from "./services/notifications";
 export { getEmailProvider, setEmailProvider, LogEmailProvider } from "./providers/email";
 export {

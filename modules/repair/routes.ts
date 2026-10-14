@@ -30,6 +30,7 @@ import {
   approveViaLesseeLink,
   ingestLesseeReply,
   confirmLesseeReply,
+  getLesseeViewForToken,
 } from "./services/lessee-approval";
 import { enterPodErd, listPodDates, latestPodErd, runPodReminders } from "./services/pod";
 import { setCompletedDate, rollbackCompletedDate } from "./services/completion";
@@ -46,6 +47,13 @@ import {
 } from "./services/contacts";
 import { issueStepOtp, isOtpRequired, setShopOtpStepFlag, getShopOtpSteps } from "./services/otp";
 import { maybeMarkReadyToClose, closeEvent } from "./services/close";
+import {
+  runMonthlyClose,
+  collectLesseeRebillEvents,
+  listCloseRuns,
+  ensureBillingPeriod,
+} from "./services/monthly-close";
+import { validateCripBytes } from "./services/crb-validate";
 import { getEmailProvider } from "./providers/email";
 import { getInboundEmailProvider } from "./providers/inbound-email";
 import { getStorageProvider } from "./providers/storage";
@@ -176,30 +184,14 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
     }
   });
 
-  /** Lessee login-free link (Resp 6 primary path). */
+  /** Lessee login-free link (Resp 6 primary path). Shows Resp 6 portion only. */
   app.get("/api/repair/lessee/:token", async (req, res) => {
     try {
-      const resolved = await resolveActiveLink(String(req.params.token), "LESSEE");
-      if (!resolved) {
+      const view = await getLesseeViewForToken(String(req.params.token));
+      if (!view) {
         return res.status(401).json({ error: "Invalid, expired, or revoked link" });
       }
-      const estimates = await listEstimatesForEvent(String(resolved.event.id));
-      const estimate = estimates[0];
-      let revisions: unknown[] = [];
-      let lines: unknown[] = [];
-      if (estimate) {
-        revisions = await listRevisions(estimate.id);
-        const latest = revisions[revisions.length - 1] as { id?: string } | undefined;
-        if (latest?.id) lines = await getRevisionLines(String(latest.id));
-      }
-      return res.json({
-        link: resolved.link,
-        event: resolved.event,
-        estimate,
-        revisions,
-        lines,
-        note: "Approve via this link (primary). Email reply requires reviewer confirmation.",
-      });
+      return res.json(view);
     } catch (err) {
       console.error("[repair/lessee/:token]", err);
       return res.status(500).json({ error: "Failed to load lessee link" });
@@ -213,6 +205,7 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       const result = await approveViaLesseeLink({
         rawToken: String(req.params.token),
         decision,
+        comment: req.body?.comment ? String(req.body.comment) : undefined,
       });
       if (!result.ok) return res.status(result.status).json({ error: result.error });
       return res.json(result);
@@ -696,11 +689,13 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       : body.documentId
         ? [String(body.documentId)]
         : [];
+    const extraTo = Array.isArray(body.extraTo) ? body.extraTo.map(String) : [];
     const result = await sendLesseeApprovalRequest({
       eventId: String(rows[0].event_id),
       estimateId,
       revisionId: String(rows[0].revision_id),
-      lesseeEmail: String(body.lesseeEmail ?? ""),
+      lesseeEmail: body.lesseeEmail ? String(body.lesseeEmail) : undefined,
+      extraTo,
       documentIds: docs,
       actor: actorFrom(req),
       note: body.note ? String(body.note) : undefined,
@@ -1028,5 +1023,77 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
+  });
+
+  /** Preview CLOSED events with unlocked Resp 6 for monthly rebill. */
+  app.get("/api/repair/billing/lessee-rebill-candidates", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const events = await collectLesseeRebillEvents({
+      accountMonth: req.query.accountMonth
+        ? String(req.query.accountMonth)
+        : undefined,
+    });
+    return res.json({ events, count: events.length });
+  });
+
+  app.get("/api/repair/billing/close-runs", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ runs: await listCloseRuns() });
+  });
+
+  app.post("/api/repair/billing/periods", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await ensureBillingPeriod({
+      accountMonth: String(req.body?.accountMonth ?? ""),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  /**
+   * Monthly close: collect CLOSED+Resp6 events, bulk rebuttal invoices,
+   * write local CRIPYYMM file (no FTP), validate, audit, lock events.
+   */
+  app.post("/api/repair/billing/monthly-close", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await runMonthlyClose({
+      accountMonth: req.body?.accountMonth
+        ? String(req.body.accountMonth)
+        : undefined,
+      actor: actorFrom(req),
+      exportDir: req.body?.exportDir ? String(req.body.exportDir) : undefined,
+      dryRun: Boolean(req.body?.dryRun),
+    });
+    if (!result.ok) {
+      return res.status(result.status).json(result);
+    }
+    return res.status(201).json(result);
+  });
+
+  /** Validate a CRB/CRIP buffer (dev/smoke). Body: { text } or multipart file. */
+  app.post("/api/repair/billing/validate-crip", upload.single("file"), async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    let bytes: Buffer | null = null;
+    if (req.file?.buffer) bytes = req.file.buffer;
+    else if (typeof req.body?.text === "string") {
+      bytes = Buffer.from(req.body.text, "latin1");
+    }
+    if (!bytes) {
+      return res.status(400).json({ error: "Provide file or text body" });
+    }
+    try {
+      return res.json(validateCripBytes(bytes));
+    } catch (err) {
+      return res.status(422).json({
+        ok: false,
+        error: err instanceof Error ? err.message : "Validation failed",
+      });
+    }
   });
 }

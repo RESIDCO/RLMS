@@ -30,10 +30,13 @@ export default function LesseeApproval() {
         if (!r.ok) throw new Error(data.error || "Failed to load");
         setCar(`${data.event?.car_mark ?? ""} ${data.event?.car_number ?? ""}`.trim());
         setLines(data.lines ?? []);
-        const t = (data.lines ?? []).reduce(
-          (s: number, l: Line) => s + Number(l.total ?? 0),
-          0,
-        );
+        const t =
+          data.amountPresented != null
+            ? Number(data.amountPresented)
+            : (data.lines ?? []).reduce(
+                (s: number, l: Line) => s + Number(l.total ?? 0),
+                0,
+              );
         setTotal(t);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
@@ -67,8 +70,8 @@ export default function LesseeApproval() {
       {!done && (
         <>
           <p className="text-sm text-muted-foreground">
-            Review the estimate lines below. Approving here is the primary path. If you
-            replied by email instead, a RESIDCO reviewer must confirm that reply.
+            Review the Resp 6 (lessee) portion below. Approving here is the primary path.
+            If you replied by email instead, a RESIDCO reviewer must confirm that reply.
           </p>
           <div className="overflow-auto border border-border rounded-md">
             <table className="w-full text-xs">

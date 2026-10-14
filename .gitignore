@@ -23,7 +23,8 @@ script/_census2020/
 supabase/.temp/
 schema/*.apply-errors.json
 
-# Repair module local storage / backups
+# Repair module local storage / backups / CRB exports
 data/repair-storage/
 backups/
+modules/repair/dev/exports/
 

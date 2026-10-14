@@ -80,10 +80,14 @@ import {
   linkInvoiceToEstimates,
   queryEstimateGrid,
   exportEstimateGridCsv,
+  bulkApproveEstimates,
+  exportBrcDetail,
+  ACTIONABLE_ESTIMATE_STATUSES,
   setUserEmailOptOut,
   setNotificationRuleMinAmount,
   buildMonthlyBillSummary,
   getPhase2Hooks,
+  type EstimateGridDateField,
 } from "./services/ops-grid";
 import {
   assertAttachmentAllowed,
@@ -1991,6 +1995,23 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const statusCodes = req.query.status
       ? String(req.query.status).split(",").map((s) => s.trim()).filter(Boolean)
       : undefined;
+    const dateFieldRaw = req.query.dateField
+      ? String(req.query.dateField)
+      : "ignore";
+    const dateField = (
+      [
+        "ignore",
+        "yard_arrival",
+        "approval_requested",
+        "approved",
+        "outbound_target",
+        "outbound_date",
+        "created",
+        "terminated",
+      ].includes(dateFieldRaw)
+        ? dateFieldRaw
+        : "ignore"
+    ) as EstimateGridDateField;
     const grid = await queryEstimateGrid({
       statusCodes,
       shopId: req.query.shopId ? String(req.query.shopId) : undefined,
@@ -1998,13 +2019,20 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       carNumber: req.query.carNumber ? String(req.query.carNumber) : undefined,
       fromDate: req.query.from ? String(req.query.from) : undefined,
       toDate: req.query.to ? String(req.query.to) : undefined,
+      dateField,
       minTotal: req.query.minTotal != null ? Number(req.query.minTotal) : undefined,
       maxTotal: req.query.maxTotal != null ? Number(req.query.maxTotal) : undefined,
       includeHidden: String(req.query.includeHidden ?? "") === "1",
+      includeShopDraft: String(req.query.includeShopDraft ?? "") === "1",
       limit: req.query.limit != null ? Number(req.query.limit) : undefined,
       offset: req.query.offset != null ? Number(req.query.offset) : undefined,
+      sortBy: req.query.sortBy ? String(req.query.sortBy) : undefined,
+      sortDir: req.query.sortDir === "asc" ? "asc" : "desc",
     });
-    return res.json(grid);
+    return res.json({
+      ...grid,
+      actionableStatuses: [...ACTIONABLE_ESTIMATE_STATUSES],
+    });
   });
 
   app.get("/api/repair/estimates/grid/export", async (req, res) => {
@@ -2016,11 +2044,66 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const exported = await exportEstimateGridCsv({
       statusCodes,
       shopId: req.query.shopId ? String(req.query.shopId) : undefined,
+      carMark: req.query.carMark ? String(req.query.carMark) : undefined,
+      carNumber: req.query.carNumber ? String(req.query.carNumber) : undefined,
+      fromDate: req.query.from ? String(req.query.from) : undefined,
+      toDate: req.query.to ? String(req.query.to) : undefined,
+      dateField: req.query.dateField
+        ? (String(req.query.dateField) as EstimateGridDateField)
+        : "ignore",
       includeHidden: String(req.query.includeHidden ?? "") === "1",
+      sortBy: req.query.sortBy ? String(req.query.sortBy) : undefined,
+      sortDir: req.query.sortDir === "asc" ? "asc" : "desc",
     });
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", "attachment; filename=estimates-grid.csv");
     return res.send(exported.csv);
+  });
+
+  app.post("/api/repair/estimates/bulk-approve", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const ids = Array.isArray(req.body?.estimateIds)
+      ? req.body.estimateIds.map(String)
+      : [];
+    return res.json(
+      await bulkApproveEstimates({ estimateIds: ids, actor: actorFrom(req) }),
+    );
+  });
+
+  app.post("/api/repair/estimates/brc-export", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const ids = Array.isArray(req.body?.estimateIds)
+      ? req.body.estimateIds.map(String)
+      : [];
+    const result = await exportBrcDetail({
+      estimateIds: ids,
+      format: req.body?.format === "json" ? "json" : "csv",
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    if ("csv" in result && result.csv) {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=brc-detail.csv");
+      return res.send(result.csv);
+    }
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/bulk-validate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const ids = Array.isArray(req.body?.estimateIds)
+      ? req.body.estimateIds.map(String)
+      : [];
+    const results = [];
+    for (const id of ids) {
+      results.push({
+        estimateId: id,
+        ...(await runRailincValidation({ estimateId: id })),
+      });
+    }
+    return res.json({ ok: true, results });
   });
 
   app.post("/api/repair/settings/email-opt-out", async (req, res) => {

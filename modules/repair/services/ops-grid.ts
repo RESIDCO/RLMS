@@ -255,6 +255,24 @@ export async function linkInvoiceToEstimates(opts: {
   return { ok: true as const, linked };
 }
 
+/** OWNER_UI_SPEC §A / shot 01 — actionable default (Approved etc. opt-in). */
+export const ACTIONABLE_ESTIMATE_STATUSES = [
+  "AWAITING_APPROVAL",
+  "REVISION_REQUESTED",
+  "ADJUSTMENT_FOR_APPROVAL",
+  "AWAITING_TERMINATE",
+] as const;
+
+export type EstimateGridDateField =
+  | "ignore"
+  | "yard_arrival"
+  | "approval_requested"
+  | "approved"
+  | "outbound_target"
+  | "outbound_date"
+  | "created"
+  | "terminated";
+
 export type EstimateGridFilters = {
   statusCodes?: string[];
   shopId?: string;
@@ -262,6 +280,8 @@ export type EstimateGridFilters = {
   carNumber?: string;
   fromDate?: string;
   toDate?: string;
+  /** Which date column Date Range applies to (shot 01 "Date Range Filter"). */
+  dateField?: EstimateGridDateField;
   minTotal?: number;
   maxTotal?: number;
   includeHidden?: boolean;
@@ -270,34 +290,81 @@ export type EstimateGridFilters = {
   tenantId?: string;
   limit?: number;
   offset?: number;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+  /** When true, skip LIMIT/OFFSET for summary over full filtered set */
+  forSummary?: boolean;
+};
+
+function dateExpr(field: EstimateGridDateField | undefined): string | null {
+  switch (field) {
+    case "yard_arrival":
+      return "ev.yard_arrived_at";
+    case "approval_requested":
+      return "appr_req.action_at";
+    case "approved":
+      return "appr.action_at";
+    case "outbound_target":
+      return "ev.target_outbound_at";
+    case "outbound_date":
+      return "ev.actual_outbound_at";
+    case "created":
+      return "e.created_at";
+    case "terminated":
+      return "term.action_at";
+    case "ignore":
+    case undefined:
+      return null;
+    default:
+      return null;
+  }
+}
+
+const SORT_COLUMNS: Record<string, string> = {
+  status: "s.sort_order",
+  total: "COALESCE(r.total, 0)",
+  shop: "sh.name",
+  car: "ev.car_mark || ev.car_number",
+  yard_arrival: "ev.yard_arrived_at",
+  approval_requested: "appr_req.action_at",
+  approved: "appr.action_at",
+  outbound_target: "ev.target_outbound_at",
+  outbound_date: "ev.actual_outbound_at",
+  created: "e.created_at",
+  estimate: "ev.car_mark || ev.car_number",
 };
 
 export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
+  const { dollarsToCents, centsToDollars, formatCentsAsDollars } = await import(
+    "./money"
+  );
   const tenantId = filters.tenantId ?? DEFAULT_TENANT_ID;
-  const limit = Math.min(filters.limit ?? 200, 1000);
+  const limit = Math.min(filters.limit ?? 500, 5000);
   const offset = filters.offset ?? 0;
 
-  // Manual_Gap #16: default open statuses when none specified
-  const defaultOpen = [
-    "QUEUED",
-    "AWAITING_APPROVAL",
-    "REVISION_REQUESTED",
-    "ADJUSTMENT_FOR_APPROVAL",
-    "APPROVED",
-    "AWAITING_TERMINATE",
-    "AWAITING_DELETE",
-  ];
-  const statusCodes =
-    filters.statusCodes?.length ? filters.statusCodes : defaultOpen;
+  // Shot 01 / OWNER_UI_SPEC §A: actionable only unless statuses explicitly passed
+  const statusCodes = filters.statusCodes?.length
+    ? filters.statusCodes
+    : [...ACTIONABLE_ESTIMATE_STATUSES];
+
+  const dateCol = dateExpr(filters.dateField);
+  const useDateRange =
+    dateCol != null && (Boolean(filters.fromDate) || Boolean(filters.toDate));
+
+  const sortCol =
+    (filters.sortBy && SORT_COLUMNS[filters.sortBy]) || "e.created_at";
+  const sortDir = filters.sortDir === "asc" ? "ASC" : "DESC";
 
   const { rows } = await q(
     `SELECT e.id AS estimate_id, e.event_id, e.current_revision, e.locked,
             e.completed_at, e.created_at,
             s.code AS status_code, s.display_name AS status_name,
-            s.owner_visible, s.hidden,
+            s.owner_visible, s.hidden, s.sort_order AS status_sort,
             ev.car_mark, ev.car_number, ev.shop_id, ev.is_wreck, ev.is_tank_car,
             ev.yard_arrived_at, ev.target_outbound_at, ev.actual_outbound_at,
+            ev.billing_road, ev.dispo_requested_at,
             sh.reporting_mark AS shop_mark, sh.name AS shop_name,
+            sh.city AS shop_city, sh.state AS shop_state,
             r.labor, r.material, r.total,
             EXISTS (
               SELECT 1 FROM repair.estimate_load_cars lc
@@ -305,13 +372,63 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
               WHERE lc.estimate_id = e.id AND f.severity IN ('ERROR','WARNING')
             ) AS has_issues,
             (SELECT COUNT(*)::int FROM repair.documents d
-             WHERE d.event_id = e.event_id AND d.deleted_at IS NULL) AS attachment_count
+             WHERE d.event_id = e.event_id AND d.deleted_at IS NULL
+               AND COALESCE(d.lifecycle_status, 'ACTIVE') <> 'VOIDED') AS attachment_count,
+            appr_req.action_at AS approval_requested_at,
+            appr.action_at AS approved_at,
+            term.action_at AS terminated_at,
+            bo.shopping_reason AS bad_order_reason,
+            bo.id AS bad_order_id,
+            inv.invoice_no,
+            cr.current_assignment AS assignment,
+            cr.lessee_name,
+            cr.managed_category AS lease_type,
+            la.sent_at AS resp6_email_at,
+            (
+              EXISTS (
+                SELECT 1 FROM repair.dispo d
+                WHERE d.event_id = e.event_id AND d.deleted_at IS NULL
+              ) OR ev.dispo_requested_at IS NOT NULL
+            ) AS dispo_requested,
+            NULL::text AS ctc
      FROM repair.estimates e
      JOIN repair.statuses s ON s.id = e.status_id
      JOIN repair.events ev ON ev.id = e.event_id
      LEFT JOIN repair.shops sh ON sh.id = ev.shop_id
      LEFT JOIN repair.estimate_revisions r
        ON r.estimate_id = e.id AND r.rev_no = e.current_revision
+     LEFT JOIN LATERAL (
+       SELECT action_at FROM repair.estimate_revisions
+       WHERE estimate_id = e.id AND new_status = 'AWAITING_APPROVAL'
+       ORDER BY rev_no ASC LIMIT 1
+     ) appr_req ON true
+     LEFT JOIN LATERAL (
+       SELECT action_at FROM repair.estimate_revisions
+       WHERE estimate_id = e.id AND new_status = 'APPROVED'
+       ORDER BY rev_no DESC LIMIT 1
+     ) appr ON true
+     LEFT JOIN LATERAL (
+       SELECT action_at FROM repair.estimate_revisions
+       WHERE estimate_id = e.id AND new_status = 'TERMINATED'
+       ORDER BY rev_no DESC LIMIT 1
+     ) term ON true
+     LEFT JOIN LATERAL (
+       SELECT id, shopping_reason FROM repair.bad_orders
+       WHERE event_id = e.event_id AND deleted_at IS NULL
+       ORDER BY received_at DESC LIMIT 1
+     ) bo ON true
+     LEFT JOIN LATERAL (
+       SELECT invoice_no FROM repair.invoices
+       WHERE event_id = e.event_id AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1
+     ) inv ON true
+     LEFT JOIN repair.cars_ref cr
+       ON upper(cr.car_mark) = upper(ev.car_mark) AND cr.car_number = ev.car_number
+     LEFT JOIN LATERAL (
+       SELECT created_at AS sent_at FROM repair.lessee_approvals
+       WHERE estimate_id = e.id AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1
+     ) la ON true
      WHERE e.tenant_id = $1
        AND (e.deleted_at IS NULL OR $2::boolean = true)
        AND (s.hidden = false OR $2::boolean = true)
@@ -320,11 +437,16 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
        AND ($4::uuid IS NULL OR ev.shop_id = $4)
        AND ($5::text IS NULL OR upper(ev.car_mark) = upper($5))
        AND ($6::text IS NULL OR ev.car_number = $6)
-       AND ($7::timestamptz IS NULL OR e.created_at >= $7::timestamptz)
-       AND ($8::timestamptz IS NULL OR e.created_at <= $8::timestamptz)
+       AND (
+         $14::boolean = false
+         OR (
+           ($7::timestamptz IS NULL OR ${dateCol ?? "e.created_at"} >= $7::timestamptz)
+           AND ($8::timestamptz IS NULL OR ${dateCol ?? "e.created_at"} <= $8::timestamptz)
+         )
+       )
        AND ($9::numeric IS NULL OR COALESCE(r.total,0) >= $9)
        AND ($10::numeric IS NULL OR COALESCE(r.total,0) <= $10)
-     ORDER BY e.created_at DESC
+     ORDER BY ${sortCol} ${sortDir} NULLS LAST, e.created_at DESC
      LIMIT $11 OFFSET $12`,
     [
       tenantId,
@@ -337,27 +459,72 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
       filters.toDate ?? null,
       filters.minTotal ?? null,
       filters.maxTotal ?? null,
-      limit,
-      offset,
+      filters.forSummary ? 100000 : limit,
+      filters.forSummary ? 0 : offset,
       filters.includeShopDraft ?? false,
+      useDateRange,
     ],
   );
 
   const estimates = rows.length;
   const cars = new Set(rows.map((r) => `${r.car_mark}|${r.car_number}`)).size;
-  const clients = new Set(rows.map((r) => r.shop_mark).filter(Boolean)).size;
-  const totalCost = rows.reduce((s, r) => s + Number(r.total ?? 0), 0);
+  const clients = new Set(
+    rows.map((r) => r.shop_mark || r.shop_name).filter(Boolean),
+  ).size;
+  // Integer cents for all money math
+  let totalCents = 0;
+  for (const r of rows) {
+    totalCents += dollarsToCents(r.total);
+  }
+
+  const mapped = rows.map((r) => {
+    const totalCentsRow = dollarsToCents(r.total);
+    const shopLabel =
+      r.shop_name || r.shop_mark
+        ? [
+            r.shop_name || r.shop_mark,
+            r.shop_city && r.shop_state
+              ? `${r.shop_city}, ${r.shop_state}`
+              : r.shop_city || null,
+          ]
+            .filter(Boolean)
+            .join(" - ")
+        : null;
+    return {
+      ...r,
+      estimate_label: `${r.car_mark} ${r.car_number}`.trim(),
+      shop_display: shopLabel,
+      total_cents: totalCentsRow,
+      total_display: formatCentsAsDollars(totalCentsRow),
+      issues: r.has_issues ? "Yes" : "No",
+      wreck: r.is_wreck ? "Yes" : "No",
+      dispo_reqd: r.dispo_requested ? "Yes" : "No",
+    };
+  });
 
   return {
-    rows,
+    rows: mapped,
+    defaultStatuses: [...ACTIONABLE_ESTIMATE_STATUSES],
     summary: {
       estimates,
       cars,
       clients,
-      totalCost,
-      perEstimate: estimates ? totalCost / estimates : 0,
-      perCar: cars ? totalCost / cars : 0,
-      perClient: clients ? totalCost / clients : 0,
+      totalCostCents: totalCents,
+      totalCost: centsToDollars(totalCents),
+      totalCostDisplay: formatCentsAsDollars(totalCents),
+      perEstimateCents: estimates ? Math.round(totalCents / estimates) : 0,
+      perCarCents: cars ? Math.round(totalCents / cars) : 0,
+      perClientCents: clients ? Math.round(totalCents / clients) : 0,
+      perEstimate: estimates ? centsToDollars(Math.round(totalCents / estimates)) : 0,
+      perCar: cars ? centsToDollars(Math.round(totalCents / cars)) : 0,
+      perClient: clients ? centsToDollars(Math.round(totalCents / clients)) : 0,
+      perEstimateDisplay: formatCentsAsDollars(
+        estimates ? Math.round(totalCents / estimates) : 0,
+      ),
+      perCarDisplay: formatCentsAsDollars(cars ? Math.round(totalCents / cars) : 0),
+      perClientDisplay: formatCentsAsDollars(
+        clients ? Math.round(totalCents / clients) : 0,
+      ),
     },
   };
 }
@@ -365,39 +532,157 @@ export async function queryEstimateGrid(filters: EstimateGridFilters = {}) {
 export async function exportEstimateGridCsv(filters: EstimateGridFilters = {}) {
   const grid = await queryEstimateGrid({ ...filters, limit: 5000 });
   const header = [
+    "Estimate",
+    "Status",
+    "Total",
+    "Issues?",
+    "Attachments",
+    "Shop Name",
+    "Arrived At Yard",
+    "Approval Requested",
+    "Approved",
+    "Terminated",
+    "Outbound Target",
+    "Outbound Date",
+    "Invoice #",
+    "Bad Order Reason",
+    "CTC",
+    "Assignment",
+    "Wreck?",
+    "Dispo Req'd",
+    "Lease Type",
+    "Resp 6 Email",
     "estimate_id",
-    "event_id",
-    "car_mark",
-    "car_number",
-    "shop_mark",
-    "status",
-    "labor",
-    "material",
-    "total",
-    "revision",
-    "created_at",
   ];
   const lines = [header.join(",")];
   for (const r of grid.rows) {
     lines.push(
       [
+        r.estimate_label,
+        r.status_name,
+        r.total_display,
+        r.issues,
+        r.attachment_count,
+        r.shop_display ?? "",
+        r.yard_arrived_at ?? "",
+        r.approval_requested_at ?? "",
+        r.approved_at ?? "",
+        r.terminated_at ?? "",
+        r.target_outbound_at ?? "",
+        r.actual_outbound_at ?? "",
+        r.invoice_no ?? "",
+        r.bad_order_reason ?? "",
+        r.ctc ?? "",
+        r.assignment ?? "",
+        r.wreck,
+        r.dispo_reqd,
+        r.lease_type ?? "",
+        r.resp6_email_at ?? "",
         r.estimate_id,
-        r.event_id,
-        r.car_mark,
-        r.car_number,
-        r.shop_mark ?? "",
-        r.status_code,
-        r.labor ?? 0,
-        r.material ?? 0,
-        r.total ?? 0,
-        r.current_revision,
-        r.created_at,
+      ]
+        .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
+        .join(","),
+    );
+  }
+  return { csv: lines.join("\n"), summary: grid.summary };
+}
+
+/** Bulk Approve for history grid (approvable statuses only). */
+export async function bulkApproveEstimates(opts: {
+  estimateIds: string[];
+  actor: string;
+  tenantId?: string;
+}) {
+  const { approveEstimate } = await import("./estimates");
+  const results: Array<{ estimateId: string; ok: boolean; error?: string }> = [];
+  for (const id of opts.estimateIds) {
+    const r = await approveEstimate({
+      estimateId: id,
+      actor: opts.actor,
+      tenantId: opts.tenantId,
+    });
+    results.push({
+      estimateId: id,
+      ok: r.ok,
+      error: r.ok ? undefined : r.error,
+    });
+  }
+  return {
+    ok: true as const,
+    approved: results.filter((x) => x.ok).length,
+    failed: results.filter((x) => !x.ok).length,
+    results,
+  };
+}
+
+/** Get BRC — Excel/CSV detail for selected estimates (current revision totals + lines). */
+export async function exportBrcDetail(opts: {
+  estimateIds: string[];
+  format?: "csv" | "json";
+  tenantId?: string;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { formatCentsAsDollars, dollarsToCents } = await import("./money");
+  if (!opts.estimateIds.length) {
+    return { ok: false as const, status: 400, error: "estimateIds required" };
+  }
+  const { rows } = await q(
+    `SELECT e.id AS estimate_id, ev.car_mark, ev.car_number,
+            s.display_name AS status_name, r.rev_no, r.labor, r.material, r.total,
+            l.line_no, l.aar_job_code, l.why_made, l.resp_code,
+            l.labor AS line_labor, l.material AS line_material, l.total AS line_total
+     FROM repair.estimates e
+     JOIN repair.events ev ON ev.id = e.event_id
+     JOIN repair.statuses s ON s.id = e.status_id
+     LEFT JOIN repair.estimate_revisions r
+       ON r.estimate_id = e.id AND r.rev_no = e.current_revision
+     LEFT JOIN repair.estimate_lines l ON l.revision_id = r.id
+     WHERE e.tenant_id = $1 AND e.id = ANY($2::uuid[])
+     ORDER BY ev.car_mark, ev.car_number, l.line_no NULLS LAST`,
+    [tenantId, opts.estimateIds],
+  );
+  if (opts.format === "json") {
+    return { ok: true as const, rows };
+  }
+  const header = [
+    "estimate_id",
+    "car",
+    "status",
+    "rev",
+    "line_no",
+    "job",
+    "why_made",
+    "resp",
+    "labor",
+    "material",
+    "total",
+  ];
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    const labor = formatCentsAsDollars(dollarsToCents(r.line_labor ?? r.labor));
+    const material = formatCentsAsDollars(
+      dollarsToCents(r.line_material ?? r.material),
+    );
+    const total = formatCentsAsDollars(dollarsToCents(r.line_total ?? r.total));
+    lines.push(
+      [
+        r.estimate_id,
+        `${r.car_mark} ${r.car_number}`,
+        r.status_name,
+        r.rev_no ?? "",
+        r.line_no ?? "",
+        r.aar_job_code ?? "",
+        r.why_made ?? "",
+        r.resp_code ?? "",
+        labor,
+        material,
+        total,
       ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(","),
     );
   }
-  return { csv: lines.join("\n"), summary: grid.summary };
+  return { ok: true as const, csv: lines.join("\n") };
 }
 
 export async function setUserEmailOptOut(opts: {

@@ -27,4 +27,5 @@ schema/*.apply-errors.json
 data/repair-storage/
 backups/
 modules/repair/dev/exports/
+modules/repair/dev/demo-output/
 

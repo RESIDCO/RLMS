@@ -18,7 +18,8 @@
     "repair:smoke-inbound-invoice": "tsx modules/repair/dev/smoke-inbound-invoice-audit.ts",
     "repair:smoke-estimate-lifecycle": "tsx modules/repair/dev/smoke-estimate-lifecycle.ts",
     "repair:smoke-lifecycle-05": "tsx modules/repair/dev/smoke-lifecycle-05.ts",
-    "repair:smoke-lifecycle-06": "tsx modules/repair/dev/smoke-lifecycle-06.ts"
+    "repair:smoke-lifecycle-06": "tsx modules/repair/dev/smoke-lifecycle-06.ts",
+    "repair:demo:local": "tsx modules/repair/dev/demo-local.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

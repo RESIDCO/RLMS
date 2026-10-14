@@ -3,9 +3,9 @@ RLMS repair — Owner UI §A final (Estimates History + nav) before sign-off
 Requires tip: cce5026f2e9ef3c44cb9369f6fe7a043799a31a4
 (§A contrast + sticky module nav)
 
-Bundle tip (after apply): PLACEHOLDER
-Bundle size: PLACEHOLDER bytes
-SHA-256: PLACEHOLDER
+Bundle tip (after apply): 0c154b70632d71de82330876f130a28386e66236
+Bundle size: 15933 bytes
+SHA-256: f103452fe75538d9e080fc956007193be3d2f68bcfdb11b0c0798ed9839d0cf8
 
 What this adds
 ----------------------------------------------------------------

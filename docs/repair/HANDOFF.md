@@ -10,7 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
-| **§C Bad Orders** | Apply `rlms-phase1-owner-ui-c-bad-orders.bundle`. Requires **`dd5acc7`** (§B shop map; Bruce signed off). |
+| **§C Bad Orders** | Apply `rlms-phase1-owner-ui-c-bad-orders.bundle`. Requires **`dd5acc7`**. Lands tip in bundle README. |
 | **§B Shop map (part 3)** | Prior: `rlms-phase1-owner-ui-b-shop-map.bundle` → **`dd5acc7`**. |
 | **§B railroads + Shop Profile** | Prior: `rlms-phase1-owner-ui-b-railroads-profile.bundle` → **`eeffc61`**. |
 | **Seed idempotent** | Prior: `rlms-phase1-seed-estimates-idempotent.bundle` → **`00d13c9`**. |
@@ -45,7 +45,7 @@ If PC is on **`dd5acc7`**, apply this §C Bad Orders bundle next.
 | N+7 | `rlms-phase1-seed-estimates-idempotent.bundle` | `e99c935` | → **`00d13c9`** |
 | N+8 | `rlms-phase1-owner-ui-b-railroads-profile.bundle` | `00d13c9` | → **`eeffc61`** |
 | N+9 | `rlms-phase1-owner-ui-b-shop-map.bundle` | `eeffc61` | → **`dd5acc7`** |
-| N+10 | **`rlms-phase1-owner-ui-c-bad-orders.bundle`** | **`dd5acc7`** | → **(see README)** |
+| N+10 | **`rlms-phase1-owner-ui-c-bad-orders.bundle`** | **`dd5acc7`** | → **`ef02d93`** |
 
 ---
 

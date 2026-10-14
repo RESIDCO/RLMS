@@ -1,0 +1,73 @@
+RLMS repair — Owner UI §A final (Estimates History + nav) before sign-off
+================================================================
+Requires tip: cce5026f2e9ef3c44cb9369f6fe7a043799a31a4
+(§A contrast + sticky module nav)
+
+Bundle tip (after apply): PLACEHOLDER
+Bundle size: PLACEHOLDER bytes
+SHA-256: PLACEHOLDER
+
+What this adds
+----------------------------------------------------------------
+  client/src/pages/repair/repairTheme.tsx
+    - Per-user light/dark theme (localStorage)
+
+  client/src/pages/repair/RepairModuleNav.tsx
+    - Remove Assignments; Admin = gear at right end
+    - Light/dark toggle in nav
+
+  client/src/pages/repair/RepairOwnerShell.tsx
+    - Theme provider + light/dark scope classes
+
+  client/src/pages/repair/RepairHome.tsx
+    - Remove Validate (intake validation → Issues?)
+    - Hide Tank Car Doc Complete unless tank-doc gate ON
+    - Hide View Auto Approval Queue until rules exist
+    - Column drag handles, filter row, resize, show/hide
+    - Named saved views store order/width/visibility/filters
+    - Set as default view (per user)
+
+  client/src/pages/repair/RepairComingSoon.tsx
+    - Theme-aware placeholders (Assignments title dropped)
+
+  client/src/index.css
+    - .repair-owner-ui--light / --dark AA tokens
+
+  docs/repair/OWNER_UI_A_ESTIMATES_HISTORY.md
+  docs/repair/HANDOFF.md
+    - §A final awaiting Bruce sign-off; next = §B after approve
+
+  docs/bundles/rlms-phase1-owner-ui-a-final.README.txt
+    - companion README (store copy authoritative for tip/size/hash)
+
+Files outside modules/repair (and why)
+----------------------------------------------------------------
+  client/src/pages/repair/*
+    Owner UI pages + nav/theme shell
+  client/src/index.css
+    Scoped owner theme tokens
+  docs/repair/*
+    sub-spec, handoff, bundle README
+
+Estimate Review content — NO CHANGES (nav/theme shell only via shared shell).
+Shop master / BO rebuild — NOT started (await sign-off).
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect cce5026
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-a-final.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-a-final.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:seed:estimates-history
+  npm run repair:dev:local
+  # http://127.0.0.1:5000/#/repair
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

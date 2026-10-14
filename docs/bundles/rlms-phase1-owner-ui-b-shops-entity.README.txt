@@ -6,9 +6,9 @@ Requires tip: 1f6aa475ed05c03609e0d7c70605d8c30cba4ace
 If PC is still on cce5026, apply rlms-phase1-owner-ui-a-final.bundle first
 (requires cce5026 → lands 1f6aa47), then this bundle.
 
-Bundle tip (after apply): f9e2c0dc5cd9c9b84dbbaf5b904f61688245362b
-Bundle size: 36492 bytes
-SHA-256: 5e9ff8707c9ae95ab6cf56cd717f776ff1394b74c747ef9a921703ca98e419e2
+Bundle tip (after apply): f9353a26fe8a91a3a361d16b3d6c7e7c066febc7
+Bundle size: 38328 bytes
+SHA-256: 32a244e4ee3b0004bed65aed2102175023b7f99021fa4222e63dc2103a5ad803
 
 What this adds
 ----------------------------------------------------------------

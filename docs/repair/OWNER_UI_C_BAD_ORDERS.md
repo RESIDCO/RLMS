@@ -1,16 +1,16 @@
 # Owner UI — Sub-section 3: Bad Orders (`/#/repair/bad-orders`)
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §C (+ screenshot `06-bad-orders.png`)  
-**Tip base:** `d4a2bfbfc17e59590f7246358bdd27af56208f18` (§C initial Bad Orders)  
-**Scope:** Round 2 polish — search multi-selects, required fields, shop map pick, staged Documents & Photos, Copy BO, Reasons admin (short name), rerunnable smoke.
+**Tip base:** `1b6e660c8740474ff48def4318b6ef57a28a05af` (§C Bad Orders r2)  
+**Scope:** One-step **Start from previous BO** — replace Copy / Copy last with **New from existing…** + History **Use as template**.
 
 ---
 
 ## Layout (three parts)
 
 1. **Search bar** — Shops / Statuses as searchable multi-selects (checkboxes, All, chips). Initials, Number, Date Range (fits at 1280px+), Date Range Filter.
-2. **New Bad Order** — required fields marked `*`; Documents & Photos staged before submit; Shop searchable + **Pick on map**.
-3. **Bad Order History** — §A parity grid; attachment count/icon opens document viewer; **Copy** per row + **Copy last**.
+2. **New Bad Order** — required fields marked `*`; Documents & Photos staged before submit; Shop searchable + **Pick on map**; **New from existing…** search at top of panel.
+3. **Bad Order History** — §A parity grid; attachment count/icon opens document viewer; **Use as template** per row (fills form in place + scrolls to panel).
 
 ---
 
@@ -39,15 +39,19 @@
 
 ## Documents & Photos
 
-Visible section on the form: drag-drop + Browse; categories **SDS / Scope of Work / Photograph / Other** + comment. Staged **before** Submit; uploaded with the created BO event(s). History: count + paperclip opens document viewer.
+Visible section on the form: drag-drop + Browse; categories **SDS / Scope of Work / Photograph / Other** + comment. Staged **before** Submit; uploaded with the created BO event(s). History: count + paperclip opens document viewer. Never copied from a template.
 
 ---
 
-## Copy Bad Order
+## Start from previous BO (template)
 
-- **Copy** on each History row and **Copy last** on the form
-- Prefills all fields **except** car number(s), dates, incident ID, and attachments
-- Works with Multi Car (enables Multi Car; list left blank for program cars)
+- **Removed:** separate **Copy last** button and per-row **Copy** icon.
+- **New from existing…** at top of New Bad Order — type car number, B/O date, shop, or reason → pick a past BO → form is **immediately filled in place**.
+- History **Use as template** — same fill; scrolls to the New Bad Order panel.
+- **Filled:** shop, reason + keyed detail, reporting/DC road, STCC, routing, dest city/state, last contents, car load, cleaned, travel on own wheels, comments, distribution list (plus B/O city/ST, wreck flags when present).
+- **Left blank and highlighted for entry:** car initials/number (or Multi Car list), B/O date (defaults today), arrival date, incident date/ID, DDCT Event ID, attachments.
+- Banner: **Filled from BO &lt;car&gt; &lt;date&gt; – Clear** (Clear resets the form).
+- Submit works as normal (duplicate check unchanged). Multi Car: enables Multi Car when source was a group; list left blank.
 
 ---
 
@@ -74,8 +78,8 @@ Accepted-Working → Closed (estimate Approved)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect d4a2bfb… before apply
-# after pull of §C r2 bundle:
+git rev-parse HEAD   # expect 1b6e660… before apply
+# after pull of copy-template bundle:
 $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
 $env:REPAIR_LOCAL_DB = "1"
 $env:REPAIR_DEV_BYPASS_AUTH = "1"
@@ -91,4 +95,4 @@ npm run repair:dev:local
 
 ## Bundle
 
-`docs/bundles/rlms-phase1-owner-ui-c-bad-orders-r2.bundle` — requires **`d4a2bfb`**.
+`docs/bundles/rlms-phase1-owner-ui-c-copy-template.bundle` — requires **`1b6e660`**.

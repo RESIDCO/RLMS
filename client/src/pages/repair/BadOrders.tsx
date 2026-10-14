@@ -34,9 +34,9 @@ import {
   Columns3,
   FileText,
   MapPin,
-  Copy,
   Upload,
   X,
+  ChevronDown,
 } from "lucide-react";
 import {
   Dialog,
@@ -179,7 +179,19 @@ const DEFAULT_COLUMNS: ColDef[] = [
   { id: "entity", label: "Entity", width: 70, filterable: true },
 ];
 
-// Copy column is always shown first in the action strip (not in DEFAULT_COLUMNS drag list).
+// "Use as template" column is always shown first (not in DEFAULT_COLUMNS drag list).
+
+const TEMPLATE_SEARCH_STATUSES = [
+  "QUEUED",
+  "ACCEPTED_PENDING",
+  "ACCEPTED_WORKING",
+  "CLOSED",
+  "DECLINED",
+];
+
+/** Fields left blank (and highlighted) when starting from a previous BO. */
+const ENTRY_HIGHLIGHT =
+  "ring-2 ring-amber-400 border-amber-400 bg-amber-50 dark:bg-amber-950/30";
 
 const DEFAULT_COL_ORDER = DEFAULT_COLUMNS.map((c) => c.id);
 const DEFAULT_WIDTHS = Object.fromEntries(
@@ -245,6 +257,32 @@ function fmtDate(v: string | null | undefined): string {
     return String(v);
   }
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+}
+
+function templateMatchHaystack(row: GridRow): string {
+  return [
+    row.car_mark,
+    row.car_number,
+    `${row.car_mark ?? ""} ${row.car_number ?? ""}`,
+    row.bo_date,
+    fmtDate(row.bo_date),
+    row.shop_display,
+    row.bad_order_reason,
+    row.bo_rule_code,
+    row.bo_city,
+    row.bo_state,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function filterTemplateCandidates(rows: GridRow[], needle: string): GridRow[] {
+  const q = needle.trim().toLowerCase();
+  if (!q) return rows.slice(0, 40);
+  return rows
+    .filter((r) => templateMatchHaystack(r).includes(q))
+    .slice(0, 40);
 }
 
 function statusClass(code: string): string {
@@ -450,7 +488,12 @@ function BadOrdersBody() {
   const [shopMapOpen, setShopMapOpen] = useState(false);
   const [shopSearch, setShopSearch] = useState("");
   const [shopPopoverOpen, setShopPopoverOpen] = useState(false);
-  const [lastCopySource, setLastCopySource] = useState<GridRow | null>(null);
+  const [templateSource, setTemplateSource] = useState<GridRow | null>(null);
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [templatePool, setTemplatePool] = useState<GridRow[]>([]);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [defaultDistribution, setDefaultDistribution] = useState("");
   const [viewer, setViewer] = useState<{
     eventId: string;
     docs: Array<{
@@ -463,6 +506,7 @@ function BadOrdersBody() {
     }>;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const formPanelRef = useRef<HTMLDivElement | null>(null);
   const [entitySnap, setEntitySnap] = useState<{
     code: string | null;
     sourceValue: string | null;
@@ -534,12 +578,14 @@ function BadOrdersBody() {
       .then((d) => {
         const entries = d.entries ?? d.list ?? [];
         if (Array.isArray(entries) && entries.length) {
+          const emails = entries
+            .map((e: { email?: string }) => e.email)
+            .filter(Boolean)
+            .join(", ");
+          setDefaultDistribution(emails);
           setForm((f) => ({
             ...f,
-            distributionEmails: entries
-              .map((e: { email?: string }) => e.email)
-              .filter(Boolean)
-              .join(", "),
+            distributionEmails: emails,
           }));
         }
       })
@@ -747,14 +793,46 @@ function BadOrdersBody() {
   };
 
   const resetForm = () => {
-    setForm(emptyForm());
+    const next = emptyForm();
+    next.distributionEmails = defaultDistribution;
+    setForm(next);
     setStagedDocs([]);
     setDocComment("");
     setFieldErrors({});
     setEntitySnap(null);
     setEntitySnapsMulti([]);
+    setTemplateSource(null);
+    setTemplateSearch("");
     setMsg("");
   };
+
+  const loadTemplatePool = useCallback(async () => {
+    setTemplateLoading(true);
+    try {
+      const qs = new URLSearchParams();
+      qs.set("status", TEMPLATE_SEARCH_STATUSES.join(","));
+      qs.set("sortBy", "bo_date");
+      qs.set("sortDir", "desc");
+      qs.set("limit", "500");
+      qs.set("dateField", "ignore");
+      const r = await apiRequest(
+        "GET",
+        `/api/repair/bad-orders/grid?${qs.toString()}`,
+      );
+      const d = await r.json();
+      setTemplatePool((d.rows ?? []) as GridRow[]);
+    } catch {
+      // Fall back to whatever the history grid already has loaded.
+      setTemplatePool((prev) => (prev.length ? prev : rows));
+    } finally {
+      setTemplateLoading(false);
+    }
+  }, [rows]);
+
+  const filteredTemplateRows = useMemo(
+    () => filterTemplateCandidates(templatePool.length ? templatePool : rows, templateSearch),
+    [templatePool, rows, templateSearch],
+  );
 
   const stageFiles = (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -793,13 +871,21 @@ function BadOrdersBody() {
     }
   };
 
-  const copyFromRow = (row: GridRow) => {
+  /** One-step "Start from previous BO" — fill form in place; leave entry fields blank. */
+  const fillFromTemplate = (row: GridRow) => {
     const next = emptyForm();
     next.multiCar = Boolean(row.multi_car_group_id);
-    // Intentionally leave car number(s), dates, incident ID, attachments blank
+    // Leave blank for entry: car initials/number (or Multi Car list), B/O date (today),
+    // arrival, incident date/ID, DDCT Event ID, attachments.
     next.carMark = "";
     next.carNumber = "";
     next.multiCarList = "";
+    next.arrivalDate = "";
+    next.incidentDate = "";
+    next.ddctIncidentId = "";
+    next.ddctEventId = "";
+    next.boDate = todayIso();
+    // Filled from source
     next.reportingRoad = row.reporting_road ? String(row.reporting_road) : "";
     next.dcRoad = row.dc_road ? String(row.dc_road) : "";
     next.stcc = row.stcc ? String(row.stcc) : "";
@@ -820,16 +906,24 @@ function BadOrdersBody() {
     next.shopId = row.shop_id ? String(row.shop_id) : "";
     next.isWreck = Boolean(row.is_wreck);
     next.wreckEstimate = Boolean(row.wreck_estimate);
-    next.ddctEventId = row.ddct_event_id ? String(row.ddct_event_id) : "";
-    next.boDate = todayIso();
+    next.distributionEmails = defaultDistribution;
     setForm(next);
     setStagedDocs([]);
+    setDocComment("");
     setFieldErrors({});
-    setLastCopySource(row);
-    setMsg(
-      `Copied fields from ${row.car_mark} ${row.car_number} — enter car number(s) and dates, then Submit.`,
-    );
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setEntitySnap(null);
+    setEntitySnapsMulti([]);
+    setTemplateSource(row);
+    setTemplateOpen(false);
+    setTemplateSearch("");
+    setMsg("");
+    requestAnimationFrame(() => {
+      formPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const clearTemplate = () => {
+    resetForm();
   };
 
   const openDocViewer = async (eventId: string) => {
@@ -1245,41 +1339,118 @@ function BadOrdersBody() {
       </div>
 
       {/* C2 — New Bad Order */}
-      <div className={`border-b px-3 py-3 ${panel}`}>
+      <div ref={formPanelRef} className={`border-b px-3 py-3 ${panel}`}>
         <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <h2 className="text-sm font-semibold tracking-wide uppercase">
             New Bad Order
           </h2>
-          <div className="flex items-center gap-3">
+          <Link
+            href="/repair/bo-reasons"
+            className="text-xs text-sky-700 underline"
+          >
+            Manage Bad Order Reasons
+          </Link>
+        </div>
+
+        <div className="mb-3 max-w-xl">
+          <Label className="text-xs">New from existing…</Label>
+          <Popover
+            open={templateOpen}
+            onOpenChange={(open) => {
+              setTemplateOpen(open);
+              if (open) void loadTemplatePool();
+            }}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={`${inputCls} w-full justify-between font-normal h-8`}
+              >
+                <span className="truncate text-left text-xs text-slate-500">
+                  Type car number, B/O date, shop, or reason…
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className={`w-[min(28rem,90vw)] p-2 ${dark ? "bg-slate-900 border-slate-600" : ""}`}
+              align="start"
+            >
+              <Input
+                className="h-8 mb-2 text-xs"
+                placeholder="Search past Bad Orders…"
+                value={templateSearch}
+                onChange={(e) => setTemplateSearch(e.target.value)}
+                autoFocus
+              />
+              <div className="max-h-64 overflow-auto">
+                {templateLoading && (
+                  <p className="text-xs text-slate-500 px-2 py-2">Loading…</p>
+                )}
+                {!templateLoading &&
+                  filteredTemplateRows.map((r) => (
+                    <button
+                      key={r.bad_order_id}
+                      type="button"
+                      className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/60"
+                      onClick={() => fillFromTemplate(r)}
+                    >
+                      <span className="font-medium">
+                        {r.car_mark} {r.car_number}
+                      </span>
+                      <span className="text-slate-500">
+                        {" "}
+                        · {fmtDate(r.bo_date) || "—"}
+                      </span>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {r.shop_display || "—"}
+                        {r.bad_order_reason ? ` · ${r.bad_order_reason}` : ""}
+                      </div>
+                    </button>
+                  ))}
+                {!templateLoading && !filteredTemplateRows.length && (
+                  <p className="text-xs text-slate-500 px-2 py-2">
+                    No matching Bad Orders
+                  </p>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {templateSource && (
+          <div
+            className={`mb-3 flex flex-wrap items-center gap-2 rounded border px-3 py-2 text-sm ${
+              dark
+                ? "border-amber-600/60 bg-amber-950/40 text-amber-100"
+                : "border-amber-300 bg-amber-50 text-amber-950"
+            }`}
+          >
+            <span>
+              Filled from BO {templateSource.car_mark}{" "}
+              {templateSource.car_number} {fmtDate(templateSource.bo_date) || ""}
+            </span>
             <Button
               type="button"
               size="sm"
               variant="outline"
               className="h-7 text-xs"
-              disabled={!lastCopySource && !rows[0]}
-              onClick={() => {
-                const src = lastCopySource ?? rows[0];
-                if (src) copyFromRow(src);
-              }}
+              onClick={clearTemplate}
             >
-              <Copy className="h-3.5 w-3.5 mr-1" />
-              Copy last
+              Clear
             </Button>
-            <Link
-              href="/repair/bo-reasons"
-              className="text-xs text-sky-700 underline"
-            >
-              Manage Bad Order Reasons
-            </Link>
           </div>
-        </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <div className="space-y-2">
             <div className="flex flex-wrap items-end gap-2">
               <div>
                 <Label className="text-xs">{reqLabel("Car Initials")}</Label>
                 <Input
-                  className={`${inputCls} w-24 ${fieldErrors.carMark ? "border-red-500" : ""}`}
+                  className={`${inputCls} w-24 ${fieldErrors.carMark ? "border-red-500" : ""} ${templateSource ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.carMark}
                   onChange={(e) => setField("carMark", e.target.value.toUpperCase())}
                 />
@@ -1292,7 +1463,7 @@ function BadOrdersBody() {
                   {form.multiCar ? "Car Number" : reqLabel("Car Number")}
                 </Label>
                 <Input
-                  className={`${inputCls} w-28 ${fieldErrors.carNumber ? "border-red-500" : ""}`}
+                  className={`${inputCls} w-28 ${fieldErrors.carNumber ? "border-red-500" : ""} ${templateSource && !form.multiCar ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.carNumber}
                   onChange={(e) => setField("carNumber", e.target.value)}
                   disabled={form.multiCar}
@@ -1318,7 +1489,7 @@ function BadOrdersBody() {
                   </span>
                 </Label>
                 <textarea
-                  className={`w-full min-h-[72px] rounded-md border px-2 py-1 text-sm ${inputCls} ${fieldErrors.multiCarList ? "border-red-500" : ""}`}
+                  className={`w-full min-h-[72px] rounded-md border px-2 py-1 text-sm ${inputCls} ${fieldErrors.multiCarList ? "border-red-500" : ""} ${templateSource ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.multiCarList}
                   onChange={(e) => setField("multiCarList", e.target.value)}
                   placeholder={"OFOX 528313\nARSX 100001"}
@@ -1406,7 +1577,7 @@ function BadOrdersBody() {
                 <Label className="text-xs">Arrival Date</Label>
                 <Input
                   type="date"
-                  className={`${inputCls} w-[140px]`}
+                  className={`${inputCls} w-[140px] ${templateSource ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.arrivalDate}
                   onChange={(e) => setField("arrivalDate", e.target.value)}
                 />
@@ -1534,7 +1705,7 @@ function BadOrdersBody() {
                 <Label className="text-xs">{reqLabel("B/O Date")}</Label>
                 <Input
                   type="date"
-                  className={`${inputCls} w-[140px] ${fieldErrors.boDate ? "border-red-500" : ""}`}
+                  className={`${inputCls} w-[140px] ${fieldErrors.boDate ? "border-red-500" : ""} ${templateSource ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.boDate}
                   onChange={(e) => setField("boDate", e.target.value)}
                 />
@@ -1576,7 +1747,7 @@ function BadOrdersBody() {
                 <Label className="text-xs">Incident Date</Label>
                 <Input
                   type="date"
-                  className={`${inputCls} w-[140px]`}
+                  className={`${inputCls} w-[140px] ${templateSource ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.incidentDate}
                   onChange={(e) => setField("incidentDate", e.target.value)}
                 />
@@ -1584,7 +1755,7 @@ function BadOrdersBody() {
               <div>
                 <Label className="text-xs">Incident ID</Label>
                 <Input
-                  className={`${inputCls} w-32`}
+                  className={`${inputCls} w-32 ${templateSource ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.ddctIncidentId}
                   onChange={(e) => setField("ddctIncidentId", e.target.value)}
                 />
@@ -1592,7 +1763,7 @@ function BadOrdersBody() {
               <div>
                 <Label className="text-xs">DDCT Event ID</Label>
                 <Input
-                  className={`${inputCls} w-36`}
+                  className={`${inputCls} w-36 ${templateSource ? ENTRY_HIGHLIGHT : ""}`}
                   value={form.ddctEventId}
                   onChange={(e) => setField("ddctEventId", e.target.value)}
                 />
@@ -1696,9 +1867,11 @@ function BadOrdersBody() {
           ) : null}
         </div>
 
-        {/* Documents & Photos — staged before submit */}
+        {/* Documents & Photos — staged before submit (never copied from template) */}
         <div
-          className={`mt-3 border rounded p-3 ${dark ? "border-slate-600 bg-slate-950/40" : "border-slate-300 bg-white"}`}
+          className={`mt-3 border rounded p-3 ${
+            dark ? "border-slate-600 bg-slate-950/40" : "border-slate-300 bg-white"
+          } ${templateSource ? "ring-2 ring-amber-400" : ""}`}
         >
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5">
@@ -1993,7 +2166,9 @@ function BadOrdersBody() {
           <table className="text-xs border-collapse min-w-full">
             <thead className={dark ? "bg-slate-800 sticky top-0" : "bg-slate-200 sticky top-0"}>
               <tr>
-                <th className="border px-1 py-1 w-14 text-center">Copy</th>
+                <th className="border px-1 py-1 w-[7.5rem] text-center">
+                  Template
+                </th>
                 {visibleCols.map((id) => {
                   const def = DEFAULT_COLUMNS.find((c) => c.id === id)!;
                   return (
@@ -2105,11 +2280,11 @@ function BadOrdersBody() {
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="h-6 px-1.5 text-xs"
-                            title="Copy Bad Order"
-                            onClick={() => copyFromRow(row)}
+                            className="h-6 px-1.5 text-[11px] underline text-sky-700"
+                            title="Use as template — fill New Bad Order from this row"
+                            onClick={() => fillFromTemplate(row)}
                           >
-                            <Copy className="h-3.5 w-3.5" />
+                            Use as template
                           </Button>
                         </td>
                         {visibleCols.map((id) => (

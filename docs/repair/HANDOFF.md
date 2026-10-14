@@ -10,7 +10,9 @@
 
 | Tip | Meaning |
 |---|---|
-| **§C Bad Orders** | Apply `rlms-phase1-owner-ui-c-bad-orders.bundle`. Requires **`dd5acc7`**. Lands tip in bundle README. |
+| **§C Copy BO template** | Apply `rlms-phase1-owner-ui-c-copy-template.bundle`. Requires **`1b6e660`**. Lands tip in bundle README. |
+| **§C Bad Orders r2** | Prior: `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` → **`1b6e660`**. |
+| **§C Bad Orders (initial)** | Prior: `rlms-phase1-owner-ui-c-bad-orders.bundle` → **`d4a2bfb`**. |
 | **§B Shop map (part 3)** | Prior: `rlms-phase1-owner-ui-b-shop-map.bundle` → **`dd5acc7`**. |
 | **§B railroads + Shop Profile** | Prior: `rlms-phase1-owner-ui-b-railroads-profile.bundle` → **`eeffc61`**. |
 | **Seed idempotent** | Prior: `rlms-phase1-seed-estimates-idempotent.bundle` → **`00d13c9`**. |
@@ -18,7 +20,7 @@
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`dd5acc7`**, apply this §C Bad Orders bundle next.
+If PC is on **`1b6e660`**, apply the §C **copy-template** bundle next.
 
 ---
 
@@ -28,7 +30,7 @@ If PC is on **`dd5acc7`**, apply this §C Bad Orders bundle next.
 |---|---|---|
 | **1** | Estimates History `/#/repair` (spec §A) | Done |
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
-| **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **In this tip** |
+| **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Template flow in this tip** |
 | 4+ | Estimate Review rebuild, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md)  
@@ -40,12 +42,10 @@ If PC is on **`dd5acc7`**, apply this §C Bad Orders bundle next.
 
 | Order | Bundle | Requires | Lands |
 |---|---|---|---|
-| N+5 | `rlms-phase1-owner-ui-b-shops-entity.bundle` | `1f6aa47` | → **`2039b7f`** |
-| N+6 | `rlms-phase1-migrate-view-fix.bundle` | `2039b7f` | → **`e99c935`** |
-| N+7 | `rlms-phase1-seed-estimates-idempotent.bundle` | `e99c935` | → **`00d13c9`** |
-| N+8 | `rlms-phase1-owner-ui-b-railroads-profile.bundle` | `00d13c9` | → **`eeffc61`** |
 | N+9 | `rlms-phase1-owner-ui-b-shop-map.bundle` | `eeffc61` | → **`dd5acc7`** |
-| N+10 | **`rlms-phase1-owner-ui-c-bad-orders.bundle`** | **`dd5acc7`** | → **`ef02d93`** |
+| N+10 | `rlms-phase1-owner-ui-c-bad-orders.bundle` | `dd5acc7` | → **`d4a2bfb`** |
+| N+11 | `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` | `d4a2bfb` | → **`1b6e660`** |
+| N+12 | **`rlms-phase1-owner-ui-c-copy-template.bundle`** | **`1b6e660`** | → **(see README)** |
 
 ---
 
@@ -72,13 +72,13 @@ If PC is on **`dd5acc7`**, apply this §C Bad Orders bundle next.
 
 ---
 
-## Apply Bad Orders §C (on tip `dd5acc7`)
+## Apply §C copy-template (on tip `1b6e660`)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect dd5acc7…
-git bundle verify PATH\TO\rlms-phase1-owner-ui-c-bad-orders.bundle
-git pull PATH\TO\rlms-phase1-owner-ui-c-bad-orders.bundle HEAD
+git rev-parse HEAD   # expect 1b6e660…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-c-copy-template.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-c-copy-template.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -97,7 +97,7 @@ npm run repair:dev:local
 # http://127.0.0.1:5000/#/repair/bo-reasons
 ```
 
-Expect: search + New Bad Order + History grid; shop labels with mark; DDCT Event ID (no Estimate ID on create); duplicate guard; entity snapshot; reasons admin; Queued → Accepted-Pending → Accepted-Working → Closed documented in sub-spec.
+Expect: **New from existing…** search fills form in place; History **Use as template**; banner **Filled from BO … – Clear**; entry fields highlighted blank; no Copy / Copy last; smoke template-ready fields PASS.
 
 ---
 

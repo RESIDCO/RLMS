@@ -1,8 +1,10 @@
 /**
- * Smoke: OWNER_UI §C Bad Orders (round 2)
+ * Smoke: OWNER_UI §C Bad Orders (template-from-previous flow)
  * - Unique test cars per run (never hard-delete; close own BOs)
  * - Required-field validation
- * - Copy BO field set (excludes car #s, dates, incident ID, attachments)
+ * - "Start from previous BO" grid field set (shop/reason/roads/STCC/routing/
+ *   dest/last contents/car load/cleaned/wheels/comments) — excludes car #s,
+ *   B/O+arrival+incident dates/IDs, DDCT Event ID, attachments
  * - Staged attachments saved with BO
  * - Bad Order Reasons: short name + optional rule-based
  *
@@ -89,7 +91,7 @@ async function closeOpenBosForCar(carNumber: string) {
 }
 
 async function main() {
-  console.log("=== repair:smoke-bad-orders (§C r2) ===");
+  console.log("=== repair:smoke-bad-orders (§C template flow) ===");
   if (!process.env.DATABASE_URL && !process.env.REPAIR_DATABASE_URL) {
     throw new Error("Set DATABASE_URL");
   }
@@ -318,20 +320,52 @@ async function main() {
   }
   ok(`multi-car group (${bulk.created.length} cars)`);
 
-  // Copy BO: grid exposes fields needed to prefill (except car #s / dates / incident / docs)
+  // Template-from-previous: grid exposes fields needed to fill New BO in place
+  // (shop, reason+keyed, roads, STCC, routing, dest, last contents, car load,
+  // cleaned, wheels, comments). Entry fields stay blank in the UI.
   const grid = await queryBadOrderGrid({
-    statusCodes: ["QUEUED", "ACCEPTED_PENDING", "ACCEPTED_WORKING"],
+    statusCodes: [
+      "QUEUED",
+      "ACCEPTED_PENDING",
+      "ACCEPTED_WORKING",
+      "CLOSED",
+      "DECLINED",
+    ],
     shopIds: [shopId],
     limit: 100,
   });
   const row = grid.rows.find((r) => r.bad_order_id === String(bo1.badOrder.id));
   if (!row) bad("grid", "BO missing");
-  if (!row.shop_id) bad("copy fields", "shop_id missing");
-  if (!row.bo_rule_code) bad("copy fields", "bo_rule_code missing");
-  if (!row.bo_city) bad("copy fields", "bo_city missing");
+  if (!row.shop_id) bad("template fields", "shop_id missing");
+  if (!row.bo_rule_code) bad("template fields", "bo_rule_code missing");
+  if (!row.bo_city) bad("template fields", "bo_city missing");
+  if (!row.reporting_road) bad("template fields", "reporting_road missing");
+  if (!row.dc_road) bad("template fields", "dc_road missing");
+  if (!row.stcc) bad("template fields", "stcc missing");
+  if (!row.routing) bad("template fields", "routing missing");
+  if (!row.last_contents) bad("template fields", "last_contents missing");
+  if (!row.comments) bad("template fields", "comments missing");
   if (Number(row.attachment_count) < 1) bad("grid attachments", "count");
+  // Search haystack used by "New from existing…" (car / date / shop / reason)
+  const hay = [
+    row.car_mark,
+    row.car_number,
+    row.bo_date,
+    row.shop_display,
+    row.bad_order_reason,
+    row.bo_rule_code,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (!hay.includes(String(row.car_number).toLowerCase())) {
+    bad("template search", "car number not in haystack");
+  }
+  if (!hay.includes(String(row.bo_rule_code).toLowerCase())) {
+    bad("template search", "reason code not in haystack");
+  }
   ok(
-    `copy-ready grid row shop=${row.shop_display} attachments=${row.attachment_count}`,
+    `template-ready grid row shop=${row.shop_display} reason=${row.bo_rule_code} attachments=${row.attachment_count}`,
   );
 
   const csv = await exportBadOrderGridCsv({

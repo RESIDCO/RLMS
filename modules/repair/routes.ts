@@ -49,11 +49,19 @@ import { issueStepOtp, isOtpRequired, setShopOtpStepFlag, getShopOtpSteps } from
 import { maybeMarkReadyToClose, closeEvent } from "./services/close";
 import {
   runMonthlyClose,
-  collectLesseeRebillEvents,
+  collectRebillEvents,
   listCloseRuns,
   ensureBillingPeriod,
 } from "./services/monthly-close";
 import { validateCripBytes } from "./services/crb-validate";
+import {
+  listBilledPartyMappings,
+  listBilledPartyMappingHistory,
+  upsertBilledPartyMapping,
+  softDeleteBilledPartyMapping,
+  getCarOwnerMark,
+  resolveInboundShopMarks,
+} from "./services/billed-party-map";
 import { getEmailProvider } from "./providers/email";
 import { getInboundEmailProvider } from "./providers/inbound-email";
 import { getStorageProvider } from "./providers/storage";
@@ -1025,16 +1033,15 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.json(result);
   });
 
-  /** Preview CLOSED events with unlocked Resp 6 for monthly rebill. */
+  /** Preview CLOSED events with unlocked Resp 6/3 for monthly rebill. */
   app.get("/api/repair/billing/lessee-rebill-candidates", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
-    const events = await collectLesseeRebillEvents({
-      accountMonth: req.query.accountMonth
-        ? String(req.query.accountMonth)
-        : undefined,
-    });
-    return res.json({ events, count: events.length });
+    const collected = await collectRebillEvents({});
+    if (!collected.ok) {
+      return res.status(collected.status).json(collected);
+    }
+    return res.json({ groups: collected.groups, count: collected.groups.length });
   });
 
   app.get("/api/repair/billing/close-runs", async (req, res) => {
@@ -1055,8 +1062,9 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
   });
 
   /**
-   * Monthly close: collect CLOSED+Resp6 events, bulk rebuttal invoices,
+   * Monthly close: collect CLOSED+Resp6/3 events, bulk rebuttal invoices,
    * write local CRIPYYMM file (no FTP), validate, audit, lock events.
+   * Outbound billing party = tenant carOwnerMark; billed party from mapping.
    */
   app.post("/api/repair/billing/monthly-close", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
@@ -1095,5 +1103,91 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
         error: err instanceof Error ? err.message : "Validation failed",
       });
     }
+  });
+
+  /** Q14 helper: parse inbound shop Format-1 marks (billing=shop, billed=owner). */
+  app.post("/api/repair/billing/inbound-marks", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const line = String(req.body?.rawLine ?? "");
+    const marks = resolveInboundShopMarks(line);
+    if (!marks) {
+      return res.status(400).json({ error: "Provide a 500-char Format 1 rawLine" });
+    }
+    const owner = await getCarOwnerMark();
+    return res.json({
+      direction: "inbound_shop_invoice",
+      ...marks,
+      tenantCarOwnerMark: owner.ok ? owner.mark : null,
+      note: "Inbound: billing=shop mark (cols 2-5), billed=car owner (cols 6-9) from shop file.",
+    });
+  });
+
+  app.get("/api/repair/billing/car-owner-mark", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const owner = await getCarOwnerMark();
+    if (!owner.ok) return res.status(422).json({ error: owner.error });
+    return res.json({ carOwnerMark: owner.mark });
+  });
+
+  app.get("/api/repair/billed-party-mappings", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const role = req.query.partyRole
+      ? (String(req.query.partyRole).toUpperCase() as "LESSEE" | "RAILROAD")
+      : undefined;
+    if (role && role !== "LESSEE" && role !== "RAILROAD") {
+      return res.status(400).json({ error: "partyRole must be LESSEE or RAILROAD" });
+    }
+    return res.json({
+      mappings: await listBilledPartyMappings({
+        partyRole: role,
+        includeInactive: String(req.query.includeInactive ?? "") === "1",
+      }),
+    });
+  });
+
+  app.get("/api/repair/billed-party-mappings/:id/history", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      history: await listBilledPartyMappingHistory(String(req.params.id)),
+    });
+  });
+
+  app.post("/api/repair/billed-party-mappings", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await upsertBilledPartyMapping({
+      id: body.id ? String(body.id) : undefined,
+      carMark: body.carMark != null ? String(body.carMark) : null,
+      carNumber: body.carNumber != null ? String(body.carNumber) : null,
+      leaseRider: body.leaseRider != null ? String(body.leaseRider) : null,
+      partyRole: String(body.partyRole ?? "LESSEE").toUpperCase() as "LESSEE" | "RAILROAD",
+      billedPartyMark: String(body.billedPartyMark ?? ""),
+      paymentTermsDays:
+        body.paymentTermsDays === undefined || body.paymentTermsDays === null
+          ? null
+          : Number(body.paymentTermsDays),
+      notes: body.notes != null ? String(body.notes) : null,
+      active: body.active === undefined ? undefined : Boolean(body.active),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(body.id ? 200 : 201).json(result);
+  });
+
+  app.delete("/api/repair/billed-party-mappings/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await softDeleteBilledPartyMapping({
+      id: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 }

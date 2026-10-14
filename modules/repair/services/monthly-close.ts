@@ -1,8 +1,12 @@
 /**
- * Monthly close: collect CLOSED events with lessee (Resp 6) responsibility,
- * bill only at close, generate local CRIPYYMM file, bulk lessee rebuttal invoices.
- * Append-only close_runs / billing_lines / rebuttal_invoices; locks events.
+ * Monthly close: collect CLOSED events with rebill responsibility (Resp 6 lessee /
+ * Resp 3 railroad), bill only at close, generate local CRIPYYMM file, bulk rebuttal
+ * invoices. Append-only close_runs / billing_lines / rebuttal_invoices; locks events.
  * No FTP.
+ *
+ * Q14–Q17: outbound billing party = tenant carOwnerMark; billed party from
+ * billed_party_mappings (block if missing); account month stamped by this close run;
+ * unprocessed (unlocked) items roll into the next close.
  */
 
 import { mkdirSync, writeFileSync } from "fs";
@@ -11,17 +15,30 @@ import { DEFAULT_TENANT_ID, q, withTransaction } from "../db";
 import { writeAudit } from "./audit";
 import { buildCripFile, type CrbInvoiceInput } from "./crb-writer";
 import { validateCripBytes } from "./crb-validate";
+import {
+  getCarOwnerMark,
+  getDefaultPaymentTermsDays,
+  getTaxpayerId,
+  partyRoleForRespCode,
+  resolveBilledParty,
+  type MissingBilledParty,
+  type PartyRole,
+} from "./billed-party-map";
+import { getCarsRef } from "../integration/rlms";
 
-const LESSEE_RESP = "6";
+const REBILL_RESP_CODES = ["6", "3"] as const;
 
-export type CloseEligibleEvent = {
+export type CloseEligibleGroup = {
   eventId: string;
   estimateId: string;
   revisionId: string;
   carMark: string;
   carNumber: string;
-  lesseeMark: string;
-  lesseeEmail: string | null;
+  leaseRider: string | null;
+  partyRole: PartyRole;
+  billedPartyMark: string;
+  paymentTermsDays: number | null;
+  contactEmail: string | null;
   laborCents: number;
   materialCents: number;
   lines: Array<{
@@ -49,7 +66,6 @@ function yymmFromDate(d = new Date()): string {
 }
 
 function invoiceDateYymmdd(accountMonth: string): string {
-  // Last calendar day of account month (UTC approx)
   const yy = 2000 + Number(accountMonth.slice(0, 2));
   const mm = Number(accountMonth.slice(2, 4));
   const last = new Date(Date.UTC(yy, mm, 0));
@@ -60,7 +76,7 @@ function invoiceDateYymmdd(accountMonth: string): string {
 function dueDateYymmdd(accountMonth: string, termsDays: number): string {
   const yy = 2000 + Number(accountMonth.slice(0, 2));
   const mm = Number(accountMonth.slice(2, 4));
-  const base = new Date(Date.UTC(yy, mm, 0)); // end of account month
+  const base = new Date(Date.UTC(yy, mm, 0));
   base.setUTCDate(base.getUTCDate() + termsDays);
   const y = String(base.getUTCFullYear()).slice(-2);
   const m = String(base.getUTCMonth() + 1).padStart(2, "0");
@@ -91,30 +107,20 @@ export async function ensureBillingPeriod(opts: {
 }
 
 /**
- * CLOSED events with Resp 6 lines that are not yet billing-locked.
+ * CLOSED events with unlocked Resp 6 / Resp 3 lines.
+ * Account month is NOT filtered by repair date — membership is “picked up by
+ * this close run” (Q17). Unlocked items roll into the next close.
  */
-export async function collectLesseeRebillEvents(opts: {
-  accountMonth?: string;
+export async function collectRebillEvents(opts: {
   tenantId?: string;
-}): Promise<CloseEligibleEvent[]> {
+}): Promise<
+  | { ok: true; groups: CloseEligibleGroup[] }
+  | { ok: false; status: 422; error: string; missing: MissingBilledParty[] }
+> {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  // Use the latest revision that still has line rows (approve / lessee history
-  // revisions bump current_revision without copying lines).
   const { rows } = await q(
     `SELECT e.id AS event_id, e.car_mark, e.car_number,
-            est.id AS estimate_id, rev.id AS revision_id,
-            (
-              SELECT c.party_ref FROM repair.contacts c
-              WHERE c.tenant_id = e.tenant_id AND c.party_type = 'lessee'
-                AND c.active AND c.deleted_at IS NULL
-              ORDER BY c.created_at ASC LIMIT 1
-            ) AS lessee_mark,
-            (
-              SELECT c.email FROM repair.contacts c
-              WHERE c.tenant_id = e.tenant_id AND c.party_type = 'lessee'
-                AND c.active AND c.deleted_at IS NULL AND c.email IS NOT NULL
-              ORDER BY c.created_at ASC LIMIT 1
-            ) AS lessee_email
+            est.id AS estimate_id, rev.id AS revision_id
      FROM repair.events e
      JOIN repair.statuses s ON s.id = e.status_id
      JOIN repair.estimates est
@@ -125,7 +131,7 @@ export async function collectLesseeRebillEvents(opts: {
        WHERE r.estimate_id = est.id
          AND EXISTS (
            SELECT 1 FROM repair.estimate_lines el
-           WHERE el.revision_id = r.id AND el.resp_code = $2
+           WHERE el.revision_id = r.id AND el.resp_code = ANY($2::text[])
          )
        ORDER BY r.rev_no DESC
        LIMIT 1
@@ -135,58 +141,125 @@ export async function collectLesseeRebillEvents(opts: {
        AND s.code = 'CLOSED'
        AND e.billing_locked_at IS NULL
      ORDER BY e.car_mark, e.car_number`,
-    [tenantId, LESSEE_RESP],
+    [tenantId, [...REBILL_RESP_CODES]],
   );
 
-  const out: CloseEligibleEvent[] = [];
+  const groups: CloseEligibleGroup[] = [];
+  const missing: MissingBilledParty[] = [];
+
   for (const r of rows) {
+    const carMark = String(r.car_mark);
+    const carNumber = String(r.car_number);
+    const car = await getCarsRef(carMark, carNumber);
+    const leaseRider = car?.lease_rider ? String(car.lease_rider) : null;
+
     const { rows: lines } = await q(
       `SELECT line_no, resp_code, labor_cents, material_cents, labor, material,
               raw_line, aar_job_code, qualifier, why_made, condition_code
        FROM repair.estimate_lines
-       WHERE revision_id = $1 AND resp_code = $2
+       WHERE revision_id = $1 AND resp_code = ANY($2::text[])
        ORDER BY line_no ASC`,
-      [r.revision_id, LESSEE_RESP],
+      [r.revision_id, [...REBILL_RESP_CODES]],
     );
-    let laborCents = 0;
-    let materialCents = 0;
-    const mapped = lines.map((l) => {
-      const lc =
-        l.labor_cents != null
-          ? Number(l.labor_cents)
-          : Math.round(Number(l.labor ?? 0) * 100);
-      const mc =
-        l.material_cents != null
-          ? Number(l.material_cents)
-          : Math.round(Number(l.material ?? 0) * 100);
-      laborCents += lc;
-      materialCents += mc;
-      return {
-        lineNo: Number(l.line_no),
-        respCode: String(l.resp_code),
-        laborCents: lc,
-        materialCents: mc,
-        rawLine: l.raw_line ? String(l.raw_line) : null,
-        aarJobCode: l.aar_job_code ? String(l.aar_job_code) : null,
-        qualifier: l.qualifier ? String(l.qualifier) : null,
-        whyMade: l.why_made ? String(l.why_made) : null,
-        conditionCode: l.condition_code ? String(l.condition_code) : null,
-      };
-    });
-    out.push({
-      eventId: String(r.event_id),
-      estimateId: String(r.estimate_id),
-      revisionId: String(r.revision_id),
-      carMark: String(r.car_mark),
-      carNumber: String(r.car_number),
-      lesseeMark: String(r.lessee_mark ?? "LSEE").slice(0, 4).toUpperCase().padEnd(4, " "),
-      lesseeEmail: r.lessee_email ? String(r.lessee_email) : null,
-      laborCents,
-      materialCents,
-      lines: mapped,
-    });
+
+    const byRole = new Map<PartyRole, typeof lines>();
+    for (const ln of lines) {
+      const role = partyRoleForRespCode(String(ln.resp_code));
+      if (!role) continue;
+      const list = byRole.get(role) ?? [];
+      list.push(ln);
+      byRole.set(role, list);
+    }
+
+    for (const [partyRole, roleLines] of byRole) {
+      const resolved = await resolveBilledParty({
+        carMark,
+        carNumber,
+        partyRole,
+        tenantId,
+        leaseRider,
+      });
+      if (!resolved.ok) {
+        missing.push(resolved.missing);
+        continue;
+      }
+
+      let laborCents = 0;
+      let materialCents = 0;
+      const mapped = roleLines.map((l) => {
+        const lc =
+          l.labor_cents != null
+            ? Number(l.labor_cents)
+            : Math.round(Number(l.labor ?? 0) * 100);
+        const mc =
+          l.material_cents != null
+            ? Number(l.material_cents)
+            : Math.round(Number(l.material ?? 0) * 100);
+        laborCents += lc;
+        materialCents += mc;
+        return {
+          lineNo: Number(l.line_no),
+          respCode: String(l.resp_code),
+          laborCents: lc,
+          materialCents: mc,
+          rawLine: l.raw_line ? String(l.raw_line) : null,
+          aarJobCode: l.aar_job_code ? String(l.aar_job_code) : null,
+          qualifier: l.qualifier ? String(l.qualifier) : null,
+          whyMade: l.why_made ? String(l.why_made) : null,
+          conditionCode: l.condition_code ? String(l.condition_code) : null,
+        };
+      });
+
+      let contactEmail: string | null = null;
+      if (partyRole === "LESSEE") {
+        const { rows: contacts } = await q(
+          `SELECT email FROM repair.contacts
+           WHERE tenant_id = $1 AND party_type = 'lessee'
+             AND active AND deleted_at IS NULL AND email IS NOT NULL
+             AND (party_ref IS NULL OR upper(party_ref) = $2)
+           ORDER BY created_at ASC LIMIT 1`,
+          [tenantId, resolved.resolved.mark],
+        );
+        contactEmail = contacts[0]?.email ? String(contacts[0].email) : null;
+      }
+
+      groups.push({
+        eventId: String(r.event_id),
+        estimateId: String(r.estimate_id),
+        revisionId: String(r.revision_id),
+        carMark,
+        carNumber,
+        leaseRider,
+        partyRole,
+        billedPartyMark: resolved.resolved.mark,
+        paymentTermsDays: resolved.resolved.paymentTermsDays,
+        contactEmail,
+        laborCents,
+        materialCents,
+        lines: mapped,
+      });
+    }
   }
-  return out;
+
+  if (missing.length) {
+    return {
+      ok: false,
+      status: 422,
+      error: "Missing billed-party mapping(s); export blocked",
+      missing,
+    };
+  }
+  return { ok: true, groups };
+}
+
+/** @deprecated use collectRebillEvents — kept for callers expecting prior name */
+export async function collectLesseeRebillEvents(opts: {
+  accountMonth?: string;
+  tenantId?: string;
+}): Promise<CloseEligibleGroup[]> {
+  const res = await collectRebillEvents({ tenantId: opts.tenantId });
+  if (!res.ok) return [];
+  return res.groups.filter((g) => g.partyRole === "LESSEE");
 }
 
 export async function runMonthlyClose(opts: {
@@ -194,7 +267,6 @@ export async function runMonthlyClose(opts: {
   tenantId?: string;
   actor: string;
   exportDir?: string;
-  /** Dry-run: validate build but do not write DB locks / files */
   dryRun?: boolean;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
@@ -203,6 +275,12 @@ export async function runMonthlyClose(opts: {
   if (!/^\d{4}$/.test(accountMonth)) {
     return { ok: false as const, status: 400, error: "accountMonth must be YYMM" };
   }
+
+  const owner = await getCarOwnerMark(tenantId);
+  if (!owner.ok) {
+    return { ok: false as const, status: 422, error: owner.error };
+  }
+  const billingParty = owner.mark;
 
   const periodRes = await ensureBillingPeriod({
     accountMonth,
@@ -218,45 +296,58 @@ export async function runMonthlyClose(opts: {
     };
   }
 
-  const events = await collectLesseeRebillEvents({ accountMonth, tenantId });
-  if (!events.length) {
+  const collected = await collectRebillEvents({ tenantId });
+  if (!collected.ok) {
+    return {
+      ok: false as const,
+      status: collected.status,
+      error: collected.error,
+      missing: collected.missing,
+    };
+  }
+  const groups = collected.groups;
+  if (!groups.length) {
     return {
       ok: false as const,
       status: 404,
-      error: "No CLOSED events with unlocked Resp 6 lines for this period",
+      error:
+        "No CLOSED events with unlocked Resp 6/3 rebill lines (unprocessed items roll into the next close)",
     };
   }
 
-  const billingParty = String(settings.crbBillingPartyMark ?? "OFOX");
   const currency = String(settings.crbCurrency ?? "U");
-  const taxpayerId = String(settings.crbTaxpayerId ?? "");
-  const paymentTerms = String(settings.crbPaymentTerms ?? "30");
-  const termsDays = Number(paymentTerms) || 30;
+  const taxpayerId = await getTaxpayerId(tenantId);
+  const defaultTerms = await getDefaultPaymentTermsDays(tenantId);
   const invDate = invoiceDateYymmdd(accountMonth);
-  const dueDate = dueDateYymmdd(accountMonth, termsDays);
 
-  // Bulk rebuttal invoices: one per lessee mark
-  const byLessee = new Map<string, CloseEligibleEvent[]>();
-  for (const ev of events) {
-    const key = ev.lesseeMark.trim().toUpperCase() || "LSEE";
-    const list = byLessee.get(key) ?? [];
-    list.push(ev);
-    byLessee.set(key, list);
+  // Bulk rebuttal invoices: one per (billed party mark + party role)
+  const byInvoiceKey = new Map<string, CloseEligibleGroup[]>();
+  for (const g of groups) {
+    const key = `${g.partyRole}|${g.billedPartyMark}`;
+    const list = byInvoiceKey.get(key) ?? [];
+    list.push(g);
+    byInvoiceKey.set(key, list);
   }
 
   const invoices: CrbInvoiceInput[] = [];
   const rebuttalMeta: Array<{
-    lesseeMark: string;
-    lesseeEmail: string | null;
+    billedPartyMark: string;
+    partyRole: PartyRole;
+    contactEmail: string | null;
     invoiceNumber: string;
     eventIds: string[];
     laborCents: number;
     materialCents: number;
     detailCount: number;
+    paymentTermsDays: number;
   }> = [];
 
   let invSeq = 1;
-  for (const [lesseeMark, group] of byLessee) {
+  for (const [, group] of byInvoiceKey) {
+    const billedMark = group[0].billedPartyMark;
+    const partyRole = group[0].partyRole;
+    const termsDays =
+      group.find((g) => g.paymentTermsDays != null)?.paymentTermsDays ?? defaultTerms;
     const invoiceNumber = `RB${accountMonth}${String(invSeq).padStart(4, "0")}`;
     invSeq++;
     let labor = 0;
@@ -270,30 +361,34 @@ export async function runMonthlyClose(opts: {
           carInitial: ev.carMark,
           carNumber: ev.carNumber,
           repairDateYymmdd: invDate,
+          // Outbound rebuttal: repairing/billing party = car owner (not shop)
           repairingParty: billingParty,
           appliedJobCode: ln.aarJobCode ?? "0000",
           appliedQualifier: ln.qualifier ?? undefined,
           whyMade: ln.whyMade ?? undefined,
           conditionCode: ln.conditionCode ?? undefined,
-          responsibilityCode: LESSEE_RESP,
+          responsibilityCode: ln.respCode,
           laborCents: ln.laborCents,
           materialCents: ln.materialCents,
           lineNumber: lineNo++,
           detailSource: "RE",
-          description: `RESP6 REBILL ${ev.carMark} ${ev.carNumber}`.slice(0, 50),
+          description: `${partyRole} REBILL ${ev.carMark} ${ev.carNumber}`.slice(0, 50),
         });
         labor += ln.laborCents;
         material += ln.materialCents;
       }
     }
-    const email = group.find((g) => g.lesseeEmail)?.lesseeEmail ?? null;
+    const email = group.find((g) => g.contactEmail)?.contactEmail ?? null;
     invoices.push({
-      billedParty: lesseeMark,
+      billedParty: billedMark,
       invoiceNumber,
       invoiceDateYymmdd: invDate,
-      paymentDueYymmdd: dueDate,
+      paymentDueYymmdd: dueDateYymmdd(accountMonth, termsDays),
       contact: {
-        companyName: `Lessee ${lesseeMark.trim()}`,
+        companyName:
+          partyRole === "RAILROAD"
+            ? `Railroad ${billedMark.trim()}`
+            : `Lessee ${billedMark.trim()}`,
         email: email ?? undefined,
         address1: "SEE CONTACT BANK",
         country: "US",
@@ -301,13 +396,15 @@ export async function runMonthlyClose(opts: {
       details,
     });
     rebuttalMeta.push({
-      lesseeMark,
-      lesseeEmail: email,
+      billedPartyMark: billedMark,
+      partyRole,
+      contactEmail: email,
       invoiceNumber,
-      eventIds: group.map((g) => g.eventId),
+      eventIds: [...new Set(group.map((g) => g.eventId))],
       laborCents: labor,
       materialCents: material,
       detailCount: details.length,
+      paymentTermsDays: termsDays,
     });
   }
 
@@ -316,7 +413,7 @@ export async function runMonthlyClose(opts: {
     accountMonthYymm: accountMonth,
     currency,
     taxpayerId,
-    paymentTerms,
+    paymentTerms: String(defaultTerms).padStart(2, "0").slice(-2),
     invoices,
   });
   const validation = validateCripBytes(built.bytes);
@@ -340,7 +437,8 @@ export async function runMonthlyClose(opts: {
       ok: true as const,
       dryRun: true,
       accountMonth,
-      eventCount: events.length,
+      billingParty,
+      eventCount: new Set(groups.map((g) => g.eventId)).size,
       invoiceCount: invoices.length,
       filename: built.filename,
       validation,
@@ -351,6 +449,8 @@ export async function runMonthlyClose(opts: {
 
   mkdirSync(exportDir, { recursive: true });
   writeFileSync(localPath, built.bytes);
+
+  const eventIds = [...new Set(groups.map((g) => g.eventId))];
 
   const result = await withTransaction(async (client) => {
     const run = await client.query(
@@ -364,7 +464,7 @@ export async function runMonthlyClose(opts: {
         tenantId,
         periodRes.period.id,
         accountMonth,
-        events.length,
+        eventIds.length,
         invoices.length,
         built.detailCount,
         built.laborCents,
@@ -379,38 +479,42 @@ export async function runMonthlyClose(opts: {
     );
     const closeRun = run.rows[0];
 
-    for (const ev of events) {
+    for (const ev of groups) {
       await client.query(
         `INSERT INTO repair.close_run_events
            (tenant_id, close_run_id, event_id, estimate_id, revision_id,
-            lessee_mark, lessee_email, labor_cents, material_cents, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            lessee_mark, lessee_email, labor_cents, material_cents,
+            account_month, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [
           tenantId,
           closeRun.id,
           ev.eventId,
           ev.estimateId,
           ev.revisionId,
-          ev.lesseeMark,
-          ev.lesseeEmail,
+          ev.billedPartyMark,
+          ev.contactEmail,
           ev.laborCents,
           ev.materialCents,
+          accountMonth,
           opts.actor,
         ],
       );
-      await client.query(
-        `UPDATE repair.events
-         SET billing_locked_at = now(), billing_close_run_id = $1
-         WHERE id = $2 AND tenant_id = $3 AND billing_locked_at IS NULL`,
-        [closeRun.id, ev.eventId, tenantId],
-      );
+
       for (const ln of ev.lines) {
+        const invNo =
+          rebuttalMeta.find(
+            (m) =>
+              m.eventIds.includes(ev.eventId) &&
+              m.billedPartyMark === ev.billedPartyMark &&
+              m.partyRole === ev.partyRole,
+          )?.invoiceNumber ?? null;
         await client.query(
           `INSERT INTO repair.billing_lines
              (tenant_id, period_id, close_run_id, event_id, source, car_mark, car_number,
               resp_code, labor_cents, material_cents, total_cents, billed_party,
-              invoice_number, raw_record, car_lease_snapshot, created_by)
-           VALUES ($1,$2,$3,$4,'REBUTTAL',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15)`,
+              invoice_number, raw_record, car_lease_snapshot, account_month, created_by)
+           VALUES ($1,$2,$3,$4,'REBUTTAL',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16)`,
           [
             tenantId,
             periodRes.period.id,
@@ -418,23 +522,36 @@ export async function runMonthlyClose(opts: {
             ev.eventId,
             ev.carMark,
             ev.carNumber,
-            LESSEE_RESP,
+            ln.respCode,
             ln.laborCents,
             ln.materialCents,
             ln.laborCents + ln.materialCents,
-            ev.lesseeMark,
-            rebuttalMeta.find((m) => m.eventIds.includes(ev.eventId))?.invoiceNumber ??
-              null,
+            ev.billedPartyMark,
+            invNo,
             ln.rawLine,
             JSON.stringify({
               estimateId: ev.estimateId,
               revisionId: ev.revisionId,
               accountMonth,
+              partyRole: ev.partyRole,
+              leaseRider: ev.leaseRider,
+              billingParty,
+              direction: "outbound_rebuttal",
             }),
+            accountMonth,
             opts.actor,
           ],
         );
       }
+    }
+
+    for (const eventId of eventIds) {
+      await client.query(
+        `UPDATE repair.events
+         SET billing_locked_at = now(), billing_close_run_id = $1
+         WHERE id = $2 AND tenant_id = $3 AND billing_locked_at IS NULL`,
+        [closeRun.id, eventId, tenantId],
+      );
     }
 
     for (const meta of rebuttalMeta) {
@@ -442,20 +559,24 @@ export async function runMonthlyClose(opts: {
         `INSERT INTO repair.rebuttal_invoices
            (tenant_id, period_id, close_run_id, lessee_mark, lessee_email,
             invoice_number, labor_cents, material_cents, total_cents,
-            event_ids, detail_count, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::uuid[],$11,$12)`,
+            event_ids, detail_count, account_month, party_role,
+            payment_terms_days, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::uuid[],$11,$12,$13,$14,$15)`,
         [
           tenantId,
           periodRes.period.id,
           closeRun.id,
-          meta.lesseeMark,
-          meta.lesseeEmail,
+          meta.billedPartyMark,
+          meta.contactEmail,
           meta.invoiceNumber,
           meta.laborCents,
           meta.materialCents,
           meta.laborCents + meta.materialCents,
           meta.eventIds,
           meta.detailCount,
+          accountMonth,
+          meta.partyRole,
+          meta.paymentTermsDays,
           opts.actor,
         ],
       );
@@ -497,7 +618,9 @@ export async function runMonthlyClose(opts: {
     action: "MONTHLY_CLOSE",
     after: {
       accountMonth,
-      eventCount: events.length,
+      billingParty,
+      direction: "outbound_rebuttal",
+      eventCount: eventIds.length,
       invoiceCount: invoices.length,
       filename: built.filename,
       sha256: built.sha256,
@@ -514,7 +637,8 @@ export async function runMonthlyClose(opts: {
     ok: true as const,
     closeRun: result,
     accountMonth,
-    eventCount: events.length,
+    billingParty,
+    eventCount: eventIds.length,
     invoiceCount: invoices.length,
     filename: built.filename,
     localPath,

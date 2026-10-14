@@ -53,12 +53,21 @@ export {
 export { maybeMarkReadyToClose, closeEvent } from "./services/close";
 export {
   runMonthlyClose,
+  collectRebillEvents,
   collectLesseeRebillEvents,
   listCloseRuns,
   ensureBillingPeriod,
 } from "./services/monthly-close";
 export { buildCripFile } from "./services/crb-writer";
 export { validateCripBytes, validateCripRecords } from "./services/crb-validate";
+export {
+  listBilledPartyMappings,
+  upsertBilledPartyMapping,
+  resolveBilledParty,
+  getCarOwnerMark,
+  resolveInboundShopMarks,
+  partyRoleForRespCode,
+} from "./services/billed-party-map";
 export { notify, resolveRecipients } from "./services/notifications";
 export { getEmailProvider, setEmailProvider, LogEmailProvider } from "./providers/email";
 export {

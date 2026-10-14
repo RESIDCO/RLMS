@@ -27,6 +27,13 @@ import { upsertContact, addAdhocEmails } from "../services/contacts";
 import { runMonthlyClose } from "../services/monthly-close";
 import { validateCripBytes } from "../services/crb-validate";
 import { parseAarFile } from "../services/aar-parser";
+import {
+  getCarOwnerMark,
+  resolveInboundShopMarks,
+  softDeleteBilledPartyMapping,
+  upsertBilledPartyMapping,
+  listBilledPartyMappings,
+} from "../services/billed-party-map";
 import { DEFAULT_TENANT_ID, q } from "../db";
 
 const samplePath = join(
@@ -176,11 +183,55 @@ async function seedClosedEventWithResp6(opts: {
 
 async function main() {
   // Fixture: detail-only sample validates as extract (not full CRIP)
-  const sample = validateCripBytes(readFileSync(samplePath));
+  const sampleBytes = readFileSync(samplePath);
+  const sample = validateCripBytes(sampleBytes);
   if (!sample.warnings.includes("detail_only_extract")) {
     throw new Error("expected detail_only_extract warning on OFOX2609 sample");
   }
   if (!sample.ok) throw new Error(`sample validation errors: ${sample.errors.join("; ")}`);
+
+  // Q14 inbound: shop file billing=shop mark, billed=car owner
+  const sampleLine = sampleBytes.toString("latin1").split(/\r?\n/).find((l) => l.length === 500);
+  if (!sampleLine) throw new Error("sample line missing");
+  const inbound = resolveInboundShopMarks(sampleLine);
+  if (!inbound || inbound.billingParty !== "APA" || inbound.billedParty !== "OFOX") {
+    throw new Error(
+      `inbound marks expected APA/OFOX, got ${JSON.stringify(inbound)}`,
+    );
+  }
+
+  // Ensure fleet car-owner mark is configured (tenant setting — not hard-coded in app logic)
+  await q(
+    `UPDATE repair.tenants
+     SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object(
+       'carOwnerMark', 'OFOX',
+       'crbPaymentTermsDays', 30,
+       'crbTaxpayerId', ''
+     )
+     WHERE id = $1`,
+    [DEFAULT_TENANT_ID],
+  );
+  const owner = await getCarOwnerMark();
+  if (!owner.ok) throw new Error(owner.error);
+
+  // Ensure billed-party mapping exists (Q15)
+  const maps = await listBilledPartyMappings({ partyRole: "LESSEE" });
+  let mappingId = maps.find(
+    (m) =>
+      String(m.car_mark).toUpperCase() === "ARSX" && String(m.car_number) === "100001",
+  )?.id;
+  if (!mappingId) {
+    const created = await upsertBilledPartyMapping({
+      carMark: "ARSX",
+      carNumber: "100001",
+      leaseRider: "R1",
+      partyRole: "LESSEE",
+      billedPartyMark: "LSEE",
+      actor: "smoke-mc",
+    });
+    if (!created.ok) throw new Error(created.error);
+    mappingId = String(created.mapping.id);
+  }
 
   await upsertContact({
     partyType: "lessee",
@@ -279,6 +330,33 @@ async function main() {
   if (!confirmed.ok) throw new Error(confirmed.error);
   if (confirmed.channel !== "email_reply") throw new Error("expected email_reply channel");
 
+  // ── Missing mapping blocks export (Q15) ────────────────────────────
+  const deactivated = await softDeleteBilledPartyMapping({
+    id: String(mappingId),
+    actor: "smoke-mc",
+    reason: "smoke missing-mark check",
+  });
+  if (!deactivated.ok) throw new Error(deactivated.error);
+  const blocked = await runMonthlyClose({
+    accountMonth: "2610",
+    actor: "reviewer@smoke",
+    exportDir: join(dirname(fileURLToPath(import.meta.url)), "exports"),
+  });
+  if (blocked.ok || blocked.status !== 422 || !("missing" in blocked)) {
+    throw new Error("expected export blocked when billed-party mapping missing");
+  }
+
+  // Restore mapping
+  const restored = await upsertBilledPartyMapping({
+    carMark: "ARSX",
+    carNumber: "100001",
+    leaseRider: "R1",
+    partyRole: "LESSEE",
+    billedPartyMark: "LSEE",
+    actor: "smoke-mc",
+  });
+  if (!restored.ok) throw new Error(restored.error);
+
   // ── Monthly close + CRIP validation ────────────────────────────────
   const close = await runMonthlyClose({
     accountMonth: "2610",
@@ -292,16 +370,31 @@ async function main() {
   if (!close.filename?.startsWith("CRIP2610")) {
     throw new Error(`unexpected filename ${close.filename}`);
   }
+  if (close.billingParty !== owner.mark) {
+    throw new Error(
+      `outbound billing party ${close.billingParty} != tenant carOwnerMark ${owner.mark}`,
+    );
+  }
+  if (close.accountMonth !== "2610") {
+    throw new Error("close run must stamp account month 2610");
+  }
 
   const fileBytes = readFileSync(close.localPath!);
   const revalidate = validateCripBytes(fileBytes);
   if (!revalidate.ok || !revalidate.isCompleteCrip) {
     throw new Error(`revalidate failed: ${revalidate.errors.join("; ")}`);
   }
-  // Cols 2-5 billing party
+  // Cols 2-5 = car owner (outbound); cols 6-9 = mapped lessee
   const first = fileBytes.toString("latin1").slice(0, 500);
-  if (first.slice(1, 5).trim() !== "OFOX") {
-    throw new Error(`billing party cols 2-5 expected OFOX, got ${JSON.stringify(first.slice(1, 5))}`);
+  if (first.slice(1, 5).trim() !== owner.mark.trim()) {
+    throw new Error(
+      `billing party cols 2-5 expected ${owner.mark}, got ${JSON.stringify(first.slice(1, 5))}`,
+    );
+  }
+  if (first.slice(5, 9).trim() !== "LSEE") {
+    throw new Error(
+      `billed party cols 6-9 expected LSEE from mapping, got ${JSON.stringify(first.slice(5, 9))}`,
+    );
   }
 
   const { rows: locked } = await q(
@@ -310,6 +403,15 @@ async function main() {
     [[a.eventId, b.eventId]],
   );
   if (Number(locked[0].n) !== 2) throw new Error("events not billing-locked");
+
+  const { rows: stamped } = await q(
+    `SELECT COUNT(*)::int AS n FROM repair.billing_lines
+     WHERE account_month = '2610' AND close_run_id = $1`,
+    [close.closeRun?.id],
+  );
+  if (Number(stamped[0].n) < 1) {
+    throw new Error("billing_lines must carry close-run account_month (Q17)");
+  }
 
   const { rows: runs } = await q(
     `SELECT COUNT(*)::int AS n FROM repair.close_runs WHERE account_month = '2610'`,
@@ -325,14 +427,25 @@ async function main() {
   }
   if (!appendOnlyOk) throw new Error("close_runs should be append-only");
 
+  // Mapping history append-only
+  const { rows: hist } = await q(
+    `SELECT COUNT(*)::int AS n FROM repair.billed_party_mapping_history`,
+  );
+  if (Number(hist[0].n) < 1) throw new Error("expected mapping history rows");
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         sampleDetailOnly: sample.detailCount,
+        inboundMarks: inbound,
+        carOwnerMark: owner.mark,
         approveViaLink: viaLink.status,
         replyConfirm: confirmed.approval.status,
+        blockedMissingMapping: true,
         closeRunId: close.closeRun?.id,
+        accountMonth: close.accountMonth,
+        billingParty: close.billingParty,
         filename: close.filename,
         localPath: close.localPath,
         invoiceCount: close.invoiceCount,

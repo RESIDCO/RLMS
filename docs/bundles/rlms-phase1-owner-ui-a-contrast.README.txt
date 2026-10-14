@@ -3,9 +3,9 @@ RLMS repair — Owner UI §A contrast + sticky module nav
 Requires tip: bd049dcca9d2ca50157ea1230d400393497102b4
 (Estimates History landing — prior owner-ui-a-estimates tip)
 
-Bundle tip (after apply): (see finalize commit / store README)
-Bundle size: (finalize)
-SHA-256: (finalize)
+Bundle tip (after apply): 20030e9c76e5fca9c6e7b20a5b29c331263ff943
+Bundle size: 10296 bytes
+SHA-256: b6f75c9aeb7b6fd70166b2d97dfb2f06ef3ed29a8d97accfea627b0ba171746f
 
 What this adds
 ----------------------------------------------------------------
@@ -40,6 +40,9 @@ What this adds
 
   docs/repair/HANDOFF.md
     - Contrast bundle as current tip
+
+  docs/bundles/rlms-phase1-owner-ui-a-contrast.README.txt
+    - companion README (store copy authoritative for tip/size/hash)
 
 Files outside modules/repair (and why)
 ----------------------------------------------------------------

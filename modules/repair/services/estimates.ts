@@ -673,11 +673,13 @@ export async function uploadEventDocument(opts: {
     bytes: opts.file.bytes,
   });
 
+  const uploadedVia = opts.rawToken ? "shop_link" : "owner_ui";
+  const uploadedRole = opts.rawToken ? "shop" : "owner";
   const { rows } = await q(
     `INSERT INTO repair.documents
        (tenant_id, event_id, kind, category_code, comment, storage_key, sha256, size, mime,
-        uploaded_by, created_by, original_filename)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)
+        uploaded_by, created_by, original_filename, uploaded_via, uploaded_role)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13)
      RETURNING *`,
     [
       tenantId,
@@ -691,6 +693,8 @@ export async function uploadEventDocument(opts: {
       stored.mime,
       opts.actorEmail,
       opts.file.filename,
+      uploadedVia,
+      uploadedRole,
     ],
   );
 
@@ -704,6 +708,8 @@ export async function uploadEventDocument(opts: {
       categoryCode,
       comment: opts.comment?.trim() || null,
       sha256: stored.sha256,
+      uploadedVia,
+      uploadedRole,
     },
     actor: opts.actorEmail,
     via: opts.rawToken ? "event_link" : "UI",

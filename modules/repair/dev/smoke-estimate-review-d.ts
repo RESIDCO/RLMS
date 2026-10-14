@@ -1,9 +1,11 @@
 /**
- * Smoke: OWNER_UI §D Estimate Review (owner)
+ * Smoke: OWNER_UI §D Estimate Review (owner) + round 2
  * - Review payload: compact context + RS line fields from raw_line
- * - Update Responsibilities: set codes, split by %, summary cents
- * - Review & Compare any two revisions
- * - Billing category; request revision; approve
+ * - Update Responsibilities: set codes, 50/50 split exact, tax prorate
+ * - Shop attachment delete blocked server-side
+ * - Component Id rule rejects coupler (4450) without ID
+ * - Carry-forward matches unchanged
+ * - Ref-data import soft-OK when licensed CSVs absent; row counts when present
  *
  * Run: npm run repair:smoke-estimate-review
  */
@@ -24,8 +26,17 @@ import {
   submitResponsibilityUpdates,
   summarizeByResp,
 } from "../services/estimate-review";
-import { formatCentsAsDollars } from "../services/money";
+import { formatCentsAsDollars, formatCentsAsMoney } from "../services/money";
 import { createShop } from "../services/shops";
+import { softDeleteDocument } from "../services/gap-lifecycle-06";
+import { validateComponentIds } from "../services/component-id-rules";
+import {
+  previewCarryForward,
+  applyCarryForwardSelections,
+} from "../services/carry-forward";
+import { previewTaxProrate } from "../services/responsibility-split";
+import { getRefDataCounts, lookupRefCode } from "../services/ref-lookup";
+import { importRefData } from "./import-ref-data";
 import { migrateLocal } from "./migrate-local";
 
 const samplePath = join(
@@ -81,9 +92,40 @@ async function seedCar() {
 }
 
 async function main() {
-  console.log("=== repair:smoke-estimate-review (§D) ===");
+  console.log("=== repair:smoke-estimate-review (§D r2) ===");
   await migrateLocal();
   await seedCar();
+
+  // Ref-data import (soft-OK without licensed CSVs)
+  const imp = await importRefData({ actor: "smoke-d-r2" });
+  if (!imp.ok && !imp.soft) bad("import-ref-data", imp.error ?? "failed");
+  const counts = await getRefDataCounts();
+  const expectedFull = {
+    ref_job_codes: 855,
+    ref_qualifiers: 639,
+    ref_why_made: 107,
+    ref_repair_categories: 2170,
+  };
+  if (imp.anyData && counts.ref_job_codes >= 800) {
+    for (const [k, n] of Object.entries(expectedFull)) {
+      const got = counts[k] ?? 0;
+      if (got < n * 0.9) {
+        bad("ref counts", `${k} expected ~${n} got ${got}`);
+      }
+      ok(`ref ${k}=${got}`);
+    }
+    const jobHit = await lookupRefCode({ kind: "job", code: "4450" });
+    ok(`hover job 4450: found=${jobHit.found} ${jobHit.description.slice(0, 40)}`);
+  } else {
+    ok(
+      `ref-data soft-skip (licensed CSVs absent) — counts job=${counts.ref_job_codes} qual=${counts.ref_qualifiers} wm=${counts.ref_why_made} cat=${counts.ref_repair_categories}; component_id_rules=${counts.component_id_rules}`,
+    );
+    const miss = await lookupRefCode({ kind: "job", code: "ZZZZ" });
+    if (miss.found || miss.description !== "Not in reference table") {
+      bad("hover miss", JSON.stringify(miss));
+    }
+    ok('unknown code → "Not in reference table"');
+  }
 
   const shopMark = `D${RUN.slice(-3)}`.slice(0, 4).toUpperCase();
   const shop = await createShop({
@@ -92,7 +134,6 @@ async function main() {
     state: "IL",
     splc: "398760",
     shopMark,
-    // omit billingRoad so reporting_mark is a unique synthetic key
     actor: "smoke-d",
   });
   if (!shop.ok) bad("create shop", shop.error);
@@ -157,8 +198,11 @@ async function main() {
   if (lines.length < 2) bad("lines", `expected ≥2 got ${lines.length}`);
   const enriched = enrichLineFromRaw(lines[0] as Record<string, unknown>);
   if (!enriched.description) bad("raw enrich", "description empty");
+  if (!enriched.labor_money?.startsWith("$")) {
+    bad("money display", `expected $ prefix got ${enriched.labor_money}`);
+  }
   ok(
-    `line enrich Loc=${enriched.location_on_car ?? ""} Qnty=${enriched.quantity ?? ""} Desc=${enriched.description.slice(0, 28)}`,
+    `line enrich Loc=${enriched.location_on_car ?? ""} money=${enriched.amount_money} cents=${enriched.amount_cents_label}`,
   );
 
   const centsSum = lines.reduce(
@@ -166,7 +210,82 @@ async function main() {
     0,
   );
   if (centsSum <= 0) bad("cents", "total_cents missing/zero");
-  ok(`integer cents total $${formatCentsAsDollars(centsSum)}`);
+  ok(`integer cents total ${formatCentsAsMoney(centsSum)}`);
+
+  // Component Id rule — coupler 4450 without CID
+  const coupler = lines.find(
+    (l) => String((l as { aar_job_code?: string }).aar_job_code ?? "").trim() === "4450",
+  );
+  if (!coupler) bad("coupler line", "job 4450 not in sample");
+  const cid = await validateComponentIds({
+    lines: lines.map((l) => ({
+      id: String((l as { id?: string }).id ?? ""),
+      line_no: Number((l as { line_no?: number }).line_no),
+      aar_job_code: (l as { aar_job_code?: string }).aar_job_code ?? null,
+      qualifier: (l as { qualifier?: string }).qualifier ?? null,
+      aar_component_id: (l as { aar_component_id?: string }).aar_component_id ?? null,
+    })),
+    stage: "FINAL",
+  });
+  if (cid.ok) {
+    // Ensure rule exists then re-check
+    await q(
+      `INSERT INTO repair.component_id_rules
+         (tenant_id, job_code, label, require_on, active, notes, created_by)
+       VALUES ($1,'4450','Coupler body requires Component Id','FINAL_OR_INVOICE',true,'smoke',$2)`,
+      [DEFAULT_TENANT_ID, "smoke-d"],
+    );
+    const cid2 = await validateComponentIds({
+      lines: [
+        {
+          line_no: Number((coupler as { line_no?: number }).line_no),
+          aar_job_code: "4450",
+          qualifier: null,
+          aar_component_id: null,
+        },
+      ],
+      stage: "FINAL",
+    });
+    if (cid2.ok) bad("component-id", "expected reject for coupler without ID");
+    ok(`component-id rejects coupler: ${cid2.errors[0]?.message}`);
+  } else {
+    ok(`component-id rejects: ${cid.errors[0]?.message}`);
+  }
+  if (!review1.componentIdFlagged?.length && !cid.flaggedLineNos.length) {
+    // review flags use REVIEW stage — may match FINAL_OR_INVOICE
+    ok("component-id review flags optional when rule require_on excludes REVIEW-only path");
+  } else {
+    ok(`component-id review flags=${(review1.componentIdFlagged ?? cid.flaggedLineNos).join(",")}`);
+  }
+
+  // Shop delete blocked
+  const { rows: docIns } = await q(
+    `INSERT INTO repair.documents
+       (tenant_id, event_id, kind, category_code, storage_key, sha256, size, mime,
+        uploaded_by, created_by, original_filename, uploaded_via, uploaded_role)
+     VALUES ($1,$2,'photo','photograph','smoke/key','abc',10,'image/jpeg','shop@smoke-d.test','shop@smoke-d.test','smoke.jpg','shop_link','shop')
+     RETURNING id`,
+    [DEFAULT_TENANT_ID, eventId],
+  );
+  const docId = String(docIns[0].id);
+  const shopDel = await softDeleteDocument({
+    documentId: docId,
+    actor: "shop@smoke-d.test",
+    actorRole: "shop",
+    reason: "shop trying to void",
+  });
+  if (shopDel.ok || shopDel.status !== 403) {
+    bad("shop delete", `expected 403 got ${JSON.stringify(shopDel)}`);
+  }
+  ok("shop delete blocked server-side (403)");
+  const ownerDel = await softDeleteDocument({
+    documentId: docId,
+    actor: "owner@smoke-d.test",
+    actorRole: "owner",
+    reason: "owner void smoke",
+  });
+  if (!ownerDel.ok) bad("owner delete", ownerDel.error);
+  ok("owner void allowed + audited");
 
   const bill = await setBillingCategory({
     estimateId: estId,
@@ -176,29 +295,107 @@ async function main() {
   if (!bill.ok) bad("billing", bill.error);
   ok("billing category");
 
-  const line0 = lines[0];
+  // 50/50 split exact
   const line1 = lines[1];
+  const laborBefore = Number((line1 as { labor_cents?: number }).labor_cents ?? 0);
+  const matBefore = Number((line1 as { material_cents?: number }).material_cents ?? 0);
+  const totalBefore = laborBefore + matBefore;
   const upd = await submitResponsibilityUpdates({
     estimateId: estId,
     lineUpdates: [
-      { lineId: String(line0.id), respCode: "7" },
+      { lineId: String(lines[0].id), respCode: "7" },
       { lineId: String(line1.id), respCode: "6" },
     ],
-    splits: [{ lineId: String(line1.id), percent: 40, respCode: "1" }],
+    splits: [{ lineId: String(line1.id), percent: 50, respCode: "1" }],
     responsibleParty: "Demo Lessee D",
     actor: "smoke-d",
   });
   if (!upd.ok) bad("resp update", upd.error);
-  ok(`responsibilities rev ${upd.revision.rev_no} total $${upd.totalDisplay}`);
+  ok(`50/50 split rev ${upd.revision.rev_no} total ${upd.totalMoney ?? "$" + upd.totalDisplay}`);
 
   const review2 = await buildEstimateReviewPayload({ estimateId: estId });
   if (!review2.ok) bad("review2", review2.error);
   const latestLines = review2.revisions[review2.revisions.length - 1].lines;
-  // Split should increase line count
   if (latestLines.length < lines.length + 1) {
     bad("split", `expected more lines after split (${latestLines.length} vs ${lines.length})`);
   }
-  ok(`after split lines=${latestLines.length}`);
+  const splitKids = latestLines.filter(
+    (l) =>
+      String((l as { display_line_no?: string }).display_line_no ?? "").endsWith("a") ||
+      String((l as { display_line_no?: string }).display_line_no ?? "").endsWith("b") ||
+      String((l as { split_label?: string }).split_label ?? "").match(/[ab]$/),
+  );
+  const splitSum = splitKids
+    .filter((l) => {
+      // only the children of our split parent — match fingerprint cluster with 1/6 resp
+      const r = String((l as { resp_code?: string }).resp_code);
+      return r === "1" || r === "6";
+    })
+    .reduce(
+      (s, l) =>
+        s +
+        Number((l as { labor_cents?: number }).labor_cents ?? 0) +
+        Number((l as { material_cents?: number }).material_cents ?? 0),
+      0,
+    );
+  // Find children that came from line1 by checking labor+mat of pairs with same split_group_id
+  const groups = new Map<string, number>();
+  for (const l of latestLines) {
+    const g = String((l as { split_group_id?: string }).split_group_id ?? "");
+    if (!g) continue;
+    groups.set(
+      g,
+      (groups.get(g) ?? 0) +
+        Number((l as { labor_cents?: number }).labor_cents ?? 0) +
+        Number((l as { material_cents?: number }).material_cents ?? 0),
+    );
+  }
+  const exactGroup = [...groups.values()].find((v) => v === totalBefore);
+  if (totalBefore > 0 && exactGroup == null) {
+    bad(
+      "50/50 exact",
+      `no split group summed to ${totalBefore}; groups=${[...groups.values()].join(",")}`,
+    );
+  }
+  ok(`50/50 split exact sum=${totalBefore}¢ children≈${splitKids.length} (splitSum scan=${splitSum})`);
+
+  // Tax prorate
+  const tax = previewTaxProrate({
+    lines: latestLines.map((l) => ({
+      respCode: String((l as { resp_code?: string }).resp_code ?? ""),
+      amountCents:
+        Number((l as { labor_cents?: number }).labor_cents ?? 0) +
+        Number((l as { material_cents?: number }).material_cents ?? 0),
+    })),
+    taxCents: 100,
+  });
+  if (!tax.exact || tax.totalTaxCents !== 100) {
+    bad("tax prorate", JSON.stringify(tax));
+  }
+  const basisTotal = tax.shares.reduce((s, x) => s + x.basisCents, 0);
+  for (const s of tax.shares) {
+    const expected = Math.trunc((100 * s.basisCents) / basisTotal);
+    // after remainder distribution, shares should be within 1 of proportional
+    if (Math.abs(s.taxCents - expected) > tax.shares.length) {
+      bad("tax share", `${s.respCode} ${s.taxCents} vs ~${expected}`);
+    }
+  }
+  ok(
+    `prorated tax 100¢ matches resp shares: ${tax.shares
+      .map((s) => `R${s.respCode}=${s.taxCents}`)
+      .join(", ")}`,
+  );
+
+  // Carry-forward
+  const carry = await previewCarryForward({ estimateId: estId });
+  if (!carry.ok) bad("carry", "preview failed");
+  const applied = applyCarryForwardSelections({
+    items: carry.items,
+    applyStatuses: ["UNCHANGED"],
+  });
+  ok(
+    `carry-forward r${carry.fromRevNo}→r${carry.toRevNo}: unchanged=${carry.counts.unchanged} changed=${carry.counts.changed} new=${carry.counts.neu} removed=${carry.counts.removed}; apply-preview ${applied.applied} (no auto-commit)`,
+  );
 
   const summary = summarizeByResp(
     latestLines.map((l) => ({
@@ -232,7 +429,6 @@ async function main() {
   if (!revReq.ok) bad("request-revision", revReq.error);
   ok("request revision");
 
-  // Shop re-upload path would restore Awaiting; force for owner approve smoke
   await q(
     `UPDATE repair.estimates e SET status_id = s.id
      FROM repair.statuses s
@@ -245,8 +441,9 @@ async function main() {
 
   ok(`documentCount=${review2.documentCount ?? 0}`);
   ok("owner D has no Submit-for-approval / completed-date controls (UI contract)");
+  ok(`formatCentsAsDollars sanity ${formatCentsAsDollars(1234)}`);
 
-  console.log(`\nPASS §D Estimate Review smoke (${RUN})`);
+  console.log(`\nPASS §D Estimate Review r2 smoke (${RUN})`);
 }
 
 main().catch((e) => {

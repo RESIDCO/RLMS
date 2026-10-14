@@ -1,0 +1,108 @@
+code,description,rule,source,pdf_page,effective,residco_sheet_description
+1A,"Undesired Emergency, Line of Road Failure—No Cause Found (LORF-NCF) EHMS Alert",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Undesired Emergency LRF - No Cause Found
+1B,Knuckle with crack in the flag hole,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),230,2026Q1 (eff Jan 01 2026),Coupler knuckle with crack in flag hole
+1C,Failed compression test,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),552,2026Q1 (eff Jan 01 2026),Failed compression test
+1D,Vertical split rims,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),399,2026Q1 (eff Jan 01 2026),Vertical split rims
+1E,Welding other than original construction weld,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),461,2026Q1 (eff Jan 01 2026),Welding other than original construction
+1F,Reflective sheeting does not meet the minimum reflectivity levels per Rule 66,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),597,2026Q1 (eff Jan 01 2026),Reflective sheeting minimum reflectivity
+1G,Bolster with cracked or broken rim,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),449,2026Q1 (eff Jan 01 2026),Bolster with cracked or broken rim
+1H,Mate valve portion per Rule 4.B.11,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Mate valve portion per Rule 4.B.11
+1J,Coupler with broken pin protector,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),202,2026Q1 (eff Jan 01 2026),Coupler with broken pin protector
+1K,Over age air brake valve per Rule 4.A.3.a,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Over age air brake valve per Rule 4.A.3.a
+1L,Double clevis shackle with cotter pins utilized to connect two sections of hand brake chain,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),181,2026Q1 (eff Jan 01 2026),
+1M,Broken or missing non-replaceable grounding strap,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),351,2026Q1 (eff Jan 01 2026),
+1N,Worn out or broken vertical chain only,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),181,2026Q1 (eff Jan 01 2026),
+1P,Slid flat (caused by hand brake left applied),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),399,2026Q1 (eff Jan 01 2026),
+1Q,"Locking plate, end cap lubricant fitting or vented backing ring plug missing, loose, or broken",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),
+1R,Missing receiver dust cover plate,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),
+1S,RME not registered in Umler,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),694,2026Q1 (eff Jan 01 2026),
+1T,Broken or cracked weld,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),230,2026Q1 (eff Jan 01 2026),
+01,Worn out,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Worn out
+02,Broken,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Broken
+03,Missing,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Missing
+04,Defective,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Defective
+05,Bent,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Bent
+06,Bent beyond repairs,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Bent beyond repair
+07,Obsolete material,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Obsolete
+08,Wrong (not standard to car),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Wrong (not standard to car)
+09,Account repairs,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Account repairs
+10,Damaged in removal,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),131,2026Q1 (eff Jan 01 2026),Damaged in removal
+11,"Removed in good condition, account of associated repairs",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Removed in good condition account associated repairs
+12,Inoperative,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Inoperative
+13,Attention required as directed by Equipment Advisory,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Attention required per Equipment Advisory
+14,Bulged out,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),300,2026Q1 (eff Jan 01 2026),Bulged out
+15,Leaking,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Leaking
+16,Out of alignment or improper height,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),230,2026Q1 (eff Jan 01 2026),Out of alignment or improper height
+17,Out of bracket or guide (Also to be used in replacing door when not entirely off rail),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),647,2026Q1 (eff Jan 01 2026),Out of bracket or guide
+18,Loose,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),119,2026Q1 (eff Jan 01 2026),Loose
+19,Adjust clearance,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),80,2026Q1 (eff Jan 01 2026),Adjust clearance
+20,Air Brakes cut out,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Air Brakes cut out
+21,Overdate/overage,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Overdate / Overage
+22,"Date markings omitted, obliterated, illegible, incorrect or failure to scrape off and paint over previous markings",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),590,2026Q1 (eff Jan 01 2026),Date illegible
+23,Government regulatory requirement,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),202,2026Q1 (eff Jan 01 2026),Government regulatory requirement
+24,Attention required,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Attention required
+25,Owner’s request,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Owner's request
+26,Decayed or metal deterioration,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Decayed or deteriorated
+27,Initial application,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Initial application
+28,Adjustment required,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),37,2026Q1 (eff Jan 01 2026),Adjustment required
+31,Fire or heat damage per Rule 95,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Fire or heat damage per Rule 95
+32,Submerged per Rule 95,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Submerged per Rule 95
+33,Derailment damage per Rule 95,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Derailment damage per Rule 95
+34,"Unfair usage damage per Rule 95 (Other than fire, flood or derailment)",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Unfair usage per Rule 95
+35,Submerged per Rule 99,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Submerged per Rule 99
+36,"AEI tag unreadable account improperly programmed, located, or applied",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),583,2026Q1 (eff Jan 01 2026),AEI tag unreadable
+37,Required AEI fields not in agreement with Umler® or AEI Specification data format,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),583,2026Q1 (eff Jan 01 2026),AEI tag data not in agreement with Umler
+38,Door open,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),647,2026Q1 (eff Jan 01 2026),Door open
+39,AEI tag unreadable account inoperative (not associated with unfair usage),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),583,2026Q1 (eff Jan 01 2026),AEI tag inoperative
+40,Twisted,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),119,2026Q1 (eff Jan 01 2026),Twisted
+41,Cracked,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),119,2026Q1 (eff Jan 01 2026),Cracked
+42,Improperly located or applied,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),110,2026Q1 (eff Jan 01 2026),Improperly located or applied
+43,Reflective sheeting damaged or obscured (used here to pertain to FRA definitions),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),597,2026Q1 (eff Jan 01 2026),Reflective sheeting damaged or obscured
+44,Complete renewal of existing reflective sheeting,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),597,2026Q1 (eff Jan 01 2026),Reflective sheeting complete renewal
+45,Wrong size component,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),60,2026Q1 (eff Jan 01 2026),Wrong size component
+46,UCI indicates defective,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),552,2026Q1 (eff Jan 01 2026),UCI indicates defective
+47,Angle cock/end cock handle or top cap stops missing,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),80,2026Q1 (eff Jan 01 2026),Angle / end cock handle or top cap stops missing
+48,Thin rim with dynamic impact,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Thin rim with dynamic impact
+49,"Reflective sheeting lacking FRA 224 stamp, damaged, obscured, or missing, for use with Job Codes 5500 and 5502 per Rule 66.",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),597,2026Q1 (eff Jan 01 2026),Reflective sheeting lacking FRA 224 stamp
+50,Roller bearing overheated,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Roller bearing overheated
+51,Roller bearing temperature performance—per MSRP Section F S-6001,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),"Roller bearing temp. perf per MSRP, S-6001 - Sec.F"
+52,Roller bearing temperature performance composite—per MSRP Section F S-6001,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),"Roller bearing temp. perf composite per MSRP, S-6001 - Sec. F"
+54,Axle broken or visually cracked,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),406,2026Q1 (eff Jan 01 2026),Axle broken or visually cracked
+55,Axle damaged between wheel seats 1⁄8 inch or deeper,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),406,2026Q1 (eff Jan 01 2026),Axle damaged between wheel seats  1/8 in. or deeper
+56,Evidence of welding and allied processes,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Axle with evidence of welding
+59,Axle bent,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),406,2026Q1 (eff Jan 01 2026),Axle bent
+60,Thin flange,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Thin flange
+61,High impact wheel (80 kips to less than 90 kips),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),High impact wheel - level O
+62,Vertical flange,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Vertical flange
+63,Wheel tread hollow,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Wheel tread hollow
+64,High flange,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),High flange
+65,High impact wheel (90 kips or greater),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),High impact wheel - level C
+66,Cracked or broken flange,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Cracked or broken flange
+67,Wheel out-of-round,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Wheels out-of-round
+68,Cracked or broken rim,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Cracked or broken rim
+69,Thermal crack extending into the plate,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Thermal crack extending into the plate
+71,Shattered rim,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Shattered rim
+73,Thin rim,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Thin rim
+74,Thermal crack,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Thermal crack
+75,Shelled tread,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Shelled tread
+76,Built-up tread,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Built-up tread
+77,Grooved tread,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Grooved tread
+78,Slid flat (hand brake not left applied),FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Slid flat
+79,Coupler with crack behind horn,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),202,2026Q1 (eff Jan 01 2026),Coupler with crack behind horn
+80,"Scrape, dent or gouge",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),"Scrape, dent, or gouge"
+81,Wheels out-of-gage,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Wheel out of gage
+82,Coupler with cracked front face,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),202,2026Q1 (eff Jan 01 2026),Coupler with cracked front face
+83,Cracked or broken plate,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Cracked or broken wheel plate
+84,Hole in plate,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Hole in plate
+85,Loose wheel,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Loose wheel
+86,Coupler with cracked key slot,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),230,2026Q1 (eff Jan 01 2026),Coupler with cracked key slot
+87,Coupler with cracked pin protector,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),202,2026Q1 (eff Jan 01 2026),Coupler with cracked pin protector
+88,Coupler with crack behind pulling lug,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),202,2026Q1 (eff Jan 01 2026),Coupler with crack behind pulling lug
+89,Subsurface defect,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),400,2026Q1 (eff Jan 01 2026),Subsurface defect
+91,"Acoustic bearing detector Level 1, non-verified",FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),"Acoustic bearing detector Level 1, non-verified"
+92,Cap screw loose or missing,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Loose or missing cap screw
+93,Seals loose or cocked out of position,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Seal loose or cocked out of position
+95,Roller bearing fused due to overheating,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Roller bearing fused due to overheating
+96,Acoustic bearing detector Level 1,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Acoustic bearing detector Level 1
+97,Loose backing ring,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Loose backing ring
+99,Damaged seals,FM Rule 83.17,AAR Field Manual 2026 (Rev 2026-01-27),340,2026Q1 (eff Jan 01 2026),Damaged Seals

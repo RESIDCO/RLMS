@@ -2,8 +2,8 @@
  * Shared Data File header + RS line grid + totals + attachments for
  * internal estimate review and lessee estimate (read-only mode).
  */
-import { useMemo, useState } from "react";
-import { AlertCircle, FileCode2, Pencil } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, FileCode2, Flag, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,6 +15,7 @@ export type HeaderFieldDef = { key: string; label: string; group: string };
 export type EstimateLine = {
   id?: string;
   line_no: number;
+  display_line_no?: string;
   aar_job_code: string | null;
   qualifier?: string | null;
   why_made?: string | null;
@@ -37,6 +38,16 @@ export type EstimateLine = {
   labor_display?: string;
   material_display?: string;
   amount_display?: string;
+  labor_money?: string;
+  material_money?: string;
+  amount_money?: string;
+  labor_cents?: number;
+  material_cents?: number;
+  total_cents?: number;
+  labor_cents_label?: string;
+  material_cents_label?: string;
+  amount_cents_label?: string;
+  component_id_flag?: boolean;
   has_comment?: boolean;
 };
 
@@ -63,10 +74,85 @@ export type DocRow = {
   deleted_at?: string | null;
 };
 
-function money(n: number | string | undefined, display?: string) {
-  if (display) return display;
-  const cents = Math.round(Number(n ?? 0) * 100);
-  return (cents / 100).toFixed(2);
+function moneyCell(opts: {
+  dollars?: number | string;
+  display?: string;
+  money?: string;
+  cents?: number;
+  centsLabel?: string;
+}) {
+  const dollars =
+    opts.money ??
+    (opts.display
+      ? opts.display.startsWith("$")
+        ? opts.display
+        : `$${opts.display}`
+      : `$${(Math.round(Number(opts.dollars ?? 0) * 100) / 100).toFixed(2)}`);
+  const centsLabel =
+    opts.centsLabel ??
+    (opts.cents != null ? String(opts.cents) : undefined);
+  return (
+    <div className="leading-tight">
+      <div className="tabular-nums">{dollars}</div>
+      {centsLabel != null && centsLabel !== "" ? (
+        <div className="text-[9px] text-muted-foreground tabular-nums">{centsLabel}¢</div>
+      ) : null}
+    </div>
+  );
+}
+
+function CodeHover({
+  kind,
+  code,
+  qualifier,
+  children,
+}: {
+  kind: string;
+  code?: string | null;
+  qualifier?: string | null;
+  children: React.ReactNode;
+}) {
+  const [tip, setTip] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open || !code) return;
+    let cancelled = false;
+    const qs = new URLSearchParams({ kind, code });
+    if (qualifier) qs.set("qualifier", qualifier);
+    void apiRequest("GET", `/api/repair/ref/lookup?${qs}`)
+      .then(async (res) => {
+        const data = await res.json();
+        if (cancelled) return;
+        const cat = [data.category, data.sub_category].filter(Boolean).join(" / ");
+        setTip(
+          data.found
+            ? `${data.description}${cat ? ` · ${cat}` : ""}`
+            : data.description || "Not in reference table",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTip("Not in reference table");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, kind, code, qualifier]);
+  if (!code) return <>{children}</>;
+  return (
+    <span
+      className="relative cursor-help border-b border-dotted border-muted-foreground/50"
+      title={tip ?? "Loading…"}
+      onMouseEnter={() => setOpen(true)}
+      onFocus={() => setOpen(true)}
+    >
+      {children}
+      {open && tip ? (
+        <span className="pointer-events-none absolute z-20 left-0 top-full mt-1 max-w-[16rem] rounded border border-border bg-popover px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-normal">
+          {tip}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 type Props = {
@@ -131,13 +217,23 @@ export function EstimateDataFile(props: Props) {
     let labor = 0;
     let material = 0;
     for (const l of lines) {
-      labor += Math.round(Number(l.labor ?? 0) * 100);
-      material += Math.round(Number(l.material ?? 0) * 100);
+      labor +=
+        l.labor_cents != null
+          ? Math.trunc(Number(l.labor_cents))
+          : Math.round(Number(l.labor ?? 0) * 100);
+      material +=
+        l.material_cents != null
+          ? Math.trunc(Number(l.material_cents))
+          : Math.round(Number(l.material ?? 0) * 100);
     }
+    const total = labor + material;
     return {
-      labor: (labor / 100).toFixed(2),
-      material: (material / 100).toFixed(2),
-      total: ((labor + material) / 100).toFixed(2),
+      laborCents: labor,
+      materialCents: material,
+      totalCents: total,
+      labor: `$${(labor / 100).toFixed(2)}`,
+      material: `$${(material / 100).toFixed(2)}`,
+      total: `$${(total / 100).toFixed(2)}`,
     };
   }, [lines]);
 
@@ -346,31 +442,92 @@ export function EstimateDataFile(props: Props) {
                         <AlertCircle className="h-3 w-3" />
                       </button>
                     </td>
-                    <td className="p-1.5 tabular-nums">{l.line_no}</td>
-                    <td className="p-1.5">{l.location_on_car ?? ""}</td>
+                    <td className="p-1.5 tabular-nums">
+                      {l.display_line_no ?? l.line_no}
+                    </td>
+                    <td className="p-1.5">
+                      <CodeHover kind="location" code={l.location_on_car}>
+                        {l.location_on_car ?? ""}
+                      </CodeHover>
+                    </td>
                     <td className="p-1.5 tabular-nums">{l.quantity ?? ""}</td>
-                    <td className="p-1.5">{l.condition_code ?? ""}</td>
-                    <td className="p-1.5 font-mono">{l.aar_job_code ?? ""}</td>
-                    <td className="p-1.5">{l.qualifier ?? ""}</td>
+                    <td className="p-1.5">
+                      <CodeHover kind="condition" code={l.condition_code}>
+                        {l.condition_code ?? ""}
+                      </CodeHover>
+                    </td>
+                    <td className="p-1.5 font-mono">
+                      <CodeHover kind="job" code={l.aar_job_code} qualifier={l.qualifier}>
+                        {l.aar_job_code ?? ""}
+                      </CodeHover>
+                    </td>
+                    <td className="p-1.5">
+                      <CodeHover kind="qualifier" code={l.qualifier}>
+                        {l.qualifier ?? ""}
+                      </CodeHover>
+                    </td>
                     <td className="p-1.5 uppercase max-w-[14rem] truncate" title={l.description ?? ""}>
                       {l.description ||
                         [l.repair_category, l.sub_category].filter(Boolean).join(" / ") ||
                         ""}
                     </td>
-                    <td className="p-1.5">{l.why_made ?? ""}</td>
-                    <td className="p-1.5 font-mono">{l.removed_job_code ?? ""}</td>
-                    <td className="p-1.5">{l.removed_qualifier ?? ""}</td>
-                    <td className="p-1.5 font-semibold">{l.resp_code ?? ""}</td>
-                    <td className="p-1.5 text-right tabular-nums">
-                      {money(l.labor, l.labor_display)}
+                    <td className="p-1.5">
+                      <CodeHover kind="why_made" code={l.why_made}>
+                        {l.why_made ?? ""}
+                      </CodeHover>
                     </td>
-                    <td className="p-1.5 text-right tabular-nums">
-                      {money(l.material, l.material_display)}
+                    <td className="p-1.5 font-mono">
+                      <CodeHover kind="job" code={l.removed_job_code}>
+                        {l.removed_job_code ?? ""}
+                      </CodeHover>
                     </td>
-                    <td className="p-1.5 text-right tabular-nums font-medium">
-                      {money(l.total, l.amount_display)}
+                    <td className="p-1.5">
+                      <CodeHover kind="qualifier" code={l.removed_qualifier}>
+                        {l.removed_qualifier ?? ""}
+                      </CodeHover>
                     </td>
-                    <td className="p-1.5 text-[10px]">{l.aar_component_id ?? ""}</td>
+                    <td className="p-1.5 font-semibold">
+                      <CodeHover kind="responsibility" code={l.resp_code}>
+                        {l.resp_code ?? ""}
+                      </CodeHover>
+                    </td>
+                    <td className="p-1.5 text-right">
+                      {moneyCell({
+                        dollars: l.labor,
+                        display: l.labor_display,
+                        money: l.labor_money,
+                        cents: l.labor_cents,
+                        centsLabel: l.labor_cents_label,
+                      })}
+                    </td>
+                    <td className="p-1.5 text-right">
+                      {moneyCell({
+                        dollars: l.material,
+                        display: l.material_display,
+                        money: l.material_money,
+                        cents: l.material_cents,
+                        centsLabel: l.material_cents_label,
+                      })}
+                    </td>
+                    <td className="p-1.5 text-right font-medium">
+                      {moneyCell({
+                        dollars: l.total,
+                        display: l.amount_display,
+                        money: l.amount_money,
+                        cents: l.total_cents,
+                        centsLabel: l.amount_cents_label,
+                      })}
+                    </td>
+                    <td className="p-1.5 text-[10px]">
+                      <span className="inline-flex items-center gap-0.5">
+                        {l.component_id_flag ? (
+                          <span title="Component Id required" className="inline-flex">
+                            <Flag className="h-3 w-3 text-red-600" />
+                          </span>
+                        ) : null}
+                        {l.aar_component_id ?? ""}
+                      </span>
+                    </td>
                     <td className="p-1.5">
                       {l.raw_line ? (
                         <button
@@ -428,9 +585,18 @@ export function EstimateDataFile(props: Props) {
                 <td className="p-1.5" colSpan={12}>
                   Totals
                 </td>
-                <td className="p-1.5 text-right tabular-nums">${totals.labor}</td>
-                <td className="p-1.5 text-right tabular-nums">${totals.material}</td>
-                <td className="p-1.5 text-right tabular-nums">${totals.total}</td>
+                <td className="p-1.5 text-right">
+                  <div className="tabular-nums">{totals.labor}</div>
+                  <div className="text-[9px] opacity-80">{totals.laborCents}¢</div>
+                </td>
+                <td className="p-1.5 text-right">
+                  <div className="tabular-nums">{totals.material}</div>
+                  <div className="text-[9px] opacity-80">{totals.materialCents}¢</div>
+                </td>
+                <td className="p-1.5 text-right">
+                  <div className="tabular-nums">{totals.total}</div>
+                  <div className="text-[9px] opacity-80">{totals.totalCents}¢</div>
+                </td>
                 <td colSpan={readOnly && onDecideLine ? 4 : 3} />
               </tr>
             </tfoot>

@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§D Estimate Review (owner)** | Apply `rlms-phase1-owner-ui-d-estimate-review.bundle`. Requires **`468a9db`**. Lands tip in bundle README. |
+| **§D Estimate Review r2** | Apply `rlms-phase1-owner-ui-d-estimate-review-r2.bundle`. Requires **`f853e48`**. Lands tip in bundle README. Licensed AAR CSVs in `modules/repair/ref-data/` + `npm run repair:import-ref-data`. |
+| **§D Estimate Review (initial)** | Prior: `rlms-phase1-owner-ui-d-estimate-review.bundle` → **`f853e48`**. |
 | **§C Template fields + attach carry** | Prior / signed off: `rlms-phase1-owner-ui-c-template-fields.bundle` → **`468a9db`**. |
 | **§C Copy BO template** | Prior: `rlms-phase1-owner-ui-c-copy-template.bundle` → **`8a9378e`**. |
 | **§C Bad Orders r2** | Prior: `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` → **`1b6e660`**. |
@@ -22,7 +23,7 @@
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`468a9db`**, apply the §D **estimate-review** bundle next.
+If PC is on **`f853e48`**, apply the §D **estimate-review-r2** bundle next.
 
 ---
 
@@ -33,7 +34,7 @@ If PC is on **`468a9db`**, apply the §D **estimate-review** bundle next.
 | **1** | Estimates History `/#/repair` (spec §A) | Done |
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
 | **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Signed off** (`468a9db`) |
-| **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **This tip** |
+| **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r2 tip** (awaiting Bruce sign-off) |
 | 5+ | Documents polish / Lessee, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md)  
@@ -50,7 +51,8 @@ If PC is on **`468a9db`**, apply the §D **estimate-review** bundle next.
 | N+11 | `rlms-phase1-owner-ui-c-bad-orders-r2.bundle` | `d4a2bfb` | → **`1b6e660`** |
 | N+12 | `rlms-phase1-owner-ui-c-copy-template.bundle` | `1b6e660` | → **`8a9378e`** |
 | N+13 | `rlms-phase1-owner-ui-c-template-fields.bundle` | `8a9378e` | → **`468a9db`** |
-| N+14 | **`rlms-phase1-owner-ui-d-estimate-review.bundle`** | **`468a9db`** | → **(see README)** |
+| N+14 | `rlms-phase1-owner-ui-d-estimate-review.bundle` | `468a9db` | → **`f853e48`** |
+| N+15 | **`rlms-phase1-owner-ui-d-estimate-review-r2.bundle`** | **`f853e48`** | → **(see README)** |
 
 ---
 
@@ -77,13 +79,13 @@ If PC is on **`468a9db`**, apply the §D **estimate-review** bundle next.
 
 ---
 
-## Apply §D Estimate Review (on tip `468a9db`)
+## Apply §D Estimate Review r2 (on tip `f853e48`)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect 468a9db…
-git bundle verify PATH\TO\rlms-phase1-owner-ui-d-estimate-review.bundle
-git pull PATH\TO\rlms-phase1-owner-ui-d-estimate-review.bundle HEAD
+git rev-parse HEAD   # expect f853e48…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-d-estimate-review-r2.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-d-estimate-review-r2.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
@@ -95,16 +97,20 @@ $env:REPAIR_LOCAL_DB = "1"
 $env:REPAIR_DEV_BYPASS_AUTH = "1"
 npm install
 npm run repair:migrate:local
+npm run repair:import-ref-data
 npm run repair:smoke-estimate-review
 npm run repair:smoke-bad-orders
 npm run repair:smoke-shop-entity
 npm run repair:dev:local
 # http://127.0.0.1:5000/#/repair
 # open an Awaiting Approval estimate → Estimate Review
-# Update Responsibilities · Review & Compare · N Document(s) found (new window)
+# Edit header (no car# overlap) · $ + cents · code hover · Update Responsibilities splits/carry-forward
+# Documents: shop cannot void; View all gallery
 ```
 
-Expect: compact RS header; line grid with Loc/Qnty/AJOB/…/PM; owner Approve / Request Revision / Update Responsibilities / Rollback / Export; **no** Submit for approval; **no** completed/outbound date entry; responsibilities codes 1/2/4/5/6/7/8/9; compare any two revisions; documents viewer new window.
+Expect: r2 header pencils + Edit header; money `$`+cents; Component Id flags; code hover from licensed ref tables (855/639/107/2170); 50/50 split exact; tax prorate; carry-forward preview (never auto-commit); shop attachment delete **403**.
+
+**Licensed AAR:** files live under `modules/repair/ref-data/` (private — never public-serve). If CSVs missing, importer soft-OK; place Bruce’s pack and re-run `npm run repair:import-ref-data`.
 
 ---
 

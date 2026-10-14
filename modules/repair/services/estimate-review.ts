@@ -32,6 +32,8 @@ import {
   centsToDollars,
   dollarsToCents,
   formatCentsAsDollars,
+  formatCentsAsMoney,
+  formatMoneyParts,
   lineLaborCents,
   lineMaterialCents,
   lineTotalCents,
@@ -42,6 +44,14 @@ import { formatShopLabel } from "./shops";
 import { DATA_FILE_HEADER_FIELDS, listHeaderEdits } from "./header-edits";
 import { getCorrectionEditorPayload } from "./gap-lifecycle-06";
 import { writeAudit } from "./audit";
+import {
+  collapseUnsplit,
+  expandLinesWithSplits,
+  lineFingerprintLite,
+  previewTaxProrate,
+  type SplitSpec,
+} from "./responsibility-split";
+import { validateComponentIds } from "./component-id-rules";
 
 /** Owner-settable codes on Update Responsibilities (shot 05). */
 export const OWNER_RESP_CODES = ["1", "2", "4", "5", "6", "7", "8", "9"] as const;
@@ -82,12 +92,21 @@ export type EnrichedLine = Record<string, unknown> & {
   labor_display: string;
   material_display: string;
   amount_display: string;
+  labor_money: string;
+  material_money: string;
+  amount_money: string;
+  labor_cents_label: string;
+  material_cents_label: string;
+  amount_cents_label: string;
+  display_line_no: string;
+  component_id_flag: boolean;
   has_comment: boolean;
 };
 
 export function enrichLineFromRaw(
   line: Record<string, unknown>,
   commentLineIds?: Set<string>,
+  componentIdFlagged?: Set<number>,
 ): EnrichedLine {
   const raw = line.raw_line != null ? String(line.raw_line) : null;
   const pick = (col: keyof typeof RAW_SLICES, stored?: unknown) => {
@@ -110,10 +129,21 @@ export function enrichLineFromRaw(
   });
   const totalCents = laborCents + materialCents;
   const id = String(line.id ?? "");
+  const lineNo = Number(line.line_no);
+  const laborParts = formatMoneyParts(laborCents);
+  const matParts = formatMoneyParts(materialCents);
+  const amtParts = formatMoneyParts(totalCents);
+  const displayLineNo =
+    line.display_line_no != null
+      ? String(line.display_line_no)
+      : line.split_label != null
+        ? String(line.split_label)
+        : String(lineNo);
   return {
     ...line,
     id,
-    line_no: Number(line.line_no),
+    line_no: lineNo,
+    display_line_no: displayLineNo,
     location_on_car: pick("location_on_car", line.location_on_car),
     quantity: pick("quantity", line.quantity),
     removed_job_code: pick("removed_job_code", line.removed_job_code),
@@ -126,6 +156,13 @@ export function enrichLineFromRaw(
     labor_display: formatCentsAsDollars(laborCents),
     material_display: formatCentsAsDollars(materialCents),
     amount_display: formatCentsAsDollars(totalCents),
+    labor_money: laborParts.dollars,
+    material_money: matParts.dollars,
+    amount_money: amtParts.dollars,
+    labor_cents_label: laborParts.centsLabel,
+    material_cents_label: matParts.centsLabel,
+    amount_cents_label: amtParts.centsLabel,
+    component_id_flag: Boolean(componentIdFlagged?.has(lineNo)),
     has_comment: id ? Boolean(commentLineIds?.has(id)) : false,
   };
 }
@@ -301,14 +338,29 @@ export async function buildEstimateReviewPayload(opts: {
 
   const withLines = [];
   let lastContentLines: Record<string, unknown>[] = [];
+  let componentIdErrors: Awaited<ReturnType<typeof validateComponentIds>> | null =
+    null;
   for (const rev of revisions) {
     const rawLines = await getRevisionLines(String(rev.id));
     const lines = rawLines.length
       ? (rawLines as Record<string, unknown>[])
       : lastContentLines;
     if (rawLines.length) lastContentLines = rawLines as Record<string, unknown>[];
+    const cidCheck = await validateComponentIds({
+      lines: lines.map((l) => ({
+        id: String(l.id ?? ""),
+        line_no: Number(l.line_no),
+        aar_job_code: l.aar_job_code as string | null,
+        qualifier: l.qualifier as string | null,
+        aar_component_id: l.aar_component_id as string | null,
+      })),
+      stage: "REVIEW",
+      tenantId,
+    });
+    if (rawLines.length) componentIdErrors = cidCheck;
+    const flagged = new Set(cidCheck.flaggedLineNos);
     const enriched = lines.map((l) =>
-      enrichLineFromRaw(l, commentLineIds),
+      enrichLineFromRaw(l, commentLineIds, flagged),
     );
     const byResp: Record<string, typeof enriched> = {};
     for (const line of enriched) {
@@ -330,6 +382,9 @@ export async function buildEstimateReviewPayload(opts: {
         labor_display: formatCentsAsDollars(totals.laborCents),
         material_display: formatCentsAsDollars(totals.materialCents),
         total_display: formatCentsAsDollars(totals.totalCents),
+        labor_money: formatCentsAsMoney(totals.laborCents),
+        material_money: formatCentsAsMoney(totals.materialCents),
+        total_money: formatCentsAsMoney(totals.totalCents),
       },
       lines: enriched,
       byResp,
@@ -417,6 +472,8 @@ export async function buildEstimateReviewPayload(opts: {
         String(d.lifecycle_status ?? "ACTIVE").toUpperCase() !== "VOIDED",
     ).length,
     latestTotals: latest?.totals ?? null,
+    componentIdErrors: componentIdErrors?.errors ?? [],
+    componentIdFlagged: componentIdErrors?.flaggedLineNos ?? [],
   };
 }
 
@@ -485,13 +542,14 @@ export function summarizeByResp(
 
 /**
  * Apply pending R(New) + optional splits → append-only revision.
- * Split: percent of each selected line becomes a new line with newResp;
- * remainder keeps current resp (integer cents, remainder on second line).
+ * Split by % or fixed $ → child lines (1a/1b) linked; remainder cents on owner/original.
+ * Unsplit via unsplitGroupIds collapses prior split groups before approval.
  */
 export async function submitResponsibilityUpdates(opts: {
   estimateId: string;
   lineUpdates: Array<{ lineId: string; respCode: string }>;
-  splits?: Array<{ lineId: string; percent: number; respCode: string }>;
+  splits?: SplitSpec[];
+  unsplitGroupIds?: string[];
   responsibleParty?: string;
   actor: string;
   tenantId?: string;
@@ -508,14 +566,59 @@ export async function submitResponsibilityUpdates(opts: {
   if (est.locked) {
     return { ok: false as const, status: 409, error: "Estimate locked" };
   }
+  // Unsplit only before approval / while still Awaiting or Revision Requested / Adjustment
+  const statusCode = String(est.status_code);
+  if (
+    opts.unsplitGroupIds?.length &&
+    !["AWAITING_APPROVAL", "REVISION_REQUESTED", "ADJUSTMENT_FOR_APPROVAL", "QUEUED"].includes(
+      statusCode,
+    )
+  ) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Unsplit only allowed before approval",
+    };
+  }
 
   const content = await getContentLinesForEstimate(opts.estimateId, tenantId);
-  const lines = content.lines;
+  let lines = content.lines;
   if (!lines.length) return { ok: false as const, status: 404, error: "No revision lines" };
   const updates = new Map(opts.lineUpdates.map((u) => [u.lineId, u.respCode]));
-  const splitMap = new Map(
-    (opts.splits ?? []).map((s) => [s.lineId, s] as const),
-  );
+
+  const laborOf = (line: Record<string, unknown>) =>
+    lineLaborCents({
+      labor: line.labor as number,
+      laborCents: line.labor_cents != null ? Number(line.labor_cents) : null,
+    });
+  const matOf = (line: Record<string, unknown>) =>
+    lineMaterialCents({
+      material: line.material as number,
+      materialCents: line.material_cents != null ? Number(line.material_cents) : null,
+    });
+
+  // Optional unsplit first (collapse groups into working set)
+  if (opts.unsplitGroupIds?.length) {
+    const collapsed = collapseUnsplit(lines, opts.unsplitGroupIds, laborOf, matOf);
+    lines = collapsed.map((o, idx) => ({
+      ...o.src,
+      id: `unsplit-${idx}`,
+      line_no: idx + 1,
+      resp_code: o.resp,
+      labor: centsToDollars(o.laborC),
+      material: centsToDollars(o.matC),
+      labor_cents: o.laborC,
+      material_cents: o.matC,
+      parent_line_no: o.parentLineNo,
+      split_label: o.splitLabel,
+      split_group_id: o.splitGroupId,
+      split_kind: o.splitKind,
+      display_line_no: o.displayLineNo,
+      source_fingerprint: o.sourceFingerprint,
+      prior_resp_code: o.priorRespCode,
+      is_tax_line: o.isTaxLine,
+    }));
+  }
 
   const { getStatusByCode } = await import("./status-machine");
   const { withTransaction } = await import("../db");
@@ -525,45 +628,25 @@ export async function submitResponsibilityUpdates(opts: {
   const awaitStatus = await getStatusByCode(tenantId, "ESTIMATE", "AWAITING_APPROVAL");
   if (!awaitStatus) return { ok: false as const, status: 500, error: "status missing" };
 
-  // Precompute outgoing lines (append-only revisions cannot be UPDATEd after insert).
-  type OutLine = { src: Record<string, unknown>; resp: string; laborC: number; matC: number };
-  const outgoing: OutLine[] = [];
-  for (const line of lines) {
-    const id = String(line.id);
-    const laborC = lineLaborCents({
-      labor: line.labor as number,
-      laborCents: line.labor_cents != null ? Number(line.labor_cents) : null,
-    });
-    const matC = lineMaterialCents({
-      material: line.material as number,
-      materialCents: line.material_cents != null ? Number(line.material_cents) : null,
-    });
-    const split = splitMap.get(id);
-    const newResp = updates.get(id);
-    if (split && split.percent > 0 && split.percent < 100) {
-      const pct = Math.min(99, Math.max(1, Math.round(split.percent)));
-      const laborA = Math.trunc((laborC * pct) / 100);
-      const matA = Math.trunc((matC * pct) / 100);
-      const respA = (split.respCode || newResp || String(line.resp_code ?? "")).trim();
-      const respB = String(line.resp_code ?? "");
-      outgoing.push({ src: line, resp: respA, laborC: laborA, matC: matA });
-      outgoing.push({
-        src: line,
-        resp: respB,
-        laborC: laborC - laborA,
-        matC: matC - matA,
-      });
-    } else {
-      outgoing.push({
-        src: line,
-        resp: (newResp ?? String(line.resp_code ?? "")).trim(),
-        laborC,
-        matC,
-      });
-    }
-  }
+  const outgoing = expandLinesWithSplits({
+    lines,
+    lineUpdates: updates,
+    splits: opts.splits ?? [],
+    laborCentsOf: laborOf,
+    materialCentsOf: matOf,
+  });
+
   const laborCentsSum = outgoing.reduce((s, o) => s + o.laborC, 0);
   const materialCentsSum = outgoing.reduce((s, o) => s + o.matC, 0);
+  const inLabor = lines.reduce((s, l) => s + laborOf(l), 0);
+  const inMat = lines.reduce((s, l) => s + matOf(l), 0);
+  if (laborCentsSum !== inLabor || materialCentsSum !== inMat) {
+    return {
+      ok: false as const,
+      status: 500,
+      error: `Split sum mismatch (labor ${laborCentsSum}≠${inLabor}, mat ${materialCentsSum}≠${inMat})`,
+    };
+  }
   const labor = centsToDollars(laborCentsSum);
   const material = centsToDollars(materialCentsSum);
   const total = centsToDollars(laborCentsSum + materialCentsSum);
@@ -572,6 +655,9 @@ export async function submitResponsibilityUpdates(opts: {
     const commentParts = [
       `Updated ${opts.lineUpdates.length} line(s)`,
       opts.splits?.length ? `split ${opts.splits.length}` : null,
+      opts.unsplitGroupIds?.length
+        ? `unsplit ${opts.unsplitGroupIds.length}`
+        : null,
       opts.responsibleParty ? `party=${opts.responsibleParty}` : null,
     ].filter(Boolean);
     const rev = await client.query(
@@ -605,9 +691,11 @@ export async function submitResponsibilityUpdates(opts: {
             repair_category, sub_category, labor_cents, material_cents,
             aar_component_id, ddct_incident_id, raw_line, created_by,
             location_on_car, quantity, removed_job_code, removed_qualifier,
-            description, machine_priceable)
+            description, machine_priceable,
+            parent_line_no, split_label, split_group_id, split_kind,
+            source_fingerprint, prior_resp_code, is_tax_line, display_line_no)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-                 $20,$21,$22,$23,$24,$25)`,
+                 $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)`,
         [
           tenantId,
           rev.rows[0].id,
@@ -634,6 +722,14 @@ export async function submitResponsibilityUpdates(opts: {
           src.removed_qualifier ?? null,
           src.description ?? null,
           src.machine_priceable ?? null,
+          o.parentLineNo,
+          o.splitLabel,
+          o.splitGroupId,
+          o.splitKind,
+          o.sourceFingerprint || lineFingerprintLite(src),
+          o.priorRespCode,
+          o.isTaxLine,
+          o.displayLineNo,
         ],
       );
     }
@@ -662,6 +758,7 @@ export async function submitResponsibilityUpdates(opts: {
       revNo,
       lineUpdates: opts.lineUpdates.length,
       splits: opts.splits?.length ?? 0,
+      unsplitGroups: opts.unsplitGroupIds?.length ?? 0,
       responsibleParty: opts.responsibleParty ?? null,
       totalCents: laborCentsSum + materialCentsSum,
     },
@@ -675,7 +772,9 @@ export async function submitResponsibilityUpdates(opts: {
     total: packed.total,
     totalCents: laborCentsSum + materialCentsSum,
     totalDisplay: formatCentsAsDollars(laborCentsSum + materialCentsSum),
+    totalMoney: formatCentsAsMoney(laborCentsSum + materialCentsSum),
   };
 }
 
-export { dollarsToCents, formatCentsAsDollars, centsToDollars };
+export { previewTaxProrate };
+export { dollarsToCents, formatCentsAsDollars, formatCentsAsMoney, centsToDollars };

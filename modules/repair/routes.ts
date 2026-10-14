@@ -117,7 +117,23 @@ import {
   restoreComment,
   cropImportPhase2Stub,
   getCorrectionEditorPayload,
+  recategorizeDocument,
+  canManageAttachments,
 } from "./services/gap-lifecycle-06";
+import { lookupRefCode, getRefDataCounts } from "./services/ref-lookup";
+import {
+  listComponentIdRules,
+  upsertComponentIdRule,
+  softDeleteComponentIdRule,
+  validateComponentIds,
+} from "./services/component-id-rules";
+import {
+  previewCarryForward,
+  applyCarryForwardSelections,
+  auditCarryForwardPreview,
+} from "./services/carry-forward";
+import { previewTaxProrate } from "./services/responsibility-split";
+import { importRefData } from "./dev/import-ref-data";
 import {
   listAttachmentCategories,
   listEventDocuments,
@@ -160,6 +176,7 @@ import {
   submitResponsibilityUpdates,
   summarizeByResp,
 } from "./services/estimate-review";
+// previewTaxProrate imported above from responsibility-split
 import {
   sendLesseeApprovalRequest,
   approveViaLesseeLink,
@@ -2945,19 +2962,39 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       : [];
     const splits = Array.isArray(req.body?.splits)
       ? req.body.splits.map(
-          (s: { lineId?: string; percent?: number; respCode?: string }) => ({
+          (s: {
+            lineId?: string;
+            percent?: number;
+            fixedCents?: number;
+            fixedDollars?: number | string;
+            respCode?: string;
+            remainderRespCode?: string;
+          }) => ({
             lineId: String(s.lineId ?? ""),
-            percent: Number(s.percent ?? 0),
+            percent: s.percent != null ? Number(s.percent) : undefined,
+            fixedCents: s.fixedCents != null ? Number(s.fixedCents) : undefined,
+            fixedDollars: s.fixedDollars,
             respCode: String(s.respCode ?? ""),
+            remainderRespCode: s.remainderRespCode
+              ? String(s.remainderRespCode)
+              : undefined,
           }),
         )
       : [];
+    const unsplitGroupIds = Array.isArray(req.body?.unsplitGroupIds)
+      ? req.body.unsplitGroupIds.map(String)
+      : [];
     // Prefer §D submit path (splits + cents); fall back to legacy updater when no splits.
-    if (splits.length > 0 || req.body?.useOwnerUiD === true) {
+    if (
+      splits.length > 0 ||
+      unsplitGroupIds.length > 0 ||
+      req.body?.useOwnerUiD === true
+    ) {
       const result = await submitResponsibilityUpdates({
         estimateId: String(req.params.id),
         lineUpdates,
         splits,
+        unsplitGroupIds,
         responsibleParty: req.body?.responsibleParty
           ? String(req.body.responsibleParty)
           : undefined,
@@ -3132,10 +3169,207 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const result = await softDeleteDocument({
       documentId: String(req.params.id),
       actor: actorFrom(req),
+      actorRole: String(req.body?.actorRole ?? "reviewer"),
       reason: String(req.body?.reason ?? ""),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
+  });
+
+  app.post("/api/repair/documents/:id/recategorize", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await recategorizeDocument({
+      documentId: String(req.params.id),
+      categoryCode: String(req.body?.categoryCode ?? req.body?.category ?? ""),
+      comment: req.body?.comment ? String(req.body.comment) : undefined,
+      actor: actorFrom(req),
+      actorRole: String(req.body?.actorRole ?? "reviewer"),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** Shop link must never void/recategorize — enforce even if client calls authed path with shop role. */
+  app.post("/api/repair/e/:token/documents/:id/soft-delete", async (_req, res) => {
+    return res.status(403).json({
+      error: "Shop cannot delete, void, or recategorize attachments (add only)",
+    });
+  });
+
+  app.get("/api/repair/ref/lookup", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const kind = String(req.query.kind ?? "job") as
+      | "job"
+      | "qualifier"
+      | "why_made"
+      | "location"
+      | "condition"
+      | "responsibility"
+      | "car_part"
+      | "category";
+    const hit = await lookupRefCode({
+      kind,
+      code: String(req.query.code ?? ""),
+      qualifier: req.query.qualifier ? String(req.query.qualifier) : null,
+    });
+    return res.json(hit);
+  });
+
+  app.get("/api/repair/ref/counts", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ counts: await getRefDataCounts() });
+  });
+
+  app.post("/api/repair/ref-data/import", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await importRefData({
+      actor: actorFrom(req),
+      dir: req.body?.dir ? String(req.body.dir) : undefined,
+    });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/component-id-rules", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ rules: await listComponentIdRules() });
+  });
+
+  app.post("/api/repair/component-id-rules", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await upsertComponentIdRule({
+      id: req.body?.id ? String(req.body.id) : undefined,
+      jobCode: req.body?.jobCode != null ? String(req.body.jobCode) : null,
+      qualifier: req.body?.qualifier != null ? String(req.body.qualifier) : null,
+      jobCodePrefix:
+        req.body?.jobCodePrefix != null ? String(req.body.jobCodePrefix) : null,
+      label: req.body?.label != null ? String(req.body.label) : null,
+      requireOn: req.body?.requireOn ? String(req.body.requireOn) : undefined,
+      active: req.body?.active != null ? Boolean(req.body.active) : undefined,
+      notes: req.body?.notes != null ? String(req.body.notes) : null,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/component-id-rules/:id/soft-delete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await softDeleteComponentIdRule({
+      id: String(req.params.id),
+      actor: actorFrom(req),
+      reason: String(req.body?.reason ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/estimates/:id/validate-component-ids", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const review = await buildEstimateReviewPayload({
+      estimateId: String(req.params.id),
+    });
+    if (!review.ok) return res.status(review.status).json({ error: review.error });
+    const lines =
+      review.revisions[review.revisions.length - 1]?.lines.map((l) => ({
+        id: String(l.id ?? ""),
+        line_no: Number(l.line_no),
+        aar_job_code: (l.aar_job_code as string) ?? null,
+        qualifier: (l.qualifier as string) ?? null,
+        aar_component_id: (l.aar_component_id as string) ?? null,
+      })) ?? [];
+    const stage = String(req.body?.stage ?? "FINAL").toUpperCase() as
+      | "FINAL"
+      | "INVOICE"
+      | "REVIEW";
+    return res.json(await validateComponentIds({ lines, stage }));
+  });
+
+  app.get("/api/repair/estimates/:id/carry-forward", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const fromQ = Number(req.query.fromRev);
+    const preview = await previewCarryForward({
+      estimateId: String(req.params.id),
+      fromRevNo: Number.isFinite(fromQ) ? fromQ : undefined,
+    });
+    await auditCarryForwardPreview({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      preview,
+    });
+    return res.json(preview);
+  });
+
+  app.post("/api/repair/estimates/:id/carry-forward/apply-preview", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    // Never auto-commit — returns lineUpdates for the client to confirm via update-responsibility
+    const preview = await previewCarryForward({
+      estimateId: String(req.params.id),
+      fromRevNo: req.body?.fromRevNo != null ? Number(req.body.fromRevNo) : undefined,
+    });
+    const applied = applyCarryForwardSelections({
+      items: preview.items,
+      applyStatuses: Array.isArray(req.body?.applyStatuses)
+        ? req.body.applyStatuses
+        : undefined,
+    });
+    await auditCarryForwardPreview({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      preview,
+      applied: applied.applied,
+    });
+    return res.json({
+      ...preview,
+      lineUpdates: applied.lineUpdates,
+      applied: applied.applied,
+      autoCommit: false,
+    });
+  });
+
+  app.post("/api/repair/estimates/:id/tax-prorate-preview", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    const taxCents = Number(req.body?.taxCents ?? 0);
+    return res.json(
+      previewTaxProrate({
+        lines: lines.map(
+          (l: {
+            respCode?: string;
+            amountCents?: number;
+            isTaxLine?: boolean;
+          }) => ({
+            respCode: String(l.respCode ?? ""),
+            amountCents: Number(l.amountCents ?? 0),
+            isTaxLine: Boolean(l.isTaxLine),
+          }),
+        ),
+        taxCents,
+      }),
+    );
+  });
+
+  app.get("/api/repair/attachments/permissions", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const role = String(req.query.role ?? req.body?.actorRole ?? "reviewer");
+    return res.json({
+      role,
+      canAdd: true,
+      canRemove: canManageAttachments(role),
+      canRecategorize: canManageAttachments(role),
+      canVoid: canManageAttachments(role),
+    });
   });
 
   app.post("/api/repair/documents/:id/restore", async (req, res) => {

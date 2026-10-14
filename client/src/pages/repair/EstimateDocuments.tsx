@@ -66,6 +66,12 @@ export default function EstimateDocuments() {
   const [msg, setMsg] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
+  const [galleryIdx, setGalleryIdx] = useState<number | null>(null);
+  /** Owner/system manager can void/recategorize; shop/viewer cannot. */
+  const [canManage, setCanManage] = useState(true);
+  const [role, setRole] = useState("reviewer");
+  const viewerOnly = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("view") === "gallery"
+    || new URLSearchParams(window.location.search).get("view") === "gallery";
 
   async function load() {
     setError("");
@@ -87,6 +93,18 @@ export default function EstimateDocuments() {
     );
     const list = (data.documents ?? []) as DocRow[];
     setDocs(list.filter((d) => !d.deleted_at));
+    const qs = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+    const roleQ =
+      qs.get("role") ||
+      new URLSearchParams(window.location.search).get("role") ||
+      "reviewer";
+    setRole(roleQ);
+    const perm = await apiRequest(
+      "GET",
+      `/api/repair/attachments/permissions?role=${encodeURIComponent(roleQ)}`,
+    );
+    const permData = await perm.json().catch(() => ({}));
+    setCanManage(Boolean(permData.canRemove));
   }
 
   useEffect(() => {
@@ -118,15 +136,37 @@ export default function EstimateDocuments() {
   }
 
   async function voidDoc(d: DocRow) {
+    if (!canManage) {
+      setError("Shop cannot delete, void, or recategorize attachments (add only)");
+      return;
+    }
     if (!confirm(`Void ${d.original_filename || d.kind}? (soft-delete / VOIDED)`)) return;
     const res = await apiRequest("POST", `/api/repair/documents/${d.id}/soft-delete`, {
       reason: "Owner void from document viewer",
+      actorRole: role,
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "void failed");
     setMsg("Document VOIDED");
     await load();
   }
+
+  useEffect(() => {
+    if (galleryIdx == null) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "ArrowRight") {
+        setGalleryIdx((i) =>
+          i == null ? 0 : Math.min(activeDocs.length - 1, i + 1),
+        );
+      } else if (e.key === "ArrowLeft") {
+        setGalleryIdx((i) => (i == null ? 0 : Math.max(0, i - 1)));
+      } else if (e.key === "Escape") {
+        setGalleryIdx(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [galleryIdx, activeDocs.length]);
 
   async function uploadFiles() {
     if (!ctx || !files?.length) return;
@@ -156,6 +196,10 @@ export default function EstimateDocuments() {
   }
 
   async function applyToChecked() {
+    if (!canManage) {
+      setError("Shop cannot delete, void, or recategorize attachments (add only)");
+      return;
+    }
     const ids = Object.entries(checked)
       .filter(([, v]) => v)
       .map(([id]) => id);
@@ -163,13 +207,16 @@ export default function EstimateDocuments() {
       setError("Select files to apply");
       return;
     }
-    // Best-effort: mark shared / category via existing share endpoint when present
     for (const id of ids) {
-      await apiRequest("POST", `/api/repair/documents/${id}/share`, {
-        shared: true,
+      const res = await apiRequest("POST", `/api/repair/documents/${id}/recategorize`, {
         categoryCode: applyCategory,
         comment: applyComment || undefined,
-      }).catch(() => undefined);
+        actorRole: role,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "recategorize failed");
+      }
     }
     setMsg(`Applied category/comment to ${ids.length} file(s)`);
     await load();
@@ -210,8 +257,41 @@ export default function EstimateDocuments() {
         {error && <p className="text-sm text-destructive">{error}</p>}
         {msg && <p className="text-sm text-foreground">{msg}</p>}
 
-        <div className="grid md:grid-cols-2 gap-3">
-          <div className="border border-border rounded-md p-3 space-y-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setGalleryIdx(activeDocs.length ? 0 : null)}
+            disabled={!activeDocs.length}
+          >
+            View all (gallery)
+          </Button>
+          {!canManage && (
+            <span className="text-xs text-amber-700 dark:text-amber-400">
+              Role {role}: add only — delete / void / recategorize blocked server-side.
+            </span>
+          )}
+        </div>
+
+        {/* Thumbnail strip */}
+        {activeDocs.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto py-1">
+            {activeDocs.map((d, i) => (
+              <button
+                key={d.id}
+                type="button"
+                className="shrink-0 w-16 h-16 border border-border rounded bg-muted/40 flex items-center justify-center text-[10px] p-1 text-center"
+                title={d.original_filename || d.kind}
+                onClick={() => setGalleryIdx(i)}
+              >
+                {(d.original_filename || d.kind || "?").slice(0, 18)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className={cn("grid md:grid-cols-2 gap-3", viewerOnly && "hidden")}>
+          <div className={cn("border border-border rounded-md p-3 space-y-2", !canManage && "opacity-50 pointer-events-none")}>
             <div className="text-sm font-medium">Apply to Checked Files</div>
             <div>
               <Label className="text-xs">Comment</Label>
@@ -340,13 +420,19 @@ export default function EstimateDocuments() {
                     <td className="p-2">{fmtSize(d.size)}</td>
                     <td className="p-2">{d.comment || ""}</td>
                     <td className="p-2">
-                      <button
-                        type="button"
-                        title="Void (soft-delete)"
-                        onClick={() => void voidDoc(d).catch((e) => setError(String(e)))}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </button>
+                      {canManage ? (
+                        <button
+                          type="button"
+                          title="Void (soft-delete)"
+                          onClick={() => void voidDoc(d).catch((e) => setError(String(e)))}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground" title="Shop: add only">
+                          —
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -381,6 +467,52 @@ export default function EstimateDocuments() {
                 </Button>
               </div>
               <iframe title="preview" src={previewUrl} className="w-full h-[70vh] border border-border rounded" />
+            </div>
+          </div>
+        )}
+
+        {galleryIdx != null && activeDocs[galleryIdx] && (
+          <div className="fixed inset-0 z-50 flex flex-col bg-black/90 text-white">
+            <div className="flex items-center justify-between px-4 py-2">
+              <div className="text-sm">
+                {galleryIdx + 1} / {activeDocs.length} ·{" "}
+                {activeDocs[galleryIdx].original_filename || activeDocs[galleryIdx].kind}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={galleryIdx <= 0}
+                  onClick={() => setGalleryIdx((i) => Math.max(0, (i ?? 0) - 1))}
+                >
+                  Prev
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={galleryIdx >= activeDocs.length - 1}
+                  onClick={() =>
+                    setGalleryIdx((i) =>
+                      Math.min(activeDocs.length - 1, (i ?? 0) + 1),
+                    )
+                  }
+                >
+                  Next
+                </Button>
+                <Button size="sm" variant="ghost" className="text-white" onClick={() => setGalleryIdx(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 flex items-center justify-center p-4">
+              <iframe
+                title="gallery"
+                src={`/api/repair/documents/${activeDocs[galleryIdx].id}/content`}
+                className="w-full h-full max-w-5xl border border-white/20 rounded bg-white"
+              />
+            </div>
+            <div className="text-center text-xs text-white/70 pb-3">
+              Keyboard: ← → navigate · Esc close
             </div>
           </div>
         )}

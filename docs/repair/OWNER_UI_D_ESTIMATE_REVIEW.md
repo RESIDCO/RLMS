@@ -2,8 +2,9 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §D  
 **Screenshots:** `02-estimate-review.png`, `04-update-responsibilities.png`, `05-responsibility-codes.png`, `03-file-attachments.png`  
-**Tip base:** `468a9db8034b56570710bdd0182425dcfc364c83` (§C signed off)  
-**Scope:** Owner Estimate Review rebuild — compact header, RS line grid, owner-only actions, Update Responsibilities, Review & Compare, documents viewer (new window). Shop link + §C Bad Orders unchanged.
+**Tip base:** `f853e48b4c754c01c186312c02ebb4f713c61714` (§D initial)  
+**Round:** **r2** — header pencils, attachments ACL, money `$`+cents, Component Id rules, AAR hover, splits, carry-forward, licensed ref-data import  
+**Scope:** Owner Estimate Review rebuild + r2 polish. Shop link + §C Bad Orders unchanged.
 
 ---
 
@@ -13,39 +14,27 @@ Owner/reviewer opens an estimate from Estimates History and works it like repair
 
 ---
 
-## Compact header (shot 02)
+## Compact header (shot 02) — r2 layout
 
-Always visible:
+Always visible fields unchanged (Shop, Car, Estimate ID, Status, SPLC, Assignment, Entity, Road/DC, car type, dates, BO reason, Billing Category).
 
-| Field | Notes |
-|---|---|
-| Shop | `Name (MARK) – City, ST` |
-| Car | Initials + number (title) |
-| Estimate ID | Header `documentReference` (fallback car+repair date) |
-| Status | Display name |
-| SPLC | Code (+ city when known) |
-| Assignment / lessee | From `cars_ref` / assignment |
-| Entity | MAIN / COAL / RPS snapshot |
-| Road / DC Road | Header / event |
-| Car type / Kind of car | Event + header |
-| Created / Account / Approval reqd / Approved | Dates |
-| Repair / Yard arrival / Target / Outbound | Dates (outbound **display only** — owner does not set) |
-| Bad Order Reason | Link to BO when present |
-| Billing Category | Editable dropdown + save |
+**r2 header edit UX (no pencil overlap on car #):**
 
-**More header detail** — collapsible full Data File header groups (Parties / Invoice / Car / Dates·Location / DDCT / Notes).
+- Per-field ✎ appears **on hover** (and focus) beside editable values — never absolutely positioned over the car number.
+- Explicit **Edit header** button opens More header detail + pencil/audit mode.
+- Works in light and dark; wraps cleanly at narrow widths.
 
-**Pencil ✎** — per-field edit; **reason required**; audit old→new, user, time. After Approved → Adjustment for Approval (MG1).
+**More header detail** — collapsible full Data File header groups. Pencil edits still require reason + audit; after Approved → Adjustment for Approval (MG1).
 
 ---
 
-## Line grid columns (shot 02)
+## Line grid + money (r2)
 
-Issue/comment icon · Item · Loc · Qnty · C · AJOB · QA · Description · WM · RJOB · QR · R · Labor · Material · Amount · Component Id · 500 (raw) · PM
+Columns unchanged. Money cells show **`$` + 2 decimals** with **integer cents underneath** (Labor / Material / Amount + totals).
 
-Totals row: Labor / Material / Amount (integer **cents** math; ≤2 decimal display).
+Code cells (AJOB, QA, WM, Loc, C, R, RJOB, QR) show **hover help** from licensed `repair.ref_*` tables (category / sub-category when present). Unknown → **"Not in reference table"**.
 
-Loc / Qnty / RJOB / QR / Description / PM derived from `raw_line` via App. G layout when not stored as columns.
+**Component Id:** red flag when an active `repair.component_id_rules` row requires CID and the line is blank (review + FINAL/INVOICE validation). Admin-editable via API / CSV import.
 
 ---
 
@@ -56,7 +45,7 @@ Loc / Qnty / RJOB / QR / Description / PM derived from `raw_line` via App. G lay
 | **Approve** | → Approved (or approve Adjustment) |
 | **Reject / Request Revision** | → Revision Requested; comment; notify shop |
 | **Send Lessee Responsibility** | Resp 6 email (shop never CC’d) |
-| **Update Responsibilities** | Full page (shots 04/05) |
+| **Update Responsibilities** | Full page (shots 04/05) + r2 splits / carry-forward / tax preview |
 | **Rollback** | Rollback completed date (audited) when applicable |
 | **Issues / comments** | Thread panel; per-line issue icon |
 | **Export** | BRC Excel / PDF / 500-byte |
@@ -67,27 +56,43 @@ Loc / Qnty / RJOB / QR / Description / PM derived from `raw_line` via App. G lay
 
 ---
 
-## Update Responsibilities (shots 04 / 05)
+## Update Responsibilities (shots 04 / 05) — r2
 
 Route: `/#/repair/estimates/:id/responsibilities`
 
-- Set Responsibility Code → **Set Checked Lines** (codes: 1 Owners, 2 Handling Line, 4 Capital Program, 5 Lease Return, 6 Rebill, 7 No Rebill, 8 Preventive Maintenance, 9 HM216 — from `repair.responsibility_codes`)
-- Restore from Previous revision → **Restore Unset Lines**
-- Split Line Items by **Percentage** → **Split Selected**
-- Responsible Party dropdown
-- Grid: checkbox · Line · Loc · Qnty · C · AJOB · QA · Description · WM · RJOB · QR · **R (Cur)** · **R (New)** · Labor · Material · Amount
-- **Reset values** / **Submit values**
-- Footer: summary by code + **Recalculate**
-
-Submit creates an append-only revision (no hard deletes). Money stays integer cents.
+- Set / restore / summary unchanged.
+- **Split** by **percentage** or **fixed $** → child lines **1a / 1b** linked (`split_group_id`); original preserved in history; **remainder cents on owner/original** line; exact sum.
+- **Unsplit** checked groups before approval (audited).
+- **Tax prorate preview** by responsibility share (exact cents).
+- **Carry forward** from prior revision: fingerprint match; green UNCHANGED / amber CHANGED (hover diff) / blue NEW / Removed list; **Apply prior → R(New) only — never auto-commit**; audited.
 
 ---
 
-## Documents viewer (shot 03)
+## Documents viewer (shot 03) — r2 permissions
 
-Route: `/#/repair/estimates/:id/documents` — opened with `window.open` (new window).
+Route: `/#/repair/estimates/:id/documents` — `window.open`.
 
-Layout: header (car / BO reason / Estimate / statuses) · Apply to checked · Add files · grid (view / save / name / type / category / loaded by / date / size / comment / del→VOIDED) · Close / Download.
+| Role | Add | Recategorize | Void / remove |
+|---|---|---|---|
+| Owner / system manager / reviewer / admin | ✓ | ✓ | ✓ (VOIDED, recoverable) |
+| Shop | ✓ only | ✗ server 403 | ✗ server 403 (incl. own) |
+| Viewer | View all gallery | — | — |
+
+Every add / void / recategorize is **audited**. Viewer: thumbnail strip + **View all** fullscreen slideshow (next/prev + keyboard arrows).
+
+---
+
+## Licensed AAR ref-data (r2)
+
+Private folder: `modules/repair/ref-data/` (**never** unauthenticated public serve).
+
+```powershell
+npm run repair:import-ref-data
+```
+
+Upserts by key; records edition/quarter/source/rule_page. Admin CSV/Excel uses the same path (`POST /api/repair/ref-data/import`).
+
+**Verified full counts (Bruce pack 2026-10-14):** job codes **855** · qualifiers **639** · why-made **107** · categories **2170**.
 
 ---
 
@@ -104,6 +109,7 @@ $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair
 $env:REPAIR_LOCAL_DB = "1"
 $env:REPAIR_DEV_BYPASS_AUTH = "1"
 npm run repair:migrate:local
+npm run repair:import-ref-data
 npm run repair:smoke-estimate-review
 npm run repair:smoke-bad-orders
 npm run repair:dev:local
@@ -115,4 +121,4 @@ npm run repair:dev:local
 
 ## Next
 
-Screen **E** document polish / Screen **F** Lessee (mirrors D read-only) when Bruce signs off §D.
+Screen **E** document polish / Screen **F** Lessee (mirrors D read-only) when Bruce signs off §D r2.

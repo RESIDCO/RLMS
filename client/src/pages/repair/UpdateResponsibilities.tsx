@@ -33,6 +33,8 @@ export default function UpdateResponsibilities() {
     Array<{ rev_no: number; id: string; lines: EstimateLine[] }>
   >([]);
   const [percent, setPercent] = useState("50");
+  const [fixedDollars, setFixedDollars] = useState("");
+  const [splitMode, setSplitMode] = useState<"percent" | "fixed">("percent");
   const [party, setParty] = useState("");
   const [assignment, setAssignment] = useState("");
   const [ctxLabel, setCtxLabel] = useState("");
@@ -40,8 +42,27 @@ export default function UpdateResponsibilities() {
     Array<{ code: string; totalDisplay: string }>
   >([]);
   const [pendingSplits, setPendingSplits] = useState<
-    Array<{ lineId: string; percent: number; respCode: string }>
+    Array<{
+      lineId: string;
+      percent?: number;
+      fixedDollars?: string;
+      respCode: string;
+    }>
   >([]);
+  const [carryItems, setCarryItems] = useState<
+    Array<{
+      status: string;
+      fingerprint: string;
+      suggestedResp?: string | null;
+      current?: { lineId: string; displayLineNo: string; respCode: string | null };
+      prior?: { respCode: string | null; displayLineNo: string };
+      diff?: Record<string, { from: unknown; to: unknown }>;
+    }>
+  >([]);
+  const [taxPreview, setTaxPreview] = useState<
+    Array<{ respCode: string; taxCents: number; taxDisplay: string; basisCents: number }>
+  >([]);
+  const [taxCentsInput, setTaxCentsInput] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [meta, setMeta] = useState<Record<string, string | null>>({});
@@ -153,25 +174,140 @@ export default function UpdateResponsibilities() {
   }
 
   function splitSelected() {
-    const pct = Number(percent);
-    if (!Number.isFinite(pct) || pct <= 0 || pct >= 100) {
-      setError("Percentage must be between 1 and 99");
-      return;
-    }
     const checked = lines.filter((l) => l.checked);
     if (!checked.length) {
       setError("Select at least one line to split");
       return;
     }
+    if (splitMode === "percent") {
+      const pct = Number(percent);
+      if (!Number.isFinite(pct) || pct <= 0 || pct >= 100) {
+        setError("Percentage must be between 1 and 99");
+        return;
+      }
+      const splits = checked.map((l) => ({
+        lineId: String(l.id),
+        percent: pct,
+        respCode: l.resp_new || selectedCode,
+      }));
+      setPendingSplits(splits);
+      setMsg(
+        `Split queued for ${splits.length} line(s) at ${pct}% → 1a/1b (applied on Submit).`,
+      );
+      return;
+    }
+    if (!fixedDollars.trim()) {
+      setError("Enter a fixed $ amount for the split-off child");
+      return;
+    }
     const splits = checked.map((l) => ({
       lineId: String(l.id),
-      percent: pct,
+      fixedDollars: fixedDollars.trim(),
       respCode: l.resp_new || selectedCode,
     }));
     setPendingSplits(splits);
     setMsg(
-      `Split queued for ${splits.length} line(s) at ${pct}% (applied on Submit).`,
+      `Split queued for ${splits.length} line(s) at fixed $${fixedDollars} → 1a/1b (remainder on owner line).`,
     );
+  }
+
+  async function loadCarryForward() {
+    setError("");
+    const res = await apiRequest(
+      "GET",
+      `/api/repair/estimates/${estimateId}/carry-forward`,
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "carry-forward failed");
+    setCarryItems(data.items ?? []);
+    setMsg(
+      `Carry-forward preview r${data.fromRevNo}→r${data.toRevNo}: ` +
+        `${data.counts?.unchanged ?? 0} green / ${data.counts?.changed ?? 0} amber / ` +
+        `${data.counts?.neu ?? 0} blue / ${data.counts?.removed ?? 0} removed — not auto-committed.`,
+    );
+  }
+
+  async function applyCarryGreen() {
+    const res = await apiRequest(
+      "POST",
+      `/api/repair/estimates/${estimateId}/carry-forward/apply-preview`,
+      { applyStatuses: ["UNCHANGED", "CHANGED"] },
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "apply preview failed");
+    const updates = new Map(
+      (data.lineUpdates ?? []).map((u: { lineId: string; respCode: string }) => [
+        u.lineId,
+        u.respCode,
+      ]),
+    );
+    setLines((prev) => {
+      const next = prev.map((l) => {
+        const resp = updates.get(String(l.id));
+        return resp != null ? { ...l, resp_new: String(resp) } : l;
+      });
+      void recalculate(next);
+      return next;
+    });
+    setMsg(
+      `Applied ${data.applied ?? 0} prior responsibilities into R(New) — review then Submit (never auto-commit).`,
+    );
+  }
+
+  async function runTaxPreview() {
+    const taxCents = Number(taxCentsInput);
+    if (!Number.isFinite(taxCents) || taxCents <= 0) {
+      setError("Enter tax amount in integer cents");
+      return;
+    }
+    const payload = lines.map((l) => ({
+      respCode: l.resp_new || l.resp_code || "",
+      amountCents:
+        (l as { labor_cents?: number }).labor_cents != null
+          ? Number((l as { labor_cents?: number }).labor_cents) +
+            Number((l as { material_cents?: number }).material_cents ?? 0)
+          : Math.round((Number(l.labor) + Number(l.material)) * 100),
+      isTaxLine: Boolean((l as { is_tax_line?: boolean }).is_tax_line),
+    }));
+    const res = await apiRequest(
+      "POST",
+      `/api/repair/estimates/${estimateId}/tax-prorate-preview`,
+      { lines: payload, taxCents },
+    );
+    const data = await res.json();
+    setTaxPreview(data.shares ?? []);
+    setMsg(
+      data.exact
+        ? `Tax prorate exact ${taxCents}¢ across ${data.shares?.length ?? 0} resp codes`
+        : "Tax prorate mismatch",
+    );
+  }
+
+  async function unsplitSelectedGroups() {
+    const groupIds = [
+      ...new Set(
+        lines
+          .filter((l) => l.checked && (l as { split_group_id?: string }).split_group_id)
+          .map((l) => String((l as { split_group_id?: string }).split_group_id)),
+      ),
+    ];
+    if (!groupIds.length) {
+      setError("Select split child lines (with split_group_id) to unsplit");
+      return;
+    }
+    const res = await apiRequest(
+      "POST",
+      `/api/repair/estimates/${estimateId}/update-responsibility`,
+      {
+        useOwnerUiD: true,
+        lineUpdates: [],
+        unsplitGroupIds: groupIds,
+      },
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "unsplit failed");
+    setMsg(`Unsplit ${groupIds.length} group(s) — rev ${data.revision?.rev_no}`);
+    await load();
   }
 
   function resetValues() {
@@ -301,19 +437,50 @@ export default function UpdateResponsibilities() {
           </div>
           <div className="space-y-2">
             <div className="font-medium text-xs uppercase text-muted-foreground">
-              Split Line Items
+              Split Line Items (% or fixed $)
             </div>
             <div className="flex flex-wrap gap-2 items-end">
               <div>
-                <Label className="text-xs">Percentage</Label>
-                <Input
-                  className="mt-1 h-9 w-24"
-                  value={percent}
-                  onChange={(e) => setPercent(e.target.value)}
-                />
+                <Label className="text-xs">Mode</Label>
+                <select
+                  className="mt-1 h-9 rounded border border-border bg-background px-2 text-sm block"
+                  value={splitMode}
+                  onChange={(e) =>
+                    setSplitMode(e.target.value === "fixed" ? "fixed" : "percent")
+                  }
+                >
+                  <option value="percent">Percent</option>
+                  <option value="fixed">Fixed $</option>
+                </select>
               </div>
+              {splitMode === "percent" ? (
+                <div>
+                  <Label className="text-xs">Percentage</Label>
+                  <Input
+                    className="mt-1 h-9 w-24"
+                    value={percent}
+                    onChange={(e) => setPercent(e.target.value)}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <Label className="text-xs">Fixed $ (child 1a)</Label>
+                  <Input
+                    className="mt-1 h-9 w-28"
+                    value={fixedDollars}
+                    onChange={(e) => setFixedDollars(e.target.value)}
+                    placeholder="12.34"
+                  />
+                </div>
+              )}
               <Button variant="secondary" onClick={splitSelected}>
                 Split Selected
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void unsplitSelectedGroups().catch((e) => setError(String(e)))}
+              >
+                Unsplit checked
               </Button>
             </div>
           </div>
@@ -342,6 +509,81 @@ export default function UpdateResponsibilities() {
             />
           </div>
           <div className="text-xs text-muted-foreground ml-auto">{ctxLabel}</div>
+        </div>
+
+        <div className="border border-border rounded-md p-3 space-y-2 text-sm">
+          <div className="font-medium text-xs uppercase text-muted-foreground">
+            Carry forward from prior revision (never auto-commit)
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void loadCarryForward().catch((e) => setError(String(e)))}
+            >
+              Preview carry-forward
+            </Button>
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => void applyCarryGreen().catch((e) => setError(String(e)))}
+              disabled={!carryItems.length}
+            >
+              Apply prior (green + amber → R New)
+            </Button>
+          </div>
+          {carryItems.length > 0 && (
+            <ul className="text-xs max-h-40 overflow-auto space-y-1">
+              {carryItems.map((it) => (
+                <li
+                  key={it.fingerprint + it.status}
+                  className={cn(
+                    "flex gap-2",
+                    it.status === "UNCHANGED" && "text-emerald-700 dark:text-emerald-400",
+                    it.status === "CHANGED" && "text-amber-700 dark:text-amber-400",
+                    it.status === "NEW" && "text-sky-700 dark:text-sky-400",
+                    it.status === "REMOVED" && "text-muted-foreground line-through",
+                  )}
+                  title={
+                    it.diff
+                      ? Object.entries(it.diff)
+                          .map(([k, v]) => `${k}: ${v.from} → ${v.to}`)
+                          .join("; ")
+                      : undefined
+                  }
+                >
+                  <span className="font-semibold w-20">{it.status}</span>
+                  <span>
+                    {it.current?.displayLineNo ?? it.prior?.displayLineNo} · R{" "}
+                    {it.prior?.respCode ?? "—"} → {it.suggestedResp ?? it.current?.respCode ?? "—"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2 items-end pt-2 border-t border-border">
+            <div>
+              <Label className="text-xs">Tax cents (prorate preview)</Label>
+              <Input
+                className="mt-1 h-8 w-32"
+                value={taxCentsInput}
+                onChange={(e) => setTaxCentsInput(e.target.value)}
+                placeholder="1234"
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void runTaxPreview().catch((e) => setError(String(e)))}
+            >
+              Preview tax by resp
+            </Button>
+            {taxPreview.map((s) => (
+              <span key={s.respCode} className="text-xs tabular-nums">
+                R{s.respCode}: ${s.taxDisplay} ({s.taxCents}¢ / basis {s.basisCents}¢)
+              </span>
+            ))}
+          </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-2 text-xs border border-border rounded-md p-3">

@@ -424,16 +424,39 @@ export async function listVoidedEstimates(opts?: {
   return rows;
 }
 
-/** MG2 — soft-delete document (never hard delete). */
+/** Roles that may void / recategorize attachments (owner / system manager). Shop: add-only. */
+const DOC_MANAGE_ROLES = new Set([
+  "owner",
+  "system_manager",
+  "admin",
+  "reviewer",
+  "dev-bypass",
+]);
+
+export function canManageAttachments(actorRole?: string | null): boolean {
+  const role = String(actorRole ?? "").trim().toLowerCase();
+  return DOC_MANAGE_ROLES.has(role);
+}
+
+/** MG2 — soft-delete document (never hard delete). Shop cannot void/remove. */
 export async function softDeleteDocument(opts: {
   documentId: string;
   actor: string;
   reason: string;
+  actorRole?: string;
   tenantId?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const reason = (opts.reason ?? "").trim();
   if (!reason) return { ok: false as const, status: 400, error: "Delete reason required" };
+  const role = String(opts.actorRole ?? "reviewer").trim().toLowerCase();
+  if (!canManageAttachments(role)) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "Shop cannot delete, void, or recategorize attachments (add only)",
+    };
+  }
   const { rows } = await q(
     `UPDATE repair.documents
      SET deleted_at = now(), deleted_by = $1, delete_reason = $2,
@@ -448,7 +471,75 @@ export async function softDeleteDocument(opts: {
     entity: "document",
     entityId: opts.documentId,
     action: "DOCUMENT_SOFT_DELETED",
-    after: { reason, neverPurge: true, lifecycle_status: "VOIDED" },
+    after: {
+      reason,
+      neverPurge: true,
+      lifecycle_status: "VOIDED",
+      actorRole: role,
+    },
+    actor: opts.actor,
+    via: "UI",
+  });
+  return { ok: true as const, document: rows[0] };
+}
+
+/** Recategorize attachment — owner/system manager only; audited. */
+export async function recategorizeDocument(opts: {
+  documentId: string;
+  categoryCode: string;
+  comment?: string;
+  actor: string;
+  actorRole?: string;
+  tenantId?: string;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const role = String(opts.actorRole ?? "reviewer").trim().toLowerCase();
+  if (!canManageAttachments(role)) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "Shop cannot delete, void, or recategorize attachments (add only)",
+    };
+  }
+  const { rows: before } = await q(
+    `SELECT * FROM repair.documents WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+    [opts.documentId, tenantId],
+  );
+  if (!before[0]) return { ok: false as const, status: 404, error: "Document not found" };
+  const { rows } = await q(
+    `UPDATE repair.documents
+     SET kind = COALESCE(NULLIF($1,''), kind),
+         category_code = COALESCE(NULLIF($2,''), category_code),
+         comment = COALESCE($3, comment),
+         last_category_by = $4,
+         last_category_at = now()
+     WHERE id = $5 AND tenant_id = $6
+     RETURNING *`,
+    [
+      opts.categoryCode,
+      opts.categoryCode,
+      opts.comment ?? null,
+      opts.actor,
+      opts.documentId,
+      tenantId,
+    ],
+  );
+  await writeAudit({
+    tenantId,
+    entity: "document",
+    entityId: opts.documentId,
+    action: "DOCUMENT_RECATEGORIZED",
+    before: {
+      kind: before[0].kind,
+      category_code: before[0].category_code,
+      comment: before[0].comment,
+    },
+    after: {
+      kind: rows[0].kind,
+      category_code: rows[0].category_code,
+      comment: rows[0].comment,
+      actorRole: role,
+    },
     actor: opts.actor,
     via: "UI",
   });

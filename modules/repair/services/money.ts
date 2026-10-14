@@ -41,6 +41,27 @@ export function formatCentsAsDollars(cents: number): string {
   return (Math.trunc(cents) / 100).toFixed(2);
 }
 
+/** Always `$` + 2 decimals (e.g. `$12.34`). */
+export function formatCentsAsMoney(cents: number): string {
+  const n = Math.trunc(cents);
+  const sign = n < 0 ? "-" : "";
+  return `${sign}$${formatCentsAsDollars(Math.abs(n))}`;
+}
+
+/** UI pair: dollar string + integer cents underneath. */
+export function formatMoneyParts(cents: number): {
+  dollars: string;
+  cents: number;
+  centsLabel: string;
+} {
+  const c = Math.trunc(cents);
+  return {
+    dollars: formatCentsAsMoney(c),
+    cents: c,
+    centsLabel: String(c),
+  };
+}
+
 export function formatDollars(value: number | string | null | undefined): string {
   return formatCentsAsDollars(dollarsToCents(value));
 }

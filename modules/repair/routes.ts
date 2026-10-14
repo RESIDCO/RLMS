@@ -13,7 +13,14 @@ import {
   reissueEventLink,
   resolveActiveLink,
 } from "./services/event-links";
-import { shopAccept, shopReject, shopOnHand } from "./services/shop-actions";
+import { shopReject, shopOnHand } from "./services/shop-actions";
+import {
+  shopAcknowledge,
+  shopDeclineWork,
+  shopArrivalDate,
+  bulkCreateBadOrders,
+  voidEstimate,
+} from "./services/bo-lifecycle";
 import {
   uploadEstimate,
   listRevisions,
@@ -24,6 +31,37 @@ import {
   listEstimatesForEvent,
   uploadEventDocument,
 } from "./services/estimates";
+import {
+  loadEstimateAar,
+  decideEstimateLoadWarnings,
+  getEstimateLoadRun,
+  loadEstimateFromInboundEmail,
+} from "./services/estimate-load";
+import { addComment, listComments, compareRevisions } from "./services/comments";
+import {
+  setTankCarDocGate,
+  shopMarkTankDocsComplete,
+  ownerDecideTankDocs,
+  listTankDocPendingQueue,
+  ensureTankPacket,
+} from "./services/tank-docs";
+import {
+  listAttachmentCategories,
+  listEventDocuments,
+  downloadAllDocuments,
+  markDocumentShared,
+  setTargetOutboundBulk,
+  setActualOutbound,
+  listDispoQueue,
+  emailLesseeDispo,
+  linkInvoiceToEstimates,
+  queryEstimateGrid,
+  exportEstimateGridCsv,
+  setUserEmailOptOut,
+  setNotificationRuleMinAmount,
+  buildMonthlyBillSummary,
+  getPhase2Hooks,
+} from "./services/ops-grid";
 import { listResponsibilityCodes } from "./services/categories";
 import {
   sendLesseeApprovalRequest,
@@ -162,14 +200,38 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
         attachments,
       });
 
-      // If a 500-byte shop invoice attachment is present, run CRB intake + pre-pay audit
+      // purpose=estimate → estimate 500-byte load; else invoice CRB pre-pay when attachment present
+      const purpose = String(body.purpose ?? "").toLowerCase();
       let invoiceIntake: unknown = null;
+      let estimateIntake: unknown = null;
       const shopAtt = result.attachments.find(
         (a) =>
           result.parsed.shopInvoiceAttachment &&
           a.filename === result.parsed.shopInvoiceAttachment.filename,
-      );
-      if (shopAtt && (result.eventToken || result.eventId || body.eventToken || body.eventId)) {
+      ) ?? result.attachments[0];
+
+      const toAddr = String(body.to ?? "");
+      const looksEstimate =
+        purpose === "estimate" ||
+        /(?:shop-estimate|estimate)\+/i.test(toAddr);
+
+      if (looksEstimate && shopAtt) {
+        estimateIntake = await loadEstimateFromInboundEmail({
+          toAddress: toAddr,
+          fromAddress: String(body.from ?? "shop@inbound.dev"),
+          subject: String(body.subject ?? ""),
+          textBody: String(body.raw ?? body.body ?? ""),
+          attachments: [
+            {
+              filename: shopAtt.filename,
+              contentType: shopAtt.mime,
+              contentBase64: shopAtt.bytes.toString("base64"),
+            },
+          ],
+          eventToken:
+            result.eventToken ?? (body.eventToken ? String(body.eventToken) : undefined),
+        });
+      } else if (shopAtt && (result.eventToken || result.eventId || body.eventToken || body.eventId)) {
         invoiceIntake = await ingestCrbInvoiceFromInboundEmail({
           bytes: shopAtt.bytes,
           filename: shopAtt.filename,
@@ -188,9 +250,12 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
         eventId: result.eventId,
         attachmentCount: result.attachments.length,
         invoiceIntake,
-        note: invoiceIntake
-          ? "Shop invoice attachment routed to CRB pre-pay audit (human review)."
-          : "Parsed decision is advisory until a reviewer confirms.",
+        estimateIntake,
+        note: estimateIntake
+          ? "Estimate 500-byte attachment routed to estimate load (ERRORS/WARNINGS)."
+          : invoiceIntake
+            ? "Shop invoice attachment routed to CRB pre-pay audit (human review)."
+            : "Parsed decision is advisory until a reviewer confirms.",
       });
     } catch (err) {
       console.error("[repair/public/inbound-dev]", err);
@@ -271,13 +336,26 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
 
   app.post("/api/repair/e/:token/accept", async (req, res) => {
     const email = String(req.body?.email ?? "shop@unknown");
-    const result = await shopAccept(String(req.params.token), email);
+    const result = await shopAcknowledge(String(req.params.token), email);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/e/:token/acknowledge", async (req, res) => {
+    const email = String(req.body?.email ?? "shop@unknown");
+    const result = await shopAcknowledge(String(req.params.token), email);
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
   });
 
   app.post("/api/repair/e/:token/reject", async (req, res) => {
     const email = String(req.body?.email ?? "shop@unknown");
+    const reason = String(req.body?.reason ?? req.body?.comment ?? "");
+    if (reason.trim()) {
+      const declined = await shopDeclineWork(String(req.params.token), email, reason);
+      if (!declined.ok) return res.status(declined.status).json({ error: declined.error });
+      return res.json(declined);
+    }
     const result = await shopReject(
       String(req.params.token),
       email,
@@ -287,9 +365,81 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
     return res.json(result);
   });
 
+  app.post("/api/repair/e/:token/decline", async (req, res) => {
+    const email = String(req.body?.email ?? "shop@unknown");
+    const result = await shopDeclineWork(
+      String(req.params.token),
+      email,
+      String(req.body?.reason ?? ""),
+    );
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
   app.post("/api/repair/e/:token/on-hand", async (req, res) => {
     const email = String(req.body?.email ?? "shop@unknown");
+    if (req.body?.arrivalDate) {
+      const result = await shopArrivalDate(
+        String(req.params.token),
+        email,
+        String(req.body.arrivalDate),
+      );
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    }
     const result = await shopOnHand(String(req.params.token), email);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/e/:token/arrival", async (req, res) => {
+    const email = String(req.body?.email ?? "shop@unknown");
+    const result = await shopArrivalDate(
+      String(req.params.token),
+      email,
+      String(req.body?.arrivalDate ?? req.body?.date ?? ""),
+    );
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post(
+    "/api/repair/e/:token/estimate-aar",
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        if (!req.file?.buffer?.length) {
+          return res.status(400).json({ error: "500-byte estimate file required" });
+        }
+        const result = await loadEstimateAar({
+          bytes: req.file.buffer,
+          filename: req.file.originalname || "estimate.dat",
+          mime: req.file.mimetype || "text/plain",
+          source: "SHOP_LINK",
+          rawToken: String(req.params.token),
+          actor: String(req.body?.email ?? "shop@unknown"),
+          actorName: String(req.body?.actorName ?? req.body?.email ?? "shop"),
+          comment: req.body?.comment ? String(req.body.comment) : undefined,
+        });
+        if (!result.ok) {
+          return res.status(result.status).json(result);
+        }
+        return res.status(result.pendingWarnings ? 202 : 201).json(result);
+      } catch (err) {
+        console.error("[repair/e/estimate-aar]", err);
+        return res.status(500).json({ error: "Estimate load failed" });
+      }
+    },
+  );
+
+  app.post("/api/repair/e/:token/tank-docs/complete", async (req, res) => {
+    const result = await shopMarkTankDocsComplete({
+      rawToken: String(req.params.token),
+      actor: String(req.body?.email ?? "shop@unknown"),
+      documentIds: Array.isArray(req.body?.documentIds)
+        ? req.body.documentIds.map(String)
+        : undefined,
+    });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
   });
@@ -1348,5 +1498,360 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
+  });
+
+  // ── Estimate load / statuses / BO / collab / tank / ops (gap slice) ──
+
+  app.post("/api/repair/bad-orders/bulk", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await bulkCreateBadOrders({
+      pastedCars: String(req.body?.cars ?? req.body?.pastedCars ?? ""),
+      shopId: req.body?.shopId ? String(req.body.shopId) : undefined,
+      rule: req.body?.rule === "RULE_107" ? "RULE_107" : "RULE_1",
+      shoppingReason: req.body?.shoppingReason
+        ? String(req.body.shoppingReason)
+        : undefined,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/estimate-loads/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const run = await getEstimateLoadRun(String(req.params.id));
+    if (!run) return res.status(404).json({ error: "Load run not found" });
+    return res.json(run);
+  });
+
+  app.post("/api/repair/estimate-loads/:id/decide-warnings", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const decision = String(req.body?.decision ?? "").toUpperCase();
+    if (decision !== "ACCEPT_WARNINGS" && decision !== "REJECT_WARNINGS") {
+      return res.status(400).json({ error: "decision must be ACCEPT_WARNINGS or REJECT_WARNINGS" });
+    }
+    const result = await decideEstimateLoadWarnings({
+      loadRunId: String(req.params.id),
+      decision: decision as "ACCEPT_WARNINGS" | "REJECT_WARNINGS",
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status ?? 400).json(result);
+    return res.json(result);
+  });
+
+  app.post(
+    "/api/repair/estimates/load-aar",
+    upload.single("file"),
+    async (req, res) => {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      if (!req.file?.buffer?.length) {
+        return res.status(400).json({ error: "500-byte file required" });
+      }
+      const result = await loadEstimateAar({
+        bytes: req.file.buffer,
+        filename: req.file.originalname || "estimate.dat",
+        mime: req.file.mimetype || "text/plain",
+        source: "UI",
+        eventId: req.body?.eventId ? String(req.body.eventId) : undefined,
+        actor: actorFrom(req),
+        comment: req.body?.comment ? String(req.body.comment) : undefined,
+      });
+      if (!result.ok) return res.status(result.status).json(result);
+      return res.status(result.pendingWarnings ? 202 : 201).json(result);
+    },
+  );
+
+  app.post("/api/repair/estimates/:id/void", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await voidEstimate({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/events/:id/comments", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      comments: await listComments({ eventId: String(req.params.id) }),
+    });
+  });
+
+  app.post("/api/repair/events/:id/comments", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await addComment({
+      eventId: String(req.params.id),
+      estimateId: req.body?.estimateId ? String(req.body.estimateId) : undefined,
+      revisionId: req.body?.revisionId ? String(req.body.revisionId) : undefined,
+      lineId: req.body?.lineId ? String(req.body.lineId) : undefined,
+      parentId: req.body?.parentId ? String(req.body.parentId) : undefined,
+      body: String(req.body?.body ?? ""),
+      author: actorFrom(req),
+      notify: req.body?.notify !== false,
+      notifyEmails: Array.isArray(req.body?.notifyEmails)
+        ? req.body.notifyEmails.map(String)
+        : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.get("/api/repair/revisions/compare", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const left = String(req.query.left ?? "");
+    const right = String(req.query.right ?? "");
+    if (!left || !right) {
+      return res.status(400).json({ error: "left and right revision ids required" });
+    }
+    return res.json(await compareRevisions({ leftRevisionId: left, rightRevisionId: right }));
+  });
+
+  app.post("/api/repair/settings/tank-doc-gate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setTankCarDocGate({
+      enabled: Boolean(req.body?.enabled),
+      actor: actorFrom(req),
+    });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/events/:id/tank-docs/ensure", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await ensureTankPacket({
+      eventId: String(req.params.id),
+      estimateId: req.body?.estimateId ? String(req.body.estimateId) : undefined,
+      actor: actorFrom(req),
+    });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/tank-docs/pending", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ queue: await listTankDocPendingQueue() });
+  });
+
+  app.post("/api/repair/tank-docs/:id/decide", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const decision = String(req.body?.decision ?? "").toUpperCase();
+    if (decision !== "VERIFY" && decision !== "REJECT") {
+      return res.status(400).json({ error: "decision must be VERIFY or REJECT" });
+    }
+    const result = await ownerDecideTankDocs({
+      packetId: String(req.params.id),
+      decision: decision as "VERIFY" | "REJECT",
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/attachment-categories", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ categories: await listAttachmentCategories() });
+  });
+
+  app.get("/api/repair/events/:id/documents", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      documents: await listEventDocuments({
+        eventId: String(req.params.id),
+        categoryCode: req.query.category ? String(req.query.category) : undefined,
+        sharedOnly: String(req.query.shared ?? "") === "1" ? true : undefined,
+      }),
+    });
+  });
+
+  app.get("/api/repair/events/:id/documents/download-all", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const pack = await downloadAllDocuments({ eventId: String(req.params.id) });
+    return res.json({
+      count: pack.files.length,
+      files: pack.files.map((f) => ({
+        filename: f.filename,
+        mime: f.mime,
+        sha256: f.sha256,
+        size: f.bytes.length,
+        contentBase64: f.bytes.toString("base64"),
+      })),
+    });
+  });
+
+  app.post("/api/repair/documents/:id/share", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await markDocumentShared({
+      documentId: String(req.params.id),
+      shared: req.body?.shared !== false,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/outbound/target-bulk", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const eventIds = Array.isArray(req.body?.eventIds)
+      ? req.body.eventIds.map(String)
+      : [];
+    const result = await setTargetOutboundBulk({
+      eventIds,
+      targetDate: String(req.body?.targetDate ?? ""),
+      note: req.body?.note ? String(req.body.note) : undefined,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  app.post("/api/repair/events/:id/outbound/actual", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setActualOutbound({
+      eventId: String(req.params.id),
+      actualDate: String(req.body?.actualDate ?? ""),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/dispo/queue", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ queue: await listDispoQueue() });
+  });
+
+  app.post("/api/repair/events/:id/dispo/email-lessee", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await emailLesseeDispo({
+      eventId: String(req.params.id),
+      actor: actorFrom(req),
+      extraTo: Array.isArray(req.body?.extraTo) ? req.body.extraTo.map(String) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/invoices/:id/link-estimates", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const estimateIds = Array.isArray(req.body?.estimateIds)
+      ? req.body.estimateIds.map(String)
+      : [];
+    const result = await linkInvoiceToEstimates({
+      invoiceId: String(req.params.id),
+      estimateIds,
+      actor: actorFrom(req),
+    });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/estimates/grid", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const statusCodes = req.query.status
+      ? String(req.query.status).split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const grid = await queryEstimateGrid({
+      statusCodes,
+      shopId: req.query.shopId ? String(req.query.shopId) : undefined,
+      carMark: req.query.carMark ? String(req.query.carMark) : undefined,
+      carNumber: req.query.carNumber ? String(req.query.carNumber) : undefined,
+      fromDate: req.query.from ? String(req.query.from) : undefined,
+      toDate: req.query.to ? String(req.query.to) : undefined,
+      minTotal: req.query.minTotal != null ? Number(req.query.minTotal) : undefined,
+      maxTotal: req.query.maxTotal != null ? Number(req.query.maxTotal) : undefined,
+      includeHidden: String(req.query.includeHidden ?? "") === "1",
+      limit: req.query.limit != null ? Number(req.query.limit) : undefined,
+      offset: req.query.offset != null ? Number(req.query.offset) : undefined,
+    });
+    return res.json(grid);
+  });
+
+  app.get("/api/repair/estimates/grid/export", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const statusCodes = req.query.status
+      ? String(req.query.status).split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const exported = await exportEstimateGridCsv({
+      statusCodes,
+      shopId: req.query.shopId ? String(req.query.shopId) : undefined,
+      includeHidden: String(req.query.includeHidden ?? "") === "1",
+    });
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=estimates-grid.csv");
+    return res.send(exported.csv);
+  });
+
+  app.post("/api/repair/settings/email-opt-out", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setUserEmailOptOut({
+      email: String(req.body?.email ?? ""),
+      optedOut: Boolean(req.body?.optedOut),
+      optOutTypes: Array.isArray(req.body?.optOutTypes)
+        ? req.body.optOutTypes.map(String)
+        : undefined,
+      actor: actorFrom(req),
+    });
+    return res.json(result);
+  });
+
+  app.patch("/api/repair/notification-rules/:type/min-amount", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const cents =
+      req.body?.minAmountCents === null || req.body?.minAmountCents === undefined
+        ? null
+        : Number(req.body.minAmountCents);
+    const result = await setNotificationRuleMinAmount({
+      notificationType: String(req.params.type),
+      minAmountCents: cents,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/billing/monthly-summary", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await buildMonthlyBillSummary({
+      accountMonth: String(req.body?.accountMonth ?? ""),
+      closeRunId: req.body?.closeRunId ? String(req.body.closeRunId) : undefined,
+      actor: actorFrom(req),
+    });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/phase2-hooks", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      hooks: await getPhase2Hooks(),
+      note: "Phase 2 design hooks only — carMARQS/CROP not built in Phase 1",
+    });
   });
 }

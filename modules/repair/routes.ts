@@ -44,7 +44,8 @@ import {
   listNotificationRules,
   updateNotificationRule,
 } from "./services/contacts";
-import { issueStepOtp, isOtpRequired, setOtpStepFlag } from "./services/otp";
+import { issueStepOtp, isOtpRequired, setShopOtpStepFlag, getShopOtpSteps } from "./services/otp";
+import { maybeMarkReadyToClose, closeEvent } from "./services/close";
 import { getEmailProvider } from "./providers/email";
 import { getInboundEmailProvider } from "./providers/inbound-email";
 import { getStorageProvider } from "./providers/storage";
@@ -151,7 +152,9 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       const pod = await latestPodErd(eventId, tenantId);
       const invoices = await listInvoicesForEvent(eventId, tenantId);
       const dispo = await listDispo(eventId, tenantId);
-      const otpInvoice = await isOtpRequired("invoice_submit", tenantId);
+      const shopId = resolved.event.shop_id ? String(resolved.event.shop_id) : null;
+      const otpInvoice = await isOtpRequired("invoice_submit", { shopId, eventId, tenantId });
+      const otpCompleted = await isOtpRequired("completed_date", { shopId, eventId, tenantId });
       return res.json({
         link: resolved.link,
         event: resolved.event,
@@ -165,7 +168,7 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
         pod,
         invoices,
         dispo,
-        otpRequired: { invoice_submit: otpInvoice },
+        otpRequired: { invoice_submit: otpInvoice, completed_date: otpCompleted },
       });
     } catch (err) {
       console.error("[repair/e/:token]", err);
@@ -307,8 +310,14 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
         completedAt: String(req.body?.completedAt ?? req.body?.date ?? new Date().toISOString()),
         actor: String(req.body?.email ?? "shop@unknown"),
         comment: req.body?.comment ? String(req.body.comment) : undefined,
+        otpCode: req.body?.otpCode ? String(req.body.otpCode) : undefined,
       });
-      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      if (!result.ok) {
+        return res.status(result.status).json({
+          error: result.error,
+          otpRequired: "otpRequired" in result ? result.otpRequired : undefined,
+        });
+      }
       return res.json(result);
     } catch (err) {
       console.error("[repair/e/:token/complete]", err);
@@ -433,6 +442,10 @@ function nextShopActions(
       break;
     case "COMPLETE":
       actions.push("invoice", "dispo", "upload-document");
+      break;
+    case "READY_TO_CLOSE":
+    case "CLOSED":
+      actions.push("upload-document");
       break;
     default:
       actions.push("upload-estimate", "pod", "upload-document");
@@ -968,11 +981,52 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.json(await runPodReminders());
   });
 
+  /** Per-shop OTP flags (Q3). Body: { shopId, step, enabled } */
   app.post("/api/repair/settings/otp-steps", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
+    const shopId = String(req.body?.shopId ?? "");
+    if (!shopId) {
+      return res.status(400).json({
+        error: "shopId required — OTP is configured per shop (default off)",
+      });
+    }
     const step = String(req.body?.step ?? "invoice_submit");
     const enabled = Boolean(req.body?.enabled);
-    return res.json(await setOtpStepFlag({ step, enabled }));
+    return res.json(
+      await setShopOtpStepFlag({ shopId, step, enabled }),
+    );
+  });
+
+  app.get("/api/repair/shops/:id/otp-steps", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json(await getShopOtpSteps({ shopId: String(req.params.id) }));
+  });
+
+  /** Evaluate Ready-to-Close conditions (invoice MATCHED + dispo). */
+  app.post("/api/repair/events/:id/ready-to-close", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await maybeMarkReadyToClose({
+      eventId: String(req.params.id),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** Reviewer one-click close from READY_TO_CLOSE (audited). */
+  app.post("/api/repair/events/:id/close", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await closeEvent({
+      eventId: String(req.params.id),
+      actor: actorFrom(req),
+      actorRole: String(req.body?.actorRole ?? "reviewer"),
+      comment: req.body?.comment ? String(req.body.comment) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 }

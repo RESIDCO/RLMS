@@ -19,6 +19,8 @@ export type NotifyOpts = {
   actor?: string;
   /** Force-exclude roles even if rule includes them */
   forceExclude?: string[];
+  /** Shop event link URL for {EventLink} template substitution (POD_DUE) */
+  eventLink?: string;
 };
 
 function asStringArray(v: unknown): string[] {
@@ -165,18 +167,17 @@ export async function notify(opts: NotifyOpts) {
     forceExclude: opts.forceExclude,
   });
 
+  const fill = (tmpl: string) =>
+    tmpl
+      .replace(/\{Equipment\}/g, equipment)
+      .replace(/\{EventLink\}/g, opts.eventLink ?? "(event link not available)");
+
   const subject =
     opts.subject ??
-    String(resolved.rule?.template_subject ?? `${opts.type} — {Equipment}`).replace(
-      /\{Equipment\}/g,
-      equipment,
-    );
+    fill(String(resolved.rule?.template_subject ?? `${opts.type} — {Equipment}`));
   const bodyText =
     opts.bodyText ??
-    String(resolved.rule?.template_body ?? `${opts.type} for {Equipment}`).replace(
-      /\{Equipment\}/g,
-      equipment,
-    );
+    fill(String(resolved.rule?.template_body ?? `${opts.type} for {Equipment}`));
 
   const to = resolved.to.length > 0 ? resolved.to : ["unconfigured@repair.local"];
   const send = await getEmailProvider().send({

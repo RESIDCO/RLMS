@@ -44,7 +44,7 @@ type Payload = {
     mismatch_flagged: boolean;
   }>;
   dispo?: Array<{ direction: string; instructions: string; at: string; by_actor: string }>;
-  otpRequired?: { invoice_submit?: boolean };
+  otpRequired?: { invoice_submit?: boolean; completed_date?: boolean };
 };
 
 export default function ShopEventLink() {
@@ -273,6 +273,19 @@ export default function ShopEventLink() {
               value={completedAt}
               onChange={(e) => setCompletedAt(e.target.value)}
             />
+            {data.otpRequired?.completed_date && (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => post("otp", { email, step: "completed_date" })}
+                >
+                  Email one-time code
+                </Button>
+                <Label>One-time code</Label>
+                <Input value={otpCode} onChange={(e) => setOtpCode(e.target.value)} />
+              </div>
+            )}
             <Button
               disabled={busy}
               onClick={() =>
@@ -280,6 +293,7 @@ export default function ShopEventLink() {
                   email,
                   completedAt: completedAt || new Date().toISOString(),
                   comment,
+                  otpCode: otpCode || undefined,
                 })
               }
             >

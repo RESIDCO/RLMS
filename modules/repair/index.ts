@@ -41,7 +41,14 @@ export {
   addAdhocEmails,
   listNotificationRules,
 } from "./services/contacts";
-export { isOtpRequired, issueStepOtp, setOtpStepFlag } from "./services/otp";
+export {
+  isOtpRequired,
+  issueStepOtp,
+  setOtpStepFlag,
+  setShopOtpStepFlag,
+  getShopOtpSteps,
+} from "./services/otp";
+export { maybeMarkReadyToClose, closeEvent } from "./services/close";
 export { notify, resolveRecipients } from "./services/notifications";
 export { getEmailProvider, setEmailProvider, LogEmailProvider } from "./providers/email";
 export {

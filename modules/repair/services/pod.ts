@@ -218,6 +218,7 @@ export async function runPodReminders(tenantId = DEFAULT_TENANT_ID) {
     if (!pod) {
       if (now >= dueAt) {
         if (await markFired(tenantId, String(ev.id), "POD_MISSED", { days })) {
+          // Recipients from notification_rules (default: shop + reviewers)
           await notify({
             tenantId,
             eventId: String(ev.id),
@@ -228,11 +229,25 @@ export async function runPodReminders(tenantId = DEFAULT_TENANT_ID) {
         }
       } else if (now >= dueAt - 86400000) {
         if (await markFired(tenantId, String(ev.id), "POD_DUE", { days })) {
+          // Shop only (default rule). Mint a fresh event link so the email has a usable URL.
+          const { issueEventLink } = await import("./event-links");
+          const link = await issueEventLink({
+            eventId: String(ev.id),
+            scope: "SHOP",
+            actor: "system:pod-due",
+            tenantId,
+          });
+          const base =
+            process.env.REPAIR_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
+            "http://localhost:5000";
+          const eventLink = `${base}/#/repair/e/${link.token}`;
           await notify({
             tenantId,
             eventId: String(ev.id),
             type: "POD_DUE",
+            bodyText: `Promised outbound date is due soon for ${ev.car_mark} ${ev.car_number}. Open your shop event link to enter or revise POD/ERD:\n${eventLink}`,
             actor: "system",
+            eventLink,
           });
           results.push({ eventId: String(ev.id), type: "POD_DUE" });
         }

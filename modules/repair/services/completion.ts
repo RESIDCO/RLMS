@@ -7,6 +7,7 @@ import { writeAudit } from "./audit";
 import { notify } from "./notifications";
 import { getStatusByCode, assertTransitionAllowed } from "./status-machine";
 import { resolveActiveLink } from "./event-links";
+import { isOtpRequired, verifyStepOtp } from "./otp";
 
 const ROLLBACK_ROLES = new Set(["reviewer", "admin", "fleet_manager", "mech_manager"]);
 
@@ -20,11 +21,14 @@ export async function setCompletedDate(opts: {
   tenantId?: string;
   via?: string;
   comment?: string;
+  /** Required when shop has otpSteps.completed_date enabled (shop link only). */
+  otpCode?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   let eventId = opts.eventId;
   let via = opts.via ?? "UI";
   let actorRole = opts.actorRole ?? "reviewer";
+  let shopId: string | null = null;
 
   if (opts.rawToken) {
     const resolved = await resolveActiveLink(opts.rawToken, "SHOP");
@@ -32,6 +36,34 @@ export async function setCompletedDate(opts: {
     eventId = String(resolved.event.id);
     via = "event_link";
     actorRole = "shop_link";
+    shopId = resolved.event.shop_id ? String(resolved.event.shop_id) : null;
+
+    // Optional per-shop OTP on completed-date via shop link (Q3)
+    const otpNeeded = await isOtpRequired("completed_date", {
+      shopId,
+      eventId,
+      tenantId: String(resolved.event.tenant_id ?? tenantId),
+    });
+    if (otpNeeded) {
+      if (!opts.otpCode) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "One-time code required for completed date (request OTP first)",
+          otpRequired: true as const,
+        };
+      }
+      const verified = await verifyStepOtp({
+        eventId,
+        step: "completed_date",
+        email: opts.actor,
+        code: opts.otpCode,
+        tenantId: String(resolved.event.tenant_id ?? tenantId),
+      });
+      if (!verified.ok) {
+        return { ok: false as const, status: verified.status, error: verified.error };
+      }
+    }
   }
 
   const { rows: estRows } = await q(

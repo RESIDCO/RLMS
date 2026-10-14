@@ -1,7 +1,8 @@
 /**
  * Shop invoice upload on event link.
  * Match = invoice total vs approved final estimate TOTAL.
- * Mismatches flagged for review. Optional OTP (tenant.settings.otpSteps.invoice_submit).
+ * Mismatches flagged for review.
+ * Optional OTP per shop (shops.settings.otpSteps.invoice_submit; default off).
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
@@ -10,6 +11,7 @@ import { requireVcfCar } from "./vcf";
 import { getStorageProvider } from "../providers/storage";
 import { notify } from "./notifications";
 import { isOtpRequired, verifyStepOtp } from "./otp";
+import { maybeMarkReadyToClose } from "./close";
 
 async function approvedFinalEstimateTotal(
   eventId: string,
@@ -63,7 +65,8 @@ export async function submitShopInvoice(opts: {
     return { ok: false as const, status: 400, error: "Invoice PDF/file required" };
   }
 
-  const otpNeeded = await isOtpRequired("invoice_submit", tenantId);
+  const shopId = event.shop_id ? String(event.shop_id) : null;
+  const otpNeeded = await isOtpRequired("invoice_submit", { shopId, eventId, tenantId });
   if (otpNeeded) {
     if (!opts.otpCode) {
       return {
@@ -188,6 +191,15 @@ export async function submitShopInvoice(opts: {
     actor: opts.actorEmail,
   });
 
+  let readyToClose: Awaited<ReturnType<typeof maybeMarkReadyToClose>> | null = null;
+  if (matched) {
+    readyToClose = await maybeMarkReadyToClose({
+      eventId,
+      tenantId,
+      actor: opts.actorEmail,
+    });
+  }
+
   return {
     ok: true as const,
     invoice: rows[0],
@@ -195,6 +207,7 @@ export async function submitShopInvoice(opts: {
     matchStatus,
     mismatchFlagged: !matched,
     otpUsed: otpNeeded,
+    readyToClose,
   };
 }
 

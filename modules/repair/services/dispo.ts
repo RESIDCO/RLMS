@@ -6,6 +6,7 @@ import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
 import { notify } from "./notifications";
 import { resolveActiveLink } from "./event-links";
+import { maybeMarkReadyToClose } from "./close";
 
 export async function listDispo(eventId: string, tenantId = DEFAULT_TENANT_ID) {
   const { rows } = await q(
@@ -67,5 +68,11 @@ export async function relayDispo(opts: {
     actor: opts.actor,
   });
 
-  return { ok: true as const, dispo: rows[0] };
+  const readyToClose = await maybeMarkReadyToClose({
+    eventId,
+    tenantId,
+    actor: opts.actor,
+  });
+
+  return { ok: true as const, dispo: rows[0], readyToClose };
 }

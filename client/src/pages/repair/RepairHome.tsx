@@ -25,6 +25,8 @@ export default function RepairHome() {
   const [error, setError] = useState<string>("");
   const [linkToken, setLinkToken] = useState<string>("");
   const [estimateId, setEstimateId] = useState<string>("");
+  const [closeEventId, setCloseEventId] = useState<string>("");
+  const [closeMsg, setCloseMsg] = useState<string>("");
 
   useEffect(() => {
     apiRequest("GET", "/api/repair/shops")
@@ -126,6 +128,63 @@ export default function RepairHome() {
             >
               Open estimate review / Resp 6
             </Link>
+          )}
+        </div>
+        <div className="grid gap-1 border-t border-border pt-4">
+          <Label htmlFor="closeEv">Event id — Ready to Close</Label>
+          <p className="text-xs text-muted-foreground">
+            When invoice total matches the approved final estimate and dispo is entered, status
+            becomes Ready to Close. Reviewer closes with one click (audited). No auto-close.
+          </p>
+          <Input
+            id="closeEv"
+            value={closeEventId}
+            onChange={(e) => setCloseEventId(e.target.value)}
+            placeholder="event uuid"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={!closeEventId}
+              onClick={async () => {
+                setCloseMsg("");
+                setError("");
+                try {
+                  const res = await apiRequest(
+                    "POST",
+                    `/api/repair/events/${closeEventId}/ready-to-close`,
+                    {},
+                  );
+                  const data = await res.json();
+                  setCloseMsg(JSON.stringify(data, null, 2));
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Ready-to-close check failed");
+                }
+              }}
+            >
+              Check / mark Ready to Close
+            </Button>
+            <Button
+              disabled={!closeEventId}
+              onClick={async () => {
+                setCloseMsg("");
+                setError("");
+                try {
+                  const res = await apiRequest("POST", `/api/repair/events/${closeEventId}/close`, {
+                    actorRole: "reviewer",
+                  });
+                  const data = await res.json();
+                  setCloseMsg(JSON.stringify(data, null, 2));
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Close failed");
+                }
+              }}
+            >
+              Close event
+            </Button>
+          </div>
+          {closeMsg && (
+            <pre className="text-xs bg-muted p-3 overflow-auto rounded-md max-h-40">{closeMsg}</pre>
           )}
         </div>
         {result && (

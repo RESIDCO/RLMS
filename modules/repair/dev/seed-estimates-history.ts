@@ -7,7 +7,9 @@
  * Usage:
  *   DATABASE_URL=... npm run repair:seed:estimates-history
  *
- * Idempotent tag: created_by = 'seed:estimates-history'
+ * Idempotent: match seed key (car_mark + car_number + created_by =
+ * 'seed:estimates-history'). Already-seeded rows are skipped — never DELETE
+ * estimate_revisions / findings / other append-only tables.
  */
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
@@ -358,36 +360,30 @@ async function shopIdFor(mark: string): Promise<string> {
   });
 }
 
-async function clearPriorSeed() {
-  // Local re-seed only: hard-delete seed-tagged rows (never used in prod).
-  await q(
-    `DELETE FROM repair.lessee_approvals WHERE created_by = 'seed:estimates-history'`,
+const SEED_CREATED_BY = "seed:estimates-history";
+
+/** Seed key: mark + number under the seed created_by tag. */
+async function findExistingSeedEstimate(
+  mark: string,
+  number: string,
+): Promise<{ estimateId: string; eventId: string } | null> {
+  const { rows } = await q(
+    `SELECT est.id AS estimate_id, ev.id AS event_id
+     FROM repair.estimates est
+     JOIN repair.events ev ON ev.id = est.event_id
+     WHERE est.created_by = $1
+       AND ev.created_by = $1
+       AND ev.car_mark = $2
+       AND ev.car_number = $3
+     ORDER BY est.created_at ASC
+     LIMIT 1`,
+    [SEED_CREATED_BY, mark, number],
   );
-  // estimate_load_findings is append-only (reject_mutation) — leave orphans in local DB.
-  await q(
-    `DELETE FROM repair.estimate_load_cars WHERE created_by = 'seed:estimates-history'`,
-  ).catch(() => undefined);
-  await q(
-    `DELETE FROM repair.estimate_lines
-     WHERE revision_id IN (
-       SELECT id FROM repair.estimate_revisions WHERE created_by = 'seed:estimates-history'
-     )`,
-  );
-  await q(
-    `DELETE FROM repair.estimate_revisions WHERE created_by = 'seed:estimates-history'`,
-  );
-  await q(
-    `DELETE FROM repair.documents WHERE created_by = 'seed:estimates-history'`,
-  );
-  await q(
-    `DELETE FROM repair.bad_orders WHERE created_by = 'seed:estimates-history'`,
-  );
-  await q(
-    `DELETE FROM repair.estimates WHERE created_by = 'seed:estimates-history'`,
-  );
-  await q(
-    `DELETE FROM repair.events WHERE created_by = 'seed:estimates-history'`,
-  );
+  if (!rows[0]) return null;
+  return {
+    estimateId: String(rows[0].estimate_id),
+    eventId: String(rows[0].event_id),
+  };
 }
 
 async function seedOne(row: SeedRow, shopId: string) {
@@ -402,6 +398,17 @@ async function seedOne(row: SeedRow, shopId: string) {
     rotate[Math.abs(Number(row.number.replace(/\D/g, "")) || 0) % 3];
   const entityCode = entityCodeFromSource(entitySource);
   const rowWithEntity: SeedRow = { ...row, entitySource };
+
+  const existing = await findExistingSeedEstimate(row.mark, row.number);
+  if (existing) {
+    return {
+      estimateId: existing.estimateId,
+      eventId: existing.eventId,
+      status: row.status,
+      label: `${row.mark} ${row.number}`,
+      skipped: true as const,
+    };
+  }
 
   await ensureCar(rowWithEntity);
   const eventStatus = await getStatusByCode(DEFAULT_TENANT_ID, "EVENT", "ON_HAND");
@@ -630,7 +637,13 @@ async function seedOne(row: SeedRow, shopId: string) {
     }
   }
 
-  return { estimateId, eventId, status: row.status, label: `${row.mark} ${row.number}` };
+  return {
+    estimateId,
+    eventId,
+    status: row.status,
+    label: `${row.mark} ${row.number}`,
+    skipped: false as const,
+  };
 }
 
 async function main() {
@@ -638,27 +651,47 @@ async function main() {
     console.error("Set DATABASE_URL before repair:seed:estimates-history");
     process.exit(1);
   }
-  console.log("repair:seed:estimates-history — migrate (idempotent) + seed ~15");
+  console.log(
+    "repair:seed:estimates-history — migrate (idempotent) + seed ~15 (skip existing)",
+  );
   await migrateLocal();
-  await clearPriorSeed();
+  // Never DELETE seed revisions/findings — estimate_revisions is append-only.
 
   const shops = new Map<string, string>();
   for (const mark of ["APA", "DEMO"]) {
     shops.set(mark, await shopIdFor(mark));
   }
 
-  const created = [];
+  const results: Array<{
+    estimateId: string;
+    eventId: string;
+    status: string;
+    label: string;
+    skipped: boolean;
+  }> = [];
   for (const row of SEED) {
     const shopId = shops.get(row.shopMark) ?? (await shopIdFor(row.shopMark));
-    created.push(await seedOne(row, shopId));
+    results.push(await seedOne(row, shopId));
   }
 
+  const created = results.filter((r) => !r.skipped);
+  const skipped = results.filter((r) => r.skipped);
   const byStatus = created.reduce<Record<string, number>>((acc, c) => {
     acc[c.status] = (acc[c.status] ?? 0) + 1;
     return acc;
   }, {});
-  console.log(`Seeded ${created.length} estimates:`);
-  for (const [k, v] of Object.entries(byStatus)) console.log(`  ${k}: ${v}`);
+  console.log(
+    `Estimates: ${created.length} created, ${skipped.length} skipped (already seeded)`,
+  );
+  if (created.length > 0) {
+    console.log("Created by status:");
+    for (const [k, v] of Object.entries(byStatus)) console.log(`  ${k}: ${v}`);
+  }
+  if (skipped.length > 0) {
+    console.log(
+      `Skipped: ${skipped.map((s) => s.label).join(", ")}`,
+    );
+  }
   console.log(
     "Default /#/repair filter shows actionable only; filter in APPROVED to test.",
   );

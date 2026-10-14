@@ -16,6 +16,8 @@ const CLOSE_ROLES = new Set([
 ]);
 
 async function hasMatchedInvoice(eventId: string, tenantId: string): Promise<boolean> {
+  // MATCHED = totals equal approved estimate. APPROVED = ACH-cleared after MATCHED
+  // (Q20: MISMATCH cannot reach APPROVED_FOR_ACH / APPROVED — no override).
   const { rows } = await q(
     `SELECT 1 FROM repair.invoices
      WHERE event_id = $1 AND tenant_id = $2 AND deleted_at IS NULL

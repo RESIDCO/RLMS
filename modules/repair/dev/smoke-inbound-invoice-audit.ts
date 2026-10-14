@@ -1,9 +1,10 @@
 /**
- * Smoke: inbound shop 500-byte intake + CRB pre-pay audit.
- * Cases: good file, mismatched total, unknown car, duplicate.
- * Also exercises DevInboundEmailProvider attachment path.
+ * Smoke: inbound shop 500-byte intake + CRB pre-pay audit (incl. Q18–Q20).
+ * Cases: good file (blank invoice_no WARN), mismatched total (ACH blocked),
+ * unknown car, hard duplicate (billing+invoice_no), soft scope WARN,
+ * reviewer invoice_no entry, inbound email, append-only checks.
  *
- * Requires DATABASE_URL + migrated repair schema (incl. inbound_invoice_audit).
+ * Requires DATABASE_URL + migrated repair schema (incl. invoice_q18_q20).
  * Run: npm run repair:smoke-inbound-invoice
  */
 import { readFileSync } from "fs";
@@ -18,6 +19,8 @@ import {
   ingestCrbInvoiceFromInboundEmail,
   decideInvoiceReview,
   listPrepayChecks,
+  setInvoiceNumberByReviewer,
+  reauditInvoiceTotals,
 } from "../services/inbound-invoice-audit";
 import { getInboundEmailProvider } from "../providers/inbound-email";
 import { DEFAULT_TENANT_ID, q } from "../db";
@@ -159,6 +162,21 @@ function mutateCarOnSample(bytes: Buffer, mark: string, number: string): Buffer 
   return Buffer.from(out.join(ending), "latin1");
 }
 
+/** Stamp a real invoice_number into Format 1 cols 14–29 (1-based; 0-based 13–28). */
+function stampInvoiceNo(bytes: Buffer, invoiceNo: string): Buffer {
+  const text = bytes.toString("latin1");
+  const ending = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const padded = invoiceNo.padEnd(16, " ").slice(0, 16);
+  const out = lines.map((line) => {
+    if (line.length !== 500 || line[0] !== "1") return line;
+    const chars = line.split("");
+    for (let i = 0; i < 16; i++) chars[13 + i] = padded[i];
+    return chars.join("");
+  });
+  return Buffer.from(out.join(ending), "latin1");
+}
+
 async function main() {
   const sampleBytes = readFileSync(samplePath);
   const parsed = parseAarFile(sampleBytes);
@@ -176,7 +194,7 @@ async function main() {
   await ensureTenantOwnerMark();
   const shopId = await apaShopId();
 
-  // ── 1) Good file ───────────────────────────────────────────────────
+  // ── 1) Good file (blank invoice_no → synthetic key + WARN) ─────────
   const good = await seedEvent({
     carMark: "OFOX",
     carNumber: "528313",
@@ -208,6 +226,14 @@ async function main() {
   if (goodIntake.totalCents !== expectedCents) {
     throw new Error(`totalCents ${goodIntake.totalCents} != ${expectedCents}`);
   }
+  if (!goodIntake.invoiceNoBlank) throw new Error("Q18 expected blank invoice_no");
+  if (goodIntake.invoiceNoSource !== "SYNTHETIC") {
+    throw new Error("Q18 expected SYNTHETIC invoice_no_source");
+  }
+  const syn = String(goodIntake.invoice.invoice_no);
+  if (!syn.includes(good.eventId) || !syn.startsWith("APA-OFOX")) {
+    throw new Error(`Q18 synthetic key unexpected: ${syn}`);
+  }
 
   const goodChecks = checkMap(await listPrepayChecks(String(goodIntake.invoice.id)));
   for (const code of [
@@ -220,10 +246,31 @@ async function main() {
     "JOB_CODE",
     "RESP_CODE",
     "DUPLICATE",
+    "DUPLICATE_SCOPE",
   ]) {
     if (goodChecks.get(code) !== "PASS") {
       throw new Error(`good file check ${code} expected PASS, got ${goodChecks.get(code)}`);
     }
+  }
+  if (goodChecks.get("BLANK_INVOICE_NO") !== "WARN") {
+    throw new Error("Q18 expected BLANK_INVOICE_NO WARN");
+  }
+
+  // Reviewer enters real invoice number
+  const entered = await setInvoiceNumberByReviewer({
+    invoiceId: String(goodIntake.invoice.id),
+    invoiceNo: "SMOKE-INV-001",
+    actor: "reviewer@smoke",
+  });
+  if (!entered.ok) throw new Error(entered.error);
+  if (entered.invoice.invoice_no !== "SMOKE-INV-001") {
+    throw new Error("reviewer invoice_no not applied");
+  }
+  if (entered.invoice.invoice_no_blank !== false) {
+    throw new Error("invoice_no_blank should clear after reviewer entry");
+  }
+  if (entered.invoice.invoice_no_source !== "REVIEWER") {
+    throw new Error("expected REVIEWER source");
   }
 
   const approved = await decideInvoiceReview({
@@ -235,6 +282,9 @@ async function main() {
   if (approved.invoice.review_status !== "APPROVED_FOR_ACH") {
     throw new Error("expected APPROVED_FOR_ACH");
   }
+  if (approved.invoice.match_status !== "APPROVED") {
+    throw new Error("ACH approve should stamp match_status APPROVED after MATCHED");
+  }
 
   // Original document immutable — sha stored; re-fetch document sha matches file
   const { rows: docs } = await q(
@@ -245,7 +295,7 @@ async function main() {
     throw new Error("document sha256 drift — original must be immutable");
   }
 
-  // ── 2) Mismatched total ────────────────────────────────────────────
+  // ── 2) Mismatched total — Q20 blocks ACH ───────────────────────────
   const mismatchEv = await seedEvent({
     carMark: "OFOX",
     carNumber: "528313",
@@ -254,9 +304,11 @@ async function main() {
     withSampleEstimate: false,
     simpleTotal: 100,
   });
+  // Stamp unique invoice_no so Q19(a) does not hard-block against prior synthetic/entered
+  const mismatchBytes = stampInvoiceNo(sampleBytes, "MM-SMOKE-100");
   const mismatchIntake = await submitShopCrbInvoice({
     rawToken: mismatchEv.token,
-    bytes: sampleBytes,
+    bytes: mismatchBytes,
     filename: "Sample_Shop_500byte_OFOX2609.txt",
     mime: "text/plain",
     actorEmail: "shop@smoke.invalid",
@@ -269,10 +321,37 @@ async function main() {
   if (mmChecks.get("TOTAL_MATCH") !== "FAIL") {
     throw new Error("expected TOTAL_MATCH FAIL");
   }
+  if (mmChecks.get("BLANK_INVOICE_NO") !== "PASS") {
+    throw new Error("stamped invoice_no should PASS BLANK_INVOICE_NO");
+  }
+  // Soft scope may WARN (same car + total from other events with overlapping jobs)
   // Still queued for human review (not hard-rejected)
   if (mismatchIntake.reviewStatus !== "PENDING_REVIEW") {
     throw new Error("mismatch should still be PENDING_REVIEW");
   }
+
+  const achBlocked = await decideInvoiceReview({
+    invoiceId: String(mismatchIntake.invoice.id),
+    decision: "APPROVED_FOR_ACH",
+    actor: "reviewer@smoke",
+  });
+  if (achBlocked.ok) throw new Error("Q20: MISMATCH must not APPROVED_FOR_ACH");
+  if (achBlocked.status !== 409) {
+    throw new Error(`Q20 expected 409, got ${achBlocked.status}: ${achBlocked.error}`);
+  }
+  if (!String(achBlocked.error).includes("No override")) {
+    throw new Error(`Q20 error should mention no override: ${achBlocked.error}`);
+  }
+
+  const reauditStillMismatch = await reauditInvoiceTotals({
+    invoiceId: String(mismatchIntake.invoice.id),
+    actor: "reviewer@smoke",
+  });
+  if (!reauditStillMismatch.ok) throw new Error(reauditStillMismatch.error);
+  if (reauditStillMismatch.matchStatus !== "MISMATCH") {
+    throw new Error("reaudit without Adjustment should remain MISMATCH");
+  }
+
   const rejected = await decideInvoiceReview({
     invoiceId: String(mismatchIntake.invoice.id),
     decision: "REJECTED",
@@ -283,8 +362,6 @@ async function main() {
 
   // ── 3) Unknown car (hard reject) ───────────────────────────────────
   const unknownBytes = mutateCarOnSample(sampleBytes, "ZZZX", "999999");
-  // Event still OFOX — car mismatch OR not in VCF. Use a dedicated event + unknown file car.
-  // Hard reject path: car not owned/managed (not in VCF).
   const unknownEv = await seedEvent({
     carMark: "OFOX",
     carNumber: "528313",
@@ -292,13 +369,7 @@ async function main() {
     actor: "smoke-inv",
     withSampleEstimate: true,
   });
-  // Mutate sample car to something not in VCF at all
   const ghostBytes = mutateCarOnSample(sampleBytes, "GHOST", "000001");
-  // Align event car temporarily by creating BO for ghost — but ghost not in VCF.
-  // Direct intake against unknownEv token will fail car-match first.
-  // Use ingest with eventId after temporarily... better: call with token of OFOX event
-  // and ghost file → 422 car mismatch. Also test pure VCF reject via inbound with
-  // a ghost event — createBadOrder for ghost should fail. So:
   const ghostReject = await submitShopCrbInvoice({
     rawToken: unknownEv.token,
     bytes: ghostBytes,
@@ -310,7 +381,6 @@ async function main() {
   if (ghostReject.status !== 422) {
     throw new Error(`expected 422, got ${ghostReject.status}: ${ghostReject.error}`);
   }
-  // Pure VCF reject: mutate unknownBytes and try createBadOrder
   const notVcf = await createBadOrder({
     carMark: "GHOST",
     carNumber: "000001",
@@ -319,7 +389,6 @@ async function main() {
   });
   if (notVcf.ok) throw new Error("GHOST car should not be in VCF");
 
-  // Also confirm unknownBytes (ZZZX 999999) — stub may have ZZZX railcar but not VCF row
   const zzzxIntake = await submitShopCrbInvoice({
     rawToken: unknownEv.token,
     bytes: unknownBytes,
@@ -330,7 +399,7 @@ async function main() {
   if (zzzxIntake.ok) throw new Error("ZZZX file on OFOX event should reject");
   if (zzzxIntake.status !== 422) throw new Error(`ZZZX expected 422 got ${zzzxIntake.status}`);
 
-  // ── 4) Duplicate ───────────────────────────────────────────────────
+  // ── 4) Q19(a) hard duplicate: same billing + invoice_no any period ─
   const dupEv = await seedEvent({
     carMark: "OFOX",
     carNumber: "528313",
@@ -338,28 +407,96 @@ async function main() {
     actor: "smoke-inv",
     withSampleEstimate: true,
   });
+  const numbered = stampInvoiceNo(sampleBytes, "APA-HARD-DUP-1");
   const first = await submitShopCrbInvoice({
     rawToken: dupEv.token,
-    bytes: sampleBytes,
+    bytes: numbered,
     filename: "Sample_Shop_500byte_OFOX2609.txt",
     mime: "text/plain",
     actorEmail: "shop@smoke.invalid",
   });
   if (!first.ok) throw new Error(`dup first: ${first.error}`);
-  const second = await submitShopCrbInvoice({
-    rawToken: dupEv.token,
-    bytes: sampleBytes,
+
+  const otherEv = await seedEvent({
+    carMark: "OFOX",
+    carNumber: "528313",
+    shopId,
+    actor: "smoke-inv",
+    withSampleEstimate: true,
+  });
+  const hardDup = await submitShopCrbInvoice({
+    rawToken: otherEv.token,
+    bytes: numbered,
     filename: "Sample_Shop_500byte_OFOX2609.txt",
     mime: "text/plain",
     actorEmail: "shop@smoke.invalid",
   });
-  if (!second.ok) throw new Error(`dup second: ${second.error}`);
-  const dupChecks = checkMap(await listPrepayChecks(String(second.invoice.id)));
-  if (dupChecks.get("DUPLICATE") !== "FAIL") {
-    throw new Error("expected DUPLICATE FAIL on second submit");
+  if (hardDup.ok) throw new Error("Q19a: same billing+invoice_no must hard-block");
+  if (hardDup.status !== 422) {
+    throw new Error(`Q19a expected 422, got ${hardDup.status}: ${hardDup.error}`);
+  }
+  if (!String(hardDup.error).includes("Hard block")) {
+    throw new Error(`Q19a error should say Hard block: ${hardDup.error}`);
   }
 
-  // ── 5) Dev inbound-email adapter ───────────────────────────────────
+  // Same-event resubmit of blank synthetic (same day) also hard-blocks
+  const blankEv = await seedEvent({
+    carMark: "OFOX",
+    carNumber: "528313",
+    shopId,
+    actor: "smoke-inv",
+    withSampleEstimate: true,
+  });
+  const blankFirst = await submitShopCrbInvoice({
+    rawToken: blankEv.token,
+    bytes: sampleBytes,
+    filename: "blank1.txt",
+    mime: "text/plain",
+    actorEmail: "shop@smoke.invalid",
+  });
+  if (!blankFirst.ok) throw new Error(`blank first: ${blankFirst.error}`);
+  const blankSecond = await submitShopCrbInvoice({
+    rawToken: blankEv.token,
+    bytes: sampleBytes,
+    filename: "blank2.txt",
+    mime: "text/plain",
+    actorEmail: "shop@smoke.invalid",
+  });
+  if (blankSecond.ok) throw new Error("same-day blank synthetic resubmit should hard-block");
+  if (blankSecond.status !== 422) {
+    throw new Error(`blank resubmit expected 422 got ${blankSecond.status}`);
+  }
+
+  // ── 5) Q19(b) soft WARN: same car + total + overlapping jobs (12mo) ─
+  // first (APA-HARD-DUP-1) already MATCHED on OFOX 528313 with sample job codes.
+  // Submit a different invoice_no on another event → soft scope WARN.
+  const softEv = await seedEvent({
+    carMark: "OFOX",
+    carNumber: "528313",
+    shopId,
+    actor: "smoke-inv",
+    withSampleEstimate: true,
+  });
+  const softBytes = stampInvoiceNo(sampleBytes, "APA-SOFT-SCOPE-1");
+  const softIntake = await submitShopCrbInvoice({
+    rawToken: softEv.token,
+    bytes: softBytes,
+    filename: "soft-scope.txt",
+    mime: "text/plain",
+    actorEmail: "shop@smoke.invalid",
+  });
+  if (!softIntake.ok) throw new Error(`soft scope intake: ${softIntake.error}`);
+  const softChecks = checkMap(await listPrepayChecks(String(softIntake.invoice.id)));
+  if (softChecks.get("DUPLICATE") !== "PASS") {
+    throw new Error("different invoice_no should PASS hard DUPLICATE");
+  }
+  if (softChecks.get("DUPLICATE_SCOPE") !== "WARN") {
+    throw new Error(
+      `Q19b expected DUPLICATE_SCOPE WARN, got ${softChecks.get("DUPLICATE_SCOPE")}`,
+    );
+  }
+
+  // ── 6) Dev inbound-email adapter ───────────────────────────────────
   const emailEv = await seedEvent({
     carMark: "OFOX",
     carNumber: "528313",
@@ -367,6 +504,7 @@ async function main() {
     actor: "smoke-inv",
     withSampleEstimate: true,
   });
+  const emailBytes = stampInvoiceNo(sampleBytes, "APA-EMAIL-001");
   const inbound = await getInboundEmailProvider().ingest({
     from: "shop@apa.example",
     to: `shop-invoice+${emailEv.token}@inbound.dev`,
@@ -378,7 +516,7 @@ async function main() {
       {
         filename: "Sample_Shop_500byte_OFOX2609.txt",
         mime: "text/plain",
-        contentBase64: sampleBytes.toString("base64"),
+        contentBase64: emailBytes.toString("base64"),
       },
     ],
   });
@@ -421,6 +559,22 @@ async function main() {
           detailOnly: true,
           sha256: parsed.sha256,
         },
+        q18: {
+          blank: true,
+          syntheticKey: syn,
+          reviewerInvoiceNo: entered.invoice.invoice_no,
+          blankWarn: goodChecks.get("BLANK_INVOICE_NO"),
+        },
+        q19: {
+          hardDupStatus: hardDup.status,
+          blankResubmitStatus: blankSecond.status,
+          softScope: softChecks.get("DUPLICATE_SCOPE"),
+        },
+        q20: {
+          mismatchAchBlocked: !achBlocked.ok,
+          achStatus: achBlocked.status,
+          reauditMatchStatus: reauditStillMismatch.matchStatus,
+        },
         good: {
           invoiceId: goodIntake.invoice.id,
           matchStatus: goodIntake.matchStatus,
@@ -435,10 +589,6 @@ async function main() {
         unknownCar: {
           ghostStatus: ghostReject.status,
           zzzxStatus: zzzxIntake.status,
-        },
-        duplicate: {
-          secondInvoiceId: second.invoice.id,
-          duplicateCheck: dupChecks.get("DUPLICATE"),
         },
         inboundEmail: {
           inboundId: inbound.id,

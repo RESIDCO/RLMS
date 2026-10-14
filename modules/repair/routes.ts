@@ -41,6 +41,8 @@ import {
   decideInvoiceReview,
   listPrepayChecks,
   listInvoiceReviewQueue,
+  setInvoiceNumberByReviewer,
+  reauditInvoiceTotals,
 } from "./services/inbound-invoice-audit";
 import { relayDispo, listDispo } from "./services/dispo";
 import {
@@ -951,6 +953,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
 
   /**
    * Reviewer decision: APPROVED_FOR_ACH (payment outside RLMS) or REJECTED (reason required).
+   * Q20: MISMATCH cannot APPROVED_FOR_ACH — no override; re-audits vs approved estimate.
    * Append-only decision row; original file remains immutable.
    */
   app.post("/api/repair/invoices/:id/prepay-decision", async (req, res) => {
@@ -966,6 +969,47 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       invoiceId: String(req.params.id),
       decision,
       reason: req.body?.reason ? String(req.body.reason) : undefined,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        error: result.error,
+        ...("matchStatus" in result ? { matchStatus: result.matchStatus } : {}),
+        ...("check" in result ? { check: result.check } : {}),
+      });
+    }
+    return res.json(result);
+  });
+
+  /** Q18: reviewer enters real invoice_no when shop file left it blank. */
+  app.post("/api/repair/invoices/:id/invoice-no", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setInvoiceNumberByReviewer({
+      invoiceId: String(req.params.id),
+      invoiceNo: String(req.body?.invoiceNo ?? ""),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        error: result.error,
+        ...("conflictingInvoiceIds" in result
+          ? { conflictingInvoiceIds: result.conflictingInvoiceIds }
+          : {}),
+      });
+    }
+    return res.json(result);
+  });
+
+  /**
+   * Q20: re-audit TOTAL_MATCH vs current approved final estimate
+   * (after shop revision or approved Adjustment).
+   */
+  app.post("/api/repair/invoices/:id/prepay-reaudit", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await reauditInvoiceTotals({
+      invoiceId: String(req.params.id),
       actor: actorFrom(req),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });

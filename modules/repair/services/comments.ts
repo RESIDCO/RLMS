@@ -5,6 +5,7 @@
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
 import { notify } from "./notifications";
+import { centsToDollars, lineLaborCents, lineMaterialCents, lineTotalCents } from "./money";
 
 export async function listComments(opts: {
   eventId?: string;
@@ -166,15 +167,28 @@ export async function compareRevisions(opts: {
     }
   }
 
-  const sum = (rows: typeof left.rows) =>
-    rows.reduce(
-      (acc, r) => ({
-        labor: acc.labor + Number(r.labor ?? 0),
-        material: acc.material + Number(r.material ?? 0),
-        total: acc.total + Number(r.total ?? 0),
-      }),
-      { labor: 0, material: 0, total: 0 },
-    );
+  const sum = (rows: typeof left.rows) => {
+    let laborCents = 0;
+    let materialCents = 0;
+    let totalCents = 0;
+    for (const r of rows) {
+      const line = {
+        labor: r.labor as number | string | null,
+        material: r.material as number | string | null,
+        total: r.total as number | string | null,
+        laborCents: r.labor_cents != null ? Number(r.labor_cents) : null,
+        materialCents: r.material_cents != null ? Number(r.material_cents) : null,
+      };
+      laborCents += lineLaborCents(line);
+      materialCents += lineMaterialCents(line);
+      totalCents += lineTotalCents(line);
+    }
+    return {
+      labor: centsToDollars(laborCents),
+      material: centsToDollars(materialCents),
+      total: centsToDollars(totalCents),
+    };
+  };
 
   return {
     leftRevisionId: opts.leftRevisionId,

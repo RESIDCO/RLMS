@@ -20,6 +20,7 @@ import { getStatusByCode, assertTransitionAllowed } from "./status-machine";
 import { lookupRepairCategory } from "./categories";
 import { getInboundEmailProvider } from "../providers/inbound-email";
 import { notify } from "./notifications";
+import { centsToDollars } from "./money";
 
 export type LoadFinding = {
   severity: "ERROR" | "WARNING";
@@ -359,9 +360,9 @@ async function applyCarEstimate(opts: {
       respCode: line.respCode ?? undefined,
       laborCents,
       materialCents,
-      labor: laborCents / 100,
-      material: materialCents / 100,
-      total: (laborCents + materialCents) / 100,
+      labor: centsToDollars(laborCents),
+      material: centsToDollars(materialCents),
+      total: centsToDollars(laborCents + materialCents),
       repairCategory: cat?.category ?? null,
       subCategory: cat?.sub_category ?? null,
       aarComponentId: line.aarComponentId,
@@ -370,9 +371,12 @@ async function applyCarEstimate(opts: {
     });
   }
 
-  const labor = lineInputs.reduce((s, l) => s + l.labor, 0);
-  const material = lineInputs.reduce((s, l) => s + l.material, 0);
-  const total = lineInputs.reduce((s, l) => s + l.total, 0);
+  // Sum integer cents first — never accumulate floating dollars.
+  const laborCentsSum = lineInputs.reduce((s, l) => s + l.laborCents, 0);
+  const materialCentsSum = lineInputs.reduce((s, l) => s + l.materialCents, 0);
+  const labor = centsToDollars(laborCentsSum);
+  const material = centsToDollars(materialCentsSum);
+  const total = centsToDollars(laborCentsSum + materialCentsSum);
 
   const packed = await withTransaction(async (client) => {
     const revNo = Number(estimate.current_revision) + 1;

@@ -56,6 +56,7 @@ import { restoreVoidedEstimate } from "../services/gap-lifecycle-06";
 import { parseAarFile } from "../services/aar-parser";
 import { migrateLocal } from "./migrate-local";
 import { assertDemoTotals, sourceFileTotals } from "./demo-totals";
+import { assertAtMostTwoDecimals, formatCentsAsDollars } from "../services/money";
 import {
   getEmailProvider,
   setEmailProvider,
@@ -415,6 +416,7 @@ async function main() {
     | undefined;
   if (revApplied?.estimateId) estimateId = String(revApplied.estimateId);
   const revs = await listRevisions(estimateId);
+  assertAtMostTwoDecimals("step[4] revision total", revApplied?.total);
   logStep(4, "Revision uploaded (UI / pre-approval)", String(revApplied?.loadKind ?? "Revision"), {
     estimateId,
     revisionId: revApplied?.revisionId,
@@ -456,6 +458,7 @@ async function main() {
   );
   const revisionId = String(totRows[0].id);
   const estimateTotal = Number(totRows[0].total);
+  assertAtMostTwoDecimals("step[5] approved estimate total", estimateTotal);
   logStep(5, "Estimate approved", "APPROVED", {
     estimateId,
     revisionId,
@@ -649,18 +652,47 @@ async function main() {
     exportLaborCents: Number(close.laborCents ?? 0),
     exportMaterialCents: Number(close.materialCents ?? 0),
   });
+
+  // Smoke: no revision labor/material/total has more than 2 decimal places.
+  const { rows: moneyRows } = await q(
+    `SELECT rev_no, labor, material, total
+     FROM repair.estimate_revisions
+     WHERE estimate_id = $1
+     ORDER BY rev_no`,
+    [estimateId],
+  );
+  for (const row of moneyRows) {
+    assertAtMostTwoDecimals(`rev ${row.rev_no} labor`, row.labor);
+    assertAtMostTwoDecimals(`rev ${row.rev_no} material`, row.material);
+    assertAtMostTwoDecimals(`rev ${row.rev_no} total`, row.total);
+  }
+  const { rows: lineMoneyRows } = await q(
+    `SELECT el.line_no, el.labor, el.material, el.total
+     FROM repair.estimate_lines el
+     JOIN repair.estimate_revisions r ON r.id = el.revision_id
+     WHERE r.estimate_id = $1`,
+    [estimateId],
+  );
+  for (const row of lineMoneyRows) {
+    assertAtMostTwoDecimals(`line ${row.line_no} labor`, row.labor);
+    assertAtMostTwoDecimals(`line ${row.line_no} material`, row.material);
+    assertAtMostTwoDecimals(`line ${row.line_no} total`, row.total);
+  }
+
   logStep(13.5, "Totals check (source / approved / export)", "ok", {
     sourceFileTotalCents: sourceTotals.allTotal,
-    sourceFileTotalDollars: (sourceTotals.allTotal / 100).toFixed(2),
+    sourceFileTotalDollars: formatCentsAsDollars(sourceTotals.allTotal),
     approvedEstimateCents: checked.approvedCents,
     exportRebillableCents: checked.exportTotalCents,
-    exportRebillableDollars: (checked.exportTotalCents / 100).toFixed(2),
+    exportRebillableDollars: formatCentsAsDollars(checked.exportTotalCents),
     neverRebillResp7Cents: sourceTotals.neverRebillTotal,
-    neverRebillResp7Dollars: (sourceTotals.neverRebillTotal / 100).toFixed(2),
+    neverRebillResp7Dollars: formatCentsAsDollars(sourceTotals.neverRebillTotal),
     neverRebillLines: sourceTotals.neverRebillLines,
+    moneyTwoDecimalsOk: true,
     note:
       "Export equals approved Resp 6/3 lines and source Resp 6/3. Full source " +
-      "includes Resp 7 Never Rebill (excluded from CRIP by design).",
+      "includes Resp 7 Never Rebill (excluded from CRIP by design). " +
+      "All revision/line totals asserted ≤ 2 decimal places (integer cents).",
   });
 
   // ── 10. Retention demo (void + restore on companion) ───────────────
@@ -694,7 +726,7 @@ async function main() {
   // Persist artifacts
   const stepLogPath = join(outDir, "step-log.json");
   const summary = {
-    tipHint: "Requires tip 1adb3bf+ (migrate via node-pg + totals smoke)",
+    tipHint: "Requires tip b29d0a5+ (integer cents money + migrate via node-pg)",
     car: "OFOX 528313",
     sampleFile: "modules/repair/dev/reference/Sample_Shop_500byte_OFOX2609.txt",
     eventId,

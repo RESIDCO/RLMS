@@ -6,6 +6,7 @@
  * ($3,083.79 on the sample — not a parser miss).
  */
 import { parseAarFile, signedMaterialCents } from "../services/aar-parser";
+import { dollarsToCents } from "../services/money";
 import { q } from "../db";
 
 /** Rebillable responsibility codes in monthly CRIP export (Resp 6 lessee, 3 railroad). */
@@ -88,7 +89,7 @@ export async function assertDemoTotals(opts: {
   approvedCents: number;
   exportTotalCents: number;
 }> {
-  const approvedCents = Math.round(opts.estimateTotalDollars * 100);
+  const approvedCents = dollarsToCents(opts.estimateTotalDollars);
   if (approvedCents !== opts.source.allTotal) {
     throw new Error(
       `Approved estimate total ${approvedCents}¢ != source file total ${opts.source.allTotal}¢ ` +

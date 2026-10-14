@@ -6,6 +6,13 @@ import { writeAudit } from "./audit";
 import { getStorageProvider } from "../providers/storage";
 import { parseAarFile, signedMaterialCents } from "./aar-parser";
 import { lookupRepairCategory } from "./categories";
+import {
+  centsToDollars,
+  lineLaborCents,
+  lineMaterialCents,
+  lineTotalCents,
+  sumLineMoney,
+} from "./money";
 
 export type EstimateLineInput = {
   lineNo?: number;
@@ -217,25 +224,7 @@ export async function uploadEstimate(opts: {
     ? opts.lines
     : await linesFromAarFile(opts.file?.bytes, tenantId);
 
-  const labor = lines.reduce(
-    (s, l) => s + Number(l.labor ?? (l.laborCents != null ? l.laborCents / 100 : 0)),
-    0,
-  );
-  const material = lines.reduce(
-    (s, l) =>
-      s + Number(l.material ?? (l.materialCents != null ? l.materialCents / 100 : 0)),
-    0,
-  );
-  const total = lines.reduce(
-    (s, l) =>
-      s +
-      Number(
-        l.total ??
-          Number(l.labor ?? (l.laborCents != null ? l.laborCents / 100 : 0)) +
-            Number(l.material ?? (l.materialCents != null ? l.materialCents / 100 : 0)),
-      ),
-    0,
-  );
+  const { labor, material, total } = sumLineMoney(lines);
 
   const packed = await withTransaction(async (client) => {
     const revNo = Number(estimate.current_revision) + 1;
@@ -265,8 +254,9 @@ export async function uploadEstimate(opts: {
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const lineTotal =
-        Number(line.total ?? Number(line.labor ?? 0) + Number(line.material ?? 0));
+      const laborC = lineLaborCents(line);
+      const materialC = lineMaterialCents(line);
+      const totalC = lineTotalCents(line);
       await client.query(
         `INSERT INTO repair.estimate_lines
            (tenant_id, revision_id, line_no, aar_job_code, qualifier, why_made,
@@ -283,15 +273,13 @@ export async function uploadEstimate(opts: {
           line.whyMade ?? null,
           line.conditionCode ?? null,
           line.respCode ?? null,
-          Number(line.labor ?? (line.laborCents != null ? line.laborCents / 100 : 0)),
-          Number(
-            line.material ?? (line.materialCents != null ? line.materialCents / 100 : 0),
-          ),
-          lineTotal,
+          centsToDollars(laborC),
+          centsToDollars(materialC),
+          centsToDollars(totalC),
           line.repairCategory ?? null,
           line.subCategory ?? null,
-          line.laborCents ?? null,
-          line.materialCents ?? null,
+          laborC,
+          materialC,
           line.aarComponentId ?? null,
           line.ddctIncidentId ?? null,
           line.rawLine ?? null,
@@ -363,9 +351,9 @@ async function linesFromAarFile(
         respCode: line.respCode ?? undefined,
         laborCents,
         materialCents,
-        labor: laborCents / 100,
-        material: materialCents / 100,
-        total: (laborCents + materialCents) / 100,
+        labor: centsToDollars(laborCents),
+        material: centsToDollars(materialCents),
+        total: centsToDollars(laborCents + materialCents),
         repairCategory: cat?.category ?? null,
         subCategory: cat?.sub_category ?? null,
         aarComponentId: line.aarComponentId,

@@ -12,6 +12,14 @@ import { notify } from "./notifications";
 import { resolveActiveLink } from "./event-links";
 import type { EstimateLineInput } from "./estimates";
 import { getPhase2Hooks } from "./ops-grid";
+import {
+  centsToDollars,
+  formatDollars,
+  lineLaborCents,
+  lineMaterialCents,
+  lineTotalCents,
+  sumLineMoney,
+} from "./money";
 
 const INTERNAL_CORRECTION_STATUSES = new Set([
   "QUEUED",
@@ -174,25 +182,7 @@ export async function saveInternalCorrection(opts: {
     }
   }
 
-  const labor = opts.lines.reduce(
-    (s, l) => s + Number(l.labor ?? (l.laborCents != null ? l.laborCents / 100 : 0)),
-    0,
-  );
-  const material = opts.lines.reduce(
-    (s, l) =>
-      s + Number(l.material ?? (l.materialCents != null ? l.materialCents / 100 : 0)),
-    0,
-  );
-  const total = opts.lines.reduce(
-    (s, l) =>
-      s +
-      Number(
-        l.total ??
-          Number(l.labor ?? (l.laborCents != null ? l.laborCents / 100 : 0)) +
-            Number(l.material ?? (l.materialCents != null ? l.materialCents / 100 : 0)),
-      ),
-    0,
-  );
+  const { labor, material, total } = sumLineMoney(opts.lines);
 
   const header = opts.header ?? {};
   const revNo = Number(estimate.current_revision) + 1;
@@ -229,8 +219,9 @@ export async function saveInternalCorrection(opts: {
 
     for (let i = 0; i < opts.lines.length; i++) {
       const line = opts.lines[i];
-      const lineTotal =
-        Number(line.total ?? Number(line.labor ?? 0) + Number(line.material ?? 0));
+      const laborC = lineLaborCents(line);
+      const materialC = lineMaterialCents(line);
+      const totalC = lineTotalCents(line);
       await client.query(
         `INSERT INTO repair.estimate_lines
            (tenant_id, revision_id, line_no, aar_job_code, qualifier, why_made,
@@ -247,15 +238,13 @@ export async function saveInternalCorrection(opts: {
           line.whyMade ?? null,
           line.conditionCode ?? null,
           line.respCode ?? null,
-          Number(line.labor ?? (line.laborCents != null ? line.laborCents / 100 : 0)),
-          Number(
-            line.material ?? (line.materialCents != null ? line.materialCents / 100 : 0),
-          ),
-          lineTotal,
+          centsToDollars(laborC),
+          centsToDollars(materialC),
+          centsToDollars(totalC),
           line.repairCategory ?? null,
           line.subCategory ?? null,
-          line.laborCents ?? null,
-          line.materialCents ?? null,
+          laborC,
+          materialC,
           line.aarComponentId ?? null,
           line.ddctIncidentId ?? null,
           line.rawLine ?? null,
@@ -303,7 +292,7 @@ export async function saveInternalCorrection(opts: {
       `An internal correction was saved on your estimate by ${opts.actor}.\n` +
       `Reason: ${reason}\n` +
       `New revision: ${revNo}\n` +
-      `New total: $${total.toFixed(2)}\n` +
+      `New total: $${formatDollars(total)}\n` +
       `Status: ${targetCode}`,
     actor: opts.actor,
   }).catch(() => undefined);

@@ -25,6 +25,7 @@ import { parseAarFile, signedMaterialCents, type ParsedAarLine } from "./aar-par
 import { validateCripBytes } from "./crb-validate";
 import { getCarOwnerMark, resolveInboundShopMarks } from "./billed-party-map";
 import { maybeMarkReadyToClose } from "./close";
+import { dollarsToCents, formatCentsAsDollars } from "./money";
 
 export type PrepayCheckCode =
   | "LINE_LENGTH"
@@ -273,7 +274,7 @@ function buildParseChecks(
       detail: {
         mode: "computed_from_detail",
         ...computed,
-        totalDollars: (computed.totalCents / 100).toFixed(2),
+        totalDollars: formatCentsAsDollars(computed.totalCents),
         note: "No Format 8/9 — invoice total derived from Format 1 labor+material",
       },
     });
@@ -371,7 +372,7 @@ async function buildBusinessChecks(opts: {
   });
 
   const estimateCents =
-    opts.estimateTotal == null ? null : Math.round(opts.estimateTotal * 100);
+    opts.estimateTotal == null ? null : dollarsToCents(opts.estimateTotal);
   const totalMatch =
     estimateCents != null && estimateCents === opts.totalCents;
   checks.push({
@@ -379,10 +380,10 @@ async function buildBusinessChecks(opts: {
     result: estimateCents == null ? "FAIL" : totalMatch ? "PASS" : "FAIL",
     detail: {
       invoiceTotalCents: opts.totalCents,
-      invoiceTotal: (opts.totalCents / 100).toFixed(2),
+      invoiceTotal: formatCentsAsDollars(opts.totalCents),
       estimateTotalCents: estimateCents,
       estimateTotal:
-        estimateCents == null ? null : (estimateCents / 100).toFixed(2),
+        estimateCents == null ? null : formatCentsAsDollars(estimateCents),
     },
   });
 
@@ -614,11 +615,11 @@ export async function reauditInvoiceTotals(opts: {
   const approved = await approvedFinalEstimate(String(inv.event_id), tenantId);
   const estimateTotal = approved?.total ?? null;
   const estimateCents =
-    estimateTotal == null ? null : Math.round(estimateTotal * 100);
+    estimateTotal == null ? null : dollarsToCents(estimateTotal);
   const totalCents =
     inv.total_cents != null
       ? Number(inv.total_cents)
-      : Math.round(Number(inv.total) * 100);
+      : dollarsToCents(inv.total);
   const matched = estimateCents != null && estimateCents === totalCents;
   const matchStatus = matched ? "MATCHED" : "MISMATCH";
 
@@ -628,10 +629,10 @@ export async function reauditInvoiceTotals(opts: {
     detail: {
       reaudit: true,
       invoiceTotalCents: totalCents,
-      invoiceTotal: (totalCents / 100).toFixed(2),
+      invoiceTotal: formatCentsAsDollars(totalCents),
       estimateTotalCents: estimateCents,
       estimateTotal:
-        estimateCents == null ? null : (estimateCents / 100).toFixed(2),
+        estimateCents == null ? null : formatCentsAsDollars(estimateCents),
       rule: "Invoice total must equal approved final estimate (Q20)",
     },
   };
@@ -1129,7 +1130,7 @@ async function ingestCrbInvoiceForEvent(opts: IntakeBase & {
   const approved = await approvedFinalEstimate(eventId, tenantId);
   const estimateTotal = approved?.total ?? null;
   const matched =
-    estimateTotal != null && Math.round(estimateTotal * 100) === totalCents;
+    estimateTotal != null && dollarsToCents(estimateTotal) === totalCents;
   const matchStatus = matched ? "MATCHED" : "MISMATCH";
 
   const stored = await getStorageProvider().put({
@@ -1258,7 +1259,7 @@ async function ingestCrbInvoiceForEvent(opts: IntakeBase & {
       resolvedNo.blank
         ? "Blank invoice_no on file — synthetic key used; reviewer should enter the real number."
         : null,
-      `Total: ${(totalCents / 100).toFixed(2)} (detail_only=${detailOnly})`,
+      `Total: ${formatCentsAsDollars(totalCents)} (detail_only=${detailOnly})`,
       `Match vs estimate: ${matchStatus}`,
       `Automated checks: ${checks.length} (${failCount} FAIL, ${warnCount} WARN)`,
       "Reviewer: approve for ACH only when MATCHED (outside RLMS) or reject with reason.",

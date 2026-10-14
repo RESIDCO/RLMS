@@ -17,6 +17,7 @@ const autoTable =
     : (autoTableImport as { default: typeof autoTableImport }).default;
 import { getStorageProvider } from "../providers/storage";
 import type { OutboundEmail } from "../providers/email";
+import { formatDollars } from "./money";
 
 export type DocRow = {
   id: string;
@@ -187,9 +188,9 @@ async function generateEstimatePdf(opts: {
       String(l.qualifier ?? ""),
       String(l.why_made ?? ""),
       String(l.repair_category ?? ""),
-      Number(l.labor).toFixed(2),
-      Number(l.material).toFixed(2),
-      Number(l.total).toFixed(2),
+      formatDollars(l.labor as number | string | null),
+      formatDollars(l.material as number | string | null),
+      formatDollars(l.total as number | string | null),
     ]),
     styles: { fontSize: 8 },
   });

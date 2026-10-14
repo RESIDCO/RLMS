@@ -25,6 +25,7 @@ import {
   type PartyRole,
 } from "./billed-party-map";
 import { getCarsRef } from "../integration/rlms";
+import { dollarsToCents } from "./money";
 
 const REBILL_RESP_CODES = ["6", "3"] as const;
 
@@ -190,11 +191,11 @@ export async function collectRebillEvents(opts: {
         const lc =
           l.labor_cents != null
             ? Number(l.labor_cents)
-            : Math.round(Number(l.labor ?? 0) * 100);
+            : dollarsToCents(l.labor);
         const mc =
           l.material_cents != null
             ? Number(l.material_cents)
-            : Math.round(Number(l.material ?? 0) * 100);
+            : dollarsToCents(l.material);
         laborCents += lc;
         materialCents += mc;
         return {

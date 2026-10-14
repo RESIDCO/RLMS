@@ -12,6 +12,7 @@ import { getStorageProvider } from "../providers/storage";
 import { notify } from "./notifications";
 import { isOtpRequired, verifyStepOtp } from "./otp";
 import { maybeMarkReadyToClose } from "./close";
+import { centsToDollars, dollarsToCents, formatDollars } from "./money";
 
 async function approvedFinalEstimateTotal(
   eventId: string,
@@ -97,9 +98,11 @@ export async function submitShopInvoice(opts: {
     };
   }
 
-  const invoiceTotal = Math.round(opts.total * 100) / 100;
-  const estimateTotal = Math.round(approved.total * 100) / 100;
-  const matched = invoiceTotal === estimateTotal;
+  const invoiceCents = dollarsToCents(opts.total);
+  const estimateCents = dollarsToCents(approved.total);
+  const invoiceTotal = centsToDollars(invoiceCents);
+  const estimateTotal = centsToDollars(estimateCents);
+  const matched = invoiceCents === estimateCents;
   const matchStatus = matched ? "MATCHED" : "MISMATCH";
 
   const stored = await getStorageProvider().put({
@@ -172,8 +175,8 @@ export async function submitShopInvoice(opts: {
       : `Invoice MISMATCH — ${event.car_mark} ${event.car_number}`,
     bodyText: [
       `Invoice ${opts.invoiceNo.trim()} for ${event.car_mark} ${event.car_number}`,
-      `Shop invoice total: ${invoiceTotal.toFixed(2)}`,
-      `Approved final estimate total: ${estimateTotal.toFixed(2)}`,
+      `Shop invoice total: ${formatDollars(invoiceTotal)}`,
+      `Approved final estimate total: ${formatDollars(estimateTotal)}`,
       `Match status: ${matchStatus}`,
       matched ? "" : "Flagged for review — totals do not match.",
       "Invoice PDF attached (storage key only in log).",

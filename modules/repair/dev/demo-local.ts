@@ -9,10 +9,10 @@
  * Prints each step, status, links, and dev-adapter emails. Writes export + step
  * log under modules/repair/dev/demo-output/ (override with REPAIR_DEMO_OUT).
  *
- * Requires: DATABASE_URL pointing at local Postgres; psql on PATH for migrate.
+ * Requires: DATABASE_URL pointing at local Postgres.
+ * Migrate runs via node-pg inside TypeScript (no shell `$DATABASE_URL`, no psql).
  * Windows: see docs/repair/PHASE1_DEMO_WINDOWS.md
  */
-import { spawnSync } from "child_process";
 import {
   mkdirSync,
   writeFileSync,
@@ -54,6 +54,8 @@ import { upsertBilledPartyMapping } from "../services/billed-party-map";
 import { voidEstimate } from "../services/bo-lifecycle";
 import { restoreVoidedEstimate } from "../services/gap-lifecycle-06";
 import { parseAarFile } from "../services/aar-parser";
+import { migrateLocal } from "./migrate-local";
+import { assertDemoTotals, sourceFileTotals } from "./demo-totals";
 import {
   getEmailProvider,
   setEmailProvider,
@@ -169,17 +171,9 @@ function multiCarFile(sample: Buffer): Buffer {
   return Buffer.from([line1, line2].join("\r\n"), "latin1");
 }
 
-function runMigrate() {
-  banner("Migrate (local stubs + repair schema)");
-  const result = spawnSync("npm", ["run", "repair:migrate:local"], {
-    cwd: join(__dirname, "../../.."),
-    env: process.env,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  });
-  if (result.status !== 0) {
-    throw new Error(`repair:migrate:local failed with exit ${result.status}`);
-  }
+async function runMigrate() {
+  banner("Migrate (local stubs + repair schema via node-pg)");
+  await migrateLocal();
 }
 
 async function resetRepairSchema() {
@@ -214,9 +208,10 @@ async function main() {
   // Need a live connection before DROP; migrate recreates everything.
   await resetRepairSchema();
   // After DROP, pool still works; migrate recreates public stubs + repair.
-  runMigrate();
+  await runMigrate();
 
   const sampleBytes = readFileSync(samplePath);
+  const sourceTotals = sourceFileTotals(sampleBytes);
   await seedOfox528313();
   const shopId = await apaShopId();
 
@@ -646,6 +641,28 @@ async function main() {
     note: "Rebuttal invoices created in repair.rebuttal_invoices; no FTP",
   });
 
+  // Totals smoke: approved = full source; CRIP = Resp 6/3 only (Resp 7 Never Rebill gap).
+  const checked = await assertDemoTotals({
+    estimateId,
+    estimateTotalDollars: estimateTotal,
+    source: sourceTotals,
+    exportLaborCents: Number(close.laborCents ?? 0),
+    exportMaterialCents: Number(close.materialCents ?? 0),
+  });
+  logStep(13.5, "Totals check (source / approved / export)", "ok", {
+    sourceFileTotalCents: sourceTotals.allTotal,
+    sourceFileTotalDollars: (sourceTotals.allTotal / 100).toFixed(2),
+    approvedEstimateCents: checked.approvedCents,
+    exportRebillableCents: checked.exportTotalCents,
+    exportRebillableDollars: (checked.exportTotalCents / 100).toFixed(2),
+    neverRebillResp7Cents: sourceTotals.neverRebillTotal,
+    neverRebillResp7Dollars: (sourceTotals.neverRebillTotal / 100).toFixed(2),
+    neverRebillLines: sourceTotals.neverRebillLines,
+    note:
+      "Export equals approved Resp 6/3 lines and source Resp 6/3. Full source " +
+      "includes Resp 7 Never Rebill (excluded from CRIP by design).",
+  });
+
   // ── 10. Retention demo (void + restore on companion) ───────────────
   const { rows: companionEst } = await q(
     `SELECT est.id FROM repair.estimates est
@@ -677,7 +694,7 @@ async function main() {
   // Persist artifacts
   const stepLogPath = join(outDir, "step-log.json");
   const summary = {
-    tipHint: "Requires tip 4963628 (lifecycle 06) + this review-package commit",
+    tipHint: "Requires tip 1adb3bf+ (migrate via node-pg + totals smoke)",
     car: "OFOX 528313",
     sampleFile: "modules/repair/dev/reference/Sample_Shop_500byte_OFOX2609.txt",
     eventId,

@@ -266,11 +266,12 @@ Local empty DB: `modules/repair/dev/local-public-stubs.sql` creates minimal publ
 ## How to demo locally
 
 ```bash
-# One command (migrate + walk + write demo-output/)
+# One command (migrate via node-pg + walk + write demo-output/)
 export DATABASE_URL=postgresql://repairdev:repairdev@127.0.0.1:5432/rlms_repair_dev
 export REPAIR_LOCAL_DB=1
 npm run repair:demo:local
 ```
 
-Windows step-by-step (Node 22 / `npm install --ignore-scripts`, portable Postgres on **5433**): [PHASE1_DEMO_WINDOWS.md](./PHASE1_DEMO_WINDOWS.md).  
+`repair:migrate:local` applies SQL through **node-pg** (no shell `$DATABASE_URL`, no `psql` required).  
+Windows step-by-step (Node 22 / `npm install --ignore-scripts`, portable Postgres on **5433**, totals / Resp 7 gap notes): [PHASE1_DEMO_WINDOWS.md](./PHASE1_DEMO_WINDOWS.md).  
 Hand-test list: [PHASE1_REVIEW_CHECKLIST.md](./PHASE1_REVIEW_CHECKLIST.md).

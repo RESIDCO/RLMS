@@ -10,10 +10,25 @@
 
 | Tip | Meaning |
 |---|---|
-| **`ac7148e`** (`ac7148e911d17f8af206ce35567277fa93e9511d`) | Local-review-mode (Windows `cross-env` + **LOCAL REVIEW MODE, no Supabase**). **Requires** tip for UI-review-feedback bundle. |
-| **** () | UI review feedback (BO rules, header pencil, lessee layout). Apply `rlms-phase1-ui-review-feedback.bundle` on **ac7148e**. |
+| **`f4e65cc`** (`f4e65cc1fe96aa2cb1349229b2fe0462176f7463`) | UI review feedback tip. **Requires tip** for owner-UI-spec docs bundle. |
+| **`ac7148e`** (`ac7148e911d17f8af206ce35567277fa93e9511d`) | Local-review-mode (predecessor of f4e65cc). |
 
-Requires tip to apply UI-review-feedback bundle: **`ac7148e`**.
+Owner-UI-spec docs tip after applying `rlms-phase1-owner-ui-spec.bundle`: see `docs/bundles/rlms-phase1-owner-ui-spec.README.txt` (pin commit).
+
+---
+
+## Owner UI RESET — Step 1 (2026-10-14)
+
+**STOP feature adds.** Bruce ordered an owner UI reset.
+
+| Step | Deliverable | Status |
+|---|---|---|
+| **1** | Spec: `docs/repair/OWNER_UI_SPEC.md` + bundle `rlms-phase1-owner-ui-spec.bundle` | **Awaiting Bruce approval** |
+| **2** | Implement screens A–H per approved spec | **Blocked until Step 1 approved** |
+
+Screenshots `01`–`06` (estimates history, estimate review, file attachments, update responsibilities, responsibility codes, bad orders) — **awaiting screenshot attachment** in store/uploads. Spec maps from Manual_Gap_Review + tip field sets; Bruce can mark gaps when shots attach.
+
+**Do not invent** unmarked AAR Bad Order Reason lists.
 
 ---
 
@@ -21,65 +36,34 @@ Requires tip to apply UI-review-feedback bundle: **`ac7148e`**.
 
 | Order | Bundle | Requires | Lands |
 |---|---|---|---|
-| … | (earlier chain through cents + local-review-mode) | … | … |
-| N | **`rlms-phase1-local-review-mode.bundle`** | **`a3a17a6`** | → **** |
-| N+1 | **`rlms-phase1-ui-review-feedback.bundle`** | **`ac7148e`** | → **** |
+| … | (earlier chain through cents + local-review-mode + ui-review-feedback) | … | … |
+| N | **`rlms-phase1-ui-review-feedback.bundle`** | **`ac7148e`** | → **`f4e65cc`** |
+| N+1 | **`rlms-phase1-owner-ui-spec.bundle`** | **`f4e65cc`** | → docs tip (see README) |
 
-Store copies: `/cursor/stores/self/docs/bundles/` (Bruce pulls to `C:\Users\BruceHarbridge\rlms-push`).
-
----
-
-## This slice — Phase 1 UI review feedback (2026-10-14)
-
-### Bad Order screen
-- **BO rule** dropdown from `repair.bo_rules` (code + description + active); admins can add.
-- Seeded **RULE_1**, **RULE_107**, **OTHER** (+ manual text). Full repairSMART AAR shopping-reason list was **not** in store captures — **do not invent**; admins add more as needed (gap documented below).
-- Shop dropdown: **"Name – City, ST"** (`shops.city` / `shops.state` / `billing_road`).
-- **Billing road** auto-fill from shop; override requires **reason**.
-- **Attachments** on BO (same `repair.documents` storage; delete → **VOIDED**, never purged).
-- Removed Resp 6 / lessee contact fields from BO; notifications use plain **distribution list**.
-
-### Internal estimate review
-- Data File **header** (full Format-1 header block) on every estimate.
-- **Pencil editor** per header field (reason required; audit old→new, user, time).
-- After Approved → **Adjustment** path (MG1).
-
-### Shop URL (`/#/repair/e/:token`)
-- **No changes.**
-
-### Lessee estimate (`/#/repair/lessee/:token`)
-- Same layout/field set as internal (header, all lines, totals, attachments).
-- Read-only except approve/dispute **own** responsibility lines (Resp 6).
-- Pencil / admin controls hidden.
-
-### Verified
-- `npm run repair:demo:local` — all 14 steps; step **[4] = 36732.04**
-- `npm run repair:smoke-ui-review` — BO rules, shop City/ST, billing auto-fill, BO attachments VOIDED, audited header edit, ≤2 decimals
-
-### Gap (AAR rule seed)
-Store had no crawl screenshot / export of the full repairSMART BO reason/rule dropdown. Seeded only **RULE_1**, **RULE_107**, and **OTHER** (from prior UI + Manual_Gap / Railinc references). Bruce/admins can add the remaining list via **Admin — add BO rule** without a code deploy.
+Store copies: Project store `docs/bundles/` (Bruce pulls to `C:\Users\BruceHarbridge\rlms-push`).
 
 ---
 
-## Apply UI-review-feedback bundle
+## Apply owner-UI-spec bundle (docs only — no product code)
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push
-git rev-parse HEAD   # expect ac7148e…
-git bundle verify PATH\TO\rlms-phase1-ui-review-feedback.bundle
-git pull PATH\TO\rlms-phase1-ui-review-feedback.bundle HEAD
+git rev-parse HEAD   # expect f4e65cc…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-spec.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-spec.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
-```powershell
-$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
-$env:REPAIR_LOCAL_DB = "1"
-$env:REPAIR_DEV_BYPASS_AUTH = "1"
-npm install
-npm run repair:demo:local
-npm run repair:smoke-ui-review
-npm run repair:dev:local
-```
+Then open: `docs\repair\OWNER_UI_SPEC.md`
+
+---
+
+## Prior slice — Phase 1 UI review feedback (parked)
+
+Parked under feature freeze. Tip `f4e65cc` remains the code baseline until Step 2 is approved.
+
+### Gap (AAR / Bad Order Reason seed)
+Store had no full repairSMART reason dropdown capture. Spec uses owner-managed Bad Order Reason list + Other; seed only known entries — admins add the rest.
 
 ---
 
@@ -95,6 +79,8 @@ npm run repair:dev:local
 
 ## Open items / questions
 
-- Full repairSMART BO rule / shopping-reason list still needed from capture or Bruce export to expand `repair.bo_rules` seed.
+- Screenshots 01–06 attachment for field-by-field mark-up against OWNER_UI_SPEC.
+- Full repairSMART Bad Order Reason list still needed from capture or Bruce export (do not invent).
 - Q1 (VCF active sync) and Q2 (shop bank security) remain open in `open-questions.md`.
 - Phase 2: CROP/carMARQS (`POST /api/repair/phase2/crop-import` → 501 only).
+- **Step 2 blocked** until Bruce approves OWNER_UI_SPEC.

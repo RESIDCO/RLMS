@@ -10,7 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
-| **Migrate view fix + §B shop fields** | Apply `rlms-phase1-migrate-view-fix.bundle`. Requires **`2039b7f`**. Tracked migrations + shop mark / lines / caps / certs / Admin catalogs / top-level Shops nav. |
+| **Migrate view fix + §B shop fields** | Apply `rlms-phase1-migrate-view-fix.bundle`. Requires **`2039b7f`** → lands **`4f87d46`**. Tracked migrations + shop mark / lines / caps / certs / Admin catalogs / top-level Shops nav. |
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 

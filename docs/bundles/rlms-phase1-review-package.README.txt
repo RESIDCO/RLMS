@@ -28,3 +28,7 @@ Then run the demo (local Postgres):
 See docs/repair/PHASE1_DEMO_WINDOWS.md for full Windows steps.
 
 Draft PR #2 — do not merge/deploy. No PAT. No Supabase branch. No paid.
+
+Bundle tip (after apply): 0db105d823e59464372003e2ce253e2a792f8997
+Bundle size: 18606 bytes
+SHA-256: 1b4c507e7c7ba9108c1c14a8b1ec3c5c49b0c25333451887d2f9c9a484122776

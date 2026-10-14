@@ -30,11 +30,15 @@ import {
 } from "../shared/build-year-backfill";
 import { parseTareWeight, parseTareWeightCsv } from "../shared/tare-weight-backfill";
 import { resolveLeaseType } from "../shared/lease-type";
+import { expirationFromAssetRow, snapshotHasLeaseExpDates } from "../shared/lease-governance";
 import {
   normalizeSnapshotMonth,
   buildCarFinancialUpdates,
   carFinancialFingerprint,
   mergeFinancialRowsByUniqueKey,
+  parseLeaseExpCell,
+  buildRiderLeaseTerms,
+  financialRowToDbPayload,
   RAILCAR_FINANCIAL_REFRESH_FIELDS,
   type ActiveCarForJoin,
   type SummaryRowForRefresh,
@@ -560,6 +564,7 @@ eq(
     lease_end_residual_per_asset: null,
     months_until_lease_exp: 5,
     lease_exp_date: "2025-12-31",
+    lease_status: null,
     deal_resp: null,
     lender: null,
     liability_insurance_exp: null,
@@ -585,6 +590,38 @@ eq(
   eq(ol.lease_exp_date, "2025-12-31", "OL1942 keeps the earlier lease exp");
   eq(ol.months_until_lease_exp, 5, "OL1942 months follow the earlier lease exp");
   eq(ol.net_equipment_cost_per_car, 8416.59, "OL1942 OEC per car unchanged");
+  eq(financialRowToDbPayload(base).lease_exp_date, "2025-12-31", "financial payload writes the Lease Exp cell date");
+  const terms = buildRiderLeaseTerms([
+    { ...base, rider_id: "OL1513", lease_exp_date: "2027-01-31", lease_status: null, count_cars: 83 },
+    { ...base, rider_id: "OL1513", lease_exp_date: "2030-01-31", lease_status: null, count_cars: 135, car_type: "TANK CARS" },
+    { ...base, rider_id: "OL1826", lease_exp_date: null, lease_status: "SCRAPPING", count_cars: 25 },
+  ]);
+  eq(terms.length, 3, "multi-term + status keep separate term rows");
+  eq(terms.find((t) => t.term_end === "2030-01-31")?.car_count, 135, "OL1513 2030 term keeps 135 cars");
+}
+
+eq(parseLeaseExpCell("2026-10-31").date, "2026-10-31", "Lease Exp date cell");
+eq(parseLeaseExpCell("2026-10-31").status, null, "date cell has no status");
+eq(parseLeaseExpCell("SCRAPPING").date, null, "SCRAPPING is not a date");
+eq(parseLeaseExpCell("SCRAPPING").status, "SCRAPPING", "SCRAPPING stores as status");
+eq(parseLeaseExpCell("Available").status, "AVAILABLE", "status is uppercased");
+
+{
+  const rows = [
+    { snapshot_month: "2026-10-01", rider_id: "OL2138", months_until_lease_exp: 0, lease_exp_date: "2026-10-31" },
+    { snapshot_month: "2026-10-01", rider_id: "OL1706", months_until_lease_exp: 0, lease_exp_date: "2026-10-31" },
+  ];
+  eq(snapshotHasLeaseExpDates(rows, "2026-10-01"), true, "October snapshot has stored Lease Exp dates");
+  eq(expirationFromAssetRow(rows[0], "2026-10-01", false), "2026-10-31", "uses the cell date, not months");
+  eq(
+    expirationFromAssetRow(
+      { snapshot_month: "2026-10-01", rider_id: "OL1826", months_until_lease_exp: 2, lease_exp_date: null },
+      "2026-10-01",
+      false
+    ),
+    null,
+    "status-only row does not rebuild a date from months"
+  );
 }
 
 eq(resolveLeaseType("Full Service Lease", "Net Lease"), "Full Service Lease", "resolveLeaseType prefers car over stale MLA");

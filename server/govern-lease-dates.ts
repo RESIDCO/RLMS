@@ -11,6 +11,7 @@ import {
   buildCarFallbackExpirations,
   lookupGovernedForRider,
   normalizeOlKey,
+  olsPresentInSnapshot,
   resolveGovernedExpiration,
   type AssetReportFinRow,
   type LeaseDateSource,
@@ -36,14 +37,20 @@ function asIso(v: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
-async function probeSourceColumns(db: SupabaseClient): Promise<{ riders: boolean; cars: boolean }> {
-  const [r, c] = await Promise.all([
+async function probeSourceColumns(
+  db: SupabaseClient
+): Promise<{ riders: boolean; cars: boolean; status: boolean; terms: boolean }> {
+  const [r, c, s, t] = await Promise.all([
     db.from("riders").select("id, expiration_source, expiration_snapshot_month").limit(1),
     db.from("railcars").select("id, lease_date_source").limit(1),
+    db.from("riders").select("id, lease_status, lease_status_snapshot_month").limit(1),
+    db.from("rider_lease_terms").select("id").limit(1),
   ]);
   return {
     riders: !r.error,
     cars: !c.error,
+    status: !s.error,
+    terms: !t.error,
   };
 }
 
@@ -54,7 +61,7 @@ export async function governLeaseDates(db: SupabaseClient): Promise<GovernLeaseD
     ? "snapshot_month, rider_id, lessee, months_until_lease_exp, lease_exp_date"
     : "snapshot_month, rider_id, lessee, months_until_lease_exp";
 
-  const [finRows, riders, cars] = await Promise.all([
+  const [finRows, riders, cars, termRows] = await Promise.all([
     fetchAllRows<AssetReportFinRow>((from, to) =>
       db
         .from("rider_financial_summary")
@@ -75,7 +82,9 @@ export async function governLeaseDates(db: SupabaseClient): Promise<GovernLeaseD
         .from("riders")
         .select(
           cols.riders
-            ? "id, rider_name, schedule_number, expiration_date, effective_date, expiration_source, expiration_snapshot_month"
+            ? cols.status
+              ? "id, rider_name, schedule_number, expiration_date, effective_date, expiration_source, expiration_snapshot_month, lease_status, lease_status_snapshot_month"
+              : "id, rider_name, schedule_number, expiration_date, effective_date, expiration_source, expiration_snapshot_month"
             : "id, rider_name, schedule_number, expiration_date, effective_date"
         )
         .order("id", { ascending: true })
@@ -93,9 +102,32 @@ export async function governLeaseDates(db: SupabaseClient): Promise<GovernLeaseD
         .order("id", { ascending: true })
         .range(from, to)
     ),
+    cols.terms
+      ? fetchAllRows<{
+          snapshot_month: string | null;
+          rider_id: string | null;
+          status_text: string | null;
+          term_end: string | null;
+        }>((from, to) =>
+          db
+            .from("rider_lease_terms")
+            .select("snapshot_month, rider_id, status_text, term_end")
+            .order("id", { ascending: true })
+            .range(from, to)
+        ).catch(() => [] as any[])
+      : Promise.resolve([] as any[]),
   ]);
 
   const { latestSnap, byOl: assetByOl } = buildAssetReportExpirations(finRows);
+  const assetPresent = olsPresentInSnapshot(finRows, latestSnap);
+  const statusByOl = new Map<string, string>();
+  for (const t of termRows as any[]) {
+    if (asIso(t.snapshot_month) !== latestSnap) continue;
+    const key = normalizeOlKey(t.rider_id);
+    const status = String(t.status_text ?? "").trim().toUpperCase();
+    if (!key || !status) continue;
+    if (!statusByOl.has(key)) statusByOl.set(key, status);
+  }
   const carFallbackByOl = buildCarFallbackExpirations(cars as any[]);
 
   const startByOl = new Map<string, string>();
@@ -111,31 +143,57 @@ export async function governLeaseDates(db: SupabaseClient): Promise<GovernLeaseD
   let olsWithAsset = 0;
   let olsWithCarFallback = 0;
   for (const r of riders as any[]) {
-    const governed = lookupGovernedForRider(r, assetByOl, carFallbackByOl);
-    if (!governed) continue;
-    if (governed.source === "asset_report") olsWithAsset += 1;
-    else olsWithCarFallback += 1;
+    const keys = [normalizeOlKey(r.rider_name), normalizeOlKey(r.schedule_number)].filter(Boolean);
+    const governed = lookupGovernedForRider(r, assetByOl, carFallbackByOl, assetPresent);
+    const status = keys.map((k) => statusByOl.get(k)).find(Boolean) ?? null;
 
-    const nextExp = governed.expiration_date;
-    const nextSource = governed.source;
-    const nextSnap = governed.source === "asset_report" ? governed.snapshot_month : null;
+    if (governed?.source === "asset_report" || governed?.source === "asset_report_multi_term") {
+      olsWithAsset += 1;
+    } else if (governed?.source === "car_records") {
+      olsWithCarFallback += 1;
+    } else if (!governed && !status) {
+      continue;
+    }
+
+    const nextExp = governed?.expiration_date ?? asIso(r.expiration_date);
+    const nextSource = governed?.source ?? (String(r.expiration_source ?? "") || null);
+    const nextSnap =
+      governed?.source === "asset_report" || governed?.source === "asset_report_multi_term"
+        ? governed.snapshot_month
+        : asIso(r.expiration_snapshot_month);
+    const nextStatus = status;
+    const nextStatusSnap = status ? latestSnap : null;
     const prevExp = asIso(r.expiration_date);
     const prevSource = String(r.expiration_source ?? "") || null;
     const prevSnap = asIso(r.expiration_snapshot_month);
+    const prevStatus = String(r.lease_status ?? "").trim().toUpperCase() || null;
+    const prevStatusSnap = asIso(r.lease_status_snapshot_month);
     if (
       prevExp === nextExp &&
-      (!cols.riders || (prevSource === nextSource && prevSnap === nextSnap))
+      (!cols.riders || (prevSource === nextSource && prevSnap === nextSnap)) &&
+      (!cols.status || (prevStatus === nextStatus && prevStatusSnap === nextStatusSnap))
     ) {
       continue;
     }
 
     const patch = cols.riders
       ? riderLeaseGovernancePayload({
-          expiration_date: nextExp,
-          expiration_source: nextSource,
-          expiration_snapshot_month: nextSnap,
+          ...(governed
+            ? {
+                expiration_date: nextExp,
+                expiration_source: nextSource,
+                expiration_snapshot_month: nextSnap,
+              }
+            : {}),
+          ...(cols.status
+            ? {
+                lease_status: nextStatus,
+                lease_status_snapshot_month: nextStatusSnap,
+              }
+            : {}),
         })
       : riderLeaseGovernancePayload({ expiration_date: nextExp });
+    if (!Object.keys(patch).length) continue;
     const { error } = await db.from("riders").update(patch).eq("id", r.id);
     if (error) throw error;
     ridersUpdated += 1;
@@ -158,7 +216,7 @@ export async function governLeaseDates(db: SupabaseClient): Promise<GovernLeaseD
       carsUnchanged += 1;
       continue;
     }
-    const governed = resolveGovernedExpiration(ol, assetByOl, carFallbackByOl);
+    const governed = resolveGovernedExpiration(ol, assetByOl, carFallbackByOl, assetPresent);
     if (!governed) {
       carsUnchanged += 1;
       continue;
@@ -169,7 +227,9 @@ export async function governLeaseDates(db: SupabaseClient): Promise<GovernLeaseD
       lease_expiry: governed.expiration_date,
       estimated_lease_expiry: governed.expiration_date,
       lease_expiry_snapshot_month:
-        governed.source === "asset_report" ? governed.snapshot_month : null,
+        governed.source === "asset_report" || governed.source === "asset_report_multi_term"
+          ? governed.snapshot_month
+          : null,
     };
     if (start) patch.lease_start_date = start;
     if (cols.cars) patch.lease_date_source = governed.source;

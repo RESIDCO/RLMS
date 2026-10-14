@@ -54,7 +54,7 @@ import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
 import { formatCalendarDate } from "@shared/lease-authority";
-import { leaseExpirationSourceLabel } from "@shared/lease-governance";
+import { formatRiderTermSchedule, leaseExpirationSourceLabel, leaseStatusLabel } from "@shared/lease-governance";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ContactLeaseLinks from "@/components/ContactLeaseLinks";
@@ -687,6 +687,14 @@ export default function LeaseManagement() {
                                   <span className="text-xs text-muted-foreground">
                                     {rider.schedule_number ?? "—"}
                                   </span>
+                                  {leaseStatusLabel((rider as any).lease_status) && (
+                                    <span
+                                      className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-muted text-foreground/80"
+                                      title="Asset Report Lease Exp status"
+                                    >
+                                      {leaseStatusLabel((rider as any).lease_status)}
+                                    </span>
+                                  )}
                                   {rider.is_inactive && <InactiveFleetBadge active={false} />}
                                   {(rider as any).sold_to && (
                                     <span className="text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30">
@@ -701,6 +709,14 @@ export default function LeaseManagement() {
                                     Expires: {fmtDate(rider.expiration_date)}
                                     <ExpirationSourceTag rider={rider as any} />
                                   </span>
+                                  {formatRiderTermSchedule((rider as any).lease_terms ?? []) ? (
+                                    <>
+                                      {" · "}
+                                      <span title="Lease terms in the Asset Report">
+                                        {formatRiderTermSchedule((rider as any).lease_terms ?? [])}
+                                      </span>
+                                    </>
+                                  ) : null}
                                   {" · "}
                                   <span title="Monthly Rate %">Rate: {fmtPct(rider.monthly_rate_pct)}</span>
                   {lease.account_manager ? (

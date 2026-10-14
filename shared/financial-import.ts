@@ -38,6 +38,8 @@ export type FinancialParsedRow = {
   lease_end_residual_per_asset: number | null;
   months_until_lease_exp: number | null;
   lease_exp_date: string | null;
+  /** Uppercased Lease Exp text when the cell is not a date (AVAILABLE, MTM, …). */
+  lease_status: string | null;
   deal_resp: string | null;
   lender: string | null;
   liability_insurance_exp: string | null;
@@ -124,17 +126,35 @@ export function normalizeAssetType(raw: unknown): string {
 function parseDateCell(v: unknown): string | null {
   if (v == null || v === "") return null;
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    return v.toISOString().slice(0, 10);
+    const y = v.getUTCFullYear();
+    const mo = v.getUTCMonth() + 1;
+    const d = v.getUTCDate();
+    return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
   if (typeof v === "number") {
     // Excel serial
-    const epoch = Date.UTC(1899, 11, 30) + v * 86400000;
+    const epoch = Date.UTC(1899, 11, 30) + Math.round(v) * 86400000;
     return new Date(epoch).toISOString().slice(0, 10);
   }
   const s = String(v).trim();
   const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  const us = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (us) {
+    const yyyy = us[3].length === 2 ? (Number(us[3]) > 50 ? `19${us[3]}` : `20${us[3]}`) : us[3];
+    return `${yyyy}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
+  }
   return null;
+}
+
+/** Lease Exp cell: a real date, or a text status. Never rebuilt from the months column. */
+export function parseLeaseExpCell(v: unknown): { date: string | null; status: string | null } {
+  const date = parseDateCell(v);
+  if (date) return { date, status: null };
+  if (v == null || v === "" || typeof v === "number") return { date: null, status: null };
+  const s = String(v).trim().replace(/\s+/g, " ").toUpperCase();
+  if (!s || s === "-" || s === "N/A" || s === "NA") return { date: null, status: null };
+  return { date: null, status: s };
 }
 
 function monthsBetween(fromIso: string, toIso: string): number {
@@ -143,18 +163,18 @@ function monthsBetween(fromIso: string, toIso: string): number {
   return (ty - fy) * 12 + (tm - fm);
 }
 
-/** Prefer the months column; if blank, derive from Lease Exp vs snapshot month. */
+/** Keep the months column as stored. Lease Exp date comes only from the date cell. */
 function resolveLeaseTerm(
   snapshotMonth: string | null,
   monthsRaw: unknown,
   leaseExpRaw: unknown
-): { months: number | null; leaseExp: string | null } {
-  const leaseExp = parseDateCell(leaseExpRaw);
+): { months: number | null; leaseExp: string | null; status: string | null } {
+  const parsed = parseLeaseExpCell(leaseExpRaw);
   let months = num(monthsRaw);
-  if (months == null && leaseExp && snapshotMonth) {
-    months = monthsBetween(snapshotMonth, leaseExp);
+  if (months == null && parsed.date && snapshotMonth) {
+    months = monthsBetween(snapshotMonth, parsed.date);
   }
-  return { months, leaseExp };
+  return { months, leaseExp: parsed.date, status: parsed.status };
 }
 
 /** Detect snapshot_month from a header cell that is a Date / ISO date. */
@@ -422,6 +442,7 @@ export function parseAssetSheet(
       lease_end_residual_per_asset: num(cell(row, map, "lease_end_residual_per_asset")),
       months_until_lease_exp: leaseTerm.months,
       lease_exp_date: leaseTerm.leaseExp,
+      lease_status: leaseTerm.status,
       deal_resp: str(cell(row, map, "deal_resp")),
       lender: str(cell(row, map, "lender")),
       liability_insurance_exp: parseDateCell(cell(row, map, "liability_insurance_exp")),
@@ -851,6 +872,51 @@ function earlierIso(a: string | null, b: string | null): string | null {
   return a ?? b;
 }
 
+export type RiderLeaseTermRow = {
+  snapshot_month: string;
+  rider_id: string;
+  entity: string;
+  term_end: string | null;
+  status_text: string | null;
+  car_count: number;
+};
+
+/** One row per distinct (rider, entity, Lease Exp value) before financial-row merge. */
+export function buildRiderLeaseTerms(rows: FinancialParsedRow[]): RiderLeaseTermRow[] {
+  const byKey = new Map<string, RiderLeaseTermRow>();
+  for (const r of rows) {
+    if (!r.snapshot_month || !r.rider_id) continue;
+    if (!r.lease_exp_date && !r.lease_status) continue;
+    const key = [
+      r.snapshot_month,
+      r.rider_id.trim().toUpperCase(),
+      r.entity,
+      r.lease_exp_date ?? "",
+      r.lease_status ?? "",
+    ].join("|");
+    const prev = byKey.get(key);
+    if (prev) {
+      prev.car_count += Math.max(r.count_cars || 0, 0);
+      continue;
+    }
+    byKey.set(key, {
+      snapshot_month: r.snapshot_month,
+      rider_id: r.rider_id.trim(),
+      entity: r.entity,
+      term_end: r.lease_exp_date,
+      status_text: r.lease_status,
+      car_count: Math.max(r.count_cars || 0, 0),
+    });
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) =>
+      a.rider_id.localeCompare(b.rider_id) ||
+      a.entity.localeCompare(b.entity) ||
+      String(a.term_end ?? "").localeCompare(String(b.term_end ?? "")) ||
+      String(a.status_text ?? "").localeCompare(String(b.status_text ?? "")),
+  );
+}
+
 /** Same grain as rider_financial_summary_uniq — merge source lines that would collide. */
 export function mergeFinancialRowsByUniqueKey(rows: FinancialParsedRow[]): FinancialParsedRow[] {
   const order: string[] = [];
@@ -909,6 +975,7 @@ export function mergeFinancialRowsByUniqueKey(rows: FinancialParsedRow[]): Finan
           : prev.lease_end_residual_per_asset ?? r.lease_end_residual_per_asset,
       months_until_lease_exp: months,
       lease_exp_date: earlierDate,
+      lease_status: firstText(prev.lease_status, r.lease_status),
       deal_resp: firstText(prev.deal_resp, r.deal_resp),
       lender: firstText(prev.lender, r.lender),
       liability_insurance_exp: earlierIso(prev.liability_insurance_exp, r.liability_insurance_exp),
@@ -940,6 +1007,7 @@ export function financialRowToDbPayload(r: FinancialParsedRow): Record<string, u
     lease_end_residual_total: r.lease_end_residual_total,
     lease_end_residual_per_asset: r.lease_end_residual_per_asset,
     months_until_lease_exp: r.months_until_lease_exp,
+    lease_exp_date: r.lease_exp_date,
     deal_resp: r.deal_resp,
     lender: r.lender,
     liability_insurance_exp: r.liability_insurance_exp,

@@ -38,6 +38,8 @@ export const RIDER_LEASE_GOVERNANCE_FIELDS = [
   "expiration_date",
   "expiration_source",
   "expiration_snapshot_month",
+  "lease_status",
+  "lease_status_snapshot_month",
 ] as const;
 
 /**

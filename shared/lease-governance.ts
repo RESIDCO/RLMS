@@ -18,7 +18,7 @@ import {
   type CarLeaseFields,
 } from "./lease-authority";
 
-export type LeaseDateSource = "asset_report" | "car_records";
+export type LeaseDateSource = "asset_report" | "asset_report_multi_term" | "car_records";
 
 export type AssetReportFinRow = {
   snapshot_month?: string | null;
@@ -64,12 +64,25 @@ function parseMonths(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** True when this snapshot stored real Lease Exp dates (not months-only history). */
+export function snapshotHasLeaseExpDates(
+  rows: AssetReportFinRow[],
+  snap: string | null
+): boolean {
+  if (!snap) return false;
+  return rows.some(
+    (r) => asIsoDate(r.snapshot_month) === snap && asIsoDate(r.lease_exp_date)
+  );
+}
+
 export function expirationFromAssetRow(
   row: AssetReportFinRow,
-  snapshotFallback: string | null
+  snapshotFallback: string | null,
+  allowMonthsFallback = true
 ): string | null {
   const direct = asIsoDate(row.lease_exp_date);
   if (direct) return direct;
+  if (!allowMonthsFallback) return null;
   const months = parseMonths(row.months_until_lease_exp);
   const snap = asIsoDate(row.snapshot_month) ?? snapshotFallback;
   if (months == null || !snap) return null;
@@ -84,26 +97,32 @@ export function buildAssetReportExpirations(
   const latestRows = latestSnap
     ? finRows.filter((r) => asIsoDate(r.snapshot_month) === latestSnap)
     : [];
+  const allowMonthsFallback = !snapshotHasLeaseExpDates(finRows, latestSnap);
   const byOl = new Map<string, GovernedOlExpiration>();
+  const datesByOl = new Map<string, Set<string>>();
   for (const r of latestRows) {
     const ol = String(r.rider_id ?? "").trim();
     const key = normalizeOlKey(ol);
     if (!key) continue;
-    const date = expirationFromAssetRow(r, latestSnap);
+    const date = expirationFromAssetRow(r, latestSnap, allowMonthsFallback);
     if (!date) continue;
     const months = parseMonths(r.months_until_lease_exp);
+    const seen = datesByOl.get(key) ?? new Set<string>();
+    seen.add(date);
+    datesByOl.set(key, seen);
     const existing = byOl.get(key);
     if (!existing || date < existing.expiration_date) {
       byOl.set(key, {
         ol,
         expiration_date: date,
-        source: "asset_report",
+        source: seen.size > 1 ? "asset_report_multi_term" : "asset_report",
         snapshot_month: latestSnap,
         months_until: months,
         lessee: r.lessee ? String(r.lessee) : null,
       });
-    } else if (existing && !existing.lessee && r.lessee) {
-      existing.lessee = String(r.lessee);
+    } else {
+      if (existing && seen.size > 1) existing.source = "asset_report_multi_term";
+      if (existing && !existing.lessee && r.lessee) existing.lessee = String(r.lessee);
     }
   }
   return { latestSnap, byOl };
@@ -148,12 +167,14 @@ export function buildCarFallbackExpirations(
 export function resolveGovernedExpiration(
   olKey: string,
   assetByOl: Map<string, GovernedOlExpiration>,
-  carFallbackByOl: Map<string, string>
+  carFallbackByOl: Map<string, string>,
+  assetPresent?: Set<string>
 ): GovernedOlExpiration | null {
   const key = normalizeOlKey(olKey);
   if (!key) return null;
   const asset = assetByOl.get(key);
   if (asset) return asset;
+  if (assetPresent?.has(key)) return null;
   const carDate = carFallbackByOl.get(key);
   if (!carDate) return null;
   return {
@@ -180,7 +201,8 @@ export function riderOlKeys(rider: {
 export function lookupGovernedForRider(
   rider: { rider_name?: string | null; schedule_number?: string | null },
   assetByOl: Map<string, GovernedOlExpiration>,
-  carFallbackByOl: Map<string, string>
+  carFallbackByOl: Map<string, string>,
+  assetPresent?: Set<string>
 ): GovernedOlExpiration | null {
   const keys = riderOlKeys(rider);
   for (const k of keys) {
@@ -188,10 +210,58 @@ export function lookupGovernedForRider(
     if (asset) return asset;
   }
   for (const k of keys) {
-    const fallback = resolveGovernedExpiration(k, assetByOl, carFallbackByOl);
+    const fallback = resolveGovernedExpiration(k, assetByOl, carFallbackByOl, assetPresent);
     if (fallback) return fallback;
   }
   return null;
+}
+
+export function olsPresentInSnapshot(
+  finRows: AssetReportFinRow[],
+  snap: string | null
+): Set<string> {
+  const out = new Set<string>();
+  if (!snap) return out;
+  for (const r of finRows) {
+    if (asIsoDate(r.snapshot_month) !== snap) continue;
+    const key = normalizeOlKey(r.rider_id);
+    if (key) out.add(key);
+  }
+  return out;
+}
+
+export function formatRiderTermSchedule(
+  terms: Array<{ term_end?: string | null; status_text?: string | null; car_count?: number | null }>
+): string | null {
+  if (!terms.length) return null;
+  const dated = terms
+    .filter((t) => asIsoDate(t.term_end))
+    .sort((a, b) => String(a.term_end).localeCompare(String(b.term_end)));
+  const statuses = terms.filter((t) => String(t.status_text ?? "").trim());
+  if (dated.length < 2 && statuses.length === 0) return null;
+  const parts: string[] = [];
+  for (const t of dated) {
+    const n = Number(t.car_count) || 0;
+    const d = asIsoDate(t.term_end)!;
+    const [y, m, day] = d.split("-");
+    parts.push(`${n} cars through ${Number(m)}/${Number(day)}/${y.slice(2)}`);
+  }
+  for (const t of statuses) {
+    const n = Number(t.car_count) || 0;
+    parts.push(`${n} ${String(t.status_text).trim().toUpperCase()}`);
+  }
+  return parts.join(" · ");
+}
+
+export function leaseStatusLabel(status: string | null | undefined): string | null {
+  const s = String(status ?? "").trim().toUpperCase();
+  if (!s) return null;
+  if (s === "MTM") return "MTM";
+  if (s === "SCRAPPING") return "Scrapping";
+  if (s === "AVAILABLE") return "Available";
+  if (s === "GOING ON LEASE") return "Going on lease";
+  if (s === "PARTOUT") return "Partout";
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function leaseExpirationSourceLabel(
@@ -202,6 +272,10 @@ export function leaseExpirationSourceLabel(
   if (s === "asset_report") {
     const month = formatAssetReportMonth(snapshotMonth);
     return month ? `Asset Report · ${month}` : "Asset Report";
+  }
+  if (s === "asset_report_multi_term") {
+    const month = formatAssetReportMonth(snapshotMonth);
+    return month ? `Earliest of N terms · ${month}` : "Earliest of N terms";
   }
   if (s === "car_records") return "Estimated from car records";
   return null;

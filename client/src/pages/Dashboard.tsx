@@ -6,6 +6,7 @@ import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatCalendarDate, parseIsoDateOnly } from "@shared/lease-authority";
+import { leaseStatusLabel } from "@shared/lease-governance";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import {
   Sheet,
@@ -100,6 +101,7 @@ type DashboardData = {
     owned_util_pct: number;
     lessee_count?: number;
     lease_authority?: string;
+    lease_status_counts?: Record<string, number>;
   };
   detail: {
     all_cars: CarRow[];
@@ -570,6 +572,21 @@ export default function Dashboard() {
                 icon={FileText}
                 onClick={() => navigate("/leases?filter=riders")}
               />
+              {Object.entries(data.kpis.lease_status_counts ?? {})
+                .filter(([, n]) => Number(n) > 0)
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([status, n]) => (
+                  <KpiCard
+                    key={status}
+                    testId={`kpi-lease-status-${status}`}
+                    label={leaseStatusLabel(status) ?? status}
+                    value={Number(n) || 0}
+                    subtext="OLs with this Asset Report Lease Exp status"
+                    icon={FileText}
+                    accent="muted"
+                    onClick={() => navigate("/leases")}
+                  />
+                ))}
               {(data.kpis.deals_expiring ?? []).map((tile) => (
                 <KpiCard
                   key={tile.year}

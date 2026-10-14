@@ -28,6 +28,15 @@ export type Rider = {
   /** asset_report | car_records — how expiration_date was last governed. */
   expiration_source?: string | null;
   expiration_snapshot_month?: string | null;
+  /** Uppercased Lease Exp text when the cell is not a date. */
+  lease_status?: string | null;
+  lease_status_snapshot_month?: string | null;
+  lease_terms?: Array<{
+    term_end: string | null;
+    status_text: string | null;
+    entity: string | null;
+    car_count: number;
+  }>;
   permissible_commodity: string | null;
   monthly_rate_pct: number | null;
   lessors_cost: number | null;
@@ -103,7 +112,7 @@ export type Railcar = {
   assignment_label: string | null;
   lease_start_date: string | null;
   lease_end_date: string | null;
-  /** asset_report | car_records — last governed source for lease dates on this row. */
+  /** asset_report | asset_report_multi_term | car_records — last governed source for lease dates on this row. */
   lease_date_source?: string | null;
   lease_expiry: string | null;
   estimated_lease_expiry?: string | null;
@@ -226,6 +235,7 @@ export type RiderFinancialSummary = {
   lease_end_residual_total: number | null;
   lease_end_residual_per_asset: number | null;
   months_until_lease_exp: number | null;
+  /** Exact Asset Report Lease Exp cell date. */ 
   lease_exp_date?: string | null;
   deal_resp: string | null;
   lender: string | null;

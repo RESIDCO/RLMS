@@ -185,7 +185,15 @@ rider_tl AS (
     AND substring(btrim(r.expiration_date::text) from 1 for 10) ~ '^\d{4}-\d{2}-\d{2}$'
 ),
 latest_fin AS (
-  SELECT max(substring(btrim(snapshot_month::text) from 1 for 10)) AS snap
+  SELECT
+    max(substring(btrim(snapshot_month::text) from 1 for 10)) AS snap,
+    bool_or(lease_exp_date IS NOT NULL) FILTER (
+      WHERE substring(btrim(snapshot_month::text) from 1 for 10) = (
+        SELECT max(substring(btrim(snapshot_month::text) from 1 for 10))
+        FROM rider_financial_summary
+        WHERE snapshot_month IS NOT NULL
+      )
+    ) AS has_lease_exp
   FROM rider_financial_summary
   WHERE snapshot_month IS NOT NULL
 ),
@@ -193,11 +201,18 @@ fin_ol AS (
   SELECT
     upper(btrim(f.rider_id::text)) AS ol,
     min(
-      (
-        (substring(btrim(f.snapshot_month::text) from 1 for 10))::date
-        + make_interval(months => round(f.months_until_lease_exp::numeric)::int)
-        - interval '1 day'
-      )::date
+      coalesce(
+        f.lease_exp_date,
+        CASE
+          WHEN latest_fin.has_lease_exp IS TRUE THEN NULL
+          WHEN f.months_until_lease_exp IS NULL THEN NULL
+          ELSE (
+            (substring(btrim(f.snapshot_month::text) from 1 for 10))::date
+            + make_interval(months => round(f.months_until_lease_exp::numeric)::int)
+            - interval '1 day'
+          )::date
+        END
+      )
     )::text AS expiration_date,
     max(nullif(btrim(f.lessee), '')) AS lessee,
     min(round(f.months_until_lease_exp::numeric)::int) AS months_until
@@ -205,8 +220,11 @@ fin_ol AS (
   CROSS JOIN latest_fin
   WHERE latest_fin.snap IS NOT NULL
     AND substring(btrim(f.snapshot_month::text) from 1 for 10) = latest_fin.snap
-    AND f.months_until_lease_exp IS NOT NULL
     AND btrim(f.rider_id::text) <> ''
+    AND (
+      f.lease_exp_date IS NOT NULL
+      OR (latest_fin.has_lease_exp IS NOT TRUE AND f.months_until_lease_exp IS NOT NULL)
+    )
   GROUP BY 1
 )
 SELECT jsonb_build_object(

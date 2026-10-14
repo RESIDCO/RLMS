@@ -179,6 +179,7 @@ import { browseGroup, browseOl, browseTurning50, countInProgram } from "./browse
 import { buildTurning50Report } from "./turning50-export";
 import {
   buildFinancialReview,
+  buildRiderLeaseTerms,
   financialRowToDbPayload,
   mergeFinancialRowsByUniqueKey,
   normalizeSnapshotMonth,
@@ -1018,6 +1019,7 @@ export async function registerRoutes(
               coal_total: fleetKpis.coal_total,
               lessee_count: Array.isArray(fleetSql?.cars_by_fleet) ? fleetSql.cars_by_fleet.length : 0,
               lease_authority: "asset_report",
+              lease_status_counts: sqlKpis.lease_status_counts ?? {},
               railcars_scanned: fleetKpis.railcars_scanned,
             }
           : {
@@ -1850,24 +1852,52 @@ export async function registerRoutes(
   // ---------- Leases (Master + nested riders) ----------
   app.get("/api/leases", async (_req, res) => {
     try {
-      const [leasesRes, ridersRes, countByRider, activeByRider] = await Promise.all([
+      const [leasesRes, ridersRes, countByRider, activeByRider, termsRes] = await Promise.all([
         supabase.from("master_leases").select("*").order("lease_number"),
         supabase.from("riders").select("*").order("rider_name"),
         countCarsByRiderId(),
         countActiveCarsByRiderId(),
+        supabase
+          .from("rider_lease_terms")
+          .select("snapshot_month, rider_id, entity, term_end, status_text, car_count")
+          .order("term_end", { ascending: true }),
       ]);
       if (leasesRes.error) throw leasesRes.error;
       if (ridersRes.error) throw ridersRes.error;
+
+      const termRows = termsRes.error ? [] : (termsRes.data ?? []);
+      let latestTermSnap = "";
+      for (const t of termRows as any[]) {
+        const s = String(t.snapshot_month ?? "").slice(0, 10);
+        if (s > latestTermSnap) latestTermSnap = s;
+      }
+      const termsByOl = new Map<string, any[]>();
+      for (const t of termRows as any[]) {
+        if (String(t.snapshot_month ?? "").slice(0, 10) !== latestTermSnap) continue;
+        const key = String(t.rider_id ?? "").trim().toUpperCase();
+        if (!key) continue;
+        const list = termsByOl.get(key) ?? [];
+        list.push({
+          term_end: t.term_end ?? null,
+          status_text: t.status_text ?? null,
+          entity: t.entity ?? null,
+          car_count: Number(t.car_count) || 0,
+        });
+        termsByOl.set(key, list);
+      }
 
       const riders = (ridersRes.data ?? []).map((r) => {
         const car_count = countByRider.get(r.id) ?? 0;
         const active_car_count = activeByRider.get(r.id) ?? 0;
         const { account_manager: _deprecatedRiderAm, ...rest } = r as any;
+        const keys = [String(r.schedule_number ?? "").trim().toUpperCase(), String(r.rider_name ?? "").trim().toUpperCase()].filter(Boolean);
+        const lease_terms = keys.map((k) => termsByOl.get(k)).find((x) => x?.length) ?? [];
         return {
           ...rest,
           car_count,
           active_car_count,
           is_inactive: active_car_count === 0,
+          lease_terms,
         };
       });
 
@@ -3406,7 +3436,9 @@ export async function registerRoutes(
         .eq("snapshot_month", month);
       if (delErr) throw delErr;
 
-      const allRows = mergeFinancialRowsByUniqueKey([...review.main.rows, ...review.rps.rows]);
+      const sourceRows = [...review.main.rows, ...review.rps.rows];
+      const allRows = mergeFinancialRowsByUniqueKey(sourceRows);
+      const termRows = buildRiderLeaseTerms(sourceRows);
       const BATCH = 100;
       let inserted = 0;
       for (let i = 0; i < allRows.length; i += BATCH) {
@@ -3414,6 +3446,19 @@ export async function registerRoutes(
         const { error } = await supabaseAdmin.from("rider_financial_summary").insert(slice);
         if (error) throw error;
         inserted += slice.length;
+      }
+
+      const { error: termDelErr } = await supabaseAdmin
+        .from("rider_lease_terms")
+        .delete()
+        .eq("snapshot_month", month);
+      if (termDelErr && !/rider_lease_terms/i.test(termDelErr.message)) throw termDelErr;
+      if (!termDelErr && termRows.length) {
+        for (let i = 0; i < termRows.length; i += BATCH) {
+          const slice = termRows.slice(i, i + BATCH);
+          const { error } = await supabaseAdmin.from("rider_lease_terms").insert(slice);
+          if (error) throw error;
+        }
       }
 
       // Recompute cars from the latest month that matches each car (not only this file).

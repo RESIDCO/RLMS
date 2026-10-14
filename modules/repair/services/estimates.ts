@@ -32,6 +32,24 @@ async function ensureEstimate(opts: {
   trackId?: string | null;
   actor: string;
 }) {
+  // MG2: VOIDED estimates stay in DB (never purge) — block shop from creating a twin
+  const voided = await q(
+    `SELECT e.id FROM repair.estimates e
+     JOIN repair.statuses s ON s.id = e.status_id
+     WHERE e.event_id = $1 AND e.tenant_id = $2
+       AND (s.code = 'VOIDED' OR e.deleted_at IS NOT NULL)
+     LIMIT 1`,
+    [opts.eventId, opts.tenantId],
+  );
+  if (voided.rows[0]) {
+    throw Object.assign(
+      new Error(
+        "Estimate is VOIDED — locked from shop edits/link access (admin can restore)",
+      ),
+      { status: 409, code: "VOIDED_LOCKED" },
+    );
+  }
+
   const existing = await q(
     `SELECT * FROM repair.estimates
      WHERE event_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
@@ -98,11 +116,20 @@ export async function uploadEstimate(opts: {
     return { ok: false as const, status: 422, error: vcf.reason };
   }
 
-  const estimate = await ensureEstimate({
-    tenantId,
-    eventId,
-    actor: opts.actorEmail ?? opts.actorName,
-  });
+  let estimate: Record<string, unknown>;
+  try {
+    estimate = await ensureEstimate({
+      tenantId,
+      eventId,
+      actor: opts.actorEmail ?? opts.actorName,
+    });
+  } catch (err) {
+    const e = err as { status?: number; code?: string; message?: string };
+    if (e.code === "VOIDED_LOCKED") {
+      return { ok: false as const, status: 409, error: e.message ?? "VOIDED locked" };
+    }
+    throw err;
+  }
 
   if (estimate.locked) {
     return {

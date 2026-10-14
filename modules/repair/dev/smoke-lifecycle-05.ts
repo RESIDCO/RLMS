@@ -14,7 +14,11 @@ import {
   parsePastedCarListWithHeader,
   setEventTankCar,
 } from "../services/gap-lifecycle-05";
-import { assertOutboundAllowed, ownerVerifyTankDocsFirst } from "../services/tank-docs";
+import {
+  assertOutboundAllowed,
+  ownerVerifyTankDocsFirst,
+  setTankCarDocGate,
+} from "../services/tank-docs";
 import { addComment } from "../services/comments";
 import { DEFAULT_TENANT_ID, q } from "../db";
 
@@ -102,7 +106,8 @@ async function main() {
     ok("comment subject + notify opt-in default off");
   } else bad("comment", JSON.stringify(c));
 
-  // Tank gate only for tank cars
+  // Tank gate only for tank cars (MG3: RESIDCO default OFF — enable for this smoke)
+  await setTankCarDocGate({ enabled: true, actor: "smoke05" });
   const nonTank = await assertOutboundAllowed({ eventId: String(bo.event.id) });
   if (nonTank.ok) ok("non-tank outbound allowed");
   else bad("non-tank", JSON.stringify(nonTank));
@@ -126,6 +131,8 @@ async function main() {
   const allowed = await assertOutboundAllowed({ eventId: String(bo.event.id) });
   if (allowed.ok) ok("tank outbound after owner verify");
   else bad("after verify", JSON.stringify(allowed));
+  // Restore RESIDCO default OFF after tank assertions
+  await setTankCarDocGate({ enabled: false, actor: "smoke05" });
 
   // Queued delete → AWAITING_DELETE → VOIDED
   const link = await issueEventLink({

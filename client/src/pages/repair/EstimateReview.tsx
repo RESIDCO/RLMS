@@ -53,6 +53,22 @@ export default function EstimateReview() {
   const [msg, setMsg] = useState("");
   const [respFilter, setRespFilter] = useState<string>("all");
   const [respNames, setRespNames] = useState<Record<string, string>>({});
+  const [corrReason, setCorrReason] = useState("");
+  const [corrHeaderNotes, setCorrHeaderNotes] = useState("");
+  const [corrShopMark, setCorrShopMark] = useState("");
+  const [editLines, setEditLines] = useState<
+    Array<{
+      lineNo: number;
+      aarJobCode: string;
+      qualifier: string;
+      whyMade: string;
+      respCode: string;
+      labor: string;
+      material: string;
+    }>
+  >([]);
+  const [needsAdjustment, setNeedsAdjustment] = useState(false);
+  const [canCorrect, setCanCorrect] = useState(false);
 
   async function load() {
     setError("");
@@ -68,8 +84,72 @@ export default function EstimateReview() {
         map[String(c.code)] = String(c.display_name ?? c.code);
       }
       setRespNames(map);
+
+      const ed = await apiRequest(
+        "GET",
+        `/api/repair/estimates/${estimateId}/correction-editor`,
+      );
+      if (ed.ok) {
+        const payload = await ed.json();
+        setCanCorrect(Boolean(payload.canCorrect));
+        setNeedsAdjustment(Boolean(payload.needsAdjustment));
+        const h = payload.header ?? {};
+        setCorrShopMark(String(h.shopMark ?? ""));
+        setCorrHeaderNotes(String(h.notes ?? ""));
+        const lines = (payload.lines ?? []) as Line[];
+        setEditLines(
+          lines.map((l) => ({
+            lineNo: l.line_no,
+            aarJobCode: l.aar_job_code ?? "",
+            qualifier: l.qualifier ?? "",
+            whyMade: l.why_made ?? "",
+            respCode: l.resp_code ?? "",
+            labor: String(l.labor ?? 0),
+            material: String(l.material ?? 0),
+          })),
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load review");
+    }
+  }
+
+  async function saveCorrection() {
+    setMsg("");
+    setError("");
+    try {
+      const res = await apiRequest(
+        "POST",
+        `/api/repair/estimates/${estimateId}/internal-correction`,
+        {
+          reason: corrReason,
+          actorRole: "reviewer",
+          asAdjustment: needsAdjustment || undefined,
+          header: {
+            shopMark: corrShopMark || undefined,
+            notes: corrHeaderNotes || undefined,
+          },
+          lines: editLines.map((l) => ({
+            lineNo: l.lineNo,
+            aarJobCode: l.aarJobCode || undefined,
+            qualifier: l.qualifier || undefined,
+            whyMade: l.whyMade || undefined,
+            respCode: l.respCode || undefined,
+            labor: Number(l.labor || 0),
+            material: Number(l.material || 0),
+            total: Number(l.labor || 0) + Number(l.material || 0),
+          })),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "correction failed");
+      setMsg(
+        `Internal correction saved as rev ${data.revision?.rev_no} (shop notified). Totals recalculated.`,
+      );
+      setCorrReason("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "correction failed");
     }
   }
 
@@ -275,6 +355,122 @@ export default function EstimateReview() {
               </p>
               <Button variant="secondary" onClick={sendLessee} disabled={!lesseeEmail}>
                 Send lessee approval email (dev log)
+              </Button>
+            </div>
+
+            <div className="grid gap-3 pt-4 border-t border-border max-w-3xl">
+              <h2 className="text-sm font-medium">
+                Internal correction editor (admin/reviewer only)
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Shops stay re-upload only via the shop link. Each save creates a new revision
+                (reason required), recalculates totals, and notifies the shop. After Approved,
+                corrections must go through Adjustment.
+              </p>
+              {needsAdjustment && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Status is post-Approved — save will create an Adjustment for Approval.
+                </p>
+              )}
+              <div className="grid gap-1">
+                <Label htmlFor="corr-reason">Correction reason (required)</Label>
+                <Textarea
+                  id="corr-reason"
+                  value={corrReason}
+                  onChange={(e) => setCorrReason(e.target.value)}
+                  rows={2}
+                  placeholder="Why this correction is needed"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1">
+                  <Label htmlFor="corr-shop">Header — shop mark</Label>
+                  <Input
+                    id="corr-shop"
+                    value={corrShopMark}
+                    onChange={(e) => setCorrShopMark(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor="corr-notes">Header — notes</Label>
+                  <Input
+                    id="corr-notes"
+                    value={corrHeaderNotes}
+                    onChange={(e) => setCorrHeaderNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+              {editLines.length > 0 && (
+                <div className="overflow-auto border border-border rounded-md">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 text-left">
+                      <tr>
+                        <th className="p-2">Line</th>
+                        <th className="p-2">Job</th>
+                        <th className="p-2">Resp</th>
+                        <th className="p-2">Labor</th>
+                        <th className="p-2">Material</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editLines.map((l, idx) => (
+                        <tr key={l.lineNo} className="border-t border-border">
+                          <td className="p-2">{l.lineNo}</td>
+                          <td className="p-2">
+                            <Input
+                              className="h-8 text-xs"
+                              value={l.aarJobCode}
+                              onChange={(e) => {
+                                const next = [...editLines];
+                                next[idx] = { ...l, aarJobCode: e.target.value };
+                                setEditLines(next);
+                              }}
+                            />
+                          </td>
+                          <td className="p-2">
+                            <Input
+                              className="h-8 text-xs w-16"
+                              value={l.respCode}
+                              onChange={(e) => {
+                                const next = [...editLines];
+                                next[idx] = { ...l, respCode: e.target.value };
+                                setEditLines(next);
+                              }}
+                            />
+                          </td>
+                          <td className="p-2">
+                            <Input
+                              className="h-8 text-xs w-20"
+                              value={l.labor}
+                              onChange={(e) => {
+                                const next = [...editLines];
+                                next[idx] = { ...l, labor: e.target.value };
+                                setEditLines(next);
+                              }}
+                            />
+                          </td>
+                          <td className="p-2">
+                            <Input
+                              className="h-8 text-xs w-20"
+                              value={l.material}
+                              onChange={(e) => {
+                                const next = [...editLines];
+                                next[idx] = { ...l, material: e.target.value };
+                                setEditLines(next);
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <Button
+                onClick={saveCorrection}
+                disabled={!corrReason.trim() || (!canCorrect && !needsAdjustment)}
+              >
+                Save correction (new revision)
               </Button>
             </div>
           </div>

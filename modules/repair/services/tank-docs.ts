@@ -1,5 +1,6 @@
 /**
- * Tank car document gate — on by default, configurable per tenant.
+ * Tank car document gate — per-tenant (RESIDCO default OFF, MG3).
+ * Optional per-car-type override via settings.tankCarDocGateByCarType.
  * Shop marks complete → owner verifies/rejects.
  * Outbound blocked until verified. Pending queue for owner.
  */
@@ -8,13 +9,28 @@ import { writeAudit } from "./audit";
 import { resolveActiveLink } from "./event-links";
 import { notify } from "./notifications";
 
-async function gateEnabled(tenantId: string): Promise<boolean> {
+async function gateEnabled(tenantId: string, eventId?: string): Promise<boolean> {
   const { rows } = await q(
     `SELECT settings FROM repair.tenants WHERE id = $1`,
     [tenantId],
   );
   const settings = (rows[0]?.settings ?? {}) as Record<string, unknown>;
-  if (settings.tankCarDocGateEnabled === false) return false;
+  // MG3: RESIDCO default is OFF; missing key → false (was previously default-on)
+  const tenantOn = settings.tankCarDocGateEnabled === true;
+  if (!tenantOn) return false;
+
+  // Optional per-car-type override (future clients); if map has entries, require match
+  const byType = settings.tankCarDocGateByCarType as Record<string, boolean> | undefined;
+  if (byType && eventId && Object.keys(byType).length > 0) {
+    const { rows: ev } = await q(
+      `SELECT car_type, is_tank_car FROM repair.events WHERE id = $1`,
+      [eventId],
+    );
+    const carType = String(ev[0]?.car_type ?? (ev[0]?.is_tank_car ? "TANK" : "")).toUpperCase();
+    if (carType && byType[carType] === false) return false;
+    if (carType && byType[carType] === true) return true;
+    // If map present but no match, fall through to tenant flag (already true)
+  }
   return true;
 }
 
@@ -31,24 +47,41 @@ export async function setTankCarDocGate(opts: {
   tenantId?: string;
   enabled: boolean;
   actor: string;
+  /** Optional per car-type map, e.g. { TANK: true, BOX: false } */
+  byCarType?: Record<string, boolean>;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const patch: Record<string, unknown> = {
+    tankCarDocGateEnabled: opts.enabled,
+  };
+  if (opts.byCarType) {
+    patch.tankCarDocGateByCarType = opts.byCarType;
+  }
   await q(
     `UPDATE repair.tenants
-     SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('tankCarDocGateEnabled', $2::boolean)
+     SET settings = COALESCE(settings, '{}'::jsonb) || $2::jsonb
      WHERE id = $1`,
-    [tenantId, opts.enabled],
+    [tenantId, JSON.stringify(patch)],
   );
   await writeAudit({
     tenantId,
     entity: "tenant",
     entityId: tenantId,
     action: "TANK_DOC_GATE_SETTING",
-    after: { enabled: opts.enabled },
+    after: { enabled: opts.enabled, byCarType: opts.byCarType ?? null },
     actor: opts.actor,
     via: "UI",
   });
-  return { ok: true as const, enabled: opts.enabled };
+  return { ok: true as const, enabled: opts.enabled, byCarType: opts.byCarType ?? null };
+}
+
+export async function getTankCarDocGate(tenantId = DEFAULT_TENANT_ID) {
+  const { rows } = await q(`SELECT settings FROM repair.tenants WHERE id = $1`, [tenantId]);
+  const settings = (rows[0]?.settings ?? {}) as Record<string, unknown>;
+  return {
+    enabled: settings.tankCarDocGateEnabled === true,
+    byCarType: (settings.tankCarDocGateByCarType as Record<string, boolean>) ?? {},
+  };
 }
 
 export async function ensureTankPacket(opts: {
@@ -58,7 +91,7 @@ export async function ensureTankPacket(opts: {
   actor: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  if (!(await gateEnabled(tenantId))) {
+  if (!(await gateEnabled(tenantId, opts.eventId))) {
     return { ok: true as const, skipped: true as const, reason: "gate_disabled" };
   }
   if (!(await eventIsTankCar(opts.eventId))) {
@@ -92,7 +125,7 @@ export async function shopMarkTankDocsComplete(opts: {
     tenantId = String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID);
   }
   if (!eventId) return { ok: false as const, status: 400, error: "eventId required" };
-  if (!(await gateEnabled(tenantId))) {
+  if (!(await gateEnabled(tenantId, eventId))) {
     return { ok: true as const, skipped: true as const, reason: "gate_disabled" };
   }
   if (!(await eventIsTankCar(eventId))) {
@@ -220,7 +253,7 @@ export async function assertOutboundAllowed(opts: {
   tenantId?: string;
 }): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  if (!(await gateEnabled(tenantId))) return { ok: true };
+  if (!(await gateEnabled(tenantId, opts.eventId))) return { ok: true };
   // Manual_Gap #11: only tank cars
   if (!(await eventIsTankCar(opts.eventId))) return { ok: true };
   const { rows } = await q(
@@ -252,7 +285,7 @@ export async function ownerVerifyTankDocsFirst(opts: {
   tenantId?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  if (!(await gateEnabled(tenantId))) {
+  if (!(await gateEnabled(tenantId, opts.eventId))) {
     return { ok: true as const, skipped: true as const };
   }
   if (!(await eventIsTankCar(opts.eventId))) {

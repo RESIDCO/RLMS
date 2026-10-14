@@ -40,11 +40,23 @@ import {
 import { addComment, listComments, compareRevisions } from "./services/comments";
 import {
   setTankCarDocGate,
+  getTankCarDocGate,
   shopMarkTankDocsComplete,
   ownerDecideTankDocs,
   listTankDocPendingQueue,
   ensureTankPacket,
 } from "./services/tank-docs";
+import {
+  saveInternalCorrection,
+  restoreVoidedEstimate,
+  listVoidedEstimates,
+  softDeleteDocument,
+  restoreDocument,
+  softDeleteComment,
+  restoreComment,
+  cropImportPhase2Stub,
+  getCorrectionEditorPayload,
+} from "./services/gap-lifecycle-06";
 import {
   listAttachmentCategories,
   listEventDocuments,
@@ -1664,11 +1676,22 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
   app.post("/api/repair/settings/tank-doc-gate", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
+    const byCarType =
+      req.body?.byCarType && typeof req.body.byCarType === "object"
+        ? (req.body.byCarType as Record<string, boolean>)
+        : undefined;
     const result = await setTankCarDocGate({
       enabled: Boolean(req.body?.enabled),
+      byCarType,
       actor: actorFrom(req),
     });
     return res.json(result);
+  });
+
+  app.get("/api/repair/settings/tank-doc-gate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json(await getTankCarDocGate());
   });
 
   app.post("/api/repair/events/:id/tank-docs/ensure", async (req, res) => {
@@ -2046,5 +2069,142 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
+  });
+
+  // ── MG1–MG4 lifecycle-06 ──
+
+  app.get("/api/repair/estimates/:id/correction-editor", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await getCorrectionEditorPayload({
+      estimateId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** MG1 — internal-only correction (admin/reviewer). Never shop link. */
+  app.post("/api/repair/estimates/:id/internal-correction", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    const mapped = lines.map(
+      (
+        l: {
+          lineNo?: number;
+          aarJobCode?: string;
+          qualifier?: string;
+          whyMade?: string;
+          conditionCode?: string;
+          respCode?: string;
+          labor?: number;
+          material?: number;
+          total?: number;
+          repairCategory?: string;
+          subCategory?: string;
+        },
+        i: number,
+      ) => ({
+        lineNo: l.lineNo ?? i + 1,
+        aarJobCode: l.aarJobCode,
+        qualifier: l.qualifier,
+        whyMade: l.whyMade,
+        conditionCode: l.conditionCode,
+        respCode: l.respCode,
+        labor: Number(l.labor ?? 0),
+        material: Number(l.material ?? 0),
+        total: Number(l.total ?? Number(l.labor ?? 0) + Number(l.material ?? 0)),
+        repairCategory: l.repairCategory,
+        subCategory: l.subCategory,
+      }),
+    );
+    const result = await saveInternalCorrection({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      actorRole: req.body?.actorRole ? String(req.body.actorRole) : "reviewer",
+      reason: String(req.body?.reason ?? ""),
+      header: req.body?.header && typeof req.body.header === "object" ? req.body.header : {},
+      lines: mapped,
+      asAdjustment: req.body?.asAdjustment === true,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json(result);
+  });
+
+  /** MG2 — admin restore VOIDED */
+  app.get("/api/repair/estimates/voided", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ estimates: await listVoidedEstimates() });
+  });
+
+  app.post("/api/repair/estimates/:id/restore", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await restoreVoidedEstimate({
+      estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      actorRole: req.body?.actorRole ? String(req.body.actorRole) : "admin",
+      reason: String(req.body?.reason ?? ""),
+      toStatus: req.body?.toStatus ? String(req.body.toStatus) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/documents/:id/soft-delete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await softDeleteDocument({
+      documentId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: String(req.body?.reason ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/documents/:id/restore", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await restoreDocument({
+      documentId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: String(req.body?.reason ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/comments/:id/soft-delete", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await softDeleteComment({
+      commentId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: String(req.body?.reason ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/comments/:id/restore", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await restoreComment({
+      commentId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: String(req.body?.reason ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** MG4 — Phase 2 CROP import stub */
+  app.post("/api/repair/phase2/crop-import", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await cropImportPhase2Stub({ actor: actorFrom(req) });
+    return res.status(501).json(result);
   });
 }

@@ -54,6 +54,7 @@ export const LOCAL_MIGRATE_SQL_FILES = [
   "modules/repair/migrations/20261014_repair_shop_master_fields.sql",
   "modules/repair/migrations/20261014_repair_railroads.sql",
   "modules/repair/migrations/20261014_repair_shop_map.sql",
+  "modules/repair/migrations/20261014_repair_bad_orders_c.sql",
 ] as const;
 
 /**
@@ -77,6 +78,12 @@ const MIGRATION_BASELINE_PROBES: Partial<Record<string, string>> = {
     to_regclass('repair.railroads') IS NOT NULL`,
   "modules/repair/migrations/20261014_repair_shop_map.sql": `
     to_regclass('repair.places') IS NOT NULL`,
+  "modules/repair/migrations/20261014_repair_bad_orders_c.sql": `
+    EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'repair' AND table_name = 'bad_orders'
+        AND column_name = 'stcc'
+    )`,
 };
 
 /** Full ordered list previously passed to `psql -f …` (stubs + migrations). */

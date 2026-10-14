@@ -40,6 +40,8 @@ import ShopEventLink from "@/pages/repair/ShopEventLink";
 import EstimateReview from "@/pages/repair/EstimateReview";
 import LesseeApproval from "@/pages/repair/LesseeApproval";
 import RepairComingSoon from "@/pages/repair/RepairComingSoon";
+import BadOrders from "@/pages/repair/BadOrders";
+import BoReasons from "@/pages/repair/BoReasons";
 import ShopMaster from "@/pages/repair/ShopMaster";
 import ShopProfile from "@/pages/repair/ShopProfile";
 import RepairAdmin from "@/pages/repair/RepairAdmin";
@@ -120,13 +122,13 @@ function AppRouter() {
       <Route path="/repair/lessee/:token" component={LesseeApproval} />
       {/* Owner module placeholders — before /repair/estimates/:id so "brc" is not treated as an id */}
       <Route path="/repair/estimates/brc" component={RepairComingSoon} />
-      <Route path="/repair/bad-orders" component={RepairComingSoon} />
+      <Route path="/repair/bad-orders" component={BadOrders} />
       <Route path="/repair/outbound-dispos" component={RepairComingSoon} />
       <Route path="/repair/invoices" component={RepairComingSoon} />
       <Route path="/repair/assignments" component={RepairComingSoon} />
       <Route path="/repair/shops/:id" component={ShopProfile} />
       <Route path="/repair/shops" component={ShopMaster} />
-      <Route path="/repair/bo-reasons" component={RepairComingSoon} />
+      <Route path="/repair/bo-reasons" component={BoReasons} />
       <Route path="/repair/billing-roads" component={RepairComingSoon} />
       <Route path="/repair/admin" component={RepairAdmin} />
       <Route path="/repair/help" component={RepairComingSoon} />

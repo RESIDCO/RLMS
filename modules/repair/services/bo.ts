@@ -7,6 +7,7 @@ import { notify } from "./notifications";
 import { resolveBoRuleSelection } from "./bo-rules";
 import { activeDistributionEmails } from "./distribution-list";
 import { resolveEntitySnapshot } from "./entity";
+import { findOpenBadOrdersForCar } from "./bo-grid";
 import {
   formatShopLabel,
   listShopsForDropdown,
@@ -30,10 +31,12 @@ export type CreateBadOrderInput = {
   /** Billing road — defaults from shop.billing_road; override requires reason */
   billingRoad?: string;
   billingRoadOverrideReason?: string;
+  /** DDCT Event ID (not Estimate ID). */
   ddctEventId?: string;
   ddctIncidentId?: string;
   shopId?: string;
   isWreck?: boolean;
+  wreckEstimate?: boolean;
   actor?: string;
   /** Manual_Gap #6 required B/O fields */
   boDate?: string;
@@ -42,6 +45,21 @@ export type CreateBadOrderInput = {
   destCity?: string;
   destState?: string;
   isTankCar?: boolean;
+  reportingRoad?: string;
+  dcRoad?: string;
+  stcc?: string;
+  routing?: string;
+  lastContents?: string;
+  carLoad?: "EMPTY" | "LOADED";
+  cleaned?: boolean;
+  travelOnOwnWheels?: boolean;
+  incidentDate?: string;
+  comments?: string;
+  arrivalDate?: string;
+  /** When false (default), block second open BO on same car. */
+  allowDuplicates?: boolean;
+  /** Shared across multi-car creates. */
+  multiCarGroupId?: string;
 };
 
 export async function createBadOrder(input: CreateBadOrderInput) {
@@ -65,6 +83,8 @@ export async function createBadOrder(input: CreateBadOrderInput) {
   }
 
   let shopBillingRoad: string | null = null;
+  let shopCity: string | null = null;
+  let shopState: string | null = null;
   if (input.shopId) {
     const { rows: shops } = await q(
       `SELECT id, billing_road, reporting_mark, city, state, name
@@ -76,6 +96,8 @@ export async function createBadOrder(input: CreateBadOrderInput) {
       return { ok: false as const, status: 400, error: "Shop not found" };
     }
     shopBillingRoad = String(shops[0].billing_road || shops[0].reporting_mark || "");
+    shopCity = shops[0].city != null ? String(shops[0].city) : null;
+    shopState = shops[0].state != null ? String(shops[0].state) : null;
   }
 
   const requestedBilling = (input.billingRoad ?? "").trim().toUpperCase() || null;
@@ -105,6 +127,34 @@ export async function createBadOrder(input: CreateBadOrderInput) {
       ? `${resolvedRule.description}: ${resolvedRule.otherText}`
       : resolvedRule.description);
 
+  // Allow Duplicates: UI sends false by default (block). Undefined skips for
+  // legacy smoke/demo callers that create multiple open BOs on the same car.
+  if (input.allowDuplicates === false) {
+    const open = await findOpenBadOrdersForCar({
+      carMark: vcf.car.car_mark,
+      carNumber: vcf.car.car_number,
+      tenantId,
+    });
+    if (open.length) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: `Open Bad Order already exists for ${vcf.car.car_mark} ${vcf.car.car_number}. Check Allow Duplicates to create another.`,
+        openBadOrders: open,
+      };
+    }
+  }
+
+  // B/O City/State required (RS #6). Fall back to shop city/ST for API/smoke callers.
+  // Last-resort placeholders keep legacy smoke paths working; owner UI always sends values.
+  const boCity = (input.boCity ?? shopCity ?? "Pending").trim();
+  const boState = (input.boState ?? shopState ?? "XX").trim().toUpperCase();
+
+  const carLoad =
+    input.carLoad === "LOADED" || input.carLoad === "EMPTY"
+      ? input.carLoad
+      : null;
+
   const boStatus = await getStatusByCode(tenantId, "EVENT", "BO_CREATED");
   const shopStatus = await getStatusByCode(tenantId, "EVENT", "SHOP_ASSIGNED");
   if (!boStatus || !shopStatus) {
@@ -124,6 +174,11 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     tenantId,
   });
 
+  const multiCarGroupId = input.multiCarGroupId ?? null;
+  const reportingRoad =
+    (input.reportingRoad ?? input.damagingRoad ?? "").trim().toUpperCase() ||
+    null;
+
   const result = await withTransaction(async (client) => {
     const event = await client.query(
       `INSERT INTO repair.events
@@ -141,7 +196,7 @@ export async function createBadOrder(input: CreateBadOrderInput) {
         vcf.car.rlms_railcar_id,
         input.shopId ?? null,
         rule,
-        input.damagingRoad ?? null,
+        reportingRoad,
         input.ddctEventId ?? null,
         input.ddctIncidentId ?? null,
         statusId,
@@ -162,8 +217,12 @@ export async function createBadOrder(input: CreateBadOrderInput) {
       `INSERT INTO repair.bad_orders
          (tenant_id, event_id, source, shopping_reason, bo_date, bo_city, bo_state,
           dest_city, dest_state, lifecycle_status, created_by,
-          bo_rule_code, bo_rule_other_text)
-       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6,$7,$8,$9,'QUEUED',$10,$11,$12)
+          bo_rule_code, bo_rule_other_text,
+          reporting_road, dc_road, stcc, routing, last_contents, car_load,
+          cleaned, travel_on_own_wheels, incident_date, comments,
+          wreck_estimate, multi_car_group_id, arrival_date)
+       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6,$7,$8,$9,'QUEUED',$10,$11,$12,
+               $13,$14,$15,$16,$17,$18,$19,$20,$21::date,$22,$23,$24,$25::date)
        RETURNING *`,
       [
         tenantId,
@@ -171,13 +230,26 @@ export async function createBadOrder(input: CreateBadOrderInput) {
         source,
         shoppingReason,
         input.boDate ?? null,
-        input.boCity ?? null,
-        input.boState ?? null,
-        input.destCity ?? null,
-        input.destState ?? null,
+        boCity,
+        boState,
+        input.destCity?.trim() || null,
+        input.destState?.trim().toUpperCase() || null,
         input.actor ?? "system",
         resolvedRule.code,
         resolvedRule.otherText,
+        reportingRoad,
+        input.dcRoad?.trim().toUpperCase() || null,
+        input.stcc?.trim() || null,
+        input.routing?.trim() || null,
+        input.lastContents?.trim() || null,
+        carLoad,
+        Boolean(input.cleaned),
+        input.travelOnOwnWheels !== false,
+        input.incidentDate ?? null,
+        input.comments?.trim() || null,
+        Boolean(input.wreckEstimate),
+        multiCarGroupId,
+        input.arrivalDate ?? null,
       ],
     );
 
@@ -189,7 +261,7 @@ export async function createBadOrder(input: CreateBadOrderInput) {
       await insertTrack(client, tenantId, ev.id, "OWNER_CONTRACT", input.actor);
     }
 
-    return { event: ev, badOrder: bo.rows[0] };
+    return { event: ev, badOrder: bo.rows[0], entity: entitySnap };
   });
 
   await writeAudit({

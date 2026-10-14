@@ -32,7 +32,11 @@ export async function upsertContact(opts: {
   partyRef?: string;
   name: string;
   email?: string;
+  phone?: string;
+  role?: string;
   active?: boolean;
+  /** Future RLMS Contacts module id — stored nullable; not required today. */
+  rlmsContactId?: string | null;
   actor: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
@@ -47,7 +51,10 @@ export async function upsertContact(opts: {
     const { rows } = await q(
       `UPDATE repair.contacts
        SET party_type = $1, party_ref = $2, name = $3, email = $4,
-           active = COALESCE($5, active)
+           active = COALESCE($5, active),
+           phone = COALESCE($8, phone),
+           role = COALESCE($9, role),
+           rlms_contact_id = COALESCE($10, rlms_contact_id)
        WHERE id = $6 AND tenant_id = $7 AND deleted_at IS NULL
        RETURNING *`,
       [
@@ -58,6 +65,11 @@ export async function upsertContact(opts: {
         opts.active ?? null,
         opts.id,
         tenantId,
+        opts.phone?.trim() || null,
+        opts.role?.trim() || null,
+        opts.rlmsContactId === undefined
+          ? null
+          : opts.rlmsContactId?.trim() || null,
       ],
     );
     if (!rows[0]) return { ok: false as const, status: 404, error: "Contact not found" };
@@ -75,8 +87,9 @@ export async function upsertContact(opts: {
 
   const { rows } = await q(
     `INSERT INTO repair.contacts
-       (tenant_id, party_type, party_ref, name, email, active, created_by)
-     VALUES ($1,$2,$3,$4,$5,COALESCE($6,true),$7)
+       (tenant_id, party_type, party_ref, name, email, active, created_by,
+        phone, role, rlms_contact_id)
+     VALUES ($1,$2,$3,$4,$5,COALESCE($6,true),$7,$8,$9,$10)
      RETURNING *`,
     [
       tenantId,
@@ -86,6 +99,9 @@ export async function upsertContact(opts: {
       opts.email?.trim().toLowerCase() ?? null,
       opts.active ?? true,
       opts.actor,
+      opts.phone?.trim() || null,
+      opts.role?.trim() || null,
+      opts.rlmsContactId?.trim() || null,
     ],
   );
   await writeAudit({

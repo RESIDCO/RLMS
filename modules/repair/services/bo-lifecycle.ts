@@ -160,6 +160,8 @@ export async function bulkCreateBadOrders(opts: {
   headerInitials?: string;
   shopId?: string;
   rule?: "RULE_1" | "RULE_107";
+  boRuleCode?: string;
+  boRuleOtherText?: string;
   shoppingReason?: string;
   actor: string;
   tenantId?: string;
@@ -167,6 +169,9 @@ export async function bulkCreateBadOrders(opts: {
   boState?: string;
   destCity?: string;
   destState?: string;
+  allowDuplicates?: boolean;
+  /** Shared form fields applied to each car in the multi-car group. */
+  shared?: Partial<CreateBadOrderInput>;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const cars = parsePastedCarList(opts.pastedCars, opts.headerInitials);
@@ -174,6 +179,8 @@ export async function bulkCreateBadOrders(opts: {
     return { ok: false as const, status: 400, error: "No cars parsed from pasted list" };
   }
 
+  const { randomUUID } = await import("crypto");
+  const multiCarGroupId = randomUUID();
   const created: Array<Record<string, unknown>> = [];
   const rejected: Array<{ carMark: string; carNumber: string; error: string }> = [];
 
@@ -184,18 +191,23 @@ export async function bulkCreateBadOrders(opts: {
       continue;
     }
     const input: CreateBadOrderInput = {
+      ...(opts.shared ?? {}),
       tenantId,
       carMark: car.carMark,
       carNumber: car.carNumber,
-      shopId: opts.shopId,
-      rule: opts.rule ?? "RULE_1",
-      shoppingReason: opts.shoppingReason,
+      shopId: opts.shopId ?? opts.shared?.shopId,
+      rule: opts.rule ?? opts.shared?.rule ?? "RULE_1",
+      boRuleCode: opts.boRuleCode ?? opts.shared?.boRuleCode,
+      boRuleOtherText: opts.boRuleOtherText ?? opts.shared?.boRuleOtherText,
+      shoppingReason: opts.shoppingReason ?? opts.shared?.shoppingReason,
       actor: opts.actor,
       source: "INTERNAL",
-      boCity: opts.boCity,
-      boState: opts.boState,
-      destCity: opts.destCity,
-      destState: opts.destState,
+      boCity: opts.boCity ?? opts.shared?.boCity,
+      boState: opts.boState ?? opts.shared?.boState,
+      destCity: opts.destCity ?? opts.shared?.destCity,
+      destState: opts.destState ?? opts.shared?.destState,
+      allowDuplicates: opts.allowDuplicates ?? opts.shared?.allowDuplicates,
+      multiCarGroupId,
     };
     const result = await createBadOrder(input);
     if (!result.ok) {
@@ -207,6 +219,8 @@ export async function bulkCreateBadOrders(opts: {
       carNumber: car.carNumber,
       eventId: result.event.id,
       badOrderId: result.badOrder.id,
+      entityCode: result.event.entity_code,
+      multiCarGroupId,
     });
   }
 

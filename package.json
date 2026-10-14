@@ -22,6 +22,7 @@
     "repair:smoke-lifecycle-06": "tsx modules/repair/dev/smoke-lifecycle-06.ts",
     "repair:smoke-ui-review": "tsx modules/repair/dev/smoke-ui-review-feedback.ts",
     "repair:smoke-shop-entity": "tsx modules/repair/dev/smoke-shop-master-entity.ts",
+    "repair:smoke-bad-orders": "tsx modules/repair/dev/smoke-bad-orders-c.ts",
     "repair:demo:local": "tsx modules/repair/dev/demo-local.ts",
     "repair:seed:estimates-history": "tsx modules/repair/dev/seed-estimates-history.ts"
   },

@@ -35,9 +35,25 @@ import {
   correctEventEntity,
   getEventEntitySnapshot,
   listOwnerEntityTags,
+  lookupCarEntity,
+  resolveEntitySnapshot,
   workspaceTitle,
 } from "./services/entity";
-import { listBoRules, createBoRule } from "./services/bo-rules";
+import {
+  listBoRules,
+  createBoRule,
+  updateBoRule,
+  deactivateBoRule,
+} from "./services/bo-rules";
+import {
+  queryBadOrderGrid,
+  exportBadOrderGridCsv,
+  listStccCodes,
+  findOpenBadOrdersForCar,
+  type BoGridDateField,
+  DEFAULT_BO_STATUSES,
+} from "./services/bo-grid";
+import { getContactsProvider } from "./providers/contacts";
 import {
   listDistributionEntries,
   addDistributionEntry,
@@ -1152,7 +1168,10 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     const activeOnly = String(req.query.activeOnly ?? "1") !== "0";
-    return res.json({ rules: await listBoRules({ activeOnly }) });
+    return res.json({
+      rules: await listBoRules({ activeOnly }),
+      label: "Bad Order Reason",
+    });
   });
 
   app.post("/api/repair/bo-rules", async (req, res) => {
@@ -1164,10 +1183,160 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       description: String(body.description ?? ""),
       eventRule: body.eventRule === "RULE_107" ? "RULE_107" : "RULE_1",
       requiresOtherText: Boolean(body.requiresOtherText),
+      allowsAdditionalDetail: body.allowsAdditionalDetail !== false,
       actor: actorFrom(req),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.status(201).json(result);
+  });
+
+  app.patch("/api/repair/bo-rules/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await updateBoRule({
+      id: String(req.params.id),
+      description: body.description != null ? String(body.description) : undefined,
+      active: body.active != null ? Boolean(body.active) : undefined,
+      requiresOtherText:
+        body.requiresOtherText != null ? Boolean(body.requiresOtherText) : undefined,
+      allowsAdditionalDetail:
+        body.allowsAdditionalDetail != null
+          ? Boolean(body.allowsAdditionalDetail)
+          : undefined,
+      sortOrder: body.sortOrder != null ? Number(body.sortOrder) : undefined,
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/bo-rules/:id/deactivate", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await deactivateBoRule({
+      id: String(req.params.id),
+      actor: actorFrom(req),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/stcc", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const activeOnly = String(req.query.activeOnly ?? "1") !== "0";
+    return res.json({ codes: await listStccCodes({ activeOnly }) });
+  });
+
+  app.get("/api/repair/cars/entity", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const carMark = String(req.query.carMark ?? "").trim();
+    const carNumber = String(req.query.carNumber ?? "").trim();
+    if (!carMark || !carNumber) {
+      return res.status(400).json({ error: "carMark and carNumber required" });
+    }
+    const snap = await resolveEntitySnapshot({ carMark, carNumber });
+    const lookup = await lookupCarEntity({ carMark, carNumber });
+    return res.json({ entity: snap, lookup });
+  });
+
+  app.get("/api/repair/bad-orders/open", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const carMark = String(req.query.carMark ?? "").trim();
+    const carNumber = String(req.query.carNumber ?? "").trim();
+    if (!carMark || !carNumber) {
+      return res.status(400).json({ error: "carMark and carNumber required" });
+    }
+    return res.json({
+      open: await findOpenBadOrdersForCar({ carMark, carNumber }),
+    });
+  });
+
+  app.get("/api/repair/bad-orders/grid", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const statusCodes = req.query.status
+      ? String(req.query.status).split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const shopIds = req.query.shopId
+      ? String(req.query.shopId).split(",").map((s) => s.trim()).filter(Boolean)
+      : req.query.shopIds
+        ? String(req.query.shopIds).split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+    const dateFieldRaw = req.query.dateField
+      ? String(req.query.dateField)
+      : "ignore";
+    const dateField = (
+      ["ignore", "bo_date", "arrival", "incident", "yard_arrival", "created"].includes(
+        dateFieldRaw,
+      )
+        ? dateFieldRaw
+        : "ignore"
+    ) as BoGridDateField;
+    const grid = await queryBadOrderGrid({
+      statusCodes,
+      shopIds,
+      carMark: req.query.carMark ? String(req.query.carMark) : undefined,
+      carNumber: req.query.carNumber ? String(req.query.carNumber) : undefined,
+      fromDate: req.query.from ? String(req.query.from) : undefined,
+      toDate: req.query.to ? String(req.query.to) : undefined,
+      dateField,
+      limit: req.query.limit != null ? Number(req.query.limit) : undefined,
+      offset: req.query.offset != null ? Number(req.query.offset) : undefined,
+      sortBy: req.query.sortBy ? String(req.query.sortBy) : undefined,
+      sortDir: req.query.sortDir === "asc" ? "asc" : "desc",
+    });
+    return res.json({
+      ...grid,
+      defaultStatuses: [...DEFAULT_BO_STATUSES],
+    });
+  });
+
+  app.get("/api/repair/bad-orders/grid/export", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const statusCodes = req.query.status
+      ? String(req.query.status).split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const shopIds = req.query.shopId
+      ? String(req.query.shopId).split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const exported = await exportBadOrderGridCsv({
+      statusCodes,
+      shopIds,
+      carMark: req.query.carMark ? String(req.query.carMark) : undefined,
+      carNumber: req.query.carNumber ? String(req.query.carNumber) : undefined,
+      fromDate: req.query.from ? String(req.query.from) : undefined,
+      toDate: req.query.to ? String(req.query.to) : undefined,
+      dateField: req.query.dateField
+        ? (String(req.query.dateField) as BoGridDateField)
+        : "ignore",
+      sortBy: req.query.sortBy ? String(req.query.sortBy) : undefined,
+      sortDir: req.query.sortDir === "asc" ? "asc" : "desc",
+    });
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=bad-orders-grid.csv",
+    );
+    return res.send(exported.csv);
+  });
+
+  app.get("/api/repair/contacts", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const partyType = req.query.partyType
+      ? (String(req.query.partyType) as "shop" | "lessee" | "other")
+      : undefined;
+    const contacts = await getContactsProvider().list({
+      partyType,
+      activeOnly: String(req.query.activeOnly ?? "1") !== "0",
+    });
+    return res.json({ contacts });
   });
 
   app.get("/api/repair/distribution-list", async (req, res) => {
@@ -1205,6 +1374,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       const uid = await maybeRequireUser(deps, req, res);
       if (!uid) return;
       const body = req.body ?? {};
+      const carLoadRaw = String(body.carLoad ?? "").toUpperCase();
       const result = await createBadOrder({
         carMark: String(body.carMark ?? ""),
         carNumber: String(body.carNumber ?? ""),
@@ -1224,7 +1394,23 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
             ? body.source
             : "INTERNAL",
         shoppingReason: body.shoppingReason ? String(body.shoppingReason) : undefined,
-        damagingRoad: body.damagingRoad ? String(body.damagingRoad) : undefined,
+        damagingRoad: body.damagingRoad
+          ? String(body.damagingRoad)
+          : body.reportingRoad
+            ? String(body.reportingRoad)
+            : undefined,
+        reportingRoad: body.reportingRoad ? String(body.reportingRoad) : undefined,
+        dcRoad: body.dcRoad ? String(body.dcRoad) : undefined,
+        stcc: body.stcc ? String(body.stcc) : undefined,
+        routing: body.routing ? String(body.routing) : undefined,
+        lastContents: body.lastContents ? String(body.lastContents) : undefined,
+        carLoad: carLoadRaw === "LOADED" || carLoadRaw === "EMPTY" ? carLoadRaw : undefined,
+        cleaned: Boolean(body.cleaned),
+        travelOnOwnWheels:
+          body.travelOnOwnWheels == null ? true : Boolean(body.travelOnOwnWheels),
+        incidentDate: body.incidentDate ? String(body.incidentDate) : undefined,
+        comments: body.comments ? String(body.comments) : undefined,
+        arrivalDate: body.arrivalDate ? String(body.arrivalDate) : undefined,
         billingRoad: body.billingRoad ? String(body.billingRoad) : undefined,
         billingRoadOverrideReason: body.billingRoadOverrideReason
           ? String(body.billingRoadOverrideReason)
@@ -1233,14 +1419,26 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
         ddctIncidentId: body.ddctIncidentId ? String(body.ddctIncidentId) : undefined,
         shopId: body.shopId ? String(body.shopId) : undefined,
         isWreck: Boolean(body.isWreck),
+        wreckEstimate: Boolean(body.wreckEstimate),
         boDate: body.boDate ? String(body.boDate) : undefined,
         boCity: body.boCity ? String(body.boCity) : undefined,
         boState: body.boState ? String(body.boState) : undefined,
         destCity: body.destCity ? String(body.destCity) : undefined,
         destState: body.destState ? String(body.destState) : undefined,
+        allowDuplicates:
+          body.allowDuplicates == null ? false : Boolean(body.allowDuplicates),
+        multiCarGroupId: body.multiCarGroupId
+          ? String(body.multiCarGroupId)
+          : undefined,
+        isTankCar: Boolean(body.isTankCar),
         actor: actorFrom(req),
       });
-      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      if (!result.ok) {
+        return res.status(result.status).json({
+          error: result.error,
+          openBadOrders: "openBadOrders" in result ? result.openBadOrders : undefined,
+        });
+      }
       return res.status(201).json(result);
     } catch (err) {
       console.error("[repair/bad-orders]", err);
@@ -2080,20 +2278,54 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
   app.post("/api/repair/bad-orders/bulk", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
+    const body = req.body ?? {};
+    const carLoadRaw = String(body.carLoad ?? "").toUpperCase();
     const result = await bulkCreateBadOrders({
-      pastedCars: String(req.body?.cars ?? req.body?.pastedCars ?? ""),
-      headerInitials: req.body?.headerInitials
-        ? String(req.body.headerInitials)
+      pastedCars: String(body.cars ?? body.pastedCars ?? ""),
+      headerInitials: body.headerInitials
+        ? String(body.headerInitials)
         : undefined,
-      shopId: req.body?.shopId ? String(req.body.shopId) : undefined,
-      rule: req.body?.rule === "RULE_107" ? "RULE_107" : "RULE_1",
-      shoppingReason: req.body?.shoppingReason
-        ? String(req.body.shoppingReason)
+      shopId: body.shopId ? String(body.shopId) : undefined,
+      rule: body.rule === "RULE_107" ? "RULE_107" : "RULE_1",
+      boRuleCode: body.boRuleCode ? String(body.boRuleCode) : undefined,
+      boRuleOtherText: body.boRuleOtherText
+        ? String(body.boRuleOtherText)
         : undefined,
-      boCity: req.body?.boCity ? String(req.body.boCity) : undefined,
-      boState: req.body?.boState ? String(req.body.boState) : undefined,
-      destCity: req.body?.destCity ? String(req.body.destCity) : undefined,
-      destState: req.body?.destState ? String(req.body.destState) : undefined,
+      shoppingReason: body.shoppingReason
+        ? String(body.shoppingReason)
+        : undefined,
+      boCity: body.boCity ? String(body.boCity) : undefined,
+      boState: body.boState ? String(body.boState) : undefined,
+      destCity: body.destCity ? String(body.destCity) : undefined,
+      destState: body.destState ? String(body.destState) : undefined,
+      allowDuplicates:
+        body.allowDuplicates == null ? false : Boolean(body.allowDuplicates),
+      shared: {
+        reportingRoad: body.reportingRoad ? String(body.reportingRoad) : undefined,
+        dcRoad: body.dcRoad ? String(body.dcRoad) : undefined,
+        stcc: body.stcc ? String(body.stcc) : undefined,
+        routing: body.routing ? String(body.routing) : undefined,
+        lastContents: body.lastContents ? String(body.lastContents) : undefined,
+        carLoad:
+          carLoadRaw === "LOADED" || carLoadRaw === "EMPTY" ? carLoadRaw : undefined,
+        cleaned: Boolean(body.cleaned),
+        travelOnOwnWheels:
+          body.travelOnOwnWheels == null ? true : Boolean(body.travelOnOwnWheels),
+        incidentDate: body.incidentDate ? String(body.incidentDate) : undefined,
+        comments: body.comments ? String(body.comments) : undefined,
+        arrivalDate: body.arrivalDate ? String(body.arrivalDate) : undefined,
+        billingRoad: body.billingRoad ? String(body.billingRoad) : undefined,
+        billingRoadOverrideReason: body.billingRoadOverrideReason
+          ? String(body.billingRoadOverrideReason)
+          : undefined,
+        ddctEventId: body.ddctEventId ? String(body.ddctEventId) : undefined,
+        ddctIncidentId: body.ddctIncidentId
+          ? String(body.ddctIncidentId)
+          : undefined,
+        boDate: body.boDate ? String(body.boDate) : undefined,
+        isWreck: Boolean(body.isWreck),
+        wreckEstimate: Boolean(body.wreckEstimate),
+      },
       actor: actorFrom(req),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });

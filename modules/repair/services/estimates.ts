@@ -600,6 +600,26 @@ async function transitionEstimate(opts: {
     via: "UI",
   });
 
+  // OWNER_UI §C: Estimate Approved → Bad Order Closed
+  if (opts.toCode === "APPROVED") {
+    await q(
+      `UPDATE repair.bad_orders
+       SET lifecycle_status = 'CLOSED'
+       WHERE event_id = $1 AND deleted_at IS NULL
+         AND lifecycle_status IN ('QUEUED','ACCEPTED_PENDING','ACCEPTED_WORKING')`,
+      [estimate.event_id],
+    ).catch(() => undefined);
+    await writeAudit({
+      tenantId,
+      entity: "event",
+      entityId: String(estimate.event_id),
+      action: "BO_CLOSED_ON_ESTIMATE_APPROVED",
+      after: { estimateId: opts.estimateId },
+      actor: opts.actor,
+      via: "UI",
+    }).catch(() => undefined);
+  }
+
   return { ok: true as const, ...packed };
 }
 

@@ -1,0 +1,26 @@
+-- DO NOT RUN until Bruce signs off preview_rent_start_default.csv
+-- and review_rent_start_idle_on_ol.csv.
+-- This file is documentation only. Default apply (after sign-off):
+--
+-- UPDATE railcar_assignments a
+-- SET rent_start_date = rc.lease_start_date,
+--     rent_start_set_by = 'migration:lease_start_date',
+--     rent_start_set_at = now()
+-- FROM v_kpi_preview_rent_start_default v
+-- JOIN railcars rc ON rc.id = v.railcar_id
+-- WHERE a.id = v.assignment_id;  -- view does not currently expose assignment_id; use railcar_id:
+--
+-- UPDATE railcar_assignments a
+-- SET rent_start_date = rc.lease_start_date,
+--     rent_start_set_by = 'migration:lease_start_date',
+--     rent_start_set_at = now()
+-- FROM railcars rc
+-- JOIN v_kpi_preview_rent_start_default v ON v.railcar_id = rc.id
+-- WHERE a.railcar_id = rc.id
+--   AND a.rent_start_date IS NULL;
+--
+-- Idle-on-OL cars stay NULL unless Bruce fills review_rent_start_idle_on_ol.csv
+-- and imports it through POST /api/rent-start/bulk (preview then apply).
+--
+-- No retag / fleet_status writes here.
+SELECT 'do_not_run';

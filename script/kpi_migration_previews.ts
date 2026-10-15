@@ -44,18 +44,24 @@ async function main() {
   const seed = await allRows(sb, "v_kpi_preview_seed_off_rent");
   const idle = seed.filter((r) => r.seed_bucket === "program" || r.seed_bucket === "deal");
   const unassigned = seed.filter((r) => r.seed_bucket === "unassigned");
+  const rentDefault = await allRows(sb, "v_kpi_preview_rent_start_default");
+  const rentIdle = await allRows(sb, "v_kpi_preview_rent_start_idle_on_ol");
 
   writeFileSync(join(dir, "preview_retag.csv"), csv(retag));
   writeFileSync(join(dir, "review_idle_on_ol.csv"), csv(idleOl));
   writeFileSync(join(dir, "preview_seed_idle.csv"), csv(idle));
   writeFileSync(join(dir, "preview_seed_unassigned.csv"), csv(unassigned));
+  writeFileSync(join(dir, "preview_rent_start_default.csv"), csv(rentDefault));
+  writeFileSync(join(dir, "review_rent_start_idle_on_ol.csv"), csv(rentIdle));
 
   console.log(JSON.stringify({
     retag: retag.length,
     idle_on_ol: idleOl.length,
     seed_idle: idle.length,
     seed_unassigned: unassigned.length,
-    note: "No writes. Bruce must sign off before apply.",
+    rent_start_default: rentDefault.length,
+    rent_start_idle_review: rentIdle.length,
+    note: "No writes. Bruce must sign off before apply. Import the edited review CSV via Bulk Rent Start.",
   }, null, 2));
 }
 

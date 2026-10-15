@@ -382,6 +382,8 @@ export const moveCarsSchema = z.object({
   moved_by: z.string().nullable().optional(),
   /** YYYY-MM-DD; omitted/today uses the current timestamp. Past dates backdate the audit trail. */
   effective_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  /** If omitted, moving onto a new OL clears rent_start_date. */
+  rent_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 export type MoveCarsInput = z.infer<typeof moveCarsSchema>;
 

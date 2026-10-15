@@ -115,6 +115,9 @@ type DashboardData = {
     stale_commitments?: number;
     stale_programs?: number;
     idle_on_ol_review?: number;
+    awaiting_rent_start?: number;
+    shop_conflict?: number;
+    future_rent_start?: number;
     lease_ended_watch?: number;
   };
   detail: {
@@ -499,7 +502,7 @@ export default function Dashboard() {
                 testId="kpi-idle"
                 label="Idle (committed)"
                 value={data.kpis.idle_count ?? 0}
-                subtext="Off rent in an open program or Going On Lease (seed buckets until Commitments are seeded)"
+                subtext="Off rent with a Commitment, or on OL awaiting rent start"
                 icon={PauseCircle}
                 onClick={() => navigate("/kpi/cars?bucket=idle")}
               />
@@ -515,7 +518,7 @@ export default function Dashboard() {
                 testId="kpi-unassigned"
                 label="Unassigned / Available for Opportunities"
                 value={data.kpis.unassigned_cars}
-                subtext={`Off rent, not in an open program / Going On Lease${data.kpis.unassigned_main != null ? ` · Main ${data.kpis.unassigned_main} / RPS ${data.kpis.unassigned_rps ?? 0}` : ""}`}
+                subtext={`Off rent, not on OL, no Commitment${data.kpis.unassigned_main != null ? ` · Main ${data.kpis.unassigned_main} / RPS ${data.kpis.unassigned_rps ?? 0}` : ""}`}
                 icon={CircleDashed}
                 onClick={() => navigate("/kpi/cars?bucket=unassigned")}
               />
@@ -573,12 +576,29 @@ export default function Dashboard() {
                 marker="icon"
                 onClick={() => navigate("/kpi/cars?bucket=off_rent")}
               />
+              <KpiCard
+                testId="kpi-awaiting-rent"
+                label="Awaiting rent start (on OL)"
+                value={data.kpis.awaiting_rent_start ?? 0}
+                subtext="On an OL but rent_start_date is blank or in the future"
+                icon={TimerOff}
+                accent={(data.kpis.awaiting_rent_start ?? 0) > 0 ? "warning" : "muted"}
+                onClick={() => navigate("/rent-start/awaiting")}
+              />
+              <KpiCard
+                testId="kpi-shop-conflict"
+                label="Shop conflict"
+                value={data.kpis.shop_conflict ?? 0}
+                subtext="On rent while in an open shop program or shop/repair ops flag"
+                icon={AlertTriangle}
+                onClick={() => navigate("/rent-start/shop")}
+              />
               {(data.kpis.idle_on_ol_review ?? 0) > 0 && (
                 <KpiCard
                   testId="kpi-idle-on-ol"
                   label="Idle on OL — under review"
                   value={data.kpis.idle_on_ol_review ?? 0}
-                  subtext="Tagged Idle but still on a live OL. List only until Bruce decides."
+                  subtext="Tagged Idle on an OL. Use the rent-start review CSV before retag."
                   icon={AlertTriangle}
                   accent="warning"
                   onClick={() => navigate("/kpi/cars?bucket=idle_on_ol")}

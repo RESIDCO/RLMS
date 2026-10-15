@@ -95,6 +95,7 @@ import {
   logProgramActivity,
 } from "./programs";
 import { registerCommitmentRoutes, ensureProgramCommitment, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
+import { registerRentStartRoutes } from "./rent-start";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
@@ -369,6 +370,7 @@ export async function registerRoutes(
 
   await recoverStaleExportJobs();
   registerCommitmentRoutes(app, requireWrite);
+  registerRentStartRoutes(app, requireWrite);
 
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
@@ -1055,6 +1057,9 @@ export async function registerRoutes(
               stale_commitments: Number(sqlKpis.stale_commitments) || 0,
               stale_programs: Number(sqlKpis.stale_programs) || 0,
               idle_on_ol_review: Number(sqlKpis.idle_on_ol_review) || 0,
+              awaiting_rent_start: Number(sqlKpis.awaiting_rent_start) || 0,
+              shop_conflict: Number(sqlKpis.shop_conflict) || 0,
+              future_rent_start: Number(sqlKpis.future_rent_start) || 0,
               lease_ended_watch: Number(sqlKpis.lease_ended_watch) || 0,
             }
           : {
@@ -2209,7 +2214,8 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const input = moveCarsSchema.parse(req.body);
-      const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date } = input;
+      const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date, rent_start_date } = input;
+      const nextRentStart = rent_start_date ?? null;
 
       // verify destination rider exists
       const { data: toRider, error: rErr } = await supabase
@@ -2246,6 +2252,9 @@ export async function registerRoutes(
               rider_id: to_rider_id,
               fleet_name: targetFleet,
               assigned_at: movedAt,
+              rent_start_date: nextRentStart,
+              rent_start_set_by: nextRentStart ? (moved_by ?? "system") : null,
+              rent_start_set_at: nextRentStart ? movedAt : null,
             })
             .eq("id", prev.id);
           if (uErr) throw uErr;
@@ -2258,6 +2267,9 @@ export async function registerRoutes(
               rider_id: to_rider_id,
               fleet_name: targetFleet,
               assigned_at: movedAt,
+              rent_start_date: nextRentStart,
+              rent_start_set_by: nextRentStart ? (moved_by ?? "system") : null,
+              rent_start_set_at: nextRentStart ? movedAt : null,
             })
             .select("id, railcar_id")
             .single();

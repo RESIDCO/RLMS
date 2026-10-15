@@ -298,6 +298,8 @@ CREATE OR REPLACE FUNCTION public.rlms_fleet_kpis()
 RETURNS jsonb
 LANGUAGE sql
 STABLE
+SECURITY DEFINER
+SET search_path = public
 SET statement_timeout = '20s'
 AS $$
 WITH op AS (
@@ -684,4 +686,6 @@ SELECT jsonb_build_object(
 FROM k;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.rlms_fleet_kpis() TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.rlms_fleet_kpis() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.rlms_fleet_kpis() FROM anon;
+GRANT EXECUTE ON FUNCTION public.rlms_fleet_kpis() TO authenticated, service_role;

@@ -4,7 +4,10 @@ import { supabaseAdmin } from "./supabase";
 import {
   COMMITMENT_TYPES,
   carNumberLookupValues,
+  derivedFleetStatus,
+  implicitAwaitingLabel,
   isOffRentLink,
+  isOnOl,
   isOnRentOlRider,
   parseCarListText,
   xLesseeName,
@@ -14,21 +17,36 @@ import { fetchAllRows } from "./fetch-all";
 
 const RECOMPUTE_STATUS = process.env.RLMS_RECOMPUTE_FLEET_STATUS === "1";
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
-type PreviewKind = "commitment" | "return" | "sold";
+export type PreviewKind = "commitment" | "return" | "sold" | "rent_start";
 const previewStore = new Map<string, { kind: PreviewKind; expires: number; snapshot: any }>();
 
-export function putPreview(kind: PreviewKind, snapshot: unknown): string {
+export async function putPreview(kind: PreviewKind, snapshot: unknown): Promise<string> {
   const token = randomUUID();
-  previewStore.set(token, { kind, expires: Date.now() + PREVIEW_TTL_MS, snapshot });
+  const expires = Date.now() + PREVIEW_TTL_MS;
+  previewStore.set(token, { kind, expires, snapshot });
+  const { error } = await supabaseAdmin.from("rlms_preview_tokens").insert({
+    token,
+    kind,
+    snapshot,
+    expires_at: new Date(expires).toISOString(),
+  });
+  if (error) console.warn("[preview] table persist skipped:", error.message);
   return token;
 }
 
-export function getPreview(kind: PreviewKind, token: string): any {
-  const row = previewStore.get(String(token ?? ""));
-  if (!row || row.kind !== kind || row.expires < Date.now()) {
+export async function getPreview(kind: PreviewKind, token: string): Promise<any> {
+  const mem = previewStore.get(String(token ?? ""));
+  if (mem && mem.kind === kind && mem.expires >= Date.now()) return mem.snapshot;
+  const { data, error } = await supabaseAdmin
+    .from("rlms_preview_tokens")
+    .select("kind, snapshot, expires_at")
+    .eq("token", token)
+    .maybeSingle();
+  if (error || !data || data.kind !== kind || new Date(data.expires_at).getTime() < Date.now()) {
     throw Object.assign(new Error("Preview expired or missing. Run preview again."), { status: 400 });
   }
-  return row.snapshot;
+  previewStore.set(token, { kind, expires: new Date(data.expires_at).getTime(), snapshot: data.snapshot });
+  return data.snapshot;
 }
 
 const CAR_SEL =
@@ -41,7 +59,7 @@ function isCommitmentType(v: unknown): v is CommitmentType {
 async function latestAssignment(railcarId: number) {
   const { data, error } = await supabaseAdmin
     .from("railcar_assignments")
-    .select("id, rider_id, fleet_name, rider:riders(id, rider_name, lease_status, expiration_date)")
+    .select("id, rider_id, fleet_name, rent_start_date, assigned_at, rider:riders(id, rider_name, lease_status, expiration_date)")
     .eq("railcar_id", railcarId)
     .order("id", { ascending: false })
     .limit(1);
@@ -55,13 +73,18 @@ async function linkForCar(railcarId: number) {
   return latestAssignment(railcarId);
 }
 
-function offRentOf(car: any, riderName: string | null | undefined, hasAssignment: boolean) {
-  return isOffRentLink({
-    hasAssignment,
+function linkInput(car: any, riderName: string | null | undefined, assignment: any) {
+  return {
+    hasAssignment: Boolean(assignment),
     rider: riderName,
     lesseeName: car?.lessee_name,
     assignmentLabel: car?.assignment_label,
-  });
+    rentStartDate: assignment?.rent_start_date ?? null,
+  };
+}
+
+function offRentOf(car: any, riderName: string | null | undefined, assignment: any) {
+  return isOffRentLink(linkInput(car, riderName, assignment));
 }
 
 export async function recomputeStatus(railcarId: number) {
@@ -100,7 +123,7 @@ export async function setCommitment(
   if (cErr) throw cErr;
   if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
   const { rider, assignment } = await linkForCar(railcarId);
-  const off = offRentOf(car, rider?.rider_name, Boolean(assignment));
+  const off = offRentOf(car, rider?.rider_name, assignment);
   if (!off) throw Object.assign(new Error("On-rent cars cannot take a Commitment"), { status: 400, code: "on_rent" });
 
   const existing = await openCommitment(railcarId);
@@ -153,7 +176,7 @@ export async function clearCommitment(railcarId: number, actor: string) {
 export async function ensureProgramCommitment(railcarId: number, program: { id: number; name: string }, actor: string) {
   const { rider, assignment } = await linkForCar(railcarId);
   const { data: car } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", railcarId).maybeSingle();
-  if (!offRentOf(car, rider?.rider_name, Boolean(assignment))) return { skipped: "on_rent" as const };
+  if (!offRentOf(car, rider?.rider_name, assignment)) return { skipped: "on_rent" as const };
   const existing = await openCommitment(railcarId);
   if (existing) return { skipped: "already_committed" as const, existing };
   await setCommitment(
@@ -197,7 +220,7 @@ async function classifyMatched(cars: any[]) {
   const { data: assigns } = ids.length
     ? await supabaseAdmin
         .from("railcar_assignments")
-        .select("id, railcar_id, rider_id, fleet_name, rider:riders(id, rider_name, lease_status)")
+        .select("id, railcar_id, rider_id, fleet_name, rent_start_date, assigned_at, rider:riders(id, rider_name, lease_status)")
         .in("railcar_id", ids)
         .order("id", { ascending: false })
     : { data: [] as any[] };
@@ -213,7 +236,7 @@ async function classifyMatched(cars: any[]) {
   return cars.map((car) => {
     const a = aBy.get(car.id);
     const rider = Array.isArray(a?.rider) ? a.rider[0] : a?.rider;
-    const off = offRentOf(car, rider?.rider_name, Boolean(a));
+    const off = offRentOf(car, rider?.rider_name, a);
     return {
       car,
       rider,
@@ -270,12 +293,12 @@ export async function previewBulkCommitment(
     })),
     not_found: notFound,
   };
-  const preview_token = putPreview("commitment", snapshot);
+  const preview_token = await putPreview("commitment", snapshot);
   return { preview_token, ...snapshot };
 }
 
 export async function applyBulkCommitment(previewToken: string, actor: string) {
-  const preview = getPreview("commitment", previewToken);
+  const preview = await getPreview("commitment", previewToken);
   if (preview.action === "clear") {
     const ids = (preview.matched ?? []).map((m: any) => m.id);
     const cleared = [];
@@ -390,12 +413,12 @@ export async function previewBulkReturn(
     ea_rider: ea,
     eligible_ids: suggested.filter((s) => s.eligible).map((s) => s.id),
   };
-  const preview_token = putPreview("return", snapshot);
+  const preview_token = await putPreview("return", snapshot);
   return { preview_token, ...snapshot };
 }
 
 export async function applyBulkReturn(previewToken: string, actor: string) {
-  const preview = getPreview("return", previewToken);
+  const preview = await getPreview("return", previewToken);
   const moved = [];
   const failed = [];
   for (const row of preview.rows ?? []) {
@@ -421,7 +444,14 @@ export async function applyBulkReturn(previewToken: string, actor: string) {
     if (prev) {
       const { error } = await supabaseAdmin
         .from("railcar_assignments")
-        .update({ rider_id: row.to_rider_id, fleet_name: targetFleet, assigned_at: new Date().toISOString() })
+        .update({
+          rider_id: row.to_rider_id,
+          fleet_name: targetFleet,
+          assigned_at: new Date().toISOString(),
+          rent_start_date: null,
+          rent_start_set_by: null,
+          rent_start_set_at: null,
+        })
         .eq("id", prev.id);
       if (error) {
         failed.push({ ...row, error: error.message });
@@ -433,6 +463,7 @@ export async function applyBulkReturn(previewToken: string, actor: string) {
         rider_id: row.to_rider_id,
         fleet_name: targetFleet,
         assigned_at: new Date().toISOString(),
+        rent_start_date: null,
       });
       if (error) {
         failed.push({ ...row, error: error.message });
@@ -556,16 +587,21 @@ export async function listKpiCars(bucket: string) {
   let q = supabaseAdmin.from("v_rlms_car_kpi").select("*").eq("is_op", true);
   if (bucket === "off_rent") q = q.eq("off_rent", true);
   else if (bucket === "idle") {
-    q = q.eq("off_rent", true).or("has_open_commitment.eq.true,in_open_program.eq.true,going_on_lease.eq.true");
+    q = q.eq("off_rent", true).or("has_open_commitment.eq.true,in_open_program.eq.true,going_on_lease.eq.true,awaiting_rent_start.eq.true");
   } else if (bucket === "unassigned") {
     q = q
       .eq("off_rent", true)
       .eq("has_open_commitment", false)
       .eq("in_open_program", false)
-      .eq("going_on_lease", false);
+      .eq("going_on_lease", false)
+      .eq("awaiting_rent_start", false)
+      .eq("on_ol", false);
   } else if (bucket === "idle_on_ol") {
-    q = q.eq("fleet_status", "Idle").eq("off_rent", false).eq("no_assignment", false);
-  } else if (bucket === "on_rent") q = q.eq("off_rent", false);
+    q = q.eq("fleet_status", "Idle").eq("on_ol", true);
+  } else if (bucket === "awaiting_rent_start") q = q.eq("awaiting_rent_start", true);
+  else if (bucket === "shop_conflict") q = q.eq("shop_conflict", true);
+  else if (bucket === "future_rent_start") q = q.eq("future_rent_start", true);
+  else if (bucket === "on_rent") q = q.eq("off_rent", false);
   else if (bucket === "no_link") q = q.eq("no_assignment", true);
   else if (bucket === "mtm") q = q.or("lease_status.ilike.%MTM%,lease_status.ilike.%month to month%");
   const { data, error } = await q.order("railcar_id").limit(5000);
@@ -632,7 +668,7 @@ function errHandler(res: Response, err: any) {
 }
 
 export async function previewMarkSold(idsRaw: number[]) {
-  const ids = [...new Set(idsRaw.filter((n) => Number.isFinite(n) && n > 0))];
+  const ids = Array.from(new Set(idsRaw.filter((n) => Number.isFinite(n) && n > 0)));
   if (!ids.length) throw Object.assign(new Error("ids required"), { status: 400 });
   const { data, error } = await supabaseAdmin
     .from("railcars")
@@ -646,7 +682,7 @@ export async function previewMarkSold(idsRaw: number[]) {
     not_found: ids.filter((id) => !found.has(id)),
     already_sold: (data ?? []).filter((r: any) => r.fleet_status === "Sold"),
   };
-  return { preview_token: putPreview("sold", snapshot), ...snapshot };
+  return { preview_token: await putPreview("sold", snapshot), ...snapshot };
 }
 
 export async function applyMarkSold(
@@ -654,7 +690,7 @@ export async function applyMarkSold(
   actor: string,
   opts: { sold_to?: string | null; effective_date?: string | null },
 ) {
-  const preview = getPreview("sold", previewToken);
+  const preview = await getPreview("sold", previewToken);
   const movedAt = opts.effective_date
     ? `${String(opts.effective_date).slice(0, 10)}T12:00:00.000Z`
     : new Date().toISOString();
@@ -694,7 +730,30 @@ export function registerCommitmentRoutes(
     try {
       const id = Number(req.params.id);
       const open = await openCommitment(id);
-      res.json({ commitment: open });
+      const { rider, assignment } = await linkForCar(id);
+      const { data: car } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", id).maybeSingle();
+      const onOl = isOnOl(linkInput(car, rider?.rider_name, assignment));
+      const off = offRentOf(car, rider?.rider_name, assignment);
+      const implicit =
+        onOl && off
+          ? {
+              name: implicitAwaitingLabel(rider?.rider_name, car?.lessee_name),
+              read_only: true,
+            }
+          : null;
+      res.json({
+        commitment: open,
+        implicit,
+        on_ol: onOl,
+        off_rent: off,
+        rent_start_date: assignment?.rent_start_date ?? null,
+        derived_status: derivedFleetStatus({
+          sold: car?.fleet_status === "Sold",
+          offRent: off,
+          onOl,
+          hasOpenCommitment: Boolean(open),
+        }),
+      });
     } catch (e) {
       errHandler(res, e);
     }

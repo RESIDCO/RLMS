@@ -37,6 +37,20 @@ export function CommitmentPanel({ carId }: { carId: number }) {
   const [target, setTarget] = useState("");
   const [note, setNote] = useState("");
   const open = data?.commitment;
+  const implicit = data?.implicit;
+  const [rentDate, setRentDate] = useState("");
+  const saveRent = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/rent-start/car/${carId}`, { date: rentDate || null });
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/commitments/car", carId] });
+      qc.invalidateQueries({ queryKey: ["/api/railcars", carId] });
+      toast({ title: "Rent start saved" });
+    },
+    onError: (e: Error) => toast({ title: "Could not set rent start", description: e.message, variant: "destructive" }),
+  });
   const save = useMutation({
     mutationFn: async (overwrite: boolean) => {
       const res = await apiRequest("POST", `/api/commitments/car/${carId}`, {
@@ -62,7 +76,29 @@ export function CommitmentPanel({ carId }: { carId: number }) {
   });
   return (
     <div className="rounded-lg border border-border p-4 space-y-3">
-      <div className="text-sm font-semibold">Commitment</div>
+      <div className="text-sm font-semibold">Rent start / Commitment</div>
+      <div className="text-sm space-y-1">
+        <div>
+          <span className="text-muted-foreground">Rent start date</span>{" "}
+          {data?.rent_start_date ?? "—"}
+          {data?.on_ol ? "" : " (only editable on an OL)"}
+        </div>
+        {canEdit && data?.on_ol ? (
+          <div className="flex gap-2 items-end">
+            <div>
+              <Label>Set date</Label>
+              <Input type="date" value={rentDate} onChange={(e) => setRentDate(e.target.value)} />
+            </div>
+            <Button size="sm" disabled={saveRent.isPending} onClick={() => saveRent.mutate()}>Save date</Button>
+          </div>
+        ) : null}
+      </div>
+      {implicit ? (
+        <div className="text-sm rounded-md border border-border bg-muted/30 px-3 py-2">
+          {implicit.name}
+          <div className="text-xs text-muted-foreground">Read-only. No Commitment row is written.</div>
+        </div>
+      ) : null}
       {open ? (
         <div className="text-sm space-y-1">
           <div><span className="text-muted-foreground">Type</span> {open.type}</div>
@@ -374,6 +410,9 @@ export function KpiCarListPage() {
     on_rent: "Active Cars (on rent)",
     no_link: "No lease link",
     mtm: "Month to Month",
+    awaiting_rent_start: "Awaiting rent start",
+    shop_conflict: "Shop conflict",
+    future_rent_start: "Future rent starts",
   };
   const { data } = useQuery({
     queryKey: ["/api/kpi/cars", bucket],
@@ -396,6 +435,117 @@ export function KpiCarListPage() {
                 <td>{r.entity}</td>
                 <td>{r.link_rider ?? "—"}</td>
                 <td>{r.lessee_name ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function BulkRentStartPage() {
+  const canEdit = useCanEdit();
+  const { toast } = useToast();
+  const [text, setText] = useState("");
+  const [date, setDate] = useState("");
+  const [overwrite, setOverwrite] = useState(false);
+  const [preview, setPreview] = useState<any>(null);
+  const runPreview = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("POST", "/api/rent-start/bulk/preview", { text, date: date || null, overwrite })).json(),
+    onSuccess: setPreview,
+    onError: (e: Error) => toast({ title: "Preview failed", description: e.message, variant: "destructive" }),
+  });
+  const apply = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: preview?.preview_token })).json(),
+    onSuccess: (d) => toast({ title: "Applied", description: `${d.written} dates written` }),
+    onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
+  });
+  return (
+    <div>
+      <PageHeader title="Bulk Rent Start Date" subtitle="Preview first. Apply writes only the reviewed rows. EA / not-on-OL cars are rejected." />
+      <div className="p-6 space-y-4 max-w-4xl">
+        <PasteBox onText={setText} />
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <Label>Date for all rows (or put dates in the CSV)</Label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <label className="text-sm flex items-center gap-2">
+            <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
+            Overwrite existing dates
+          </label>
+          {canEdit && (
+            <Button disabled={runPreview.isPending} onClick={() => runPreview.mutate()}>Preview</Button>
+          )}
+          {canEdit && preview?.preview_token && (
+            <Button disabled={apply.isPending} onClick={() => apply.mutate()}>Apply preview</Button>
+          )}
+        </div>
+        {preview && (
+          <div className="text-sm space-y-2">
+            <div>Matched {preview.matched?.length ?? 0} · not found {preview.not_found?.length ?? 0} · not on OL {preview.not_on_ol?.length ?? 0} · already dated {preview.already_has_date?.length ?? 0} · to write {preview.to_write?.length ?? 0}</div>
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th>Car</th><th>OL</th><th>Old</th><th>New</th><th>Status</th></tr></thead>
+              <tbody>
+                {(preview.to_write ?? []).map((r: any) => (
+                  <tr key={r.id} className="border-t border-border/40">
+                    <td className="font-mono">{r.marks} {r.car_number}</td>
+                    <td>{r.link}</td>
+                    <td>{r.old_date ?? "—"}</td>
+                    <td>{r.new_date}</td>
+                    <td>{r.resulting_status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function RentStartWatchPage({ kind }: { kind: "awaiting" | "shop" | "future" }) {
+  const titles = {
+    awaiting: "Awaiting rent start",
+    shop: "Shop conflict",
+    future: "Future rent starts (30 days)",
+  };
+  const { data } = useQuery({
+    queryKey: ["/api/rent-start/watch", kind],
+    queryFn: () => apiGet<any>(`/api/rent-start/watch?kind=${kind}`),
+  });
+  return (
+    <div>
+      <PageHeader title={titles[kind]} subtitle={kind === "awaiting" ? `On OL, no rent start, assigned more than ${data?.days ?? 60} days ago` : `${data?.rows?.length ?? 0} cars`} />
+      <div className="p-6">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-muted-foreground text-xs">
+              <th>Car</th><th>OL</th><th>Lessee</th>
+              {kind === "awaiting" && <th>Assigned</th>}
+              {kind === "awaiting" && <th>Days waiting</th>}
+              {kind !== "awaiting" && <th>Rent start</th>}
+              <th>Shop</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.rows ?? []).map((r: any) => (
+              <tr key={r.railcar_id} className="border-t border-border/40">
+                <td className="py-1.5 font-mono">
+                  <button type="button" className="underline" onClick={() => openAppTab(carPath(r.railcar_id))}>
+                    {r.reporting_marks} {r.car_number}
+                  </button>
+                </td>
+                <td>{r.link_rider}</td>
+                <td>{r.lessee_name}</td>
+                {kind === "awaiting" && <td>{String(r.assigned_at ?? "").slice(0, 10)}</td>}
+                {kind === "awaiting" && <td>{r.days_waiting ?? "—"}</td>}
+                {kind !== "awaiting" && <td>{r.rent_start_date ?? "—"}</td>}
+                <td>{r.shop ?? r.open_program_shop_id ?? r.ops_flag ?? "—"}</td>
               </tr>
             ))}
           </tbody>

@@ -8,6 +8,12 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY in environment");
 }
 
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error(
+    "SUPABASE_SERVICE_ROLE_KEY is required (verify it on Render). Refusing to start with the anon key as admin.",
+  );
+}
+
 // Standard client (anon key) — used for all data queries
 export const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -17,14 +23,11 @@ export const supabase = createClient(
   }
 );
 
-// Admin client (service role key) — used only for user management (invite, delete auth users)
-// Falls back to anon client if service role key not configured
-export const supabaseAdmin = process.env.SUPABASE_SERVICE_ROLE_KEY
-  ? createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    )
-  : supabase;
+// Admin client (service role). Never fall back to anon.
+export const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
 
 export default supabase;

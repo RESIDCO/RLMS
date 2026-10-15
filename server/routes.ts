@@ -94,7 +94,8 @@ import {
   resolveProgramCars,
   logProgramActivity,
 } from "./programs";
-import { registerCommitmentRoutes, ensureProgramCommitment, recomputeStatus } from "./commitment";
+import { registerCommitmentRoutes, ensureProgramCommitment, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
+import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag } from "@shared/ops-flag";
@@ -147,6 +148,7 @@ import {
   deriveFleetStatus,
   isOperatingFleetCar,
   autoFleetStatusFromLegacyText,
+  isSoldAssignment,
   parseFleetStatus,
   countsAsLeasedForKpi,
   isLeasedFleetStatus,
@@ -1051,6 +1053,8 @@ export async function registerRoutes(
               going_on_lease_cars: Number(sqlKpis.going_on_lease_cars) || 0,
               going_on_lease_earliest_end: sqlKpis.going_on_lease_earliest_end ?? null,
               stale_commitments: Number(sqlKpis.stale_commitments) || 0,
+              stale_programs: Number(sqlKpis.stale_programs) || 0,
+              idle_on_ol_review: Number(sqlKpis.idle_on_ol_review) || 0,
               lease_ended_watch: Number(sqlKpis.lease_ended_watch) || 0,
             }
           : {
@@ -1320,9 +1324,21 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      return res.status(400).json({
-        message: "Rental status is derived from the lease link and Commitment. It cannot be set by hand.",
-      });
+      if (req.body?.preview_token) {
+        return res.json(
+          await applyMarkSold(String(req.body.preview_token), writerId, {
+            sold_to: req.body?.sold_to ?? null,
+            effective_date: req.body?.effective_date ?? null,
+          }),
+        );
+      }
+      if (req.body?.fleet_status && req.body.fleet_status !== "Sold") {
+        return res.status(400).json({
+          message: "Only Sold can be set by hand. Idle / Leased / Unassigned are derived.",
+        });
+      }
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];
+      return res.json(await previewMarkSold(ids));
     } catch (err) {
       errHandler(res, err);
     }
@@ -1594,8 +1610,15 @@ export async function registerRoutes(
       const insertRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
       delete insertRow.fleet_status;
       delete insertRow.fleet_status_source;
-      insertRow.fleet_status = "Unassigned";
-      insertRow.fleet_status_source = "derived";
+      const derived = statusFromAssignmentLink({
+        sold: parsed.fleet_status === "Sold" || isSoldAssignment(parsed),
+        hasAssignment: Boolean(parsed.rider_external_id),
+        rider: parsed.rider_external_id,
+        lesseeName: parsed.lessee_name,
+        assignmentLabel: parsed.assignment_label,
+      });
+      insertRow.fleet_status = derived;
+      insertRow.fleet_status_source = derived === "Sold" ? "manual" : "derived";
       Object.assign(insertRow, fieldsImpliedByCarStatus(String(parsed.status ?? "Active/In-Service")));
       const { data, error } = await supabase
         .from("railcars")
@@ -1643,6 +1666,10 @@ export async function registerRoutes(
 
       delete updateRow.fleet_status;
       delete updateRow.fleet_status_source;
+      if (parsed.fleet_status === "Sold") {
+        updateRow.fleet_status = "Sold";
+        updateRow.fleet_status_source = "manual";
+      }
 
       let priorStatus: string | null | undefined;
       let priorActive: boolean | null | undefined;
@@ -5526,6 +5553,10 @@ export async function registerRoutes(
       if (!Number.isFinite(categoryId) || categoryId <= 0) {
         return res.status(400).json({ error: "Category is required" });
       }
+      const targetDate = String(req.body.target_completion_date ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+        return res.status(400).json({ error: "target_completion_date is required" });
+      }
       const status = parseStatus(req.body.status, "open");
       const { data, error } = await supabase
         .from("programs")
@@ -5539,7 +5570,7 @@ export async function registerRoutes(
           account_manager: req.body.account_manager || null,
           account_id: req.body.account_id ? Number(req.body.account_id) : null,
           status_narrative: req.body.status_narrative || null,
-          target_completion_date: req.body.target_completion_date || null,
+          target_completion_date: targetDate,
           created_by: userId,
         })
         .select()
@@ -5591,7 +5622,13 @@ export async function registerRoutes(
         updates.account_id = req.body.account_id ? Number(req.body.account_id) : null;
       }
       if (req.body.status_narrative !== undefined) updates.status_narrative = req.body.status_narrative || null;
-      if (req.body.target_completion_date !== undefined) updates.target_completion_date = req.body.target_completion_date || null;
+      if (req.body.target_completion_date !== undefined) {
+        const targetDate = String(req.body.target_completion_date ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+          return res.status(400).json({ error: "target_completion_date is required" });
+        }
+        updates.target_completion_date = targetDate;
+      }
       if (req.body.opened_date !== undefined) updates.opened_date = req.body.opened_date || null;
       if (req.body.closed_date !== undefined) updates.closed_date = req.body.closed_date || null;
       const { data, error } = await supabaseAdmin.from("programs").update(updates).eq("id", id).select().single();

@@ -393,6 +393,10 @@ function CreateProgramDialog({
       toast({ title: "Name and category are required", variant: "destructive" });
       return;
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+      toast({ title: "Target completion date is required", variant: "destructive" });
+      return;
+    }
     setPending(true);
     try {
       const res = await apiRequest("POST", "/api/programs", {
@@ -480,7 +484,7 @@ function CreateProgramDialog({
           </div>
           <div>
             <Label className="text-xs">Target completion</Label>
-            <Input type="date" value={target} onChange={(e) => setTarget(e.target.value)} />
+            <Input type="date" required value={target} onChange={(e) => setTarget(e.target.value)} />
           </div>
           <div>
             <Label className="text-xs">Tags (comma-separated, for hybrids like NLD, Sale)</Label>

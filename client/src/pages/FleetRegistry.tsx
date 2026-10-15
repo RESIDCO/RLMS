@@ -458,6 +458,7 @@ export default function FleetRegistry() {
   const [bulkRentalOpen, setBulkRentalOpen] = useState(false);
   const [bulkRentalTarget, setBulkRentalTarget] = useState<FleetStatus | null>(null);
   const [bulkRentalEffectiveDate, setBulkRentalEffectiveDate] = useState(todayIsoDateOnly);
+  const [soldPreview, setSoldPreview] = useState<any>(null);
   const [bulkNeedsCompletionPending, setBulkNeedsCompletionPending] = useState(false);
   const [bulkEntityPending, setBulkEntityPending] = useState(false);
   const [bulkFlagPending, setBulkFlagPending] = useState(false);
@@ -695,27 +696,42 @@ export default function FleetRegistry() {
     }
   };
 
-  const bulkUpdateFleetStatus = async () => {
-    if (!bulkRentalTarget) return;
+  const bulkPreviewSold = async () => {
     const ids = Array.from(selectedIds);
-    const next = bulkRentalTarget;
     setBulkFleetStatusPending(true);
     try {
-      await apiRequest("POST", "/api/railcars/bulk-fleet-status", {
-        ids,
-        fleet_status: next,
+      const res = await apiRequest("POST", "/api/railcars/sold/preview", { ids });
+      const d = await res.json();
+      setSoldPreview(d);
+      setBulkRentalTarget("Sold");
+      setBulkRentalEffectiveDate(todayIsoDateOnly());
+      setBulkRentalOpen(true);
+    } catch (e: any) {
+      toast({ title: "Sold preview failed", description: e.message, variant: "destructive" });
+    } finally {
+      setBulkFleetStatusPending(false);
+    }
+  };
+
+  const bulkUpdateFleetStatus = async () => {
+    if (!soldPreview?.preview_token) return;
+    setBulkFleetStatusPending(true);
+    try {
+      const res = await apiRequest("POST", "/api/railcars/sold/apply", {
+        preview_token: soldPreview.preview_token,
         effective_date: bulkRentalEffectiveDate || todayIsoDateOnly(),
-        moved_by: "bulk-action",
       });
+      const d = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/history"] });
-      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} set to ${next}` });
+      toast({ title: `${d.updated ?? soldPreview.ids?.length ?? 0} car(s) marked Sold` });
       setBulkRentalOpen(false);
       setBulkRentalTarget(null);
+      setSoldPreview(null);
       clearSelection();
     } catch (e: any) {
-      toast({ title: "Bulk rental status update failed", description: e.message, variant: "destructive" });
+      toast({ title: "Bulk Sold failed", description: e.message, variant: "destructive" });
     } finally {
       setBulkFleetStatusPending(false);
     }
@@ -1397,6 +1413,15 @@ export default function FleetRegistry() {
                 <Image className="h-4 w-4" />
                 Find Photos
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={bulkFleetStatusPending || selectedIds.size === 0}
+                onClick={bulkPreviewSold}
+                data-testid="bulk-mark-sold"
+              >
+                Mark Sold
+              </Button>
               {/* Bulk status change */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1637,14 +1662,10 @@ export default function FleetRegistry() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>
-              Set rental status to {bulkRentalTarget} for {selectedIds.size} selected car{selectedIds.size !== 1 ? "s" : ""}?
+              Mark {soldPreview?.cars?.length ?? selectedIds.size} car{selectedIds.size !== 1 ? "s" : ""} Sold?
             </DialogTitle>
             <DialogDescription>
-              {bulkRentalTarget === "Sold"
-                ? "Sold / Transferred To is left blank on a bulk change — fill buyer names per car afterward if needed."
-                : bulkRentalTarget === "Abatement"
-                  ? "Abatement keeps the car leased; rent is paused. It stays in Total Fleet and is netted out of Active Cars."
-                  : `This marks the selected cars as ${bulkRentalTarget}.`}
+              Preview of the cars that will be marked Sold. Fill buyer names per car afterward if needed.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">
@@ -1661,11 +1682,18 @@ export default function FleetRegistry() {
                 Defaults to today. A past date is stored on the History log. Does not recalculate this month’s rent or depreciation.
               </p>
             </div>
+            {(soldPreview?.cars ?? []).length > 0 && (
+              <ul className="max-h-40 overflow-auto text-xs font-mono space-y-0.5">
+                {(soldPreview.cars as any[]).map((c) => (
+                  <li key={c.id}>{c.reporting_marks} {c.car_number} · {c.fleet_status}</li>
+                ))}
+              </ul>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setBulkRentalOpen(false)}>Cancel</Button>
             <Button
-              disabled={!bulkRentalTarget || bulkFleetStatusPending}
+              disabled={!soldPreview?.preview_token || bulkFleetStatusPending}
               onClick={bulkUpdateFleetStatus}
               data-testid="button-confirm-bulk-rental-status"
             >
@@ -2810,9 +2838,18 @@ export function RailcarFormDialog({
           <div>
             <Label>Rental Status</Label>
             <p className="text-[11px] text-muted-foreground mb-1.5">
-              Derived from the lease link and Commitment. Not editable.
+              Derived from the lease link and Commitment. Sold is the only status you can set by hand.
             </p>
             <Input value={form.fleet_status || "—"} readOnly disabled data-testid="select-fleet-status" />
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.fleet_status === "Sold"}
+                onChange={(e) => setForm({ ...form, fleet_status: (e.target.checked ? "Sold" : "Leased") as FleetStatus })}
+                data-testid="checkbox-mark-sold"
+              />
+              Mark Sold
+            </label>
           </div>
           {form.fleet_status === "Sold" && (
             <div>

@@ -1,10 +1,13 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/commitment.test.ts */
 import {
+  carNumberLookupValues,
   derivedFleetStatus,
   isOffRentLink,
   isOnRentOlRider,
   parseCarListText,
+  statusFromAssignmentLink,
+  xLesseeName,
 } from "./commitment.ts";
 
 let passed = 0;
@@ -36,6 +39,12 @@ ok(parsed[0].initial === "TFOX" && parsed[0].number === "000644", "spaced mark")
 ok(parsed[1].number === "000645", "glued mark");
 ok(parsed[2].initial === "OFCX" && parsed[2].number === "003449", "hyphen + pad");
 ok(parsed.some((p) => p.initial === "" && p.raw === "BAD"), "unparsed kept");
+ok(carNumberLookupValues("644").includes("000644") && carNumberLookupValues("000644").includes("644"), "number variants");
+ok(xLesseeName("KBX") === "xKBX" && xLesseeName("xKBX") === "xKBX", "x-lessee keeps prior");
+ok(statusFromAssignmentLink({ hasAssignment: true, rider: "OL1917" }) === "Leased", "new car on OL");
+ok(statusFromAssignmentLink({ hasAssignment: true, rider: "EA2435", seedIdle: true }) === "Idle", "new car off rent seed idle");
+ok(statusFromAssignmentLink({ hasAssignment: false }) === "Unassigned", "new car no link");
+ok(statusFromAssignmentLink({ sold: true, hasAssignment: false }) === "Sold", "new sold car");
 
 if (failed) {
   console.error(`FAILED ${failed}`);

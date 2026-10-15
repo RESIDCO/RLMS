@@ -3,6 +3,8 @@ import { fetchAllRows } from "./fetch-all";
 import { deleteVcfPreview, getVcfPreview } from "./vcf-preview-cache";
 import { governLeaseDates } from "./govern-lease-dates";
 import { statusAlignedToActiveFlag } from "@shared/car-lifecycle-status";
+import { statusFromAssignmentLink } from "@shared/commitment";
+import { isSoldAssignment } from "@shared/fleet-status";
 import { assertRailcarImporterPatch } from "@shared/rider-import-guard";
 import {
   buildVcfReview,
@@ -258,7 +260,19 @@ export async function runVcfCommit(opts: {
         insertPayload = {
           ...payload,
           status: statusAlignedToActiveFlag(null, payload.active === true),
-          fleet_status: "Unassigned",
+          fleet_status: (() => {
+            const st = statusFromAssignmentLink({
+              sold: isSoldAssignment({
+                rider_external_id: payload.rider_external_id as string | null,
+                assignment_label: payload.assignment_label as string | null,
+              }),
+              hasAssignment: Boolean(payload.rider_external_id),
+              rider: payload.rider_external_id as string | null,
+              lesseeName: payload.lessee_name as string | null,
+              assignmentLabel: payload.assignment_label as string | null,
+            });
+            return st;
+          })(),
           fleet_status_source: "derived",
           active_source: "auto",
         };

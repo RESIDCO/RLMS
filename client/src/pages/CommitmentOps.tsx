@@ -134,13 +134,15 @@ export function BulkCommitmentPage() {
   const [overwrite, setOverwrite] = useState(false);
   const [action, setAction] = useState<"set" | "clear">("set");
   const runPreview = useMutation({
-    mutationFn: async () => (await apiRequest("POST", "/api/commitments/bulk/preview", { text })).json(),
+    mutationFn: async () => (await apiRequest("POST", "/api/commitments/bulk/preview", {
+      text, action, type, name, target_date: target || null, note: note || null, overwrite,
+    })).json(),
     onSuccess: setPreview,
     onError: (e: Error) => toast({ title: "Preview failed", description: e.message, variant: "destructive" }),
   });
   const apply = useMutation({
     mutationFn: async () => (await apiRequest("POST", "/api/commitments/bulk/apply", {
-      text, action, type, name, target_date: target || null, note: note || null, overwrite,
+      preview_token: preview?.preview_token,
     })).json(),
     onSuccess: (d) => toast({ title: "Applied", description: JSON.stringify({ set: d.set, skipped: d.skipped, cleared: d.cleared }) }),
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
@@ -187,7 +189,7 @@ export function BulkCommitmentPage() {
             </>
           )}
           <Button onClick={() => runPreview.mutate()} disabled={!text.trim()}>Preview</Button>
-          {canEdit && <Button variant="secondary" disabled={!preview} onClick={() => apply.mutate()}>Apply</Button>}
+          {canEdit && <Button variant="secondary" disabled={!preview?.preview_token} onClick={() => apply.mutate()}>Apply reviewed preview</Button>}
         </div>
         {preview && (
           <div className="text-sm space-y-3">
@@ -211,13 +213,15 @@ export function BulkReturnPage() {
   const [commitName, setCommitName] = useState("");
   const [commitType, setCommitType] = useState<CommitmentType>("deal");
   const runPreview = useMutation({
-    mutationFn: async () => (await apiRequest("POST", "/api/returns/bulk/preview", { text })).json(),
+    mutationFn: async () => (await apiRequest("POST", "/api/returns/bulk/preview", {
+      text,
+      commitment: commitName.trim() ? { type: commitType, name: commitName.trim() } : null,
+    })).json(),
     onSuccess: setPreview,
   });
   const apply = useMutation({
     mutationFn: async () => (await apiRequest("POST", "/api/returns/bulk/apply", {
-      text,
-      commitment: commitName.trim() ? { type: commitType, name: commitName.trim() } : null,
+      preview_token: preview?.preview_token,
     })).json(),
     onSuccess: (d) => toast({ title: "Return applied", description: `Moved ${d.moved}` }),
   });
@@ -238,18 +242,19 @@ export function BulkReturnPage() {
             </SelectContent>
           </Select>
           <Button onClick={() => runPreview.mutate()}>Preview</Button>
-          {canEdit && <Button variant="secondary" disabled={!preview} onClick={() => apply.mutate()}>Apply</Button>}
+          {canEdit && <Button variant="secondary" disabled={!preview?.preview_token} onClick={() => apply.mutate()}>Apply reviewed preview</Button>}
         </div>
         {preview?.rows && (
           <table className="w-full text-xs">
-            <thead><tr className="text-left text-muted-foreground"><th>Car</th><th>From</th><th>To</th><th>Status</th></tr></thead>
+            <thead><tr className="text-left text-muted-foreground"><th>Car</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {preview.rows.map((r: any) => (
                 <tr key={r.id} className="border-t border-border/40">
                   <td className="py-1 font-mono">{r.marks} {r.car_number}</td>
                   <td>{r.from_link}</td>
-                  <td>{r.to_link} {r.to_label}{r.missing_ea ? " (EA missing)" : ""}</td>
+                  <td>{r.to_link} {r.to_label}</td>
                   <td>{r.resulting_status}</td>
+                  <td>{r.eligible ? "" : r.reject}</td>
                 </tr>
               ))}
             </tbody>
@@ -363,7 +368,8 @@ export function KpiCarListPage() {
   const bucket = new URLSearchParams(search.replace(/^\?/, "")).get("bucket") ?? "off_rent";
   const titles: Record<string, string> = {
     off_rent: "Off Rent",
-    idle: "Idle (committed)",
+    idle: "Idle (seed / committed)",
+    idle_on_ol: "Tagged Idle on OL — under review",
     unassigned: "Unassigned / Available for Opportunities",
     on_rent: "Active Cars (on rent)",
     no_link: "No lease link",

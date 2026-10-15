@@ -113,6 +113,8 @@ type DashboardData = {
     going_on_lease_cars?: number;
     going_on_lease_earliest_end?: string | null;
     stale_commitments?: number;
+    stale_programs?: number;
+    idle_on_ol_review?: number;
     lease_ended_watch?: number;
   };
   detail: {
@@ -497,7 +499,7 @@ export default function Dashboard() {
                 testId="kpi-idle"
                 label="Idle (committed)"
                 value={data.kpis.idle_count ?? 0}
-                subtext="Off rent with an open Commitment"
+                subtext="Off rent in an open program or Going On Lease (seed buckets until Commitments are seeded)"
                 icon={PauseCircle}
                 onClick={() => navigate("/kpi/cars?bucket=idle")}
               />
@@ -513,7 +515,7 @@ export default function Dashboard() {
                 testId="kpi-unassigned"
                 label="Unassigned / Available for Opportunities"
                 value={data.kpis.unassigned_cars}
-                subtext={`Off rent, no Commitment${data.kpis.unassigned_main != null ? ` · Main ${data.kpis.unassigned_main} / RPS ${data.kpis.unassigned_rps ?? 0}` : ""}`}
+                subtext={`Off rent, not in an open program / Going On Lease${data.kpis.unassigned_main != null ? ` · Main ${data.kpis.unassigned_main} / RPS ${data.kpis.unassigned_rps ?? 0}` : ""}`}
                 icon={CircleDashed}
                 onClick={() => navigate("/kpi/cars?bucket=unassigned")}
               />
@@ -565,12 +567,23 @@ export default function Dashboard() {
                 testId="kpi-off-rent"
                 label="Off Rent"
                 value={data.kpis.off_rent_count}
-                subtext={`Lease link EA/EX/xOL, x-lessee, or no assignment${data.kpis.off_rent_main != null ? ` · Main ${data.kpis.off_rent_main} / Coal ${data.kpis.off_rent_coal ?? 0} / RPS ${data.kpis.off_rent_rps ?? 0}` : ""}`}
+                subtext={`${data.kpis.off_rent_count.toLocaleString()} confirmed${data.kpis.off_rent_main != null ? ` · Main ${data.kpis.off_rent_main} / Coal ${data.kpis.off_rent_coal ?? 0} / RPS ${data.kpis.off_rent_rps ?? 0}` : ""}${(data.kpis.idle_on_ol_review ?? 0) > 0 ? ` · ${data.kpis.idle_on_ol_review} tagged Idle on OL — under review` : ""}`}
                 icon={AlertTriangle}
                 accent={data.kpis.off_rent_count > 0 ? "warning" : "muted"}
                 marker="icon"
                 onClick={() => navigate("/kpi/cars?bucket=off_rent")}
               />
+              {(data.kpis.idle_on_ol_review ?? 0) > 0 && (
+                <KpiCard
+                  testId="kpi-idle-on-ol"
+                  label="Idle on OL — under review"
+                  value={data.kpis.idle_on_ol_review ?? 0}
+                  subtext="Tagged Idle but still on a live OL. List only until Bruce decides."
+                  icon={AlertTriangle}
+                  accent="warning"
+                  onClick={() => navigate("/kpi/cars?bucket=idle_on_ol")}
+                />
+              )}
               <KpiCard
                 testId="kpi-mtm"
                 label="Month to Month"
@@ -595,8 +608,8 @@ export default function Dashboard() {
               <KpiCard
                 testId="kpi-stale"
                 label="Stale Commitments"
-                value={data.kpis.stale_commitments ?? 0}
-                subtext="No date, past date, older than 90 days, or program past end"
+                value={`${data.kpis.stale_commitments ?? 0} / ${data.kpis.stale_programs ?? 0}`}
+                subtext="Stale Commitments / open programs past target"
                 icon={AlertTriangle}
                 onClick={() => navigate("/commitments/stale")}
               />

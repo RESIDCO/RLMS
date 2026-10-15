@@ -42,6 +42,44 @@ export function derivedFleetStatus(input: {
   return input.hasOpenCommitment ? "Idle" : "Unassigned";
 }
 
+/** Status from the lease-link fields on a new/imported car (no DB recompute). */
+export function statusFromAssignmentLink(input: {
+  sold?: boolean;
+  hasAssignment?: boolean | null;
+  rider?: string | null;
+  lesseeName?: string | null;
+  assignmentLabel?: string | null;
+  hasOpenCommitment?: boolean;
+  seedIdle?: boolean;
+}): DerivedFleetStatus {
+  const offRent = isOffRentLink({
+    hasAssignment: input.hasAssignment,
+    rider: input.rider,
+    lesseeName: input.lesseeName,
+    assignmentLabel: input.assignmentLabel,
+  });
+  return derivedFleetStatus({
+    sold: input.sold,
+    offRent,
+    hasOpenCommitment: Boolean(input.hasOpenCommitment || input.seedIdle),
+  });
+}
+
+export function xLesseeName(priorLessee: string | null | undefined): string {
+  const s = String(priorLessee ?? "").trim();
+  if (!s) return "xLessee";
+  if (isXLesseeText(s) || /^x/i.test(s)) return s;
+  return `x${s}`;
+}
+
+/** Match stored car_number whether padded to 6 or stored short. */
+export function carNumberLookupValues(number: string): string[] {
+  const digits = String(number ?? "").replace(/\D/g, "");
+  if (!digits) return [];
+  const stripped = digits.replace(/^0+/, "") || "0";
+  return [...new Set([digits, stripped, stripped.padStart(6, "0"), digits.padStart(6, "0")])];
+}
+
 export type ParsedCarToken = { initial: string; number: string; raw: string };
 
 /** Mark + number, any spacing: TFOX 000644, TFOX000644, TFOX-644. */

@@ -37,9 +37,11 @@ CREATE INDEX IF NOT EXISTS car_commitments_program_ix
   ON public.car_commitments (program_id)
   WHERE cleared_at IS NULL AND program_id IS NOT NULL;
 
-GRANT SELECT ON public.car_commitments TO anon, authenticated, service_role;
-GRANT INSERT, UPDATE, DELETE ON public.car_commitments TO authenticated, service_role;
-GRANT USAGE, SELECT ON SEQUENCE public.car_commitments_id_seq TO authenticated, service_role;
+ALTER TABLE public.car_commitments ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.car_commitments FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON SEQUENCE public.car_commitments_id_seq FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.car_commitments TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.car_commitments_id_seq TO service_role;
 
 CREATE OR REPLACE FUNCTION public.rlms_is_off_rent(
   has_assignment boolean,
@@ -100,6 +102,16 @@ SELECT
     SELECT 1 FROM public.car_commitments cc
     WHERE cc.railcar_id = rc.id AND cc.cleared_at IS NULL
   ) AS has_open_commitment,
+  EXISTS (
+    SELECT 1
+    FROM public.program_cars pc
+    JOIN public.programs p ON p.id = pc.program_id
+    WHERE pc.railcar_id = rc.id
+      AND pc.exited_date IS NULL
+      AND p.closed_date IS NULL
+      AND lower(coalesce(p.status, '')) NOT IN ('closed', 'complete', 'completed')
+  ) AS in_open_program,
+  (upper(btrim(coalesce(r.lease_status, ''))) LIKE '%GOING ON LEASE%') AS going_on_lease,
   (a.railcar_id IS NULL) AS no_assignment
 FROM public.railcars rc
 LEFT JOIN LATERAL (
@@ -263,15 +275,23 @@ DROP TRIGGER IF EXISTS trg_recompute_status_assignment ON public.railcar_assignm
 CREATE TRIGGER trg_recompute_status_assignment
 AFTER INSERT OR UPDATE OR DELETE ON public.railcar_assignments
 FOR EACH ROW EXECUTE FUNCTION public.rlms_recompute_fleet_status_trig();
+ALTER TABLE public.railcar_assignments DISABLE TRIGGER trg_recompute_status_assignment;
 
 DROP TRIGGER IF EXISTS trg_recompute_status_commitment ON public.car_commitments;
 CREATE TRIGGER trg_recompute_status_commitment
 AFTER INSERT OR UPDATE OR DELETE ON public.car_commitments
 FOR EACH ROW EXECUTE FUNCTION public.rlms_recompute_fleet_status_trig();
+ALTER TABLE public.car_commitments DISABLE TRIGGER trg_recompute_status_commitment;
+
+-- After Bruce signs off the retag preview:
+--   ALTER TABLE public.railcar_assignments ENABLE TRIGGER trg_recompute_status_assignment;
+--   ALTER TABLE public.car_commitments ENABLE TRIGGER trg_recompute_status_commitment;
+-- and set RLMS_RECOMPUTE_FLEET_STATUS=1 on the API.
 
 GRANT EXECUTE ON FUNCTION public.rlms_is_off_rent(boolean, text, text, text) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.rlms_derived_fleet_status(boolean, boolean, boolean) TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.rlms_recompute_fleet_status(bigint) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.rlms_recompute_fleet_status(bigint) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.rlms_recompute_fleet_status(bigint) TO service_role;
 
 -- KPI rewrite: Off Rent / Active / Utilization from the lease link, not the tag.
 CREATE OR REPLACE FUNCTION public.rlms_fleet_kpis()
@@ -307,13 +327,17 @@ k AS (
     (SELECT count(*) FROM railcars)::int AS scanned,
     (SELECT count(*) FROM railcars WHERE active IS TRUE)::int AS active_including_sold,
     (SELECT count(*) FROM railcars WHERE active IS TRUE AND fleet_status = 'Sold')::int AS sold,
-    count(*) FILTER (WHERE off_rent AND has_open_commitment)::int AS idle,
+    count(*) FILTER (
+      WHERE off_rent AND (has_open_commitment OR in_open_program OR going_on_lease)
+    )::int AS idle,
     count(*) FILTER (WHERE NOT off_rent)::int AS leased,
     0::int AS abatement,
     count(*)::int AS operating,
     count(*) FILTER (WHERE NOT off_rent)::int AS leased_operating,
     count(*) FILTER (WHERE NOT off_rent)::int AS leased_only,
-    count(*) FILTER (WHERE off_rent AND NOT has_open_commitment)::int AS unassigned,
+    count(*) FILTER (
+      WHERE off_rent AND NOT (has_open_commitment OR in_open_program OR going_on_lease)
+    )::int AS unassigned,
     count(*) FILTER (WHERE entity = 'Rail Partners Select')::int AS rps_total,
     count(*) FILTER (WHERE entity = 'Rail Partners Select' AND NOT off_rent)::int AS rps_assigned,
     count(*) FILTER (WHERE entity IN ('Main', 'Coal'))::int AS owned_total,
@@ -343,8 +367,16 @@ k AS (
     count(*) FILTER (WHERE off_rent AND entity = 'Main')::int AS off_rent_main,
     count(*) FILTER (WHERE off_rent AND entity = 'Coal')::int AS off_rent_coal,
     count(*) FILTER (WHERE off_rent AND entity = 'Rail Partners Select')::int AS off_rent_rps,
-    count(*) FILTER (WHERE off_rent AND NOT has_open_commitment AND entity = 'Main')::int AS unassigned_main,
-    count(*) FILTER (WHERE off_rent AND NOT has_open_commitment AND entity = 'Rail Partners Select')::int AS unassigned_rps,
+    count(*) FILTER (
+      WHERE off_rent AND NOT (has_open_commitment OR in_open_program OR going_on_lease) AND entity = 'Main'
+    )::int AS unassigned_main,
+    count(*) FILTER (
+      WHERE off_rent AND NOT (has_open_commitment OR in_open_program OR going_on_lease)
+        AND entity = 'Rail Partners Select'
+    )::int AS unassigned_rps,
+    count(*) FILTER (
+      WHERE fleet_status = 'Idle' AND off_rent IS NOT TRUE AND no_assignment IS NOT TRUE
+    )::int AS idle_on_ol_review,
     count(*) FILTER (WHERE no_assignment)::int AS no_lease_link,
     count(*) FILTER (
       WHERE upper(btrim(coalesce(lease_status, ''))) ~ '(MTM|MONTH[[:space:]]*TO[[:space:]]*MONTH)'
@@ -361,25 +393,23 @@ gol AS (
   WHERE is_op
     AND upper(btrim(coalesce(lease_status, ''))) LIKE '%GOING ON LEASE%'
 ),
-stale AS (
+stale_commitments AS (
   SELECT count(*)::int AS n
-  FROM (
-    SELECT cc.id
-    FROM car_commitments cc
-    WHERE cc.cleared_at IS NULL
-      AND (
-        cc.target_date IS NULL
-        OR cc.target_date < current_date
-        OR cc.set_at < now() - interval '90 days'
-      )
-    UNION
-    SELECT p.id
-    FROM programs p
-    WHERE p.closed_date IS NULL
-      AND p.target_completion_date IS NOT NULL
-      AND p.target_completion_date < current_date
-      AND lower(coalesce(p.status, '')) NOT IN ('closed', 'complete', 'completed')
-  ) s
+  FROM car_commitments cc
+  WHERE cc.cleared_at IS NULL
+    AND (
+      cc.target_date IS NULL
+      OR cc.target_date < current_date
+      OR cc.set_at < now() - interval '90 days'
+    )
+),
+stale_programs AS (
+  SELECT count(*)::int AS n
+  FROM programs p
+  WHERE p.closed_date IS NULL
+    AND p.target_completion_date IS NOT NULL
+    AND p.target_completion_date < current_date
+    AND lower(coalesce(p.status, '')) NOT IN ('closed', 'complete', 'completed')
 ),
 watch AS (
   SELECT count(*)::int AS n
@@ -553,11 +583,13 @@ SELECT jsonb_build_object(
     'unassigned_main', k.unassigned_main,
     'unassigned_rps', k.unassigned_rps,
     'no_lease_link', k.no_lease_link,
+    'idle_on_ol_review', k.idle_on_ol_review,
     'month_to_month', k.month_to_month,
     'going_on_lease_leases', (SELECT leases FROM gol),
     'going_on_lease_cars', (SELECT cars FROM gol),
     'going_on_lease_earliest_end', (SELECT earliest_end FROM gol),
-    'stale_commitments', (SELECT n FROM stale),
+    'stale_commitments', (SELECT n FROM stale_commitments),
+    'stale_programs', (SELECT n FROM stale_programs),
     'lease_ended_watch', (SELECT n FROM watch)
   ),
   'cars_by_fleet', (

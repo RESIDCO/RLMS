@@ -568,6 +568,10 @@ export default function ProgramDetailPage() {
 
   async function saveHeader() {
     if (!header || !canEdit) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(header.target_completion_date || "")) {
+      toast({ title: "Target completion date is required", variant: "destructive" });
+      return;
+    }
     await patchProgram.mutateAsync({
       entity: header.entity || null,
       account_manager: header.account_manager.trim() || null,

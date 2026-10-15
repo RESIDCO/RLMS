@@ -94,6 +94,7 @@ import {
   resolveProgramCars,
   logProgramActivity,
 } from "./programs";
+import { assignmentRentStartOnMove } from "@shared/commitment";
 import { registerCommitmentRoutes, ensureProgramCommitment, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
 import { registerRentStartRoutes } from "./rent-start";
 import { statusFromAssignmentLink } from "@shared/commitment";
@@ -2215,7 +2216,7 @@ export async function registerRoutes(
       if (!writerId) return;
       const input = moveCarsSchema.parse(req.body);
       const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date, rent_start_date } = input;
-      const nextRentStart = rent_start_date ?? null;
+      const dateSupplied = typeof rent_start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rent_start_date);
 
       // verify destination rider exists
       const { data: toRider, error: rErr } = await supabase
@@ -2230,7 +2231,7 @@ export async function registerRoutes(
       // fetch current assignments for each car
       const { data: currentAssigns, error: caErr } = await supabase
         .from("railcar_assignments")
-        .select("id, railcar_id, rider_id, fleet_name")
+        .select("id, railcar_id, rider_id, fleet_name, rent_start_date, rent_start_set_by, rent_start_set_at")
         .in("railcar_id", car_ids);
       if (caErr) throw caErr;
       const currentByCar = new Map<number, any>();
@@ -2244,6 +2245,20 @@ export async function registerRoutes(
         const fromRiderId = prev?.rider_id ?? null;
         const fromFleet = prev?.fleet_name ?? null;
         const targetFleet = new_fleet_name ?? fromFleet;
+        const rent = assignmentRentStartOnMove({
+          fromRiderId,
+          toRiderId: to_rider_id,
+          prevDate: prev?.rent_start_date ?? null,
+          prevSetBy: prev?.rent_start_set_by ?? null,
+          prevSetAt: prev?.rent_start_set_at ?? null,
+          dateSupplied,
+          suppliedDate: rent_start_date ?? null,
+          actor: moved_by ?? "system",
+          movedAt,
+        });
+        const histReason = rent.priorDateNote
+          ? [reason, `prior rent_start_date ${rent.priorDateNote}`].filter(Boolean).join("; ")
+          : reason ?? null;
 
         if (prev) {
           const { error: uErr } = await supabase
@@ -2252,9 +2267,9 @@ export async function registerRoutes(
               rider_id: to_rider_id,
               fleet_name: targetFleet,
               assigned_at: movedAt,
-              rent_start_date: nextRentStart,
-              rent_start_set_by: nextRentStart ? (moved_by ?? "system") : null,
-              rent_start_set_at: nextRentStart ? movedAt : null,
+              rent_start_date: rent.rent_start_date,
+              rent_start_set_by: rent.rent_start_set_by,
+              rent_start_set_at: rent.rent_start_set_at,
             })
             .eq("id", prev.id);
           if (uErr) throw uErr;
@@ -2267,9 +2282,9 @@ export async function registerRoutes(
               rider_id: to_rider_id,
               fleet_name: targetFleet,
               assigned_at: movedAt,
-              rent_start_date: nextRentStart,
-              rent_start_set_by: nextRentStart ? (moved_by ?? "system") : null,
-              rent_start_set_at: nextRentStart ? movedAt : null,
+              rent_start_date: rent.rent_start_date,
+              rent_start_set_by: rent.rent_start_set_by,
+              rent_start_set_at: rent.rent_start_set_at,
             })
             .select("id, railcar_id")
             .single();
@@ -2285,7 +2300,7 @@ export async function registerRoutes(
           to_fleet_name: targetFleet,
           moved_at: movedAt,
           moved_by: moved_by ?? "system",
-          reason: reason ?? null,
+          reason: histReason,
         });
       }
 

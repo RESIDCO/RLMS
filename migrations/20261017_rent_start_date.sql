@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS public.rlms_app_settings (
   value text NOT NULL
 );
 INSERT INTO public.rlms_app_settings (key, value)
-VALUES ('awaiting_rent_days', '60')
+VALUES
+  ('awaiting_rent_days', '60'),
+  ('rent_start_enforced', 'false')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.rlms_preview_tokens (
@@ -43,16 +45,34 @@ AS $$
     AND btrim(coalesce(assignment_label, '')) !~ '^[(]?x[A-Z(]';
 $$;
 
+CREATE OR REPLACE FUNCTION public.rlms_rent_start_enforced()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT lower(btrim(coalesce(
+    (SELECT s.value FROM public.rlms_app_settings s WHERE s.key = 'rent_start_enforced'),
+    'false'
+  ))) IN ('true', '1', 't', 'yes');
+$$;
+
 CREATE OR REPLACE FUNCTION public.rlms_is_on_rent(
   p_on_ol boolean,
-  p_rent_start date
+  p_rent_start date,
+  p_fleet_status text
 ) RETURNS boolean
 LANGUAGE sql
 STABLE
 AS $$
   SELECT coalesce(p_on_ol, false) IS TRUE
-    AND p_rent_start IS NOT NULL
-    AND p_rent_start <= current_date;
+    AND (
+      (p_rent_start IS NOT NULL AND p_rent_start <= current_date)
+      OR (
+        p_rent_start IS NULL
+        AND public.rlms_rent_start_enforced() IS NOT TRUE
+        AND coalesce(p_fleet_status, '') IS DISTINCT FROM 'Idle'
+      )
+    );
 $$;
 
 CREATE OR REPLACE FUNCTION public.rlms_is_off_rent(
@@ -60,14 +80,16 @@ CREATE OR REPLACE FUNCTION public.rlms_is_off_rent(
   link_rider text,
   lessee_name text,
   assignment_label text,
-  rent_start date
+  rent_start date,
+  p_fleet_status text
 ) RETURNS boolean
 LANGUAGE sql
 STABLE
 AS $$
   SELECT NOT public.rlms_is_on_rent(
     public.rlms_is_on_ol(has_assignment, link_rider, lessee_name, assignment_label),
-    rent_start
+    rent_start,
+    p_fleet_status
   );
 $$;
 
@@ -124,14 +146,16 @@ SELECT
       rc.lessee_name,
       rc.assignment_label
     ),
-    a.rent_start_date
+    a.rent_start_date,
+    rc.fleet_status
   ) AS on_rent,
   public.rlms_is_off_rent(
     a.railcar_id IS NOT NULL,
     r.rider_name,
     rc.lessee_name,
     rc.assignment_label,
-    a.rent_start_date
+    a.rent_start_date,
+    rc.fleet_status
   ) AS off_rent,
   (
     public.rlms_is_on_ol(
@@ -147,7 +171,8 @@ SELECT
         rc.lessee_name,
         rc.assignment_label
       ),
-      a.rent_start_date
+      a.rent_start_date,
+      rc.fleet_status
     )
   ) AS awaiting_rent_start,
   (
@@ -191,7 +216,8 @@ SELECT
         rc.lessee_name,
         rc.assignment_label
       ),
-      a.rent_start_date
+      a.rent_start_date,
+      rc.fleet_status
     )
     THEN btrim(coalesce(r.rider_name, '')) || ' – ' || coalesce(nullif(btrim(rc.lessee_name), ''), 'lessee') || ' (awaiting rent start)'
     ELSE NULL
@@ -368,7 +394,8 @@ BEGIN
       (SELECT r.rider_name FROM railcar_assignments a JOIN riders r ON r.id = a.rider_id WHERE a.railcar_id = railcars.id ORDER BY a.id DESC LIMIT 1),
       lessee_name,
       assignment_label,
-      (SELECT a.rent_start_date FROM railcar_assignments a WHERE a.railcar_id = railcars.id ORDER BY a.id DESC LIMIT 1)
+      (SELECT a.rent_start_date FROM railcar_assignments a WHERE a.railcar_id = railcars.id ORDER BY a.id DESC LIMIT 1),
+      fleet_status
     ),
     public.rlms_is_on_ol(
       EXISTS (SELECT 1 FROM railcar_assignments a WHERE a.railcar_id = railcars.id),
@@ -442,13 +469,16 @@ FOR EACH ROW EXECUTE FUNCTION public.rlms_recompute_fleet_status_trig();
 ALTER TABLE public.car_commitments DISABLE TRIGGER trg_recompute_status_commitment;
 
 GRANT EXECUTE ON FUNCTION public.rlms_is_on_ol(boolean, text, text, text) TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.rlms_is_on_rent(boolean, date) TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.rlms_is_off_rent(boolean, text, text, text, date) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.rlms_rent_start_enforced() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.rlms_is_on_rent(boolean, date, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.rlms_is_off_rent(boolean, text, text, text, date, text) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.rlms_derived_fleet_status(boolean, boolean, boolean, boolean) TO anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.rlms_recompute_fleet_status(bigint) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.rlms_recompute_fleet_status(bigint) TO service_role;
 
 DROP FUNCTION IF EXISTS public.rlms_is_off_rent(boolean, text, text, text);
+DROP FUNCTION IF EXISTS public.rlms_is_off_rent(boolean, text, text, text, date);
+DROP FUNCTION IF EXISTS public.rlms_is_on_rent(boolean, date);
 DROP FUNCTION IF EXISTS public.rlms_derived_fleet_status(boolean, boolean, boolean);
 
 -- KPI rewrite: Off Rent / Active / Utilization from the lease link, not the tag.

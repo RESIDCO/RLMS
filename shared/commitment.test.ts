@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/commitment.test.ts */
 import {
+  assignmentRentStartOnMove,
   carNumberLookupValues,
   derivedFleetStatus,
   isOffRentLink,
@@ -29,7 +30,18 @@ ok(isOffRentLink({ hasAssignment: true, rider: "EX1001" }), "EX rider");
 ok(isOffRentLink({ hasAssignment: true, rider: "xOL1701" }), "xOL rider");
 ok(isOffRentLink({ hasAssignment: true, rider: "OL1917", lesseeName: "xKBX" }), "x-lessee");
 ok(isOffRentLink({ hasAssignment: true, rider: "OL1917", assignmentLabel: "(xADM) leftover" }), "x-label");
-ok(isOffRentLink({ hasAssignment: true, rider: "OL1917", lesseeName: "ADM" }), "OL without rent start is off rent");
+ok(
+  !isOffRentLink({ hasAssignment: true, rider: "OL1917", lesseeName: "ADM", rentStartEnforced: false }),
+  "NULL rent start is still on rent until enforced",
+);
+ok(
+  isOffRentLink({ hasAssignment: true, rider: "OL1917", lesseeName: "ADM", fleetStatus: "Idle", rentStartEnforced: false }),
+  "Idle + NULL rent start is off rent even before enforce",
+);
+ok(
+  isOffRentLink({ hasAssignment: true, rider: "OL1917", lesseeName: "ADM", rentStartEnforced: true }),
+  "NULL rent start is off rent once enforced",
+);
 ok(
   !isOffRentLink({ hasAssignment: true, rider: "OL1917", lesseeName: "ADM", rentStartDate: "2020-01-01", asOf: "2026-10-15" }),
   "OL with past rent start is on rent",
@@ -56,7 +68,15 @@ ok(parsed[2].initial === "OFCX" && parsed[2].number === "003449", "hyphen + pad"
 ok(parsed.some((p) => p.initial === "" && p.raw === "BAD"), "unparsed kept");
 ok(carNumberLookupValues("644").includes("000644") && carNumberLookupValues("000644").includes("644"), "number variants");
 ok(xLesseeName("KBX") === "xKBX" && xLesseeName("xKBX") === "xKBX", "x-lessee keeps prior");
-ok(statusFromAssignmentLink({ hasAssignment: true, rider: "OL1917" }) === "Idle", "new OL car without rent start is Idle");
+ok(statusFromAssignmentLink({ hasAssignment: true, rider: "OL1917" }) === "Leased", "new OL car NULL date stays Leased until enforced");
+ok(statusFromAssignmentLink({ hasAssignment: true, rider: "OL1917", fleetStatus: "Idle" }) === "Idle", "Idle tag + NULL date is awaiting");
+ok(statusFromAssignmentLink({ hasAssignment: true, rider: "OL1917", rentStartEnforced: true }) === "Idle", "enforced NULL date is Idle");
+const keep = assignmentRentStartOnMove({
+  fromRiderId: 10, toRiderId: 10, prevDate: "2020-01-01", prevSetBy: "bruce", prevSetAt: "2026-01-01T00:00:00Z",
+});
+ok(keep.rent_start_date === "2020-01-01" && keep.priorDateNote === null, "same-OL fleet rename keeps rent start");
+const reset = assignmentRentStartOnMove({ fromRiderId: 10, toRiderId: 11, prevDate: "2020-01-01" });
+ok(reset.rent_start_date === null && reset.priorDateNote === "2020-01-01", "new OL without date clears rent start");
 ok(statusFromAssignmentLink({ hasAssignment: true, rider: "OL1917", rentStartDate: "2020-01-01", asOf: "2026-10-15" }) === "Leased", "new OL car with past rent start");
 const csvRows = parseCarDateRows("TFOX 000644,2024-10-18\nBAD\nTFOX 1,EA skip", "2026-01-01");
 ok(csvRows[0].date === "2024-10-18" && csvRows[0].number === "000644", "csv car,date");

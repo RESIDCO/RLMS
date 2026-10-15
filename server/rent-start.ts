@@ -227,8 +227,7 @@ export async function listRentStartWatch(kind: string) {
     .from("v_rlms_car_kpi")
     .select("railcar_id, reporting_marks, car_number, entity, link_rider, lessee_name, assigned_at, rent_start_date, open_program_shop_id, ops_flag")
     .eq("is_op", true)
-    .eq("on_ol", true)
-    .is("rent_start_date", null)
+    .eq("awaiting_rent_start", true)
     .order("railcar_id")
     .limit(5000);
   if (error) throw error;

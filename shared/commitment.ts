@@ -10,6 +10,9 @@ export type LinkInput = {
   assignmentLabel?: string | null;
   rentStartDate?: string | null;
   asOf?: string | null;
+  fleetStatus?: string | null;
+  /** Default false until Bruce flips rlms_app_settings.rent_start_enforced. */
+  rentStartEnforced?: boolean | null;
 };
 
 export const COMMITMENT_TYPES = ["program", "deal", "scrap", "other"] as const;
@@ -43,9 +46,54 @@ export function isOnOl(input: LinkInput): boolean {
 export function isOnRent(input: LinkInput): boolean {
   if (!isOnOl(input)) return false;
   const d = isoDateOnly(input.rentStartDate);
-  if (!d) return false;
   const asOf = isoDateOnly(input.asOf) ?? new Date().toISOString().slice(0, 10);
-  return d <= asOf;
+  if (d) return d <= asOf;
+  const enforced = input.rentStartEnforced === true;
+  if (!enforced && String(input.fleetStatus ?? "") !== "Idle") return true;
+  return false;
+}
+
+/** Same-rider moves keep the date unless a new one is explicitly supplied. */
+export function assignmentRentStartOnMove(input: {
+  fromRiderId?: number | null;
+  toRiderId: number;
+  prevDate?: string | null;
+  prevSetBy?: string | null;
+  prevSetAt?: string | null;
+  dateSupplied?: boolean;
+  suppliedDate?: string | null;
+  actor?: string | null;
+  movedAt?: string | null;
+}): {
+  rent_start_date: string | null;
+  rent_start_set_by: string | null;
+  rent_start_set_at: string | null;
+  priorDateNote: string | null;
+} {
+  const supplied = Boolean(input.dateSupplied) && Boolean(isoDateOnly(input.suppliedDate));
+  const sameRider = input.fromRiderId != null && Number(input.fromRiderId) === Number(input.toRiderId);
+  if (supplied) {
+    return {
+      rent_start_date: isoDateOnly(input.suppliedDate),
+      rent_start_set_by: input.actor ?? "system",
+      rent_start_set_at: input.movedAt ?? null,
+      priorDateNote: sameRider ? null : isoDateOnly(input.prevDate),
+    };
+  }
+  if (sameRider) {
+    return {
+      rent_start_date: isoDateOnly(input.prevDate) ?? (input.prevDate ? String(input.prevDate).slice(0, 10) : null),
+      rent_start_set_by: input.prevSetBy ?? null,
+      rent_start_set_at: input.prevSetAt ?? null,
+      priorDateNote: null,
+    };
+  }
+  return {
+    rent_start_date: null,
+    rent_start_set_by: null,
+    rent_start_set_at: null,
+    priorDateNote: isoDateOnly(input.prevDate) ?? (input.prevDate ? String(input.prevDate).slice(0, 10) : null),
+  };
 }
 
 export function isOffRentLink(input: LinkInput): boolean {

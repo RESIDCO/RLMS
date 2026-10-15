@@ -23,4 +23,11 @@
 -- and imports it through POST /api/rent-start/bulk (preview then apply).
 --
 -- No retag / fleet_status writes here.
+--
+-- After the signed-off default UPDATE (and review import), flip enforcement so
+-- a NULL rent_start_date means off rent. Do not run this until then:
+--
+-- UPDATE public.rlms_app_settings
+-- SET value = 'true'
+-- WHERE key = 'rent_start_enforced';
 SELECT 'do_not_run';

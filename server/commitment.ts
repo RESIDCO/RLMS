@@ -20,7 +20,17 @@ const PREVIEW_TTL_MS = 30 * 60 * 1000;
 export type PreviewKind = "commitment" | "return" | "sold" | "rent_start";
 const previewStore = new Map<string, { kind: PreviewKind; expires: number; snapshot: any }>();
 
+export async function purgeExpiredPreviews() {
+  const now = Date.now();
+  for (const [token, row] of Array.from(previewStore.entries())) {
+    if (row.expires < now) previewStore.delete(token);
+  }
+  const { error } = await supabaseAdmin.from("rlms_preview_tokens").delete().lt("expires_at", new Date().toISOString());
+  if (error) console.warn("[preview] expire cleanup skipped:", error.message);
+}
+
 export async function putPreview(kind: PreviewKind, snapshot: unknown): Promise<string> {
+  await purgeExpiredPreviews();
   const token = randomUUID();
   const expires = Date.now() + PREVIEW_TTL_MS;
   previewStore.set(token, { kind, expires, snapshot });
@@ -35,6 +45,7 @@ export async function putPreview(kind: PreviewKind, snapshot: unknown): Promise<
 }
 
 export async function getPreview(kind: PreviewKind, token: string): Promise<any> {
+  await purgeExpiredPreviews();
   const mem = previewStore.get(String(token ?? ""));
   if (mem && mem.kind === kind && mem.expires >= Date.now()) return mem.snapshot;
   const { data, error } = await supabaseAdmin
@@ -73,18 +84,36 @@ async function linkForCar(railcarId: number) {
   return latestAssignment(railcarId);
 }
 
-function linkInput(car: any, riderName: string | null | undefined, assignment: any) {
+let enforcedCache: { value: boolean; at: number } | null = null;
+
+export async function rentStartEnforced(): Promise<boolean> {
+  if (enforcedCache && Date.now() - enforcedCache.at < 30_000) return enforcedCache.value;
+  const { data, error } = await supabaseAdmin
+    .from("rlms_app_settings")
+    .select("value")
+    .eq("key", "rent_start_enforced")
+    .maybeSingle();
+  const value = error
+    ? false
+    : ["true", "1", "t", "yes"].includes(String(data?.value ?? "false").trim().toLowerCase());
+  enforcedCache = { value, at: Date.now() };
+  return value;
+}
+
+function linkInput(car: any, riderName: string | null | undefined, assignment: any, enforced?: boolean) {
   return {
     hasAssignment: Boolean(assignment),
     rider: riderName,
     lesseeName: car?.lessee_name,
     assignmentLabel: car?.assignment_label,
     rentStartDate: assignment?.rent_start_date ?? null,
+    fleetStatus: car?.fleet_status ?? null,
+    rentStartEnforced: enforced,
   };
 }
 
-function offRentOf(car: any, riderName: string | null | undefined, assignment: any) {
-  return isOffRentLink(linkInput(car, riderName, assignment));
+async function offRentOf(car: any, riderName: string | null | undefined, assignment: any) {
+  return isOffRentLink(linkInput(car, riderName, assignment, await rentStartEnforced()));
 }
 
 export async function recomputeStatus(railcarId: number) {
@@ -123,7 +152,7 @@ export async function setCommitment(
   if (cErr) throw cErr;
   if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
   const { rider, assignment } = await linkForCar(railcarId);
-  const off = offRentOf(car, rider?.rider_name, assignment);
+  const off = await offRentOf(car, rider?.rider_name, assignment);
   if (!off) throw Object.assign(new Error("On-rent cars cannot take a Commitment"), { status: 400, code: "on_rent" });
 
   const existing = await openCommitment(railcarId);
@@ -176,7 +205,7 @@ export async function clearCommitment(railcarId: number, actor: string) {
 export async function ensureProgramCommitment(railcarId: number, program: { id: number; name: string }, actor: string) {
   const { rider, assignment } = await linkForCar(railcarId);
   const { data: car } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", railcarId).maybeSingle();
-  if (!offRentOf(car, rider?.rider_name, assignment)) return { skipped: "on_rent" as const };
+  if (!(await offRentOf(car, rider?.rider_name, assignment))) return { skipped: "on_rent" as const };
   const existing = await openCommitment(railcarId);
   if (existing) return { skipped: "already_committed" as const, existing };
   await setCommitment(
@@ -233,10 +262,11 @@ async function classifyMatched(cars: any[]) {
   }
   const cBy = new Map<number, any>();
   for (const c of commits ?? []) cBy.set(c.railcar_id, c);
+  const enforced = await rentStartEnforced();
   return cars.map((car) => {
     const a = aBy.get(car.id);
     const rider = Array.isArray(a?.rider) ? a.rider[0] : a?.rider;
-    const off = offRentOf(car, rider?.rider_name, a);
+    const off = isOffRentLink(linkInput(car, rider?.rider_name, a, enforced));
     return {
       car,
       rider,
@@ -733,7 +763,7 @@ export function registerCommitmentRoutes(
       const { rider, assignment } = await linkForCar(id);
       const { data: car } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", id).maybeSingle();
       const onOl = isOnOl(linkInput(car, rider?.rider_name, assignment));
-      const off = offRentOf(car, rider?.rider_name, assignment);
+      const off = await offRentOf(car, rider?.rider_name, assignment);
       const implicit =
         onOl && off
           ? {

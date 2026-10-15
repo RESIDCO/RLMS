@@ -1,5 +1,5 @@
 /**
- * Smoke: OWNER_UI §G — Shop portal + Railinc-style validation
+ * Smoke: OWNER_UI §G — Shop portal + Railinc-style validation (+ r2 clarity)
  *
  * 1. Good file loads
  * 2. Each hard-reject
@@ -8,6 +8,9 @@
  * 5. Resubmit → rev 2 with diff
  * 6. Cross-shop 403
  * 7. Totals reconcile (integer cents)
+ * 8. §G r2: AA contrast tokens, returnTo source, POD reason+history,
+ *    missed POD, timeline, line comments, resubmit commentDiff+resolve,
+ *    role switcher shop 403s
  *
  * Run: npm run repair:smoke-shop
  */
@@ -45,6 +48,17 @@ import {
 } from "../services/shop-portal";
 import { migrateLocal } from "./migrate-local";
 import { assertShopClientTypecheck } from "./typecheck-client-shop";
+import {
+  contrastRatio,
+  SHOP_AA_TOKENS,
+  saveDecisionComments,
+  updateBoLifecycleDates,
+  getBoLifecycleBundle,
+  resolveDecisionComment,
+  listMissedPodReasonCodes,
+} from "../services/shop-clarity";
+import { readFileSync as readFsSync } from "fs";
+import { join as pathJoin } from "path";
 
 const samplePath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -656,10 +670,255 @@ async function main() {
       },
     );
     if (!resOk.ok) bad("http-home", await resOk.text());
-    ok("HTTP shop home 200");
+    const homeJson = await resOk.json();
+    if (homeJson.kpis == null) bad("kpis", "shop home missing kpis");
+    ok("HTTP shop home 200 + KPIs");
+
+    // Role switcher: owner hitting shop → 403
+    const owner403 = await fetch(
+      `http://127.0.0.1:${port}/api/repair/shop/home`,
+      {
+        headers: {
+          "x-repair-role": "owner",
+          "x-repair-shop-mark": markA,
+          "x-repair-actor": "owner-dev",
+        },
+      },
+    );
+    if (owner403.status !== 403) {
+      bad("role-owner-403", `expected 403 got ${owner403.status}`);
+    }
+    ok("DEV role switcher: owner → shop home 403");
+
+    const mp403 = await fetch(
+      `http://127.0.0.1:${port}/api/repair/shop/events/${eventId}`,
+      {
+        headers: {
+          "x-repair-role": "managing_partner",
+          "x-repair-shop-mark": markA,
+          "x-repair-actor": "mp-dev",
+        },
+      },
+    );
+    if (mp403.status !== 403) {
+      bad("role-mp-403", `expected 403 got ${mp403.status}`);
+    }
+    ok("DEV role switcher: managing_partner → shop event 403");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }
+
+  // ── §G r2 clarity ──────────────────────────────────────────────────
+  const aaValue = contrastRatio(SHOP_AA_TOKENS.value, SHOP_AA_TOKENS.surface);
+  const aaLabel = contrastRatio(SHOP_AA_TOKENS.label, SHOP_AA_TOKENS.surface);
+  if (aaValue < 4.5) bad("aa-value", `value contrast ${aaValue}`);
+  if (aaLabel < 4.5) bad("aa-label", `label contrast ${aaLabel}`);
+  ok(`AA contrast tokens value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)}`);
+
+  // axe-equivalent: scan shop pages for pale-on-light classes
+  const shopPages = [
+    "client/src/pages/repair/ShopPortal.tsx",
+    "client/src/pages/repair/ShopBoDetail.tsx",
+    "client/src/pages/repair/ShopEstimateDetail.tsx",
+  ];
+  for (const rel of shopPages) {
+    const src = readFsSync(pathJoin(process.cwd(), rel), "utf8");
+    if (src.includes("text-slate-400") || src.includes("text-slate-500")) {
+      bad("axe-pale", `${rel} still uses pale slate-400/500`);
+    }
+  }
+  ok("axe smoke: no pale slate-400/500 on shop routes");
+
+  // returnTo helper present in nav chrome
+  const navSrc = readFsSync(
+    pathJoin(process.cwd(), "client/src/pages/repair/RepairNavChrome.tsx"),
+    "utf8",
+  );
+  if (!navSrc.includes("returnTo") || !navSrc.includes("Back to")) {
+    bad("returnTo", "RepairNavChrome missing returnTo Back link");
+  }
+  ok("returnTo + Back to <source> present");
+
+  // Missed POD reason catalog
+  const reasons = await listMissedPodReasonCodes();
+  if (reasons.length < 5) bad("pod-reasons", `expected ≥5 codes, got ${reasons.length}`);
+  ok(`missed POD reason codes (${reasons.length})`);
+
+  // POD with reason + history
+  const pod1 = await updateBoLifecycleDates({
+    eventId,
+    actor: "shop-a",
+    actorRole: "shop",
+    arrival: "2026-10-01",
+    pod: "2026-10-10",
+  });
+  if (!pod1.ok) bad("pod1", pod1.error);
+  const pod2 = await updateBoLifecycleDates({
+    eventId,
+    actor: "shop-a",
+    actorRole: "shop",
+    pod: "2026-10-18",
+    podReasonCode: "AWAITING_PARTS",
+    podReasonNote: "Wheelset delay",
+  });
+  if (!pod2.ok) bad("pod2", pod2.error);
+  const life = await getBoLifecycleBundle({ eventId });
+  if (life.podHistory.length < 2) {
+    bad("pod-hist", `expected ≥2 POD history rows, got ${life.podHistory.length}`);
+  }
+  const lastPod = life.podHistory[life.podHistory.length - 1];
+  if (lastPod?.reasonCode !== "AWAITING_PARTS") {
+    bad("pod-reason", JSON.stringify(lastPod));
+  }
+  ok("POD reason + history (old→new/reason/who/when)");
+
+  // Missed POD required after past POD
+  await updateBoLifecycleDates({
+    eventId,
+    actor: "shop-a",
+    actorRole: "shop",
+    pod: "2020-01-01",
+    podReasonCode: "OTHER",
+    podReasonNote: "force past",
+  });
+  const lifeMiss = await getBoLifecycleBundle({ eventId });
+  if (!lifeMiss.dates.missedPodRequired) {
+    bad("missed-req", "expected missedPodRequired when today > POD");
+  }
+  const missSave = await updateBoLifecycleDates({
+    eventId,
+    actor: "shop-a",
+    actorRole: "shop",
+    missedPodReasonCode: "LABOR",
+    missedPodReasonNote: "Crew shortage",
+  });
+  if (!missSave.ok) bad("miss-save", missSave.error);
+  ok("Missed POD reason required + saved after POD");
+
+  // Timeline present
+  if (!life.timeline?.length || life.timeline.length < 6) {
+    bad("timeline", "expected full status timeline");
+  }
+  ok(`status timeline (${life.timeline.length} steps, current ${life.timelineCode})`);
+
+  // Line comments on reject + outbox by line + BRC comments + resolve + commentDiff
+  await saveDecisionComments({
+    eventId,
+    estimateId,
+    kind: "REJECT",
+    estimateComment: "Overall revise",
+    lineComments: [
+      { lineNo: 1, jobCode: "1001", body: "Fix qty on line 1" },
+      { lineNo: 3, body: "Confirm price" },
+    ],
+    author: "owner@smoke-g.test",
+  });
+  const detailAfter = await shopEstimateDetail({ ...actorA, estimateId });
+  if (!detailAfter.ok) bad("detail-comments", detailAfter.error);
+  // May not show if status not rejected — force check via list
+  const { listDecisionComments, formatCommentsForEmail } = await import(
+    "../services/shop-clarity"
+  );
+  const dc = await listDecisionComments({ estimateId });
+  if (dc.lineLevel.length < 2) bad("line-comments", JSON.stringify(dc));
+  if (!dc.lineLevel.some((c) => c.lineNo === 1 && c.body.includes("Fix qty"))) {
+    bad("line1-comment", "line 1 comment missing");
+  }
+  ok("line comments on correct lines");
+
+  const emailLines = formatCommentsForEmail(dc);
+  if (!emailLines.some((l) => l.includes("Line 1"))) {
+    bad("email-lines", emailLines.join("|"));
+  }
+  ok("rejection email/outbox lists comments by line");
+
+  await notifyShopEstimateDecision({
+    estimateId,
+    type: "ESTIMATE_REJECTED",
+    actor: "owner@smoke-g.test",
+  });
+  const { rows: outbox2 } = await q(
+    `SELECT body_text FROM repair.email_outbox
+     WHERE estimate_id = $1 AND notification_type = 'ESTIMATE_REJECTED'
+     ORDER BY created_at DESC LIMIT 1`,
+    [estimateId],
+  );
+  if (!String(outbox2[0]?.body_text ?? "").includes("Line 1")) {
+    bad("outbox-body-lines", String(outbox2[0]?.body_text ?? "").slice(0, 200));
+  }
+  ok("outbox body includes line comments");
+
+  const brc2 = await shopDownloadBrc({ ...actorA, estimateId });
+  if (!brc2.ok) bad("brc2", brc2.error);
+  const brcText = brc2.bytes.toString("latin1");
+  if (!brcText.includes("BRC_SHOP_COMMENTS") && !brcText.includes("Owner comments")) {
+    // PDF may compress — check doc payload
+    if (!(brc2.doc.decisionComments?.length)) {
+      bad("brc-comments", "shop BRC missing decision comments");
+    }
+  }
+  ok("shop BRC PDF comments section by line#");
+
+  const c0 = dc.lineLevel[0];
+  const resolved = await resolveDecisionComment({
+    commentId: c0.id,
+    actor: "owner@smoke-g.test",
+  });
+  if (!resolved.ok) bad("resolve", resolved.error);
+  ok("owner can mark comment resolved");
+
+  // Force Rejected so resubmit + commentDiff can run
+  {
+    const { rows: stR } = await q(
+      `SELECT s.code FROM repair.estimates e JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
+      [estimateId],
+    );
+    const code = String(stR[0]?.code ?? "");
+    if (code === "APPROVED" || code === "AWAITING_APPROVAL") {
+      // Move to REVISION_REQUESTED via direct status when approve path already passed
+      const to = await q(
+        `SELECT id FROM repair.statuses
+         WHERE tenant_id = $1 AND entity = 'ESTIMATE' AND code = 'REVISION_REQUESTED'`,
+        [DEFAULT_TENANT_ID],
+      );
+      if (to.rows[0]) {
+        await q(`UPDATE repair.estimates SET status_id = $1 WHERE id = $2`, [
+          to.rows[0].id,
+          estimateId,
+        ]);
+      }
+    } else if (code === "QUEUED") {
+      await requestRevision({
+        estimateId,
+        actor: "owner@smoke-g.test",
+        comment: "again",
+      }).catch(() => undefined);
+    }
+  }
+  const resub2 = await shopResubmitEstimate({
+    ...actorA,
+    estimateId,
+    bytes: goodFile,
+    filename: `REV-COMMENT-${RUN}.txt`,
+    comment: "Addressed line comments",
+  });
+  if (!resub2.ok) {
+    bad("resubmit-commentDiff", JSON.stringify(resub2).slice(0, 300));
+  } else if (!resub2.commentDiff) {
+    bad("commentDiff", "expected commentDiff on resubmit");
+  } else {
+    ok("resubmit diff includes commented-lines change set + resolve path");
+  }
+
+  // Seed script exists
+  const seedSrc = readFsSync(
+    pathJoin(process.cwd(), "modules/repair/dev/seed-shop-demo.ts"),
+    "utf8",
+  );
+  if (!seedSrc.includes("DS01") || !seedSrc.includes("shop-samples")) {
+    bad("seed", "seed-shop-demo missing DS01 / shop-samples");
+  }
+  ok("seed-shop-demo script present (DS01 + samples)");
 
   console.log("=== repair:smoke-shop PASS ===");
 }

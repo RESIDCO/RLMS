@@ -83,6 +83,12 @@ export type BrcDocument = {
   carCompact: string;
   /** Embedded for cent reconciliation smokes */
   totalMarker: string;
+  /** §G r2 shop BRC — owner reject/adjust comments by line # */
+  decisionComments?: Array<{
+    lineNo: number | null;
+    jobCode: string | null;
+    body: string;
+  }>;
 };
 
 const HEADER_LABELS = [
@@ -408,6 +414,20 @@ export async function loadBrcDocument(opts: {
     createdDateForFooter: fmtDate(est.created_at),
   };
 
+  let decisionComments: BrcDocument["decisionComments"] = [];
+  if (opts.audience === "shop") {
+    const { listDecisionComments } = await import("./shop-clarity");
+    const dc = await listDecisionComments({
+      estimateId: opts.estimateId,
+      tenantId,
+    });
+    decisionComments = dc.all.map((c) => ({
+      lineNo: c.lineNo,
+      jobCode: c.jobCode,
+      body: c.body,
+    }));
+  }
+
   return {
     ok: true,
     doc: {
@@ -418,6 +438,7 @@ export async function loadBrcDocument(opts: {
       showComponentId,
       carCompact: compactCarLabel(carInitial, carNumber),
       totalMarker: `BRC_TOTAL_CENTS:${totalCents}`,
+      decisionComments,
     },
   };
 }
@@ -588,6 +609,40 @@ export function renderBrcPdf(doc: BrcDocument): Buffer {
       footerY,
       { align: "right" },
     );
+  }
+
+  // §G r2 — shop BRC: owner decision comments by line #
+  if (doc.audience === "shop" && doc.decisionComments?.length) {
+    const finalY =
+      (pdf as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable
+        ?.finalY ?? tableTop + 40;
+    let y = finalY + 18;
+    pdf.setPage(pageCount);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(9);
+    pdf.setTextColor(15, 23, 42);
+    pdf.text("Owner comments (by line #)", margin, y);
+    y += 12;
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    for (const c of doc.decisionComments) {
+      const line =
+        c.lineNo != null
+          ? `Line ${c.lineNo}${c.jobCode ? ` · ${c.jobCode}` : ""}: ${c.body}`
+          : `Estimate: ${c.body}`;
+      const wrapped = pdf.splitTextToSize(line, pageW - margin * 2);
+      if (y + wrapped.length * 10 > pdf.internal.pageSize.getHeight() - 48) {
+        pdf.addPage();
+        y = 40;
+      }
+      pdf.text(wrapped, margin, y);
+      y += wrapped.length * 10 + 2;
+    }
+    // Marker for smoke
+    pdf.setFontSize(0.01);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text("BRC_SHOP_COMMENTS", margin, 10);
+    pdf.setTextColor(0, 0, 0);
   }
 
   // Ensure every header label is in the text layer (smoke)

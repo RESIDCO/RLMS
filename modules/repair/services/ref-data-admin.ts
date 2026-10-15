@@ -269,6 +269,22 @@ export const REF_TABLES: TableDef[] = [
     ],
     searchCols: ["job_code", "qualifier", "price_key", "source"],
   },
+  {
+    key: "missed_pod_reasons",
+    label: "Missed POD reasons",
+    table: "repair.missed_pod_reason_codes",
+    naturalKey: ["code"],
+    columns: [
+      "code",
+      "label",
+      "description",
+      "sort_order",
+      "active",
+      "effective_to",
+      "owner_override",
+    ],
+    searchCols: ["code", "label", "description"],
+  },
 ];
 
 function tableDef(key: string): TableDef | null {

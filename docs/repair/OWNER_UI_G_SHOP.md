@@ -2,7 +2,27 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §G  
 **Routes:** `/#/repair/shop` · `/#/repair/shop/events/:eventId` · `/#/repair/shop/estimates/:id`  
-**Requires tip:** `9296477` (§F r3)
+**Requires tip:** `85199a7` (§G initial) for **r2**; prior initial required `9296477` (§F r3)
+
+## §G r2 — Shop clarity + review aids
+
+| Area | Behavior |
+|---|---|
+| **AA contrast** | Shop portal / BO / estimate / documents / admin labels ≥4.5:1 (`slate-700`+); values near-black. Smoke checks tokens + forbids pale `slate-400/500` on shop pages. |
+| **Navigation** | Breadcrumbs `Shop home > Bad Order <car> > Estimate rev N > Documents`. Documents + drill-ins: `← Back to <source>` via `returnTo` / `returnLabel` (fallback: browser history). |
+| **BO lifecycle dates** | Arrival, Inspected, Estimate submitted, Owner approval, Repair start, POD, Completed, Released/Outbound. Shop edits: arrival, POD (reason on change), missed POD reason, completed/outbound. Owner edits all. Audited. |
+| **POD history** | Append-only: old → new, reason code + note, who, when. Missed POD reason **required** when today > POD and not released. Codes in Reference Data (`missed_pod_reasons`). |
+| **Status timeline** | Open → Estimate Pending → Under Owner Review → Rejected/Adjustment → Approved → In Repair → Completed → Closed (Invoiced). Each step: meaning + who acts next. Closed only after completed + invoice. |
+| **Flags panel** | What / line / blocks completion? / who clears. Approved + open blocking flags: “Approved – N flags block completion/invoicing”. |
+| **Shop KPIs** | Missed POD count; Avg days arrival → approval. |
+| **Owner comments** | Per-line + estimate-level on reject/adjust. Shop sees inline under lines (line#+code); empty → “no change requested”. Outbox lists by line; shop BRC PDF comments by line#. Resubmit `commentDiff` + owner resolve. |
+| **Dev aids** | `npm run repair:seed-shop-demo` — Demo Shop **DS01**, OPEN BO, samples under `modules/repair/dev/shop-samples/`, Rejected/Approved+flags/Missed POD/Closed. DEV role switcher banner (Owner / MP / Shop / Lessee) when local review. |
+
+```powershell
+npm run repair:seed-shop-demo
+npm run repair:typecheck-client-shop
+npm run repair:smoke-shop
+```
 
 ## Shop portal (shop role, own shop mark)
 
@@ -61,7 +81,7 @@ npm run repair:typecheck-client-shop
 npm run repair:smoke-shop
 ```
 
-Covers: good file load; each hard-reject; each flag class; mixed wreck rejected; resubmit → rev 2 + diff; cross-shop 403; totals reconcile (integer cents).
+Covers: good file load; each hard-reject; each flag class; mixed wreck rejected; resubmit → rev 2 + diff; cross-shop 403; totals reconcile (integer cents); **r2** AA/axe, returnTo, POD reason+history, missed POD, timeline, line comments, commentDiff+resolve, role-switcher 403s.
 
 ## Open Q defaults (until Bruce answers)
 

@@ -23,6 +23,11 @@ import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { cn } from "@/lib/utils";
+import {
+  RepairBackLink,
+  RepairBreadcrumbs,
+  readReturnTo,
+} from "./RepairNavChrome";
 
 type DocRow = {
   id: string;
@@ -430,19 +435,32 @@ export default function EstimateDocuments() {
   }
 
   const canManage = Boolean(perms?.canVoid);
+  const returnTo = typeof window !== "undefined" ? readReturnTo() : null;
 
   return (
     <RepairOwnerShell>
       <div className="p-3 max-w-[1400px] mx-auto space-y-3">
-        {/* Header — shot 03 */}
+        {/* Header — shot 03 + §G r2 returnTo / breadcrumbs */}
         <div className="flex items-start justify-between gap-3 border-b border-border pb-2">
-          <div>
-            <h1 className="text-lg font-semibold">File Attachments</h1>
-            <div className="text-base font-bold tracking-tight">
+          <div className="space-y-1">
+            <RepairBreadcrumbs
+              items={[
+                ...(returnTo
+                  ? [{ label: returnTo.label, href: returnTo.href }]
+                  : [{ label: "Shop home", href: "/repair/shop" }]),
+                { label: "Documents" },
+              ]}
+            />
+            <RepairBackLink
+              fallbackHref="/repair/shop"
+              fallbackLabel="Shop home"
+            />
+            <h1 className="text-lg font-semibold text-slate-900">File Attachments</h1>
+            <div className="text-base font-bold tracking-tight text-slate-900">
               {scope?.carLabel || "—"}
             </div>
-            <div className="text-sm text-muted-foreground">{scope?.reason || ""}</div>
-            <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            <div className="text-sm text-slate-700">{scope?.reason || ""}</div>
+            <div className="text-xs text-slate-700 mt-1 flex flex-wrap gap-x-4 gap-y-1">
               {scope?.badOrderId && <span>Bad Order ID: {scope.badOrderId.slice(0, 8)}</span>}
               {scope?.estimateIdDisplay && (
                 <span>Estimate: {scope.estimateIdDisplay}</span>

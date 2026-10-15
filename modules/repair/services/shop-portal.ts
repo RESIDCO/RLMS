@@ -25,6 +25,13 @@ import {
 } from "./railinc-validator";
 import { parseAarFile } from "./aar-parser";
 import { getStatusByCode } from "./status-machine";
+import {
+  getBoLifecycleBundle,
+  shopKpis,
+  listDecisionComments,
+  formatCommentsForEmail,
+  commentedLinesDiff,
+} from "./shop-clarity";
 
 export type ShopActor = {
   role: string;
@@ -255,6 +262,8 @@ export async function shopPortalHome(opts: ShopActor & {
     };
   });
 
+  const kpisEarly = await shopKpis({ shopId, tenantId: ctx.tenantId });
+
   if (opts.status) {
     const want = opts.status.toLowerCase();
     return {
@@ -270,6 +279,7 @@ export async function shopPortalHome(opts: ShopActor & {
         (e) => String(e.statusLabel).toLowerCase() === want ||
           String(e.status_code).toLowerCase() === want,
       ),
+      kpis: kpisEarly,
     };
   }
 
@@ -283,6 +293,7 @@ export async function shopPortalHome(opts: ShopActor & {
     byStatus,
     badOrders: bos,
     estimates: estimateRows,
+    kpis: kpisEarly,
   };
 }
 
@@ -348,6 +359,11 @@ export async function shopBoDetail(opts: ShopActor & { eventId: string }) {
   });
   const docOk = docs && "ok" in docs && docs.ok === true ? docs : null;
 
+  const clarity = await getBoLifecycleBundle({
+    eventId: opts.eventId,
+    tenantId: ctx.tenantId,
+  });
+
   return {
     ok: true as const,
     event: {
@@ -388,6 +404,8 @@ export async function shopBoDetail(opts: ShopActor & { eventId: string }) {
       },
       count: docOk?.documents?.length ?? 0,
     },
+    /** §G r2 clarity: dates, POD history, timeline, flags */
+    lifecycle: clarity,
   };
 }
 
@@ -995,10 +1013,17 @@ export async function shopResubmitEstimate(opts: ShopActor & {
   if (!submitted.ok) return submitted;
 
   let diff = null;
+  let commentDiff = null;
   if (priorRevId && submitted.revisionId) {
     diff = await compareRevisions({
       leftRevisionId: priorRevId,
       rightRevisionId: submitted.revisionId,
+    });
+    commentDiff = await commentedLinesDiff({
+      estimateId: opts.estimateId,
+      leftRevisionId: priorRevId,
+      rightRevisionId: String(submitted.revisionId),
+      tenantId: ctx.tenantId,
     });
   }
 
@@ -1006,6 +1031,7 @@ export async function shopResubmitEstimate(opts: ShopActor & {
     ...submitted,
     priorRevisionId: priorRevId,
     diff,
+    commentDiff,
     newRevision: submitted.revisionId,
   };
 }
@@ -1088,6 +1114,15 @@ export async function shopEstimateDetail(opts: ShopActor & { estimateId: string 
     [opts.estimateId],
   );
 
+  const decisionComments = await listDecisionComments({
+    estimateId: opts.estimateId,
+    tenantId: ctx.tenantId,
+  });
+  const statusCode = String(owned.estimate.status_code);
+  const showDecisionComments =
+    statusCode === "REVISION_REQUESTED" ||
+    statusCode === "ADJUSTMENT_FOR_APPROVAL";
+
   return {
     ok: true as const,
     estimate: {
@@ -1101,7 +1136,11 @@ export async function shopEstimateDetail(opts: ShopActor & { estimateId: string 
     },
     revisions: revs,
     validationRuns: valRuns,
-    canWithdraw: String(owned.estimate.status_code) === "AWAITING_APPROVAL",
+    canWithdraw: statusCode === "AWAITING_APPROVAL",
+    decisionComments: showDecisionComments
+      ? decisionComments
+      : { estimateLevel: [], lineLevel: [], all: [] },
+    showDecisionComments,
   };
 }
 
@@ -1136,6 +1175,24 @@ export async function notifyShopEstimateDecision(opts: {
     ESTIMATE_ADJUSTMENT_REQUESTED: `Adjustment requested — ${label}`,
     ESTIMATE_APPROVED: `Estimate approved — ${label}`,
   };
+
+  let reasons = opts.reasons ?? [];
+  if (
+    opts.type === "ESTIMATE_REJECTED" ||
+    opts.type === "ESTIMATE_ADJUSTMENT_REQUESTED"
+  ) {
+    const comments = await listDecisionComments({
+      estimateId: opts.estimateId,
+      tenantId,
+    });
+    const fromComments = formatCommentsForEmail(comments);
+    if (fromComments.length && fromComments[0] !== "no change requested") {
+      reasons = [...reasons, ...fromComments];
+    } else if (!reasons.length) {
+      reasons = fromComments;
+    }
+  }
+
   return enqueueShopOutbox({
     tenantId,
     eventId: String(row.event_id),
@@ -1145,7 +1202,7 @@ export async function notifyShopEstimateDecision(opts: {
     bodyText: subjects[opts.type],
     recipients: emails,
     actor: opts.actor,
-    reasons: opts.reasons,
+    reasons,
   });
 }
 

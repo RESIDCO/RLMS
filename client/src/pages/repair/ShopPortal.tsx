@@ -1,6 +1,6 @@
 /**
  * §G Shop portal home — own shop mark only.
- * BOs assigned to shop; estimates by status; car search.
+ * §G r2: AA contrast, KPIs, DEV role switcher.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import DevRoleSwitcher, {
+  repairDevHeaders,
+  readDevRole,
+} from "./DevRoleSwitcher";
+import { RepairBreadcrumbs, shopAa } from "./RepairNavChrome";
 
 type HomePayload = {
   shop: { id: string; shopMark: string; name: string };
@@ -32,6 +37,10 @@ type HomePayload = {
     current_revision: number;
     total?: string | number;
   }>;
+  kpis?: {
+    missedPodCount: number;
+    avgDaysArrivalToApproval: number | null;
+  };
 };
 
 const STATUS_ORDER = [
@@ -43,19 +52,6 @@ const STATUS_ORDER = [
   "Completed",
 ];
 
-function shopHeaders(): HeadersInit {
-  const mark =
-    (typeof window !== "undefined" &&
-      (window as unknown as { __REPAIR_SHOP_MARK?: string }).__REPAIR_SHOP_MARK) ||
-    localStorage.getItem("repairShopMark") ||
-    "";
-  return {
-    "x-repair-role": "shop",
-    "x-repair-shop-mark": mark,
-    "x-repair-actor": "shop-portal",
-  };
-}
-
 export default function ShopPortal() {
   const [shopMark, setShopMark] = useState(
     () => localStorage.getItem("repairShopMark") || "",
@@ -66,6 +62,13 @@ export default function ShopPortal() {
   const [data, setData] = useState<HomePayload | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [devRole, setDevRole] = useState(() => readDevRole());
+
+  useEffect(() => {
+    const onRole = () => setDevRole(readDevRole());
+    window.addEventListener("repair-dev-role", onRole);
+    return () => window.removeEventListener("repair-dev-role", onRole);
+  }, []);
 
   const load = useCallback(async () => {
     if (!shopMark.trim()) {
@@ -83,7 +86,7 @@ export default function ShopPortal() {
     try {
       const res = await fetch(`/api/repair/shop/home?${qs}`, {
         headers: {
-          ...shopHeaders(),
+          ...repairDevHeaders(),
           "x-repair-shop-mark": shopMark.trim().toUpperCase(),
         },
       });
@@ -105,29 +108,35 @@ export default function ShopPortal() {
     if (shopMark.trim()) void load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — initial only
 
+  useEffect(() => {
+    if (devRole !== "shop" && shopMark.trim()) void load();
+  }, [devRole]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="min-h-full bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white px-4 py-4 sm:px-8">
+    <div className={shopAa.page}>
+      <DevRoleSwitcher shopMark={shopMark || undefined} />
+      <header className="border-b border-slate-300 bg-white px-4 py-4 sm:px-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold tracking-wide text-slate-500">
+            <RepairBreadcrumbs items={[{ label: "Shop home" }]} />
+            <p className="mt-1 text-xs font-semibold tracking-wide text-slate-700">
               RESIDCO · Shop portal
             </p>
             <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
               {data?.shop?.name || "Shop work queue"}
             </h1>
-            <p className="text-sm text-slate-600">
+            <p className={shopAa.muted}>
               Own shop mark only · no lessee · no DV/settlement
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div>
-              <Label htmlFor="shopMark" className="text-xs">
+              <Label htmlFor="shopMark" className={shopAa.label}>
                 Shop mark
               </Label>
               <Input
                 id="shopMark"
-                className="w-28 font-mono uppercase"
+                className="w-28 border-slate-400 font-mono uppercase text-slate-900"
                 value={shopMark}
                 onChange={(e) => setShopMark(e.target.value.toUpperCase())}
                 maxLength={4}
@@ -142,23 +151,42 @@ export default function ShopPortal() {
 
       <main className="mx-auto max-w-6xl space-y-8 px-4 py-6 sm:px-8">
         {error && (
-          <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <div className="rounded border border-red-700 bg-red-50 px-3 py-2 text-sm text-red-900">
             {error}
           </div>
         )}
 
+        {data?.kpis && (
+          <section className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded border border-slate-300 bg-white p-4">
+              <p className={shopAa.label}>Missed POD count</p>
+              <p className="mt-1 font-mono text-2xl font-semibold text-slate-900">
+                {data.kpis.missedPodCount}
+              </p>
+            </div>
+            <div className="rounded border border-slate-300 bg-white p-4">
+              <p className={shopAa.label}>Avg days arrival → approval</p>
+              <p className="mt-1 font-mono text-2xl font-semibold text-slate-900">
+                {data.kpis.avgDaysArrivalToApproval != null
+                  ? data.kpis.avgDaysArrivalToApproval
+                  : "—"}
+              </p>
+            </div>
+          </section>
+        )}
+
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold">Search car</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Search car</h2>
           <div className="flex flex-wrap gap-2">
             <Input
               placeholder="Initial"
-              className="w-24 font-mono uppercase"
+              className="w-24 border-slate-400 font-mono uppercase text-slate-900"
               value={carInitial}
               onChange={(e) => setCarInitial(e.target.value.toUpperCase())}
             />
             <Input
               placeholder="Number"
-              className="w-32 font-mono"
+              className="w-32 border-slate-400 font-mono text-slate-900"
               value={carNumber}
               onChange={(e) => setCarNumber(e.target.value)}
             />
@@ -171,7 +199,9 @@ export default function ShopPortal() {
         {data && (
           <>
             <section>
-              <h2 className="mb-3 text-lg font-semibold">Estimates by status</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">
+                Estimates by status
+              </h2>
               <div className="flex flex-wrap gap-2">
                 {STATUS_ORDER.map((s) => (
                   <button
@@ -185,36 +215,43 @@ export default function ShopPortal() {
                       "rounded border px-3 py-2 text-left text-sm transition",
                       statusFilter === s
                         ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white hover:border-slate-400",
+                        : "border-slate-300 bg-white text-slate-900 hover:border-slate-600",
                     )}
                   >
                     <div className="font-medium">{s}</div>
-                    <div className="font-mono text-lg">{data.byStatus[s] ?? 0}</div>
+                    <div className="font-mono text-lg text-slate-900">
+                      {data.byStatus[s] ?? 0}
+                    </div>
                   </button>
                 ))}
               </div>
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold">
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">
                 Bad orders assigned to {data.shop.shopMark}
               </h2>
               {data.badOrders.length === 0 ? (
-                <p className="text-sm text-slate-500">No bad orders for this shop.</p>
+                <p className={shopAa.muted}>No bad orders for this shop.</p>
               ) : (
-                <ul className="divide-y divide-slate-200 rounded border border-slate-200 bg-white">
+                <ul className="divide-y divide-slate-300 rounded border border-slate-300 bg-white">
                   {data.badOrders.map((bo) => (
-                    <li key={bo.event_id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
+                    <li
+                      key={bo.event_id}
+                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-3"
+                    >
                       <div>
-                        <span className="font-mono font-semibold">
+                        <span className="font-mono font-semibold text-slate-900">
                           {bo.car_mark} {bo.car_number}
                         </span>
-                        <span className="ml-2 text-sm text-slate-500">
+                        <span className="ml-2 text-sm text-slate-700">
                           {bo.lifecycle_status || "—"}
                           {bo.is_wreck ? " · Wreck" : ""}
                         </span>
                         {bo.shopping_reason && (
-                          <p className="text-sm text-slate-600">{bo.shopping_reason}</p>
+                          <p className="text-sm text-slate-700">
+                            {bo.shopping_reason}
+                          </p>
                         )}
                       </div>
                       <Link href={`/repair/shop/events/${bo.event_id}`}>
@@ -229,21 +266,23 @@ export default function ShopPortal() {
             </section>
 
             <section>
-              <h2 className="mb-3 text-lg font-semibold">Estimates</h2>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">
+                Estimates
+              </h2>
               {data.estimates.length === 0 ? (
-                <p className="text-sm text-slate-500">No estimates yet.</p>
+                <p className={shopAa.muted}>No estimates yet.</p>
               ) : (
-                <ul className="divide-y divide-slate-200 rounded border border-slate-200 bg-white">
+                <ul className="divide-y divide-slate-300 rounded border border-slate-300 bg-white">
                   {data.estimates.map((est) => (
                     <li
                       key={est.estimate_id}
                       className="flex flex-wrap items-center justify-between gap-2 px-3 py-3"
                     >
                       <div>
-                        <span className="font-mono font-semibold">
+                        <span className="font-mono font-semibold text-slate-900">
                           {est.car_mark} {est.car_number}
                         </span>
-                        <span className="ml-2 text-sm">
+                        <span className="ml-2 text-sm text-slate-900">
                           {est.statusLabel} · rev {est.current_revision}
                         </span>
                       </div>

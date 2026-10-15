@@ -90,6 +90,8 @@ export async function enterPodErd(opts: {
   dateValue: string; // YYYY-MM-DD
   enteredBy: string;
   reason?: string;
+  /** §G r2 — structured reason when POD changes */
+  reasonCode?: string;
   tenantId?: string;
   via?: string;
 }) {
@@ -110,13 +112,34 @@ export async function enterPodErd(opts: {
 
   const prior = await latestPodErd(eventId, tenantId);
   const wasRevision = Boolean(prior[opts.kind]);
+  const priorRaw = prior[opts.kind]?.date_value;
+  const priorDate =
+    priorRaw == null
+      ? null
+      : priorRaw instanceof Date
+        ? priorRaw.toISOString().slice(0, 10)
+        : /^\d{4}-\d{2}-\d{2}/.test(String(priorRaw))
+          ? String(priorRaw).slice(0, 10)
+          : (() => {
+              const d = new Date(String(priorRaw));
+              return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+            })();
 
   const { rows } = await q(
     `INSERT INTO repair.pod_dates
-       (tenant_id, event_id, kind, date_value, entered_by, reason, created_by)
-     VALUES ($1,$2,$3,$4::date,$5,$6,$5)
+       (tenant_id, event_id, kind, date_value, entered_by, reason, reason_code, prior_date, created_by)
+     VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8::date,$5)
      RETURNING *`,
-    [tenantId, eventId, opts.kind, opts.dateValue, opts.enteredBy, opts.reason ?? null],
+    [
+      tenantId,
+      eventId,
+      opts.kind,
+      opts.dateValue,
+      opts.enteredBy,
+      opts.reason ?? null,
+      opts.reasonCode ?? null,
+      wasRevision ? priorDate : null,
+    ],
   );
 
   await writeAudit({

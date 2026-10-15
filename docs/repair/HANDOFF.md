@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§G Shop portal + Railinc validation** | Apply `rlms-phase1-owner-ui-g-shop.bundle` on tip **`9296477`** (§F r3). Shop portal (own mark); stub Railinc validator (hard reject vs flag); local outbox; cross-shop 403. Smoke: `npm run repair:smoke-shop`. Typecheck: `npm run repair:typecheck-client-shop`. Spec: [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md). |
+| **§G r2 Shop clarity + review aids** | Apply `rlms-phase1-owner-ui-g-shop-r2.bundle` on tip **`85199a7`** (§G). AA contrast; returnTo + breadcrumbs; BO dates/POD history/missed POD/timeline/flags/KPIs; owner reject/adjust line comments (shop/email/BRC); `repair:seed-shop-demo` + DEV role switcher. Smoke: `npm run repair:smoke-shop`. Typecheck: `npm run repair:typecheck-client-shop`. Spec: [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md). |
+| **§G Shop portal + Railinc validation** | Prior: `rlms-phase1-owner-ui-g-shop.bundle` on tip **`9296477`** (§F r3) → **`85199a7`**. Shop portal (own mark); stub Railinc validator; local outbox; cross-shop 403. |
 | **§F r3 Manual lessee decision** | Apply `rlms-phase1-owner-ui-f-lessee-r3.bundle` on tip **`d172911`** (§F r2). Owner/managing partner **Record lessee response** (Accept/Reject + proof .msg/.eml/PDF → Lessee Approval); closes link; clears overdue; badge Accepted (manual); undo (owner only). Smoke: `npm run repair:smoke-lessee`. Typecheck: `npm run repair:typecheck-client-lessee`. |
 | **§F r2 Lessee fixes** | Prior: `rlms-phase1-owner-ui-f-lessee-r2.bundle` on tip **`fda2956`** → **`d172911`**. Accept/Reject never silent; owner 30s poll + no-store; BRC header/grid/sticky footer; Loc/WM/C/Resp hovers. |
 | **§F Lessee screen** | Prior: `rlms-phase1-owner-ui-f-lessee.bundle` on tip **`81034cc`** → **`fda2956`**. Login-free signed link; Accept/Reject; 3 business days (≥72h); overdue never auto-approves. |
@@ -55,7 +56,7 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **BUILD + hotfix + DV panel** (`ba5dc51`) |
 | **5 / §E** | Document Viewer (shot 03) + BRC PDF / Lessee email — [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on **`73b9e3d`** |
 | **6 / §F** | Lessee screen — [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) | Apply `rlms-phase1-owner-ui-f-lessee-r3.bundle` on **`d172911`** |
-| **7 / §G** | Shop portal + Railinc validation — [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md) | Apply `rlms-phase1-owner-ui-g-shop.bundle` on **`9296477`** |
+| **7 / §G** | Shop portal + Railinc validation (+ r2 clarity) — [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md) | Apply `rlms-phase1-owner-ui-g-shop-r2.bundle` on **`85199a7`** |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) · [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) · [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md)  
 **Overall map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)
@@ -85,11 +86,39 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+25 | **`rlms-phase1-owner-ui-f-lessee.bundle`** (§F Lessee screen) | **`81034cc`** | → **`fda2956`** |
 | N+26 | **`rlms-phase1-owner-ui-f-lessee-r2.bundle`** (§F r2 Accept bug + readability + hovers) | **`fda2956`** | → **`d172911`** |
 | N+27 | **`rlms-phase1-owner-ui-f-lessee-r3.bundle`** (§F r3 manual lessee decision) | **`d172911`** | → **`9296477`** |
-| N+28 | **`rlms-phase1-owner-ui-g-shop.bundle`** (§G Shop portal + Railinc stub validation) | **`9296477`** | → **(see README)** |
+| N+28 | **`rlms-phase1-owner-ui-g-shop.bundle`** (§G Shop portal + Railinc stub validation) | **`9296477`** | → **`85199a7`** |
+| N+29 | **`rlms-phase1-owner-ui-g-shop-r2.bundle`** (§G r2 shop clarity + review aids) | **`85199a7`** | → **(see README)** |
 
 ---
 
-## Apply §G Shop portal (on tip `9296477`)
+## Apply §G r2 Shop clarity (on tip `85199a7`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect 85199a7…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-g-shop-r2.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-g-shop-r2.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
+Then:
+
+```powershell
+$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+$env:REPAIR_LOCAL_DB = "1"
+$env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
+npm run repair:migrate:local
+npm run repair:seed-shop-demo
+npm run repair:typecheck-client-shop
+npm run repair:smoke-shop
+npm run repair:dev:local
+# http://127.0.0.1:5000/#/repair/shop  (shop mark DS01 after seed)
+```
+
+---
+
+## Apply §G Shop portal (on tip `9296477`) — prior
 
 ```powershell
 cd C:\Users\BruceHarbridge\rlms-push

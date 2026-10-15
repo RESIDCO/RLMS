@@ -222,6 +222,7 @@ import {
   shopDownloadDataFile,
   shopEstimateDetail,
   notifyShopEstimateDecision,
+  resolveShopContext,
 } from "./services/shop-portal";
 import {
   getRailincValidator,
@@ -2083,6 +2084,28 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       comment: req.body?.comment ? String(req.body.comment) : undefined,
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
+    // §G r2 — per-line + estimate-level decision comments
+    try {
+      const { saveDecisionComments } = await import("./services/shop-clarity");
+      const { rows: ev } = await q(
+        `SELECT event_id FROM repair.estimates WHERE id = $1`,
+        [String(req.params.id)],
+      );
+      if (ev[0]?.event_id) {
+        await saveDecisionComments({
+          eventId: String(ev[0].event_id),
+          estimateId: String(req.params.id),
+          kind: "REJECT",
+          estimateComment: req.body?.comment ? String(req.body.comment) : null,
+          lineComments: Array.isArray(req.body?.lineComments)
+            ? req.body.lineComments
+            : [],
+          author: actorFrom(req),
+        });
+      }
+    } catch {
+      /* non-fatal */
+    }
     const reasons = req.body?.comment ? [String(req.body.comment)] : [];
     await notifyShopEstimateDecision({
       estimateId: String(req.params.id),
@@ -4537,5 +4560,101 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       `attachment; filename="${result.filename}"`,
     );
     return res.send(Buffer.from(result.content, "latin1"));
+  });
+
+  // §G r2 — BO lifecycle dates (shop / owner)
+  app.patch("/api/repair/shop/events/:eventId/lifecycle", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const actor = shopActorFrom(req);
+    // Shop mark ownership gate (owners use owner routes / role switcher still hits shop APIs with shop mark)
+    const gate = await shopBoDetail({
+      ...actor,
+      eventId: String(req.params.eventId),
+    });
+    if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+    const ctx = await resolveShopContext(actor);
+    const { updateBoLifecycleDates } = await import("./services/shop-clarity");
+    const result = await updateBoLifecycleDates({
+      eventId: String(req.params.eventId),
+      actor: actor.actor,
+      actorRole: actor.role || "shop",
+      tenantId: ctx.ok ? ctx.tenantId : undefined,
+      arrival: req.body?.arrival,
+      inspected: req.body?.inspected,
+      estimateSubmitted: req.body?.estimateSubmitted,
+      ownerApproval: req.body?.ownerApproval,
+      repairStart: req.body?.repairStart,
+      pod: req.body?.pod,
+      podReasonCode: req.body?.podReasonCode,
+      podReasonNote: req.body?.podReasonNote,
+      completed: req.body?.completed,
+      released: req.body?.released,
+      missedPodReasonCode: req.body?.missedPodReasonCode,
+      missedPodReasonNote: req.body?.missedPodReasonNote,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/missed-pod-reasons", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const { listMissedPodReasonCodes } = await import("./services/shop-clarity");
+    return res.json({ reasons: await listMissedPodReasonCodes() });
+  });
+
+  /** Owner/MP lifecycle date edits (all fields). */
+  app.patch("/api/repair/events/:id/lifecycle", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const role = roleFrom(req).toLowerCase();
+    if (
+      !["owner", "managing_partner", "reviewer", "admin", "dev-bypass"].includes(
+        role,
+      )
+    ) {
+      return res.status(403).json({ error: "Owner/MP only" });
+    }
+    const { updateBoLifecycleDates } = await import("./services/shop-clarity");
+    const result = await updateBoLifecycleDates({
+      eventId: String(req.params.id),
+      actor: actorFrom(req),
+      actorRole: role,
+      arrival: req.body?.arrival,
+      inspected: req.body?.inspected,
+      estimateSubmitted: req.body?.estimateSubmitted,
+      ownerApproval: req.body?.ownerApproval,
+      repairStart: req.body?.repairStart,
+      pod: req.body?.pod,
+      podReasonCode: req.body?.podReasonCode,
+      podReasonNote: req.body?.podReasonNote,
+      completed: req.body?.completed,
+      released: req.body?.released,
+      missedPodReasonCode: req.body?.missedPodReasonCode,
+      missedPodReasonNote: req.body?.missedPodReasonNote,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/comments/:id/resolve", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const role = roleFrom(req).toLowerCase();
+    if (
+      !["owner", "managing_partner", "reviewer", "admin", "dev-bypass"].includes(
+        role,
+      )
+    ) {
+      return res.status(403).json({ error: "Owner/MP only" });
+    }
+    const { resolveDecisionComment } = await import("./services/shop-clarity");
+    const result = await resolveDecisionComment({
+      commentId: String(req.params.id),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 }

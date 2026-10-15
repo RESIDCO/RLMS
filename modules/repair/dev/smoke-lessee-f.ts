@@ -1,5 +1,5 @@
 /**
- * Smoke: OWNER_UI §F — Lessee screen (+ r2 E2E Accept/Reject)
+ * Smoke: OWNER_UI §F — Lessee screen (+ r2 E2E + r3 manual decision)
  *
  * 1. Accept via link (name/email/IP/send version)
  * 2. Reject requires comment
@@ -10,6 +10,8 @@
  * 7. Email text "within 3 business days"
  * 8. E2E: real HTTP decide route + owner lessee-status → Accepted/Rejected
  * 9. Ref lookup hover public (Loc/C/WM/Resp)
+ * 10. r3: manual accept with .msg closes link; owner badge manual;
+ *     shop/lessee 403; undo restores Sent
  *
  * Run: npm run repair:smoke-lessee
  */
@@ -37,7 +39,10 @@ import {
   getLesseeViewForToken,
   getOwnerLesseePanel,
   mapApprovalToOwnerStatus,
+  recordManualLesseeDecision,
+  undoManualLesseeDecision,
   sendLesseeApprovalRequest,
+  LESSEE_LINK_CLOSED_MSG,
 } from "../services/lessee-approval";
 import { buildSendLesseePreview, sendLesseeFromPreview } from "../services/send-lessee";
 import { computeLesseeTotals } from "../services/lessee-totals";
@@ -583,6 +588,198 @@ async function main() {
         ok(`ref hover ${kind}=${code}: not in reference table (empty seed OK)`);
       }
     }
+
+    // ── §F r3: manual accept with .msg; 403 shop/lessee; undo → Sent ──
+    const { estimateId: estMan } = await seedEstimate();
+    const sentMan = await sendOnce(estMan);
+    if (!sentMan.ok) bad("r3-send", sentMan.error ?? "");
+    const tokenMan = String(sentMan.lesseeUrlPath ?? "").split("/").pop()!;
+    if (!tokenMan) bad("r3-token", "missing");
+
+    // Flag overdue so owner can still record
+    await q(
+      `UPDATE repair.lessee_approvals
+       SET response_due_at = now() - interval '1 hour', status = 'OVERDUE',
+           overdue_flagged_at = now()
+       WHERE estimate_id = $1 AND status IN ('PENDING','VIEWED','OVERDUE')`,
+      [estMan],
+    );
+    await q(
+      `UPDATE repair.estimates SET lessee_response_overdue = true WHERE id = $1`,
+      [estMan],
+    );
+
+    const msgBytes = Buffer.from(
+      "From: lessee@example.test\r\nSubject: Accept\r\n\r\nAccepted by phone follow-up.\r\n",
+      "utf8",
+    );
+    // Rename to .msg for extension check (content is fine for smoke)
+    const shop403 = await recordManualLesseeDecision({
+      estimateId: estMan,
+      decision: "APPROVE",
+      note: "shop should fail",
+      actor: "shop@smoke.test",
+      actorRole: "shop",
+      lesseeName: "Nope",
+      lesseeEmail: "nope@x.test",
+      method: "phone",
+    });
+    if (shop403.ok || shop403.status !== 403) {
+      bad("r3-shop-403", JSON.stringify(shop403));
+    }
+    ok("r3 shop record → 403");
+
+    const lessee403 = await recordManualLesseeDecision({
+      estimateId: estMan,
+      decision: "APPROVE",
+      note: "lessee should fail",
+      actor: "lessee@smoke.test",
+      actorRole: "lessee",
+      lesseeName: "Nope",
+      lesseeEmail: "nope@x.test",
+      method: "email",
+    });
+    if (lessee403.ok || lessee403.status !== 403) {
+      bad("r3-lessee-403", JSON.stringify(lessee403));
+    }
+    ok("r3 lessee record → 403");
+
+    const httpShop = await fetch(
+      `${base}/api/repair/estimates/${estMan}/lessee-manual`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-repair-role": "shop",
+        },
+        body: JSON.stringify({
+          decision: "APPROVE",
+          note: "http shop",
+          lesseeName: "X",
+          lesseeEmail: "x@y.test",
+        }),
+      },
+    );
+    if (httpShop.status !== 403) {
+      bad("r3-http-shop-403", await httpShop.text());
+    }
+    ok("r3 HTTP shop → 403");
+
+    const manual = await recordManualLesseeDecision({
+      estimateId: estMan,
+      decision: "APPROVE",
+      note: "Phone accept with Outlook proof",
+      actor: "owner@example.test",
+      actorRole: "owner",
+      lesseeName: "Manual Pat",
+      lesseeEmail: "manual.pat@lessee.test",
+      method: "phone",
+      proof: {
+        filename: `accept-${RUN}.msg`,
+        mime: "application/vnd.ms-outlook",
+        bytes: msgBytes,
+      },
+    });
+    if (!manual.ok) bad("r3-manual", manual.error);
+    if (manual.status !== "APPROVED_MANUAL") {
+      bad("r3-status", String(manual.status));
+    }
+    if (!manual.proofDocumentId) bad("r3-proof", "missing proof document");
+    if (!String(manual.badge ?? "").includes("Accepted (manual)")) {
+      bad("r3-badge", String(manual.badge));
+    }
+    ok(`r3 manual accept + .msg proof → ${manual.status}`);
+
+    const viewClosed = await getLesseeViewForToken(tokenMan);
+    if (!viewClosed || viewClosed.canDecide !== false) {
+      bad("r3-closed-decide", "link should be closed");
+    }
+    if (viewClosed.closedMessage !== LESSEE_LINK_CLOSED_MSG) {
+      bad("r3-closed-msg", String(viewClosed.closedMessage));
+    }
+    const decideClosed = await fetch(
+      `${base}/api/repair/lessee/${tokenMan}/decide`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          decision: "APPROVE",
+          name: "Late",
+          email: "late@x.test",
+        }),
+      },
+    );
+    const decideClosedBody = (await decideClosed.json()) as { error?: string };
+    if (decideClosed.status !== 409) {
+      bad("r3-decide-409", JSON.stringify(decideClosedBody));
+    }
+    if (!String(decideClosedBody.error ?? "").includes("already recorded")) {
+      bad("r3-decide-msg", JSON.stringify(decideClosedBody));
+    }
+    ok('r3 lessee link closed — "A response was already recorded"');
+
+    const { rows: estClear } = await q(
+      `SELECT lessee_response_overdue FROM repair.estimates WHERE id = $1`,
+      [estMan],
+    );
+    if (estClear[0]?.lessee_response_overdue) {
+      bad("r3-overdue-clear", "overdue flag still set");
+    }
+    ok("r3 overdue flag cleared");
+
+    const panelMan = await getOwnerLesseePanel({
+      estimateId: estMan,
+      actorRole: "owner",
+    });
+    if (panelMan.ownerStatus !== "Accepted") {
+      bad("r3-owner-status", panelMan.ownerStatus);
+    }
+    if (!String(panelMan.badge ?? "").includes("Accepted (manual)")) {
+      bad("r3-owner-badge", String(panelMan.badge));
+    }
+    const histProof = panelMan.history.find((h) => h.proofDocumentId);
+    if (!histProof) bad("r3-hist-proof", "history missing proof");
+    ok("r3 owner status Accepted (manual) + proof in history");
+
+    const mp403 = await undoManualLesseeDecision({
+      estimateId: estMan,
+      reason: "partner cannot undo",
+      actor: "mp@example.test",
+      actorRole: "managing_partner",
+    });
+    if (mp403.ok || mp403.status !== 403) {
+      bad("r3-mp-undo-403", JSON.stringify(mp403));
+    }
+    ok("r3 managing partner undo → 403");
+
+    const undid = await undoManualLesseeDecision({
+      estimateId: estMan,
+      reason: "Wrong contact — reopen for resend",
+      actor: "owner@example.test",
+      actorRole: "owner",
+    });
+    if (!undid.ok) bad("r3-undo", undid.error);
+    if (undid.ownerStatus !== "Sent" && undid.ownerStatus !== "Viewed") {
+      bad("r3-undo-status", undid.ownerStatus);
+    }
+    const panelUndo = await getOwnerLesseePanel({
+      estimateId: estMan,
+      actorRole: "owner",
+    });
+    if (panelUndo.ownerStatus !== "Sent" && panelUndo.ownerStatus !== "Viewed") {
+      bad("r3-undo-panel", panelUndo.ownerStatus);
+    }
+    const undoHist = panelUndo.history.filter((h) => h.decision === "UNDO");
+    if (undoHist.length < 1) bad("r3-undo-hist", "UNDO row missing");
+    const priorKeep = panelUndo.history.filter((h) => h.decision === "APPROVED");
+    if (priorKeep.length < 1) bad("r3-hist-keep", "prior APPROVED deleted");
+    ok(`r3 undo restores ${panelUndo.ownerStatus}; history kept (UNDO + APPROVED)`);
+
+    const viewReopen = await getLesseeViewForToken(tokenMan);
+    if (!viewReopen || viewReopen.canDecide !== true) {
+      bad("r3-reopen", "link should allow decide after undo");
+    }
+    ok("r3 undo reopens lessee link (canDecide)");
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));

@@ -66,8 +66,17 @@ export function assertLesseeClientTypecheck(): void {
   if (!review.includes("lessee-status") && !review.includes("Lessee response overdue")) {
     bad("owner", "EstimateReview must show lessee status / overdue");
   }
-  if (!review.includes("Record phone/email") && !review.includes("lessee-manual")) {
-    bad("manual", "EstimateReview must allow manual phone/email record");
+  if (
+    !review.includes("Record lessee response") &&
+    !review.includes("lessee-manual")
+  ) {
+    bad("manual", "EstimateReview must offer Record lessee response");
+  }
+  if (!review.includes("Undo manual") && !review.includes("lessee-manual-undo")) {
+    bad("undo", "EstimateReview must offer undo for manual lessee decision");
+  }
+  if (!review.includes("proof") && !review.includes(".msg")) {
+    bad("proof", "EstimateReview manual dialog must accept proof attachment");
   }
   if (!review.includes("30_000") && !review.includes("30000")) {
     bad("polling", "EstimateReview must poll lessee-status within 30s");

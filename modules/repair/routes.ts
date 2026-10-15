@@ -201,6 +201,7 @@ import {
   getOwnerLesseePanel,
   flagLesseeOverdueIfNeeded,
   recordManualLesseeDecision,
+  undoManualLesseeDecision,
   assertLesseeTokenEstimateAccess,
 } from "./services/lessee-approval";
 import {
@@ -217,6 +218,8 @@ import {
   zipViewerDocuments,
   attachDocumentsToSendLessee,
   setDocumentOwnerOnly,
+  canRecordManualLessee,
+  canUndoManualLessee,
   previewKindFor,
 } from "./services/documents-viewer";
 import { enterPodErd, listPodDates, latestPodErd, runPodReminders } from "./services/pod";
@@ -2192,6 +2195,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       if (!uid) return;
       const panel = await getOwnerLesseePanel({
         estimateId: String(req.params.id),
+        actorRole: roleFrom(req),
       });
       return res.json(panel);
     } catch (err) {
@@ -2200,25 +2204,81 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     }
   });
 
-  app.post("/api/repair/estimates/:id/lessee-manual", async (req, res) => {
+  /**
+   * §F r3: Record lessee response (Accept/Reject manual) — owner / managing partner.
+   * Multipart: decision, note, lesseeName, lesseeEmail, method, receivedAt, optional proof file.
+   */
+  app.post(
+    "/api/repair/estimates/:id/lessee-manual",
+    upload.single("proof"),
+    async (req, res) => {
+      try {
+        const uid = await maybeRequireUser(deps, req, res);
+        if (!uid) return;
+        const role = roleFrom(req);
+        if (!canRecordManualLessee(role)) {
+          return res
+            .status(403)
+            .json({ error: "Owner or managing partner only" });
+        }
+        const body = req.body ?? {};
+        const decision =
+          String(body.decision ?? "").toUpperCase() === "REJECT"
+            ? "REJECT"
+            : "APPROVE";
+        const proof = req.file
+          ? {
+              filename: req.file.originalname || "proof.bin",
+              mime: req.file.mimetype || "application/octet-stream",
+              bytes: req.file.buffer,
+            }
+          : null;
+        const result = await recordManualLesseeDecision({
+          estimateId: String(req.params.id),
+          decision,
+          note: String(body.note ?? ""),
+          actor: String(body.actor ?? actorFrom(req) ?? uid),
+          actorRole: role,
+          lesseeName: body.lesseeName ? String(body.lesseeName) : undefined,
+          lesseeEmail: body.lesseeEmail ? String(body.lesseeEmail) : undefined,
+          method: body.method ? String(body.method) : undefined,
+          receivedAt: body.receivedAt ? String(body.receivedAt) : undefined,
+          proof,
+        });
+        if (!result.ok) {
+          return res.status(result.status).json({ error: result.error });
+        }
+        return res.json(result);
+      } catch (err) {
+        console.error("[repair/estimates/:id/lessee-manual]", err);
+        return res.status(500).json({ error: "Manual lessee decision failed" });
+      }
+    },
+  );
+
+  /** §F r3: Undo manual lessee decision — owner only; required reason; reopens send. */
+  app.post("/api/repair/estimates/:id/lessee-manual-undo", async (req, res) => {
     try {
       const uid = await maybeRequireUser(deps, req, res);
       if (!uid) return;
+      const role = roleFrom(req);
+      if (!canUndoManualLessee(role)) {
+        return res.status(403).json({ error: "Owner only" });
+      }
       const body = req.body ?? {};
-      const decision =
-        String(body.decision ?? "").toUpperCase() === "REJECT" ? "REJECT" : "APPROVE";
-      const result = await recordManualLesseeDecision({
+      const result = await undoManualLesseeDecision({
         estimateId: String(req.params.id),
-        decision,
-        note: String(body.note ?? ""),
-        actor: String(body.actor ?? uid),
-        lesseeEmail: body.lesseeEmail ? String(body.lesseeEmail) : undefined,
+        reason: String(body.reason ?? ""),
+        actor: String(body.actor ?? actorFrom(req) ?? uid),
+        actorRole: role,
       });
-      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      if (!result.ok) {
+        return res.status(result.status).json({ error: result.error });
+      }
       return res.json(result);
     } catch (err) {
-      console.error("[repair/estimates/:id/lessee-manual]", err);
-      return res.status(500).json({ error: "Manual lessee decision failed" });
+      console.error("[repair/estimates/:id/lessee-manual-undo]", err);
+      return res.status(500).json({ error: "Undo manual lessee decision failed" });
     }
   });
 

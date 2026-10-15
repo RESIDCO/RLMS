@@ -64,6 +64,14 @@ export const DOC_CATEGORY_GROUPS: Array<{
     match: (k, c) => c === "ddct" || k === "ddct",
   },
   {
+    code: "lessee_approval",
+    label: "Lessee Approval",
+    match: (k, c) =>
+      c === "lessee_approval" ||
+      k === "lessee_approval" ||
+      c === "lessee approval",
+  },
+  {
     code: "other",
     label: "Other",
     match: () => true,
@@ -102,9 +110,40 @@ export function isOwnerRole(role?: string | null): boolean {
   const r = normalizeRole(role);
   return (
     r === "owner" ||
+    r === "managing_partner" ||
+    r === "managing partner" ||
+    r === "car_owner" ||
     r === "system_manager" ||
     r === "admin" ||
     r === "reviewer" ||
+    r === "dev-bypass"
+  );
+}
+
+/** §F r3: Record lessee response — owner / managing partner only. */
+export function canRecordManualLessee(role?: string | null): boolean {
+  const r = normalizeRole(role);
+  if (r === "shop" || r === "lessee") return false;
+  return (
+    r === "owner" ||
+    r === "managing_partner" ||
+    r === "managing partner" ||
+    r === "car_owner" ||
+    r === "admin" ||
+    r === "system_manager" ||
+    r === "dev-bypass"
+  );
+}
+
+/** §F r3: Undo manual lessee decision — owner only. */
+export function canUndoManualLessee(role?: string | null): boolean {
+  const r = normalizeRole(role);
+  if (r === "shop" || r === "lessee") return false;
+  return (
+    r === "owner" ||
+    r === "car_owner" ||
+    r === "admin" ||
+    r === "system_manager" ||
     r === "dev-bypass"
   );
 }

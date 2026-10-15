@@ -2,7 +2,7 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §F  
 **Route:** `/#/repair/lessee/:token` (login-free)  
-**Requires tip:** `fda2956` (§F initial) for **r2**; earlier: `81034cc` (§E r2)
+**Requires tip:** `d172911` (§F r2) for **r3**; earlier: `fda2956` (§F), `81034cc` (§E r2)
 
 ## Access
 
@@ -13,6 +13,7 @@ Signed expiring link from Resp 6 email, scoped to **one estimate + one send**.
 | Scope | Resp 6 lines + granted attachments from that send only |
 | Expiry | `response_due_at + 30 days` |
 | After respond | Link stays readable (**read-only**); decide → 409 |
+| Manual record | Link closed: **"A response was already recorded"** |
 | Newer send | Revokes older links (`SUPERSEDED`) |
 | Expired / revoked | 401 |
 
@@ -42,11 +43,38 @@ Email Description uses **"within 3 business days"** (not "48 hours").
 
 ## No response
 
-**Never auto-approve.** When the window passes: flag **Lessee response overdue**. Owner may **Resend** or **Record phone/email approval** with a required note.
+**Never auto-approve.** When the window passes: flag **Lessee response overdue**. Owner may **Resend** or **Record lessee response** (manual).
 
-## Owner side (Estimate Review) — r2
+## Owner side (Estimate Review) — r2 + r3
 
-Badge: Sent / Viewed / Accepted / Rejected / Overdue. Show decider **name, email, ET time, comment**. History updates on refresh and **30s polling** while the page is open. `GET …/lessee-status` is `Cache-Control: no-store` and prefers the latest non-SUPERSEDED send/revision.
+Badge: Sent / Viewed / Accepted / Rejected / Overdue. Manual: **`Accepted (manual) – <name>, <time>`** (or Rejected). Show decider **name, email, ET time, comment**. History updates on refresh and **30s polling**. `GET …/lessee-status` is `Cache-Control: no-store` and prefers the latest non-SUPERSEDED send/revision.
+
+### Record lessee response (r3)
+
+**Owner** and **managing partner** only; only while current send is **Sent / Viewed / Overdue**. Shop / lessee → **403**.
+
+Dialog fields:
+
+| Field | Rule |
+|---|---|
+| Decision | Accept / Reject |
+| Lessee contact | Name + email required |
+| Date/time received | Default now (ET) |
+| Method | Email / Phone / Other |
+| Note | Required |
+| Proof | Optional `.msg` / `.eml` / PDF → Document Viewer category **Lessee Approval**, `owner_only`, tied to send |
+
+On save:
+
+- Status **`APPROVED_MANUAL`** or **`REJECTED_MANUAL`** against the current send’s exact revision lines + total (integer cents)
+- Audit: recorded by `<user>`
+- Close lessee link (`A response was already recorded`)
+- Clear Overdue flag
+- History shows who recorded + opens attached proof
+
+### Undo (r3)
+
+**Owner only** (managing partner → 403). Required reason. Reopens send to **Sent**. **Never deletes history** — appends `UNDO` decision row.
 
 ## Smoke / typecheck
 
@@ -56,4 +84,4 @@ npm run repair:smoke-lessee
 npm run repair:smoke-brc-email
 ```
 
-Covers: accept, reject, overdue flag, expired link, superseded link, scoping, **E2E HTTP Accept/Reject → owner Accepted/Rejected**, public ref lookup hovers.
+Covers: accept, reject, overdue flag, expired link, superseded link, scoping, **E2E HTTP Accept/Reject → owner Accepted/Rejected**, public ref lookup hovers, **manual accept + .msg closes link**, owner manual badge, **shop/lessee 403**, **undo → Sent**.

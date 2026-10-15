@@ -13,8 +13,23 @@ import {
   Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
 import {
   EstimateDataFile,
@@ -184,8 +199,13 @@ export default function EstimateReview() {
   const [pencilOpen, setPencilOpen] = useState(false);
   const [lesseePanel, setLesseePanel] = useState<{
     ownerStatus: string;
+    badge?: string;
     overdue: boolean;
+    canRecordManual?: boolean;
+    canUndoManual?: boolean;
     current: {
+      status?: string | null;
+      badge?: string | null;
       responseDueAtEt?: string | null;
       sendVersion?: number | null;
       revisionId?: string | null;
@@ -194,6 +214,9 @@ export default function EstimateReview() {
       respondentName?: string | null;
       respondentEmail?: string | null;
       comment?: string | null;
+      manualRecordedBy?: string | null;
+      proofDocumentId?: string | null;
+      isManual?: boolean;
     } | null;
     history: Array<{
       id: string;
@@ -205,10 +228,46 @@ export default function EstimateReview() {
       respondentName?: string | null;
       respondentEmail?: string | null;
       sendVersion?: number | null;
+      recordedBy?: string | null;
+      proofDocumentId?: string | null;
+      proofFilename?: string | null;
     }>;
   } | null>(null);
-  const [manualNote, setManualNote] = useState("");
   const [showManual, setShowManual] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualError, setManualError] = useState("");
+  const [manualDecision, setManualDecision] = useState<"APPROVE" | "REJECT">(
+    "APPROVE",
+  );
+  const [manualName, setManualName] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
+  const [manualNote, setManualNote] = useState("");
+  const [manualMethod, setManualMethod] = useState<"email" | "phone" | "other">(
+    "email",
+  );
+  const [manualReceivedAt, setManualReceivedAt] = useState("");
+  const [manualProof, setManualProof] = useState<File | null>(null);
+  const [showUndo, setShowUndo] = useState(false);
+  const [undoReason, setUndoReason] = useState("");
+  const [undoSubmitting, setUndoSubmitting] = useState(false);
+
+  function defaultReceivedAtLocal(): string {
+    // datetime-local in America/New_York wall time
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = Object.fromEntries(
+      fmt.formatToParts(new Date()).map((p) => [p.type, p.value]),
+    );
+    const hour = String(parts.hour === "24" ? "00" : parts.hour).padStart(2, "0");
+    return `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}`;
+  }
 
   async function loadLesseePanel() {
     if (!estimateId) return;
@@ -260,25 +319,97 @@ export default function EstimateReview() {
     }
   }
 
-  async function recordManual(decision: "APPROVE" | "REJECT") {
-    if (!manualNote.trim()) {
-      setError("Note is required to record phone/email approval");
-      return;
-    }
-    const res = await apiRequest(
-      "POST",
-      `/api/repair/estimates/${estimateId}/lessee-manual`,
-      { decision, note: manualNote.trim(), actor: "owner" },
-    );
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || "Manual record failed");
-      return;
-    }
-    setMsg(`Lessee ${decision === "APPROVE" ? "accepted" : "rejected"} recorded manually.`);
-    setShowManual(false);
+  function openManualDialog() {
+    setManualError("");
+    setManualDecision("APPROVE");
+    setManualName(lesseePanel?.current?.respondentName ?? "");
+    setManualEmail(lesseePanel?.current?.respondentEmail ?? "");
     setManualNote("");
-    void loadLesseePanel();
+    setManualMethod("email");
+    setManualReceivedAt(defaultReceivedAtLocal());
+    setManualProof(null);
+    setShowManual(true);
+  }
+
+  async function recordManual() {
+    setManualError("");
+    if (!manualName.trim() || !manualEmail.trim().includes("@")) {
+      setManualError("Lessee contact name and email are required");
+      return;
+    }
+    if (!manualNote.trim()) {
+      setManualError("Note is required");
+      return;
+    }
+    setManualSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.set("decision", manualDecision);
+      fd.set("note", manualNote.trim());
+      fd.set("lesseeName", manualName.trim());
+      fd.set("lesseeEmail", manualEmail.trim());
+      fd.set("method", manualMethod);
+      if (manualReceivedAt) {
+        // Treat datetime-local as ET wall clock → ISO
+        fd.set("receivedAt", new Date(manualReceivedAt).toISOString());
+      }
+      fd.set("actor", "owner");
+      fd.set("actorRole", "owner");
+      if (manualProof) fd.set("proof", manualProof);
+      const res = await fetch(`/api/repair/estimates/${estimateId}/lessee-manual`, {
+        method: "POST",
+        body: fd,
+        headers: {
+          "x-repair-role": "owner",
+          "x-repair-actor": "owner",
+        },
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setManualError(data.error || "Manual record failed");
+        return;
+      }
+      setMsg(
+        data.badge ||
+          `Lessee ${manualDecision === "APPROVE" ? "accepted" : "rejected"} recorded manually.`,
+      );
+      setShowManual(false);
+      void loadLesseePanel();
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : "Manual record failed");
+    } finally {
+      setManualSubmitting(false);
+    }
+  }
+
+  async function undoManual() {
+    if (!undoReason.trim()) {
+      setError("Undo reason is required");
+      return;
+    }
+    setUndoSubmitting(true);
+    setError("");
+    try {
+      const res = await apiRequest(
+        "POST",
+        `/api/repair/estimates/${estimateId}/lessee-manual-undo`,
+        { reason: undoReason.trim(), actor: "owner", actorRole: "owner" },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Undo failed");
+        return;
+      }
+      setMsg("Manual lessee decision undone — send reopened.");
+      setShowUndo(false);
+      setUndoReason("");
+      void loadLesseePanel();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Undo failed");
+    } finally {
+      setUndoSubmitting(false);
+    }
   }
 
   useEffect(() => {
@@ -641,7 +772,9 @@ export default function EstimateReview() {
                     lesseePanel.ownerStatus !== "Accepted" &&
                     lesseePanel.ownerStatus !== "Rejected"
                       ? "Lessee response overdue"
-                      : lesseePanel.ownerStatus}
+                      : lesseePanel.badge ||
+                        lesseePanel.current?.badge ||
+                        lesseePanel.ownerStatus}
                   </strong>
                 </span>
                 {lesseePanel.current?.responseDueAtEt ? (
@@ -654,17 +787,9 @@ export default function EstimateReview() {
                     Send #{lesseePanel.current.sendVersion}
                   </span>
                 ) : null}
-                {lesseePanel.current?.decidedAtEt ? (
+                {lesseePanel.current?.manualRecordedBy ? (
                   <span className="text-xs text-muted-foreground">
-                    {lesseePanel.current.decidedAtEt}
-                  </span>
-                ) : null}
-                {lesseePanel.current?.respondentName ? (
-                  <span className="text-xs">
-                    {lesseePanel.current.respondentName}
-                    {lesseePanel.current.respondentEmail
-                      ? ` <${lesseePanel.current.respondentEmail}>`
-                      : ""}
+                    recorded by {lesseePanel.current.manualRecordedBy}
                   </span>
                 ) : null}
                 {lesseePanel.current?.comment ? (
@@ -685,43 +810,38 @@ export default function EstimateReview() {
                 >
                   Resend
                 </Link>
-                <button
-                  type="button"
-                  className="text-xs underline text-sky-700"
-                  onClick={() => setShowManual((v) => !v)}
-                >
-                  Record phone/email approval
-                </button>
+                {lesseePanel.canRecordManual !== false &&
+                (lesseePanel.ownerStatus === "Sent" ||
+                  lesseePanel.ownerStatus === "Viewed" ||
+                  lesseePanel.ownerStatus === "Overdue" ||
+                  lesseePanel.overdue) ? (
+                  <button
+                    type="button"
+                    className="text-xs underline text-sky-700"
+                    onClick={() => openManualDialog()}
+                  >
+                    Record lessee response
+                  </button>
+                ) : null}
+                {lesseePanel.canUndoManual ? (
+                  <button
+                    type="button"
+                    className="text-xs underline text-sky-700"
+                    onClick={() => {
+                      setUndoReason("");
+                      setShowUndo(true);
+                    }}
+                  >
+                    Undo manual decision
+                  </button>
+                ) : null}
               </div>
-              {showManual && (
-                <div className="flex flex-wrap gap-2 items-end">
-                  <Textarea
-                    className="text-xs min-h-[2.5rem] flex-1"
-                    placeholder="Required note (who / when / how)"
-                    value={manualNote}
-                    onChange={(e) => setManualNote(e.target.value)}
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => void recordManual("APPROVE")}
-                  >
-                    Record Accept
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void recordManual("REJECT")}
-                  >
-                    Record Reject
-                  </Button>
-                </div>
-              )}
               {lesseePanel.history.length > 0 && (
                 <div className="text-xs space-y-1 border-t border-border/60 pt-2">
                   <div className="font-medium text-muted-foreground">
                     Response history
                   </div>
-                  {lesseePanel.history.slice(0, 5).map((h) => (
+                  {lesseePanel.history.slice(0, 8).map((h) => (
                     <div key={h.id} className="flex flex-wrap gap-x-2">
                       <span className="font-medium">{h.decision}</span>
                       <span>via {h.channel}</span>
@@ -732,6 +852,11 @@ export default function EstimateReview() {
                             ? new Date(h.decidedAt).toLocaleString()
                             : "")}
                       </span>
+                      {h.recordedBy ? (
+                        <span className="text-muted-foreground">
+                          recorded by {h.recordedBy}
+                        </span>
+                      ) : null}
                       {h.respondentName ? (
                         <span>
                           {h.respondentName}
@@ -741,12 +866,179 @@ export default function EstimateReview() {
                       {h.comment ? (
                         <span className="text-muted-foreground">— {h.comment}</span>
                       ) : null}
+                      {h.proofDocumentId ? (
+                        <a
+                          className="underline text-sky-700"
+                          href={`/api/repair/documents/${h.proofDocumentId}/content`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {h.proofFilename || "Open proof"}
+                        </a>
+                      ) : null}
                     </div>
                   ))}
                 </div>
               )}
             </section>
           )}
+
+          <Dialog open={showManual} onOpenChange={setShowManual}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Record lessee response</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <div className="space-y-1">
+                  <Label>Decision</Label>
+                  <Select
+                    value={manualDecision}
+                    onValueChange={(v) =>
+                      setManualDecision(v === "REJECT" ? "REJECT" : "APPROVE")
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="APPROVE">Accept</SelectItem>
+                      <SelectItem value="REJECT">Reject</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="manual-lessee-name">Lessee contact name</Label>
+                    <Input
+                      id="manual-lessee-name"
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="manual-lessee-email">Lessee email</Label>
+                    <Input
+                      id="manual-lessee-email"
+                      type="email"
+                      value={manualEmail}
+                      onChange={(e) => setManualEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="manual-received">Date/time received (ET)</Label>
+                    <Input
+                      id="manual-received"
+                      type="datetime-local"
+                      value={manualReceivedAt}
+                      onChange={(e) => setManualReceivedAt(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Method</Label>
+                    <Select
+                      value={manualMethod}
+                      onValueChange={(v) =>
+                        setManualMethod(
+                          v === "phone" || v === "other" ? v : "email",
+                        )
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="email">Email</SelectItem>
+                        <SelectItem value="phone">Phone</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="manual-note">Note (required)</Label>
+                  <Textarea
+                    id="manual-note"
+                    className="min-h-[4rem]"
+                    value={manualNote}
+                    onChange={(e) => setManualNote(e.target.value)}
+                    placeholder="Who called / what was said / reference"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="manual-proof">
+                    Proof attachment (.msg / .eml / PDF) — optional
+                  </Label>
+                  <Input
+                    id="manual-proof"
+                    type="file"
+                    accept=".msg,.eml,.pdf,application/pdf,message/rfc822"
+                    onChange={(e) =>
+                      setManualProof(e.target.files?.[0] ?? null)
+                    }
+                  />
+                </div>
+                {manualError ? (
+                  <p className="text-sm text-red-600">{manualError}</p>
+                ) : null}
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowManual(false)}
+                  disabled={manualSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void recordManual()}
+                  disabled={manualSubmitting}
+                >
+                  {manualSubmitting ? "Saving…" : "Save"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={showUndo} onOpenChange={setShowUndo}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Undo manual lessee decision</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-2 text-sm">
+                <p className="text-muted-foreground">
+                  Reopens the send. History is kept (append-only).
+                </p>
+                <Label htmlFor="undo-reason">Reason (required)</Label>
+                <Textarea
+                  id="undo-reason"
+                  value={undoReason}
+                  onChange={(e) => setUndoReason(e.target.value)}
+                  className="min-h-[3.5rem]"
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowUndo(false)}
+                  disabled={undoSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void undoManual()}
+                  disabled={undoSubmitting}
+                >
+                  {undoSubmitting ? "Undoing…" : "Undo"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Compact header — no absolute pencil over car # */}
           {ctx && (

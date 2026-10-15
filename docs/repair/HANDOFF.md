@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§F r2 Lessee fixes** | Apply `rlms-phase1-owner-ui-f-lessee-r2.bundle` on tip **`fda2956`** (§F). Accept/Reject never silent (confirm lock + red errors + ET success banner); owner 30s poll + no-store status; BRC header/grid/sticky footer; Loc/WM/C/Resp hovers. Smoke: `npm run repair:smoke-lessee`. Typecheck: `npm run repair:typecheck-client-lessee`. |
+| **§F r3 Manual lessee decision** | Apply `rlms-phase1-owner-ui-f-lessee-r3.bundle` on tip **`d172911`** (§F r2). Owner/managing partner **Record lessee response** (Accept/Reject + proof .msg/.eml/PDF → Lessee Approval); closes link; clears overdue; badge Accepted (manual); undo (owner only). Smoke: `npm run repair:smoke-lessee`. Typecheck: `npm run repair:typecheck-client-lessee`. |
+| **§F r2 Lessee fixes** | Prior: `rlms-phase1-owner-ui-f-lessee-r2.bundle` on tip **`fda2956`** → **`d172911`**. Accept/Reject never silent; owner 30s poll + no-store; BRC header/grid/sticky footer; Loc/WM/C/Resp hovers. |
 | **§F Lessee screen** | Prior: `rlms-phase1-owner-ui-f-lessee.bundle` on tip **`81034cc`** → **`fda2956`**. Login-free signed link; Accept/Reject; 3 business days (≥72h); overdue never auto-approves. |
 | **§E r2 BRC PDF + Lessee email** | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on tip **`73b9e3d`** (§E Document Viewer). Billing Repair Card PDF (owner/lessee/shop filters); customary Resp6 email (subject/To/CC/body table/attachments); local `.eml` outbox. Smoke: `npm run repair:smoke-brc-email`. Typecheck: `npm run repair:typecheck-client-brc-email`. |
 | **§E Document Viewer** | Prior: `rlms-phase1-owner-ui-e-document-viewer.bundle` on tip **`ba5dc51`** → **`73b9e3d`**. File Attachments own-window from Estimate / BO / Wreck; left category list + right preview (image/PDF/500-byte/Office); filters; shop view-all non-voided + add-only; lessee granted-only; `owner_only` never to shop/lessee; bulk zip + Attach Send Lessee; required-docs checklist. Smoke: `npm run repair:smoke-documents`. Typecheck: `npm run repair:typecheck-client-documents`. |
@@ -52,7 +53,7 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r5 tip** (awaiting Bruce sign-off) |
 | **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **BUILD + hotfix + DV panel** (`ba5dc51`) |
 | **5 / §E** | Document Viewer (shot 03) + BRC PDF / Lessee email — [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on **`73b9e3d`** |
-| **6 / §F** | Lessee screen — [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) | Apply `rlms-phase1-owner-ui-f-lessee-r2.bundle` on **`fda2956`** |
+| **6 / §F** | Lessee screen — [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) | Apply `rlms-phase1-owner-ui-f-lessee-r3.bundle` on **`d172911`** |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) · [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md)  
 **Overall map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)
@@ -80,7 +81,21 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+23 | **`rlms-phase1-owner-ui-e-document-viewer.bundle`** (§E File Attachments) | **`ba5dc51`** | → **`73b9e3d`** |
 | N+24 | **`rlms-phase1-owner-ui-e-brc-email.bundle`** (§E r2 BRC PDF + Lessee email) | **`73b9e3d`** | → **`81034cc`** |
 | N+25 | **`rlms-phase1-owner-ui-f-lessee.bundle`** (§F Lessee screen) | **`81034cc`** | → **`fda2956`** |
-| N+26 | **`rlms-phase1-owner-ui-f-lessee-r2.bundle`** (§F r2 Accept bug + readability + hovers) | **`fda2956`** | → **(see README)** |
+| N+26 | **`rlms-phase1-owner-ui-f-lessee-r2.bundle`** (§F r2 Accept bug + readability + hovers) | **`fda2956`** | → **`d172911`** |
+| N+27 | **`rlms-phase1-owner-ui-f-lessee-r3.bundle`** (§F r3 manual lessee decision) | **`d172911`** | → **(see README)** |
+
+---
+
+## Apply §F r3 (on tip `d172911`)
+
+```powershell
+git rev-parse HEAD   # expect d172911…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-f-lessee-r3.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-f-lessee-r3.bundle HEAD
+npm run repair:migrate:local
+npm run repair:typecheck-client-lessee
+npm run repair:smoke-lessee
+```
 
 ---
 

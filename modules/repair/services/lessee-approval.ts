@@ -100,7 +100,7 @@ async function insertDecision(opts: {
   eventId: string;
   revisionId: string;
   lesseeEmail: string;
-  decision: "APPROVED" | "REJECTED";
+  decision: "APPROVED" | "REJECTED" | "UNDO";
   channel: "url" | "email_reply" | "manual";
   amountPresentedCents: number | null;
   comment?: string;
@@ -112,14 +112,19 @@ async function insertDecision(opts: {
   respondentEmail?: string;
   respondentIp?: string;
   sendVersion?: number | null;
+  proofDocumentId?: string | null;
+  manualMethod?: string | null;
+  manualReceivedAt?: string | null;
+  recordedBy?: string | null;
 }) {
   const { rows } = await q(
     `INSERT INTO repair.lessee_approval_decisions
        (tenant_id, approval_id, event_id, revision_id, lessee_email, decision,
         channel, amount_presented_cents, comment, inbound_email_id,
         confirmed_by_reviewer, confirmed_at, created_by,
-        respondent_name, respondent_email, respondent_ip, send_version)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        respondent_name, respondent_email, respondent_ip, send_version,
+        proof_document_id, manual_method, manual_received_at, recorded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
      RETURNING *`,
     [
       opts.tenantId,
@@ -139,9 +144,67 @@ async function insertDecision(opts: {
       opts.respondentEmail ?? null,
       opts.respondentIp ?? null,
       opts.sendVersion ?? null,
+      opts.proofDocumentId ?? null,
+      opts.manualMethod ?? null,
+      opts.manualReceivedAt ?? null,
+      opts.recordedBy ?? null,
     ],
   );
   return rows[0];
+}
+
+const MANUAL_APPROVED_STATUSES = new Set([
+  "APPROVED_MANUAL",
+  "MANUAL_APPROVED",
+]);
+const MANUAL_REJECTED_STATUSES = new Set([
+  "REJECTED_MANUAL",
+  "MANUAL_REJECTED",
+]);
+const DECIDED_STATUSES = new Set([
+  "APPROVED_VIA_LINK",
+  "REJECTED_VIA_LINK",
+  "REPLY_CONFIRMED",
+  "REPLY_REJECTED",
+  "APPROVED_MANUAL",
+  "REJECTED_MANUAL",
+  "MANUAL_APPROVED",
+  "MANUAL_REJECTED",
+]);
+const OPEN_SEND_STATUSES = new Set([
+  "PENDING",
+  "VIEWED",
+  "OVERDUE",
+  "REPLY_RECEIVED",
+]);
+
+export const LESSEE_LINK_CLOSED_MSG = "A response was already recorded";
+
+/** Owner badge label distinguishing manual accept/reject. */
+export function ownerStatusBadgeLabel(opts: {
+  ownerStatus: LesseeOwnerStatus;
+  status?: string | null;
+  respondentName?: string | null;
+  decidedAtEt?: string | null;
+}): string {
+  const st = String(opts.status ?? "");
+  const name = (opts.respondentName ?? "").trim();
+  const when = (opts.decidedAtEt ?? "").trim();
+  if (MANUAL_APPROVED_STATUSES.has(st) || (opts.ownerStatus === "Accepted" && st.includes("MANUAL"))) {
+    const base = "Accepted (manual)";
+    if (name && when) return `${base} – ${name}, ${when}`;
+    if (name) return `${base} – ${name}`;
+    if (when) return `${base} – ${when}`;
+    return base;
+  }
+  if (MANUAL_REJECTED_STATUSES.has(st) || (opts.ownerStatus === "Rejected" && st.includes("MANUAL"))) {
+    const base = "Rejected (manual)";
+    if (name && when) return `${base} – ${name}, ${when}`;
+    if (name) return `${base} – ${name}`;
+    if (when) return `${base} – ${when}`;
+    return base;
+  }
+  return opts.ownerStatus;
 }
 
 export function mapApprovalToOwnerStatus(row: {
@@ -155,14 +218,14 @@ export function mapApprovalToOwnerStatus(row: {
   if (
     st === "APPROVED_VIA_LINK" ||
     st === "REPLY_CONFIRMED" ||
-    st === "MANUAL_APPROVED"
+    MANUAL_APPROVED_STATUSES.has(st)
   ) {
     return "Accepted";
   }
   if (
     st === "REJECTED_VIA_LINK" ||
     st === "REPLY_REJECTED" ||
-    st === "MANUAL_REJECTED"
+    MANUAL_REJECTED_STATUSES.has(st)
   ) {
     return "Rejected";
   }
@@ -480,15 +543,16 @@ export async function approveViaLesseeLink(opts: {
   if (approval.status === "SUPERSEDED") {
     return { ok: false as const, status: 410, error: "This link was superseded by a newer send" };
   }
-  if (
-    !["PENDING", "VIEWED", "OVERDUE", "REPLY_RECEIVED"].includes(
-      String(approval.status),
-    )
-  ) {
+  if (!OPEN_SEND_STATUSES.has(String(approval.status))) {
+    const closed =
+      String(approval.link_closed_message ?? "").trim() ||
+      LESSEE_LINK_CLOSED_MSG;
     return {
       ok: false as const,
       status: 409,
-      error: `Already ${approval.status} — link is read-only`,
+      error: DECIDED_STATUSES.has(String(approval.status))
+        ? closed
+        : `Already ${approval.status} — link is read-only`,
     };
   }
 
@@ -914,16 +978,11 @@ export async function getLesseeViewForToken(rawToken: string) {
 
   const amountPresentedDollars = bundle.totalCents / 100;
   const decided =
-    approval &&
-    [
-      "APPROVED_VIA_LINK",
-      "REJECTED_VIA_LINK",
-      "REPLY_CONFIRMED",
-      "REPLY_REJECTED",
-      "MANUAL_APPROVED",
-      "MANUAL_REJECTED",
-    ].includes(String(approval.status));
+    approval && DECIDED_STATUSES.has(String(approval.status));
   const canDecide = !decided;
+  const closedMessage = decided
+    ? String(approval?.link_closed_message ?? LESSEE_LINK_CLOSED_MSG)
+    : null;
   const ownerStatus = approval
     ? mapApprovalToOwnerStatus(approval)
     : ("None" as LesseeOwnerStatus);
@@ -1032,6 +1091,7 @@ export async function getLesseeViewForToken(rawToken: string) {
       : null,
     readOnly: true,
     canDecide,
+    closedMessage,
     canPencilEdit: false,
     hideAppNav: true,
     note: "",
@@ -1152,9 +1212,13 @@ export async function flagLesseeOverdueIfNeeded(opts: {
 export async function getOwnerLesseePanel(opts: {
   estimateId: string;
   tenantId?: string;
+  actorRole?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   await flagLesseeOverdueIfNeeded(opts);
+  const { canRecordManualLessee, canUndoManualLessee } = await import(
+    "./documents-viewer"
+  );
 
   const { rows: approvals } = await q(
     `SELECT *
@@ -1178,11 +1242,24 @@ export async function getOwnerLesseePanel(opts: {
   const ownerStatus = current
     ? mapApprovalToOwnerStatus(current)
     : ("None" as LesseeOwnerStatus);
+  const badge = current
+    ? ownerStatusBadgeLabel({
+        ownerStatus,
+        status: current.status,
+        respondentName: current.respondent_name,
+        decidedAtEt: formatDueEt(current.decided_at ?? current.manual_received_at),
+      })
+    : ownerStatus;
 
   const { rows: history } = await q(
-    `SELECT d.*, a.send_version, a.revision_id
+    `SELECT d.*, a.send_version, a.revision_id,
+            doc.original_filename AS proof_filename,
+            doc.id AS proof_doc_id
      FROM repair.lessee_approval_decisions d
      JOIN repair.lessee_approvals a ON a.id = d.approval_id
+     LEFT JOIN repair.documents doc
+       ON doc.id = COALESCE(d.proof_document_id, a.proof_document_id)
+      AND doc.deleted_at IS NULL
      WHERE a.estimate_id = $1 AND a.tenant_id = $2
      ORDER BY d.decided_at DESC, d.created_at DESC`,
     [opts.estimateId, tenantId],
@@ -1194,22 +1271,36 @@ export async function getOwnerLesseePanel(opts: {
     [opts.estimateId, tenantId],
   );
 
+  const openForManual =
+    !!current && OPEN_SEND_STATUSES.has(String(current.status));
+  const isManualDecided =
+    !!current &&
+    (MANUAL_APPROVED_STATUSES.has(String(current.status)) ||
+      MANUAL_REJECTED_STATUSES.has(String(current.status)));
+
   return {
     ownerStatus,
+    badge,
     overdue: Boolean(est[0]?.lessee_response_overdue) || ownerStatus === "Overdue",
     overdueAt: est[0]?.lessee_response_overdue_at ?? null,
     /** Tip for clients: always revalidate; do not cache this panel. */
     cacheControl: "no-store",
+    canRecordManual:
+      canRecordManualLessee(opts.actorRole) && openForManual,
+    canUndoManual: canUndoManualLessee(opts.actorRole) && isManualDecided,
     current: current
       ? {
           id: current.id,
           status: current.status,
           ownerStatus,
+          badge,
           responseDueAt: current.response_due_at ?? null,
           responseDueAtEt: formatDueEt(current.response_due_at),
           viewedAt: current.viewed_at ?? null,
           decidedAt: current.decided_at ?? null,
-          decidedAtEt: formatDueEt(current.decided_at),
+          decidedAtEt: formatDueEt(
+            current.decided_at ?? current.manual_received_at,
+          ),
           sendVersion:
             current.send_version != null ? Number(current.send_version) : null,
           revisionId: current.revision_id ?? null,
@@ -1221,12 +1312,28 @@ export async function getOwnerLesseePanel(opts: {
           respondentName: current.respondent_name ?? null,
           respondentEmail: current.respondent_email ?? null,
           lesseeEmail: current.lessee_email,
+          manualMethod: current.manual_method ?? null,
+          manualReceivedAt: current.manual_received_at ?? null,
+          manualReceivedAtEt: formatDueEt(current.manual_received_at),
+          manualRecordedBy: current.manual_recorded_by ?? null,
+          proofDocumentId: current.proof_document_id
+            ? String(current.proof_document_id)
+            : null,
+          isManual:
+            MANUAL_APPROVED_STATUSES.has(String(current.status)) ||
+            MANUAL_REJECTED_STATUSES.has(String(current.status)),
         }
       : null,
     sends: approvals.map((a) => ({
       id: a.id,
       status: a.status,
       ownerStatus: mapApprovalToOwnerStatus(a),
+      badge: ownerStatusBadgeLabel({
+        ownerStatus: mapApprovalToOwnerStatus(a),
+        status: a.status,
+        respondentName: a.respondent_name,
+        decidedAtEt: formatDueEt(a.decided_at ?? a.manual_received_at),
+      }),
       sendVersion: a.send_version != null ? Number(a.send_version) : null,
       revisionId: a.revision_id ?? null,
       createdAt: a.created_at,
@@ -1251,92 +1358,207 @@ export async function getOwnerLesseePanel(opts: {
       sendVersion: h.send_version != null ? Number(h.send_version) : null,
       revisionId: h.revision_id ?? null,
       confirmedByReviewer: h.confirmed_by_reviewer,
+      recordedBy: h.recorded_by ?? h.confirmed_by_reviewer ?? null,
+      manualMethod: h.manual_method ?? null,
+      proofDocumentId: h.proof_doc_id ? String(h.proof_doc_id) : null,
+      proofFilename: h.proof_filename ?? null,
     })),
   };
 }
 
 /**
- * Owner records phone/email approval manually with a note.
- * Used when window passed or lessee responded off-link. Never silent.
+ * Owner / managing partner records Accept/Reject off-link against the
+ * current Sent/Viewed/Overdue send (exact revision lines + total).
+ * Closes the lessee link; clears overdue; optional proof (.msg/.eml/PDF).
  */
 export async function recordManualLesseeDecision(opts: {
   estimateId: string;
   decision: "APPROVE" | "REJECT";
   note: string;
   actor: string;
+  actorRole?: string;
+  lesseeName?: string;
   lesseeEmail?: string;
+  method?: "email" | "phone" | "other" | string;
+  receivedAt?: string | Date | null;
+  proof?: {
+    filename: string;
+    mime: string;
+    bytes: Buffer;
+  } | null;
   tenantId?: string;
 }) {
+  const { canRecordManualLessee } = await import("./documents-viewer");
+  if (!canRecordManualLessee(opts.actorRole)) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "Owner or managing partner only",
+    };
+  }
+
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const note = opts.note.trim();
   if (!note) {
-    return { ok: false as const, status: 400, error: "Note is required for manual recording" };
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Note is required for manual recording",
+    };
   }
+  const lesseeName = (opts.lesseeName ?? "").trim();
+  const lesseeEmail = (opts.lesseeEmail ?? "").trim().toLowerCase();
+  if (!lesseeName || !lesseeEmail.includes("@")) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Lessee contact name and email are required",
+    };
+  }
+  const methodRaw = String(opts.method ?? "other").trim().toLowerCase();
+  const method =
+    methodRaw === "email" || methodRaw === "phone" ? methodRaw : "other";
+
+  let receivedAt: Date;
+  if (opts.receivedAt) {
+    receivedAt =
+      opts.receivedAt instanceof Date
+        ? opts.receivedAt
+        : new Date(String(opts.receivedAt));
+    if (Number.isNaN(receivedAt.getTime())) {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Invalid date/time received",
+      };
+    }
+  } else {
+    receivedAt = new Date();
+  }
+
+  if (opts.proof) {
+    const name = opts.proof.filename.toLowerCase();
+    const okExt =
+      name.endsWith(".msg") ||
+      name.endsWith(".eml") ||
+      name.endsWith(".pdf") ||
+      opts.proof.mime === "application/pdf" ||
+      opts.proof.mime === "message/rfc822" ||
+      opts.proof.mime === "application/vnd.ms-outlook";
+    if (!okExt) {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Proof attachment must be .msg, .eml, or PDF",
+      };
+    }
+  }
+
   const decision = opts.decision === "APPROVE" ? "APPROVED" : "REJECTED";
   const status =
-    decision === "APPROVED" ? "MANUAL_APPROVED" : "MANUAL_REJECTED";
+    decision === "APPROVED" ? "APPROVED_MANUAL" : "REJECTED_MANUAL";
 
+  // Prefer live non-SUPERSEDED open send (Sent / Viewed / Overdue)
   const { rows: open } = await q(
     `SELECT * FROM repair.lessee_approvals
      WHERE estimate_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
        AND status IN ('PENDING', 'VIEWED', 'OVERDUE', 'REPLY_RECEIVED')
-     ORDER BY created_at DESC LIMIT 1`,
+     ORDER BY COALESCE(send_version, 0) DESC, created_at DESC
+     LIMIT 1`,
     [opts.estimateId, tenantId],
   );
-
+  if (!open[0]) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "No open lessee send (Sent, Viewed, or Overdue) to record against",
+    };
+  }
   let approval = open[0];
-  if (!approval) {
-    // Create a shell approval if none open (owner documenting off-system response)
-    const { rows: est } = await q(
-      `SELECT e.id AS estimate_id, e.event_id, e.entity_code,
-              (SELECT id FROM repair.estimate_revisions
-               WHERE estimate_id = e.id ORDER BY rev_no DESC LIMIT 1) AS revision_id
-       FROM repair.estimates e
-       WHERE e.id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL`,
-      [opts.estimateId, tenantId],
-    );
-    if (!est[0]?.revision_id) {
-      return { ok: false as const, status: 404, error: "Estimate not found" };
+
+  // Snapshot exact lines + total for this send's revision
+  const amountCents =
+    approval.amount_presented_cents != null
+      ? Number(approval.amount_presented_cents)
+      : await resp6AmountCents(String(approval.revision_id));
+
+  let proofDocumentId: string | null = null;
+  if (opts.proof) {
+    const { uploadEventDocument } = await import("./estimates");
+    const { setDocumentOwnerOnly } = await import("./documents-viewer");
+    const uploaded = await uploadEventDocument({
+      eventId: String(approval.event_id),
+      tenantId,
+      kind: "lessee_approval",
+      categoryCode: "lessee_approval",
+      comment: `Lessee response proof (send #${approval.send_version ?? "?"}) — recorded by ${opts.actor}`,
+      actorEmail: opts.actor,
+      file: opts.proof,
+    });
+    if (!uploaded.ok) {
+      return {
+        ok: false as const,
+        status: uploaded.status,
+        error: uploaded.error,
+      };
     }
-    const amountCents = await resp6AmountCents(String(est[0].revision_id));
-    const { rows: created } = await q(
-      `INSERT INTO repair.lessee_approvals
-         (tenant_id, event_id, estimate_id, revision_id, lessee_email, status,
-          channel, amount_presented_cents, amount_presented, decision, comment,
-          decided_at, manual_note, manual_recorded_by, created_by, send_version)
-       VALUES ($1,$2,$3,$4,$5,$6,'manual',$7,$8,$9,$10,now(),$10,$11,$11,
-               COALESCE((SELECT MAX(send_version) FROM repair.lessee_approvals WHERE estimate_id=$3),0))
-       RETURNING *`,
-      [
-        tenantId,
-        est[0].event_id,
-        opts.estimateId,
-        est[0].revision_id,
-        (opts.lesseeEmail ?? "manual@recorded").trim().toLowerCase(),
-        status,
-        amountCents,
-        amountCents / 100,
-        decision,
-        note,
-        opts.actor,
-      ],
-    );
-    approval = created[0];
-  } else {
-    const { rows: updated } = await q(
-      `UPDATE repair.lessee_approvals
-       SET status = $2, decision = $3, channel = 'manual', decided_at = now(),
-           comment = $4, manual_note = $4, manual_recorded_by = $5
-       WHERE id = $1
-       RETURNING *`,
-      [approval.id, status, decision, note, opts.actor],
-    );
-    approval = updated[0];
+    proofDocumentId = String(uploaded.document.id);
+    await setDocumentOwnerOnly({
+      documentId: proofDocumentId,
+      ownerOnly: true,
+      actor: opts.actor,
+      actorRole: opts.actorRole ?? "owner",
+      tenantId,
+    });
   }
 
+  const { rows: updated } = await q(
+    `UPDATE repair.lessee_approvals
+     SET status = $2,
+         decision = $3,
+         channel = 'manual',
+         decided_at = $4,
+         comment = $5,
+         manual_note = $5,
+         manual_recorded_by = $6,
+         manual_method = $7,
+         manual_received_at = $4,
+         respondent_name = $8,
+         respondent_email = $9,
+         lessee_email = $9,
+         proof_document_id = COALESCE($10, proof_document_id),
+         link_closed_message = $11,
+         amount_presented_cents = $12,
+         amount_presented = $13,
+         manual_undone_at = NULL,
+         manual_undo_reason = NULL,
+         manual_undo_by = NULL
+     WHERE id = $1
+     RETURNING *`,
+    [
+      approval.id,
+      status,
+      decision,
+      receivedAt.toISOString(),
+      note,
+      opts.actor,
+      method,
+      lesseeName,
+      lesseeEmail,
+      proofDocumentId,
+      LESSEE_LINK_CLOSED_MSG,
+      amountCents,
+      amountCents / 100,
+    ],
+  );
+  approval = updated[0];
+
+  // Clear overdue flag on recorded response
   await q(
     `UPDATE repair.estimates
-     SET lessee_response_overdue = false
+     SET lessee_response_overdue = false,
+         lessee_response_overdue_at = NULL
      WHERE id = $1`,
     [opts.estimateId],
   );
@@ -1346,18 +1568,22 @@ export async function recordManualLesseeDecision(opts: {
     approvalId: approval.id,
     eventId: approval.event_id,
     revisionId: approval.revision_id,
-    lesseeEmail: approval.lessee_email,
+    lesseeEmail,
     decision,
     channel: "manual",
-    amountPresentedCents: approval.amount_presented_cents
-      ? Number(approval.amount_presented_cents)
-      : null,
+    amountPresentedCents: amountCents,
     comment: note,
     confirmedByReviewer: opts.actor,
-    confirmedAt: new Date().toISOString(),
+    confirmedAt: receivedAt.toISOString(),
     actor: opts.actor,
+    respondentName: lesseeName,
+    respondentEmail: lesseeEmail,
     sendVersion:
       approval.send_version != null ? Number(approval.send_version) : null,
+    proofDocumentId,
+    manualMethod: method,
+    manualReceivedAt: receivedAt.toISOString(),
+    recordedBy: opts.actor,
   });
 
   await writeLesseeRevision({
@@ -1365,11 +1591,11 @@ export async function recordManualLesseeDecision(opts: {
     estimateId: opts.estimateId,
     action:
       decision === "APPROVED"
-        ? "Responsibility 6 Accepted (manual / phone-email)"
-        : "Responsibility 6 Rejected (manual / phone-email)",
+        ? "Responsibility 6 Accepted (manual)"
+        : "Responsibility 6 Rejected (manual)",
     actor: opts.actor,
-    amountCents: Number(approval.amount_presented_cents ?? 0),
-    comment: note,
+    amountCents,
+    comment: `recorded by ${opts.actor}: ${note}`,
   });
 
   await writeAudit({
@@ -1377,12 +1603,202 @@ export async function recordManualLesseeDecision(opts: {
     entity: "lessee_approval",
     entityId: approval.id,
     action: "LESSEE_MANUAL_DECISION",
-    after: { decision, note },
+    after: {
+      decision,
+      status,
+      note,
+      method,
+      receivedAt: receivedAt.toISOString(),
+      lesseeName,
+      lesseeEmail,
+      proofDocumentId,
+      amountPresentedCents: amountCents,
+      sendVersion: approval.send_version,
+      recordedBy: opts.actor,
+      linkClosedMessage: LESSEE_LINK_CLOSED_MSG,
+    },
     actor: opts.actor,
     via: "UI",
   });
 
-  return { ok: true as const, approval, decision, channel: "manual" as const };
+  return {
+    ok: true as const,
+    approval,
+    decision,
+    status,
+    channel: "manual" as const,
+    proofDocumentId,
+    badge: ownerStatusBadgeLabel({
+      ownerStatus: decision === "APPROVED" ? "Accepted" : "Rejected",
+      status,
+      respondentName: lesseeName,
+      decidedAtEt: formatDueEt(receivedAt),
+    }),
+    closedMessage: LESSEE_LINK_CLOSED_MSG,
+  };
+}
+
+/**
+ * Owner-only undo of a manual lessee decision. Reopens the send (Sent).
+ * Never deletes history — appends an UNDO decision row.
+ */
+export async function undoManualLesseeDecision(opts: {
+  estimateId: string;
+  reason: string;
+  actor: string;
+  actorRole?: string;
+  tenantId?: string;
+}) {
+  const { canUndoManualLessee } = await import("./documents-viewer");
+  if (!canUndoManualLessee(opts.actorRole)) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "Owner only",
+    };
+  }
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const reason = opts.reason.trim();
+  if (!reason) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Undo reason is required",
+    };
+  }
+
+  const { rows } = await q(
+    `SELECT * FROM repair.lessee_approvals
+     WHERE estimate_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+       AND status IN (
+         'APPROVED_MANUAL', 'REJECTED_MANUAL',
+         'MANUAL_APPROVED', 'MANUAL_REJECTED'
+       )
+     ORDER BY COALESCE(send_version, 0) DESC, created_at DESC
+     LIMIT 1`,
+    [opts.estimateId, tenantId],
+  );
+  if (!rows[0]) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "No manual lessee decision to undo",
+    };
+  }
+  const approval = rows[0];
+  const priorStatus = String(approval.status);
+  // Brief/smoke: undo restores Sent (PENDING). Bump due if past so
+  // flagLesseeOverdueIfNeeded does not immediately re-stamp Overdue.
+  const reopenStatus = "PENDING";
+  const cfg = await loadLesseeWindowConfig({
+    tenantId,
+    entityCode: approval.entity_code ? String(approval.entity_code) : null,
+  });
+  const newDue = computeResponseDueAt(
+    new Date(),
+    cfg.businessDays,
+    cfg.minHours,
+    cfg.holidays,
+  );
+  const newLinkExp = computeLinkExpiresAt(newDue);
+
+  const { rows: updated } = await q(
+    `UPDATE repair.lessee_approvals
+     SET status = $2,
+         decision = NULL,
+         channel = COALESCE(channel, 'url'),
+         decided_at = NULL,
+         comment = NULL,
+         link_closed_message = NULL,
+         overdue_flagged_at = NULL,
+         response_due_at = $5,
+         link_expires_at = $6,
+         manual_undone_at = now(),
+         manual_undo_reason = $3,
+         manual_undo_by = $4
+     WHERE id = $1
+     RETURNING *`,
+    [
+      approval.id,
+      reopenStatus,
+      reason,
+      opts.actor,
+      newDue.toISOString(),
+      newLinkExp.toISOString(),
+    ],
+  );
+
+  await q(
+    `UPDATE repair.estimates
+     SET lessee_response_overdue = false,
+         lessee_response_overdue_at = NULL
+     WHERE id = $1`,
+    [opts.estimateId],
+  );
+
+  if (approval.link_id) {
+    await q(
+      `UPDATE repair.event_links
+       SET expires_at = $2, revoked_at = NULL, revoked_by = NULL
+       WHERE id = $1`,
+      [approval.link_id, newLinkExp.toISOString()],
+    );
+  }
+
+  await insertDecision({
+    tenantId,
+    approvalId: approval.id,
+    eventId: approval.event_id,
+    revisionId: approval.revision_id,
+    lesseeEmail: approval.lessee_email,
+    decision: "UNDO",
+    channel: "manual",
+    amountPresentedCents: approval.amount_presented_cents
+      ? Number(approval.amount_presented_cents)
+      : null,
+    comment: reason,
+    actor: opts.actor,
+    respondentName: approval.respondent_name ?? undefined,
+    respondentEmail: approval.respondent_email ?? undefined,
+    sendVersion:
+      approval.send_version != null ? Number(approval.send_version) : null,
+    proofDocumentId: approval.proof_document_id
+      ? String(approval.proof_document_id)
+      : null,
+    recordedBy: opts.actor,
+  });
+
+  await writeLesseeRevision({
+    tenantId,
+    estimateId: opts.estimateId,
+    action: "Responsibility 6 manual decision undone",
+    actor: opts.actor,
+    amountCents: Number(approval.amount_presented_cents ?? 0),
+    comment: `undo by ${opts.actor}: ${reason}`,
+  });
+
+  await writeAudit({
+    tenantId,
+    entity: "lessee_approval",
+    entityId: approval.id,
+    action: "LESSEE_MANUAL_UNDO",
+    after: {
+      priorStatus,
+      reopenStatus,
+      reason,
+      undoneBy: opts.actor,
+      responseDueAt: newDue.toISOString(),
+    },
+    actor: opts.actor,
+    via: "UI",
+  });
+
+  return {
+    ok: true as const,
+    approval: updated[0],
+    reopenStatus,
+    ownerStatus: mapApprovalToOwnerStatus(updated[0]),
+  };
 }
 
 /** Lessee download of Resp6 PDF / 500-byte for this send only. */

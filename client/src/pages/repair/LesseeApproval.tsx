@@ -175,6 +175,10 @@ export default function LesseeApproval() {
     setTotalCents(cents);
     setAmountMoney(String(data.amountMoney ?? formatDisplayMoney(cents)));
     setCanDecide(data.canDecide !== false);
+    const closedMessage =
+      typeof data.closedMessage === "string" && data.closedMessage.trim()
+        ? data.closedMessage.trim()
+        : null;
     const approval = (data.approval ?? null) as {
       decision?: string | null;
       decidedAt?: string | null;
@@ -183,6 +187,7 @@ export default function LesseeApproval() {
       respondentEmail?: string | null;
       comment?: string | null;
       responseDueAtEt?: string | null;
+      status?: string | null;
     } | null;
     setDueEt(approval?.responseDueAtEt ?? null);
     setDecisionMeta(
@@ -197,7 +202,14 @@ export default function LesseeApproval() {
         : null,
     );
     setDownloads((data.downloads as typeof downloads) ?? {});
-    if (approval?.decision === "APPROVED") {
+    const status = String(approval?.status ?? "");
+    const isManual =
+      status.includes("MANUAL") ||
+      status === "APPROVED_MANUAL" ||
+      status === "REJECTED_MANUAL";
+    if (data.canDecide === false && closedMessage && isManual) {
+      setDone(closedMessage);
+    } else if (approval?.decision === "APPROVED") {
       const when = approval.decidedAtEt || formatEt(approval.decidedAt);
       const who = approval.respondentName || "lessee";
       setDone(`Accepted on ${when} by ${who}. Thank you.`);
@@ -205,6 +217,8 @@ export default function LesseeApproval() {
       const when = approval.decidedAtEt || formatEt(approval.decidedAt);
       const who = approval.respondentName || "lessee";
       setDone(`Rejected on ${when} by ${who}. This link is now read-only.`);
+    } else if (data.canDecide === false && closedMessage) {
+      setDone(closedMessage);
     }
   }, []);
 
@@ -326,7 +340,8 @@ export default function LesseeApproval() {
       let msg = err instanceof Error ? err.message : "Decision failed";
       if (status === 400) msg = msg || "Bad request (400)";
       else if (status === 401) msg = msg || "Invalid or expired link (401)";
-      else if (status === 409) msg = msg || "Already decided — link is read-only (409)";
+      else if (status === 409)
+        msg = msg || "A response was already recorded";
       else if (!status) msg = `Network error: ${msg}`;
       setError(msg);
       setErrorStatus(status ?? null);

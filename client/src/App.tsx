@@ -51,6 +51,9 @@ import ShopProfile from "@/pages/repair/ShopProfile";
 import RepairAdmin from "@/pages/repair/RepairAdmin";
 import ReferenceData from "@/pages/repair/ReferenceData";
 import WreckEvent from "@/pages/repair/WreckEvent";
+import ShopPortal from "@/pages/repair/ShopPortal";
+import ShopBoDetail from "@/pages/repair/ShopBoDetail";
+import ShopEstimateDetail from "@/pages/repair/ShopEstimateDetail";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -127,6 +130,10 @@ function AppRouter() {
       <Route path="/repair/e/:token" component={ShopEventLink} />
       <Route path="/repair/lessee/:token/documents" component={LesseeDocuments} />
       <Route path="/repair/lessee/:token" component={LesseeApproval} />
+      {/* §G Shop portal — own shop mark */}
+      <Route path="/repair/shop/events/:eventId" component={ShopBoDetail} />
+      <Route path="/repair/shop/estimates/:id" component={ShopEstimateDetail} />
+      <Route path="/repair/shop" component={ShopPortal} />
       {/* Owner module placeholders — before /repair/estimates/:id so "brc" is not treated as an id */}
       <Route path="/repair/estimates/brc" component={RepairComingSoon} />
       <Route path="/repair/bad-orders" component={BadOrders} />

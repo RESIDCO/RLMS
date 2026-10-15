@@ -212,6 +212,24 @@ import {
 } from "./services/send-lessee";
 import { buildBrcPdf, type BrcAudience } from "./services/brc-pdf";
 import {
+  shopPortalHome,
+  shopBoDetail,
+  shopValidatePreview,
+  shopSubmitEstimate,
+  shopWithdrawEstimate,
+  shopResubmitEstimate,
+  shopDownloadBrc,
+  shopDownloadDataFile,
+  shopEstimateDetail,
+  notifyShopEstimateDecision,
+} from "./services/shop-portal";
+import {
+  getRailincValidator,
+  listValidationRules,
+  persistValidationRun,
+  getValidationForRevision,
+} from "./services/railinc-validator";
+import {
   listViewerDocuments,
   getDocumentContent,
   decodeAar500Preview,
@@ -318,6 +336,28 @@ function roleFrom(req: Request): string {
       req.query.actorRole ||
       "reviewer",
   );
+}
+
+function shopMarkFrom(req: Request): string {
+  return String(
+    req.headers["x-repair-shop-mark"] ||
+      req.body?.shopMark ||
+      req.query.shopMark ||
+      "",
+  ).trim();
+}
+
+function shopActorFrom(req: Request) {
+  return {
+    role: roleFrom(req) || "shop",
+    shopMark: shopMarkFrom(req),
+    shopId: req.headers["x-repair-shop-id"]
+      ? String(req.headers["x-repair-shop-id"])
+      : req.body?.shopId
+        ? String(req.body.shopId)
+        : null,
+    actor: actorFrom(req),
+  };
 }
 
 /** Call BEFORE global /api auth middleware. */
@@ -2043,6 +2083,13 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       comment: req.body?.comment ? String(req.body.comment) : undefined,
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
+    const reasons = req.body?.comment ? [String(req.body.comment)] : [];
+    await notifyShopEstimateDecision({
+      estimateId: String(req.params.id),
+      type: "ESTIMATE_REJECTED",
+      reasons,
+      actor: actorFrom(req),
+    }).catch(() => undefined);
     return res.json(result);
   });
 
@@ -2055,6 +2102,11 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       comment: req.body?.comment ? String(req.body.comment) : undefined,
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
+    await notifyShopEstimateDecision({
+      estimateId: String(req.params.id),
+      type: "ESTIMATE_APPROVED",
+      actor: actorFrom(req),
+    }).catch(() => undefined);
     return res.json(result);
   });
 
@@ -3573,11 +3625,56 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
   app.get("/api/repair/estimates/:id/railinc-validate", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
+    // Prefer stub Railinc validator over regenerated CRIP check when bytes available
+    const exported = await exportEstimatesAar500({
+      estimateIds: [String(req.params.id)],
+    });
+    const file = exported.files[0];
+    if (file?.content) {
+      const validator = getRailincValidator();
+      const validation = await validator.validate({
+        bytes: Buffer.from(file.content, "latin1"),
+        mode: "ESTIMATE",
+      });
+      const { rows: rev } = await q(
+        `SELECT id FROM repair.estimate_revisions
+         WHERE estimate_id = $1 ORDER BY rev_no DESC LIMIT 1`,
+        [String(req.params.id)],
+      );
+      await persistValidationRun({
+        estimateId: String(req.params.id),
+        revisionId: rev[0] ? String(rev[0].id) : null,
+        result: validation,
+        actor: actorFrom(req),
+      });
+      return res.json({
+        ok: true,
+        filename: file.filename,
+        validation,
+        stored: true,
+      });
+    }
     const result = await runRailincValidation({
       estimateId: String(req.params.id),
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
+  });
+
+  app.get("/api/repair/estimates/:id/validation", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const stored = await getValidationForRevision({
+      estimateId: String(req.params.id),
+      revisionId: req.query.revisionId ? String(req.query.revisionId) : null,
+    });
+    return res.json({ ok: true, validation: stored });
+  });
+
+  app.get("/api/repair/validation-rules", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ rules: await listValidationRules() });
   });
 
   app.post("/api/repair/events/:id/tank-car", async (req, res) => {
@@ -4285,5 +4382,160 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.json({
       wreck: omitOwnerDv(wreck as unknown as Record<string, unknown>),
     });
+  });
+
+  // ── §G Shop portal (own shop mark only) ─────────────────────────────
+
+  app.get("/api/repair/shop/home", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopPortalHome({
+      ...shopActorFrom(req),
+      carInitial: req.query.carInitial ? String(req.query.carInitial) : undefined,
+      carNumber: req.query.carNumber ? String(req.query.carNumber) : undefined,
+      status: req.query.status ? String(req.query.status) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/shop/events/:eventId", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopBoDetail({
+      ...shopActorFrom(req),
+      eventId: String(req.params.eventId),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/shop/estimates/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopEstimateDetail({
+      ...shopActorFrom(req),
+      estimateId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/shop/validate", upload.single("file"), async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const file = req.file;
+    const lines = Array.isArray(req.body?.lines)
+      ? req.body.lines
+      : req.body?.linesJson
+        ? JSON.parse(String(req.body.linesJson))
+        : undefined;
+    const result = await shopValidatePreview({
+      ...shopActorFrom(req),
+      bytes: file?.buffer,
+      filename: file?.originalname,
+      lines,
+      mode: req.body?.mode === "FINAL_INVOICE" ? "FINAL_INVOICE" : "ESTIMATE",
+    });
+    if (!result.ok) {
+      return res
+        .status(result.status)
+        .json({ error: result.error, validation: result.validation });
+    }
+    return res.json(result);
+  });
+
+  app.post(
+    "/api/repair/shop/events/:eventId/submit-estimate",
+    upload.single("file"),
+    async (req, res) => {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const file = req.file;
+      const lines = Array.isArray(req.body?.lines)
+        ? req.body.lines
+        : req.body?.linesJson
+          ? JSON.parse(String(req.body.linesJson))
+          : undefined;
+      const result = await shopSubmitEstimate({
+        ...shopActorFrom(req),
+        eventId: String(req.params.eventId),
+        bytes: file?.buffer,
+        filename: file?.originalname,
+        lines,
+        comment: req.body?.comment ? String(req.body.comment) : undefined,
+      });
+      if (!result.ok) {
+        return res.status(result.status ?? 400).json(result);
+      }
+      return res.json(result);
+    },
+  );
+
+  app.post("/api/repair/shop/estimates/:id/withdraw", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopWithdrawEstimate({
+      ...shopActorFrom(req),
+      estimateId: String(req.params.id),
+      reason: req.body?.reason ? String(req.body.reason) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post(
+    "/api/repair/shop/estimates/:id/resubmit",
+    upload.single("file"),
+    async (req, res) => {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      if (!req.file?.buffer) {
+        return res.status(400).json({ error: "file required for resubmit" });
+      }
+      const result = await shopResubmitEstimate({
+        ...shopActorFrom(req),
+        estimateId: String(req.params.id),
+        bytes: req.file.buffer,
+        filename: req.file.originalname || "resubmit.txt",
+        comment: req.body?.comment ? String(req.body.comment) : undefined,
+      });
+      if (!result.ok) {
+        return res.status(result.status ?? 400).json(result);
+      }
+      return res.json(result);
+    },
+  );
+
+  app.get("/api/repair/shop/estimates/:id/brc-pdf", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopDownloadBrc({
+      ...shopActorFrom(req),
+      estimateId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="BRC_shop_${String(req.params.id).slice(0, 8)}.pdf"`,
+    );
+    return res.send(result.bytes);
+  });
+
+  app.get("/api/repair/shop/estimates/:id/data-file", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopDownloadDataFile({
+      ...shopActorFrom(req),
+      estimateId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.setHeader("Content-Type", "text/plain; charset=latin1");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${result.filename}"`,
+    );
+    return res.send(Buffer.from(result.content, "latin1"));
   });
 }

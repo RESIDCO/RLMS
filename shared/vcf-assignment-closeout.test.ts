@@ -7,6 +7,7 @@ import {
   openPeriodMatchKey,
   planVcfAssignmentCloseout,
   skipVcfAssignmentWrites,
+  skipVcfRailcarPatch,
   stripManualProtectedRailcarFields,
 } from "./vcf-assignment-closeout";
 import { storedVcfEndDate, storedVcfStartDate } from "./vcf-import";
@@ -43,7 +44,7 @@ function hist(
 }
 
 ok(skipVcfAssignmentWrites({ active_source: "manual", active: true }), "manual skips AH");
-ok(skipVcfAssignmentWrites({ active_source: "auto", active: false }), "inactive skips AH");
+ok(!skipVcfAssignmentWrites({ active_source: "auto", active: false }), "inactive current still writes other periods");
 ok(!skipVcfAssignmentWrites({ active_source: "auto", active: true }), "active auto writes AH");
 
 const stripped = stripManualProtectedRailcarFields({
@@ -56,6 +57,8 @@ const stripped = stripManualProtectedRailcarFields({
 ok(stripped.lessee_name === "KBX", "strip keeps lessee");
 ok(stripped.active === undefined, "strip drops active");
 ok(stripped.status === undefined, "strip drops status");
+ok(skipVcfRailcarPatch({ active_source: "manual" }), "manual skips all car patches");
+ok(!skipVcfRailcarPatch({ active_source: "auto" }), "auto allows car patches");
 
 ok(
   openPeriodMatchKey(1, "EA1739", "2026-07-21") ===
@@ -193,6 +196,88 @@ ok(storedVcfStartDate("1901-01-01") === null, "1901 start stores as null");
     incoming: [incoming],
   });
   ok(closeoutStats(actions).updated === 1 && closeoutStats(actions).inserted === 0, "1:1 leftover updates end date");
+}
+
+// SMNX-style: ended inactive incoming still updates the matching closed period
+{
+  const old = hist({
+    railcar_id: 34493,
+    rider_external_id: "OL2602",
+    start_date: "2025-09-12",
+    end_date: "2026-05-05",
+    active: false,
+    assignment_id_ext: "549",
+  });
+  const incoming = { ...old, end_date: "2026-04-27" };
+  const actions = planVcfAssignmentCloseout({
+    existingRows: [{ id: 26018, ...old }],
+    incoming: [incoming],
+  });
+  ok(closeoutStats(actions).updated === 1, "inactive current row still updates end date");
+}
+
+// File-vs-itself: two same-end opens that differ on ACTIVE stay paired to themselves
+{
+  const openA = hist({
+    railcar_id: 1,
+    rider_external_id: "EA2404",
+    start_date: "2024-03-11",
+    end_date: null,
+    active: true,
+    comment: "Idle",
+    assignment_id_ext: "468",
+  });
+  const openB = hist({
+    railcar_id: 1,
+    rider_external_id: "EA2404",
+    start_date: "2024-03-11",
+    end_date: null,
+    active: false,
+    comment: "Available",
+    assignment_id_ext: "468",
+  });
+  const actions = planVcfAssignmentCloseout({
+    existingRows: [
+      { id: 1, ...openA },
+      { id: 2, ...openB },
+    ],
+    incoming: [openA, openB],
+  });
+  ok(closeoutStats(actions).unchanged === 2 && closeoutStats(actions).updated === 0, "duplicate opens pair by content");
+}
+
+// IARX/OFCX-style: leftover must not reopen a closed period when another open exists
+{
+  const closed = hist({
+    railcar_id: 1,
+    rider_external_id: "EA2404",
+    start_date: "2024-03-11",
+    end_date: "2024-03-11",
+    active: false,
+    assignment_id_ext: "468",
+  });
+  const opened = hist({
+    railcar_id: 1,
+    rider_external_id: "EA2404",
+    start_date: "2024-03-11",
+    end_date: null,
+    active: true,
+    assignment_id_ext: "468",
+  });
+  const actions = planVcfAssignmentCloseout({
+    existingRows: [
+      { id: 39126, ...closed },
+      { id: 39127, ...opened },
+    ],
+    incoming: [opened, { ...opened, assignment_id_ext: null }],
+  });
+  const stats = closeoutStats(actions);
+  ok(stats.updated === 0, "does not reopen closed sibling");
+  ok(stats.inserted === 0, "does not insert duplicate open when car already has one");
+  ok(
+    !actions.some((a) => a.op === "update" && a.existingId === 39126 && a.payload.end_date == null),
+    "id 39126 stays closed",
+  );
 }
 
 console.log(`${passed} passed, ${failed} failed`);

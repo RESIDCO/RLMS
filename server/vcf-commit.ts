@@ -19,7 +19,6 @@ import {
   closeoutStats,
   planVcfAssignmentCloseout,
   skipVcfAssignmentWrites,
-  VCF_MANUAL_PROTECTED_RAILCAR_FIELDS,
   type ExistingHistoryRow,
 } from "@shared/vcf-assignment-closeout";
 import {
@@ -251,7 +250,7 @@ export async function runVcfCommit(opts: {
         }
         const activeManual = existingCar.active_source === "manual";
         if (activeManual) {
-          for (const key of VCF_MANUAL_PROTECTED_RAILCAR_FIELDS) delete updatePayload[key];
+          updatePayload = null;
         } else {
           updatePayload.active_source = "auto";
           if (typeof payload.active === "boolean") {
@@ -260,10 +259,10 @@ export async function runVcfCommit(opts: {
               payload.active
             );
           }
+          assertRailcarImporterPatch(updatePayload);
+          if (!payloadChanged(updatePayload, existingCar)) updatePayload = null;
+          else railcarBackups.push({ load_id: loadId, railcar_id: existingId, before: pickBackup(existingCar) });
         }
-        assertRailcarImporterPatch(updatePayload);
-        if (!payloadChanged(updatePayload, existingCar)) updatePayload = null;
-        else railcarBackups.push({ load_id: loadId, railcar_id: existingId, before: pickBackup(existingCar) });
       } else {
         insertPayload = {
           ...payload,

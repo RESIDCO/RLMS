@@ -34,13 +34,18 @@ export function openPeriodMatchKey(
   return `${railcarId}|${String(riderExternalId ?? "").trim()}|${String(startDate ?? "").trim()}`;
 }
 
-/** Skip assignment_history writes for remark-retired or already-inactive cars. */
+/** Skip assignment_history writes only for manually protected cars.
+ * An inactive current file row must not skip the car's other periods. */
 export function skipVcfAssignmentWrites(car: {
   active_source?: string | null;
   active?: boolean | null;
 }): boolean {
-  if (String(car.active_source ?? "").trim() === "manual") return true;
-  return car.active !== true;
+  return String(car.active_source ?? "").trim() === "manual";
+}
+
+/** Skip every railcar field patch when active_source = manual (incl. managed_category). */
+export function skipVcfRailcarPatch(car: { active_source?: string | null }): boolean {
+  return String(car.active_source ?? "").trim() === "manual";
 }
 
 /** Fields VCF must not write when active_source = manual. */
@@ -106,14 +111,29 @@ function endDateDistance(a: string | null | undefined, b: string | null | undefi
 
 function pickExactExisting(
   cands: ExistingHistoryRow[],
+  hist?: AssignmentHistoryPeriodPayload,
 ): ExistingHistoryRow | undefined {
   if (!cands.length) return undefined;
-  return [...cands].sort((a, b) => {
+  const ranked = [...cands].sort((a, b) => {
+    if (hist) {
+      const aEq = assignmentHistoryContentEqual(a, hist) ? 1 : 0;
+      const bEq = assignmentHistoryContentEqual(b, hist) ? 1 : 0;
+      if (aEq !== bEq) return bEq - aEq;
+    }
     const aFilled = a.assignment_id_ext ? 1 : 0;
     const bFilled = b.assignment_id_ext ? 1 : 0;
     if (aFilled !== bFilled) return bFilled - aFilled;
     return (b.id ?? 0) - (a.id ?? 0);
-  })[0];
+  });
+  return ranked[0];
+}
+
+/** True when pairing would null a stored end date (reopen a closed period). */
+export function wouldReopenClosedPeriod(
+  existing: { end_date?: string | null },
+  incoming: { end_date?: string | null },
+): boolean {
+  return !isOpen(existing) && isOpen(incoming);
 }
 
 function pairIncomingToExisting(
@@ -133,7 +153,7 @@ function pairIncomingToExisting(
         endDateMatchKey(e.end_date) === wantEnd &&
         assignmentIdsCompatible(e.assignment_id_ext, hist.assignment_id_ext),
     );
-    const keep = pickExactExisting(cands);
+    const keep = pickExactExisting(cands, hist);
     if (!keep) continue;
     usedE.add(keep.id);
     usedI.add(i);
@@ -152,6 +172,7 @@ function pairIncomingToExisting(
   const leftE = existingRows.filter((e) => !usedE.has(e.id));
 
   const pairOne = (hist: AssignmentHistoryPeriodPayload, keep: ExistingHistoryRow) => {
+    if (wouldReopenClosedPeriod(keep, hist)) return;
     usedE.add(keep.id);
     const merged: AssignmentHistoryPeriodPayload = {
       ...hist,
@@ -164,22 +185,37 @@ function pairIncomingToExisting(
     }
   };
 
-  if (leftI.length === 1 && leftE.length === 1) {
+  const canPair = (e: ExistingHistoryRow, h: AssignmentHistoryPeriodPayload) =>
+    !wouldReopenClosedPeriod(e, h);
+
+  if (leftI.length === 1 && leftE.length === 1 && canPair(leftE[0], leftI[0].h)) {
     pairOne(leftI[0].h, leftE[0]);
     usedI.add(leftI[0].i);
   } else if (leftI.length && leftE.length) {
     const avail = [...leftE];
     for (const { h, i } of leftI) {
-      if (!avail.length) break;
-      avail.sort((a, b) => endDateDistance(a.end_date, h.end_date) - endDateDistance(b.end_date, h.end_date));
-      const keep = avail.shift()!;
+      const eligible = avail.filter((e) => canPair(e, h));
+      if (!eligible.length) continue;
+      eligible.sort((a, b) => endDateDistance(a.end_date, h.end_date) - endDateDistance(b.end_date, h.end_date));
+      const keep = eligible[0];
+      avail.splice(avail.indexOf(keep), 1);
       pairOne(h, keep);
       usedI.add(i);
     }
   }
 
+  const carHasOpen = existingRows.some(isOpen);
   for (const { h, i } of incoming.map((hist, idx) => ({ h: hist, i: idx }))) {
     if (usedI.has(i)) continue;
+    if (isOpen(h) && carHasOpen) {
+      const key = openPeriodMatchKey(h.railcar_id, h.rider_external_id, h.start_date);
+      const sameKeyClosed = existingRows.some(
+        (e) =>
+          !isOpen(e) &&
+          openPeriodMatchKey(e.railcar_id, e.rider_external_id, e.start_date) === key,
+      );
+      if (sameKeyClosed) continue;
+    }
     actions.push({ op: "insert", payload: h });
   }
   return actions;

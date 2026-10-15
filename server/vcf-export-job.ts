@@ -5,8 +5,11 @@ import { join } from "path";
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import {
+  V_VALID_EXPORT_COLUMN_WIDTHS,
   V_VALID_EXPORT_HEADERS,
+  excelNumFmtForHeader,
   exportRowToValues,
+  sortVValidExportRows,
   viewRowToExport,
   type VValidViewRow,
 } from "@shared/vcf-export";
@@ -153,37 +156,55 @@ async function uploadWorkbook(jobId: string, tmpPath: string): Promise<string> {
   return storagePath;
 }
 
+function applyExportSheetLayout(sheet: ExcelJS.Worksheet, dataRows: number) {
+  sheet.getRow(1).font = { bold: true };
+  sheet.views = [{ state: "frozen", ySplit: 1, activeCell: "A2" }];
+  const last = Math.max(1, dataRows + 1);
+  sheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: last, column: V_VALID_EXPORT_HEADERS.length },
+  };
+  V_VALID_EXPORT_HEADERS.forEach((h, i) => {
+    const col = sheet.getColumn(i + 1);
+    col.width = V_VALID_EXPORT_COLUMN_WIDTHS[i] ?? 12;
+    const fmt = excelNumFmtForHeader(h);
+    if (fmt) col.numFmt = fmt;
+  });
+}
+
 async function runJob(jobId: string) {
   const tmpPath = join(tmpdir(), `vcf-export-${jobId}.xlsx`);
   logMem(jobId, "start");
   try {
-    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
-      filename: tmpPath,
-      useStyles: false,
-      useSharedStrings: false,
-    });
-    const sheet = workbook.addWorksheet("V_VALID_CARS");
-    sheet.addRow([...V_VALID_EXPORT_HEADERS]).commit();
-
-    let rowCount = 0;
+    const collected: ReturnType<typeof viewRowToExport>[] = [];
     for (const src of [1, 2] as const) {
       let afterId = 0;
       for (;;) {
         const batch = await fetchBatch(src, afterId);
         if (!batch.length) break;
-        for (const raw of batch) {
-          const values = exportRowToValues(viewRowToExport(raw));
-          sheet.addRow(values).commit();
-          rowCount += 1;
-        }
+        for (const raw of batch) collected.push(viewRowToExport(raw));
         const nextId = Number(batch[batch.length - 1]?.export_id);
-        logMem(jobId, "batch", { src, afterId, nextId, rowCount, batch: batch.length });
+        logMem(jobId, "batch", { src, afterId, nextId, rowCount: collected.length, batch: batch.length });
         if (!Number.isFinite(nextId) || nextId <= afterId) break;
         afterId = nextId;
       }
     }
 
+    const rows = sortVValidExportRows(collected);
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+      filename: tmpPath,
+      useStyles: true,
+      useSharedStrings: false,
+    });
+    const sheet = workbook.addWorksheet("V_VALID_CARS");
+    applyExportSheetLayout(sheet, rows.length);
+    sheet.addRow([...V_VALID_EXPORT_HEADERS]).commit();
+    for (const row of rows) {
+      sheet.addRow(exportRowToValues(row)).commit();
+    }
+
     await workbook.commit();
+    const rowCount = rows.length;
     logMem(jobId, "workbook-committed", { rowCount });
 
     const storagePath = await uploadWorkbook(jobId, tmpPath);
@@ -197,7 +218,7 @@ async function runJob(jobId: string) {
     logMem(jobId, "ready", { rowCount });
   } catch (err) {
     const message = isMissingView(err)
-      ? "v_valid_export_rows is missing. Apply migrations/20260817_v_valid_export_view.sql, then retry."
+      ? "v_valid_export_rows is missing. Apply migrations/20261015_v_valid_export_brief_a.sql, then retry."
       : errMessage(err);
     console.error(`[vcf-export] ${jobId} failed:`, err);
     await failJob(jobId, message);

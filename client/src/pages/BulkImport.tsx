@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiUpload } from "@/lib/queryClient";
 import { looksLikeVcf } from "@shared/vcf-import";
+import { confirmSave } from "@/components/ConfirmActionDialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import AcquisitionImportSection from "./AcquisitionImportSection";
 import MarkContactsImportSection from "./MarkContactsImportSection";
 import {
@@ -99,6 +101,7 @@ interface VcfReviewResult {
   ok: boolean;
   mode: "vcf";
   previewId?: string;
+  fileName?: string | null;
   existingCarsInDb: number;
   totalRows: number;
   distinctCars: number;
@@ -125,6 +128,23 @@ interface VcfReviewResult {
   badActiveValues: Array<{ raw: string; count: number; sampleRows: number[] }>;
   unmappedManagedCategoryCount: number;
   unmappedManagedCategories: Array<{ raw: string; count: number }>;
+}
+
+interface VcfCommitResult {
+  ok: boolean;
+  loadId?: string;
+  fileName?: string | null;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  reactivated: number;
+  deactivated: number;
+  skippedManual: number;
+  notInFile: number;
+  assignmentInserted: number;
+  assignmentClosed: number;
+  remarkInserted: number;
+  integrityChecks?: IntegrityCheckView[];
 }
 
 // ── CSV parser (client-side, no library needed for simple cases) ───────────────
@@ -388,6 +408,13 @@ export default function BulkImportPage() {
   const [finLoading, setFinLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [vcfReview, setVcfReview] = useState<VcfReviewResult | null>(null);
+  const [vcfAck, setVcfAck] = useState(false);
+  const [vcfCommitted, setVcfCommitted] = useState<VcfCommitResult | null>(null);
+  const [vcfCommitPhase, setVcfCommitPhase] = useState<string | null>(null);
+  const vcfCommitLock = useRef(false);
+  const [vcfLoadLog, setVcfLoadLog] = useState<
+    Array<{ id: string; loaded_at: string; file_name: string | null; checks: IntegrityCheckView[] | null }>
+  >([]);
   const [finReview, setFinReview] = useState<FinancialReviewResult | null>(null);
   const [finPayload, setFinPayload] = useState<{ mainRows: unknown[][]; rpsRows: unknown[][] } | null>(null);
   const [finSnapshotMonth, setFinSnapshotMonth] = useState("");
@@ -414,8 +441,19 @@ export default function BulkImportPage() {
     }
   }
 
+  async function refreshVcfLoadLog() {
+    try {
+      const res = await apiRequest("GET", "/api/import/vcf/loads");
+      const body = await res.json();
+      setVcfLoadLog(body.loads ?? []);
+    } catch {
+      /* table may not exist yet */
+    }
+  }
+
   useEffect(() => {
     void refreshFinLoadLog();
+    void refreshVcfLoadLog();
   }, []);
 
   async function previewFinancial(mainRows: unknown[][], rpsRows: unknown[][], snapshotMonth?: string | null) {
@@ -436,6 +474,8 @@ export default function BulkImportPage() {
   async function handleCarFile(file: File) {
     setPreview(null);
     setVcfReview(null);
+    setVcfAck(false);
+    setVcfCommitted(null);
     setCommitted(null);
     setFileName(file.name);
     setLoading(true);
@@ -592,6 +632,79 @@ export default function BulkImportPage() {
     } finally {
       setFinLoading(false);
       setFinCommitPhase(null);
+    }
+  }
+
+  async function handleVcfCommit() {
+    if (!vcfReview?.previewId || vcfCommitLock.current || loading) return;
+    const ok = await confirmSave({
+      title: "Commit this Valid Car File to production?",
+      description: [
+        fileName || vcfReview.fileName || "this file",
+        `${vcfReview.newCars.toLocaleString()} new (${vcfReview.newActiveCars ?? 0} active, ${vcfReview.newInactiveCars ?? 0} inactive)`,
+        `${vcfReview.reactivatedCars ?? 0} reactivated · ${vcfReview.deactivatedCars ?? 0} deactivated`,
+        `After load: ${(vcfReview.projectedTotalCars ?? 0).toLocaleString()} cars, ${(vcfReview.projectedActiveCars ?? 0).toLocaleString()} active`,
+      ].join(" · "),
+      confirmLabel: "Commit to production",
+    });
+    if (!ok) return;
+    vcfCommitLock.current = true;
+    setLoading(true);
+    setVcfCommitPhase("Starting — do not close this tab");
+    try {
+      const res = await apiRequest(
+        "POST",
+        "/api/import/vcf/commit?progress=1",
+        { previewId: vcfReview.previewId, confirmProductionImport: true },
+        { Accept: "application/x-ndjson" },
+        { timeoutMs: 15 * 60 * 1000 }
+      );
+      const ct = res.headers.get("content-type") || "";
+      let result: VcfCommitResult;
+      if (ct.includes("ndjson") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let parsed: VcfCommitResult | null = null;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const msg = JSON.parse(line);
+            if (msg.type === "progress") setVcfCommitPhase(String(msg.phase));
+            if (msg.type === "error") {
+              const extra = msg.stage ? ` (stage ${msg.stage})` : "";
+              throw new Error(`${msg.message || "Commit failed"}${extra}`);
+            }
+            if (msg.type === "done") parsed = msg.result as VcfCommitResult;
+          }
+        }
+        if (buf.trim()) {
+          const msg = JSON.parse(buf);
+          if (msg.type === "error") throw new Error(msg.message || "Commit failed");
+          if (msg.type === "done") parsed = msg.result as VcfCommitResult;
+        }
+        if (!parsed) throw new Error("Commit finished without a summary");
+        result = parsed;
+      } else {
+        result = await res.json();
+      }
+      setVcfCommitted(result);
+      setVcfReview(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void refreshVcfLoadLog();
+      toast({ title: "Valid Car File committed" });
+    } catch (e: any) {
+      toast({ title: "Valid Car File commit failed", description: e.message, variant: "destructive" });
+    } finally {
+      vcfCommitLock.current = false;
+      setLoading(false);
+      setVcfCommitPhase(null);
     }
   }
 
@@ -775,7 +888,7 @@ export default function BulkImportPage() {
             />
           </div>
 
-          {loading && (
+          {loading && !vcfReview && (
             <div className="mt-6 space-y-2">
               <Skeleton className="h-8 w-1/3" />
               <Skeleton className="h-48 w-full" />
@@ -783,7 +896,7 @@ export default function BulkImportPage() {
           )}
 
           {/* §2.3 Valid Car File review */}
-          {vcfReview && !loading && (
+          {vcfReview && (
             <div className="mt-6 space-y-4">
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
                 <div className="text-sm font-semibold text-foreground">Valid Car File — §2.3 review (dry-run)</div>
@@ -885,9 +998,73 @@ export default function BulkImportPage() {
                 </div>
               </div>
 
-              <div className="text-xs text-muted-foreground">
-                Production commit stays locked until Bruce signs off. Existing cars in DB: {vcfReview.existingCarsInDb.toLocaleString()}.
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+                <div className="text-xs text-muted-foreground">
+                  Existing cars in DB: {vcfReview.existingCarsInDb.toLocaleString()}. Commit applies only the staged preview
+                  {vcfReview.previewId ? ` (${vcfReview.previewId.slice(0, 8)}…)` : ""}.
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={vcfAck}
+                    onCheckedChange={(v) => setVcfAck(v === true)}
+                    disabled={!canEdit || loading || !vcfReview.previewId}
+                    data-testid="check-vcf-signoff"
+                  />
+                  I have reviewed these counts
+                </label>
+                {vcfCommitPhase && (
+                  <div className="text-sm text-foreground" data-testid="vcf-commit-progress">{vcfCommitPhase}</div>
+                )}
+                <Button
+                  onClick={() => void handleVcfCommit()}
+                  disabled={!canEdit || loading || !vcfAck || !vcfReview.previewId || vcfCommitLock.current}
+                  data-testid="button-commit-vcf"
+                >
+                  {!canEdit ? "View only" : loading ? "Committing…" : "Commit to production"}
+                </Button>
               </div>
+            </div>
+          )}
+
+          {vcfCommitted && (
+            <div className="mt-6 rounded-lg border border-umler-teal/30 bg-umler-teal/10 p-6" data-testid="vcf-commit-report">
+              <CheckCircle2 className="h-8 w-8 text-emerald-400 mb-3" />
+              <div className="text-lg font-semibold text-foreground">Valid Car File committed</div>
+              <div className="text-xs text-muted-foreground mt-1">{vcfCommitted.fileName || fileName}</div>
+              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+                <div>Cars inserted: <span className="font-mono-num">{vcfCommitted.inserted.toLocaleString()}</span></div>
+                <div>Reactivated: <span className="font-mono-num">{vcfCommitted.reactivated.toLocaleString()}</span></div>
+                <div>Deactivated: <span className="font-mono-num">{vcfCommitted.deactivated.toLocaleString()}</span></div>
+                <div>Unchanged: <span className="font-mono-num">{vcfCommitted.unchanged.toLocaleString()}</span></div>
+                <div>History inserted: <span className="font-mono-num">{vcfCommitted.assignmentInserted.toLocaleString()}</span></div>
+                <div>History periods closed: <span className="font-mono-num">{vcfCommitted.assignmentClosed.toLocaleString()}</span></div>
+                <div>car_number_history added: <span className="font-mono-num">{vcfCommitted.remarkInserted.toLocaleString()}</span></div>
+                <div>skipped, manual: <span className="font-mono-num">{vcfCommitted.skippedManual.toLocaleString()}</span></div>
+                <div>not in file: <span className="font-mono-num">{vcfCommitted.notInFile.toLocaleString()}</span></div>
+              </div>
+              {vcfCommitted.integrityChecks && vcfCommitted.integrityChecks.length > 0 && (
+                <div className="mt-4">
+                  <IntegrityChecksList checks={vcfCommitted.integrityChecks} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {vcfLoadLog.length > 0 && (
+            <div className="mt-6 rounded-lg border border-border p-4">
+              <div className="text-sm font-medium mb-2">Valid Car File load history</div>
+              <ul className="space-y-1 text-xs">
+                {vcfLoadLog.map((row) => {
+                  const failed = (row.checks ?? []).some((c) => !c.pass);
+                  return (
+                    <li key={row.id} className="flex flex-wrap gap-x-3">
+                      <span className="text-muted-foreground">{new Date(row.loaded_at).toLocaleString()}</span>
+                      <span className="text-muted-foreground">{row.file_name || "—"}</span>
+                      <span className={failed ? "text-red-500" : "text-emerald-500"}>{failed ? "checks failed" : "checks passed"}</span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 

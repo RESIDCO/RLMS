@@ -136,23 +136,12 @@ import {
   buildVcfReview,
   vcfCarKeyFromDb,
   type VcfExistingCar,
-  railcarPayloadFromCurrent,
-  assignmentHistoryPayloadFromPeriod,
-  carNumberHistoryNaturalKey,
-  carNumberHistoryPayloadFromPeriod,
 } from "@shared/vcf-import";
 import { parseVcfUpload, parseVcfUploadFromPath } from "./vcf-workbook";
-import { deleteVcfPreview, getVcfPreview, putVcfPreview } from "./vcf-preview-cache";
+import { putVcfPreview } from "./vcf-preview-cache";
+import { runVcfCommit, VcfCommitError } from "./vcf-commit";
 import { unlink } from "fs/promises";
 import { tmpdir } from "os";
-import {
-  closeoutClosePatch,
-  closeoutStats,
-  planVcfAssignmentCloseout,
-  skipVcfAssignmentWrites,
-  VCF_MANUAL_PROTECTED_RAILCAR_FIELDS,
-  type ExistingHistoryRow,
-} from "@shared/vcf-assignment-closeout";
 import {
   deriveFleetStatus,
   isOperatingFleetCar,
@@ -3028,6 +3017,7 @@ export async function registerRoutes(
         mode: "vcf",
         previewId,
         existingCarsInDb: existingCars.size,
+        fileName: file?.originalname ?? null,
         totalRows: review.totalRows,
         distinctCars: review.distinctCars,
         newCars: review.newCars,
@@ -3062,15 +3052,15 @@ export async function registerRoutes(
     }
   });
 
-  // VCF commit — gated. Requires confirmProductionImport === true after Bruce review.
-  // Not used for the non-prod gate run; kept ready for the signed-off production load.
-  // Do-not-touch: accounts.account_manager, riders.account_manager (deprecated),
-  // railcar_assignments, railcars.current_assignment_id (Phase 2).
-  // VCF writes railcars + assignment_history + car_number_history. Open history
-  // periods match car+rider+start (null vs filled ASSIGNMENT_ID is the same
-  // period). Manual / already-inactive cars skip assignment_history writes.
-  // See docs/IMPORT_WRITE_BOUNDARIES.md and docs/VCF_CLOSEOUT_PHASE1.md.
+  // VCF commit — gated. Requires confirmProductionImport after Bruce reviews counts.
+  // Rows come only from vcf_preview_cache (previewId). Do-not-touch: accounts.account_manager,
+  // riders.account_manager, railcar_assignments, railcars.current_assignment_id (Phase 2).
   app.post("/api/import/vcf/commit", async (req: Request, res: Response) => {
+    const stream =
+      String(req.headers.accept || "").includes("ndjson") || String(req.query.progress || "") === "1";
+    const emit = (obj: Record<string, unknown>) => {
+      if (stream && !res.writableEnded) res.write(JSON.stringify(obj) + "\n");
+    };
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
@@ -3078,297 +3068,58 @@ export async function registerRoutes(
         previewId?: string;
         confirmProductionImport?: boolean;
       };
-      if (!confirmProductionImport) {
-        return res.status(400).json({
-          message: "VCF commit blocked — set confirmProductionImport: true only after Bruce signs off on the §2.3 review.",
-        });
+      if (stream) {
+        res.status(200);
+        res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("X-Accel-Buffering", "no");
+        (res as any).flushHeaders?.();
       }
-      if (!previewId) {
-        return res.status(400).json({ message: "Preview expired, re-drop the file" });
-      }
-      const rows = await getVcfPreview(supabaseAdmin, String(previewId), writerId);
-      if (!rows?.length) {
-        return res.status(400).json({ message: "Preview expired, re-drop the file" });
-      }
-
-      const existingKeys = new Set<string>();
-      const existingList = await fetchAllRows<{
-        id: number;
-        car_initial?: string | null;
-        car_number?: string | null;
-        reporting_marks?: string | null;
-      }>((from, to) =>
-        supabase
-          .from("railcars")
-          .select("id, car_initial, car_number, reporting_marks")
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-      const keyToId = new Map<string, number>();
-      for (const r of existingList) {
-        const k = vcfCarKeyFromDb(r);
-        existingKeys.add(k);
-        keyToId.set(k, r.id);
-      }
-
-      const review = buildVcfReview(rows, existingKeys);
-      const BATCH = 500;
-      let inserted = 0;
-      let updated = 0;
-      let historyRows = 0;
-      let assignmentPeriods = 0;
-      let assignmentInserted = 0;
-      let assignmentUpdated = 0;
-      let assignmentUnchanged = 0;
-      let assignmentClosed = 0;
-      let assignmentSkipped = 0;
-      let remarkHistory = 0;
-      let remarkInserted = 0;
-      let remarkUpdated = 0;
-      let remarkUnchanged = 0;
-      const movedAt = new Date().toISOString();
-
-      // Prefetch all assignment_history so close-out can see open periods
-      // regardless of moved_by (null ASSIGNMENT_ID twins, remark copies, etc.).
-      const ahByRailcar = new Map<number, ExistingHistoryRow[]>();
-      {
-        let from = 0;
-        for (;;) {
-          const { data, error } = await supabase
-            .from("assignment_history")
-            .select(
-              "id, railcar_id, assignment_id_ext, start_date, end_date, rider_external_id, assignment_label, active, comment, reason, moved_at, moved_by"
-            )
-            .range(from, from + 999);
-          if (error) throw error;
-          const chunk = data ?? [];
-          for (const r of chunk) {
-            const rid = Number(r.railcar_id);
-            const list = ahByRailcar.get(rid) ?? [];
-            list.push(r as ExistingHistoryRow);
-            ahByRailcar.set(rid, list);
-          }
-          if (chunk.length < 1000) break;
-          from += 1000;
-        }
-      }
-      const cnhByKey = new Map<string, any>();
-      {
-        let from = 0;
-        for (;;) {
-          const { data, error } = await supabase
-            .from("car_number_history")
-            .select(
-              "id, railcar_id, old_car_initial, old_car_number, new_car_initial, new_car_number, changed_at, changed_by, reason"
-            )
-            .eq("changed_by", "vcf-import")
-            .range(from, from + 999);
-          if (error) throw error;
-          const chunk = data ?? [];
-          for (const r of chunk) {
-            cnhByKey.set(
-              carNumberHistoryNaturalKey({
-                railcarId: r.railcar_id,
-                old_car_initial: r.old_car_initial,
-                old_car_number: r.old_car_number,
-                new_car_initial: r.new_car_initial,
-                new_car_number: r.new_car_number,
-                changed_at: r.changed_at,
-              }),
-              r
-            );
-          }
-          if (chunk.length < 1000) break;
-          from += 1000;
-        }
-      }
-
-      for (let i = 0; i < review.cars.length; i += BATCH) {
-        const slice = review.cars.slice(i, i + BATCH);
-        for (const car of slice) {
-          const payload = railcarPayloadFromCurrent(car.current, {
-            needsReview: car.needsReview,
-          });
-          const existingId = keyToId.get(car.carKey);
-          let railcarId = existingId;
-          let existingCar: { entity?: string | null; fleet_status_source?: string | null; active_source?: string | null; active?: boolean | null; status?: string | null } | null = null;
-          if (existingId) {
-            // Skip entity in update when unchanged so the old managed_category trigger doesn't fire
-            const existingCarRes = await supabase
-              .from("railcars")
-              .select("entity, fleet_status_source, active_source, active, status")
-              .eq("id", existingId)
-              .maybeSingle();
-            existingCar = existingCarRes.data as typeof existingCar;
-            const updatePayload = { ...payload };
-            if (existingCar && (existingCar as any).entity === payload.entity) {
-              delete (updatePayload as any).entity;
-            }
-            // Never overwrite a human fleet_status pick. Auto rows re-derive from this VCF period.
-            if ((existingCar as any)?.fleet_status_source === "manual") {
-              delete (updatePayload as any).fleet_status;
-              delete (updatePayload as any).fleet_status_source;
-            } else {
-              (updatePayload as any).fleet_status = autoFleetStatusFromLegacyText({
-                active: payload.active as boolean | undefined,
-                rider_external_id: payload.rider_external_id as string | null,
-                assignment_label: payload.assignment_label as string | null,
-                managed_category: payload.managed_category as string | null,
-              });
-              (updatePayload as any).fleet_status_source = "auto";
-            }
-            // Never overwrite a human Inactive/Reactivate pick.
-            // Remark-retired identities also stamp active_source=manual so a
-            // later VCF that still lists the old mark as ACTIVE cannot revive them.
-            const activeManual = (existingCar as any)?.active_source === "manual";
-            if (activeManual) {
-              for (const key of VCF_MANUAL_PROTECTED_RAILCAR_FIELDS) {
-                delete (updatePayload as any)[key];
-              }
-            } else {
-              (updatePayload as any).active_source = "auto";
-              if (typeof payload.active === "boolean") {
-                (updatePayload as any).status = statusAlignedToActiveFlag(
-                  (existingCar as any)?.status,
-                  payload.active,
-                );
-              }
-            }
-            assertRailcarImporterPatch(updatePayload);
-            const { error } = await supabase.from("railcars").update(updatePayload).eq("id", existingId);
-            if (error) throw error;
-            updated += 1;
-          } else {
-            const insertPayload = {
-              ...payload,
-              status: statusAlignedToActiveFlag(null, payload.active === true),
-              fleet_status: autoFleetStatusFromLegacyText({
-                active: payload.active as boolean | undefined,
-                rider_external_id: payload.rider_external_id as string | null,
-                assignment_label: payload.assignment_label as string | null,
-                managed_category: payload.managed_category as string | null,
-              }),
-              fleet_status_source: "auto",
-              active_source: "auto",
-            };
-            assertRailcarImporterPatch(insertPayload);
-            const { data: ins, error } = await supabase.from("railcars").insert(insertPayload).select("id").single();
-            if (error) throw error;
-            railcarId = ins!.id;
-            keyToId.set(car.carKey, railcarId);
-            inserted += 1;
-          }
-
-          // Phase 1 close-out: same open period = car + rider + start (null vs filled
-          // ASSIGNMENT_ID is the same period). Skip retired/inactive cars entirely.
-          // Does not write railcar_assignments / current_assignment_id.
-          const skipHistory = skipVcfAssignmentWrites({
-            active_source: existingId ? existingCar?.active_source : "auto",
-            active: existingId ? existingCar?.active : true,
-          });
-          if (skipHistory) {
-            assignmentSkipped += car.periods.length;
-          } else {
-            const incoming = car.periods.map((p) =>
-              assignmentHistoryPayloadFromPeriod(railcarId!, p, movedAt),
-            );
-            const existingRows = ahByRailcar.get(railcarId!) ?? [];
-            const actions = planVcfAssignmentCloseout({ existingRows, incoming });
-            const planned = closeoutStats(actions);
-            for (const action of actions) {
-              if (action.op === "unchanged") continue;
-              if (action.op === "update") {
-                const { error } = await supabase
-                  .from("assignment_history")
-                  .update(action.payload)
-                  .eq("id", action.existingId);
-                if (error) throw error;
-              } else if (action.op === "insert") {
-                const { data: ins, error } = await supabase
-                  .from("assignment_history")
-                  .insert(action.payload)
-                  .select("id")
-                  .single();
-                if (error) throw error;
-                const next = ahByRailcar.get(railcarId!) ?? [];
-                next.push({ id: ins!.id, ...action.payload });
-                ahByRailcar.set(railcarId!, next);
-              } else if (action.op === "close") {
-                const { error } = await supabase
-                  .from("assignment_history")
-                  .update(closeoutClosePatch(action, movedAt))
-                  .eq("id", action.existingId);
-                if (error) throw error;
-              }
-            }
-            assignmentInserted += planned.inserted;
-            assignmentUpdated += planned.updated;
-            assignmentUnchanged += planned.unchanged;
-            assignmentClosed += planned.closed;
-            assignmentPeriods += car.periods.length;
-          }
-
-          // Idempotent car_number_history upsert — remark natural key
-          for (const p of car.periods) {
-            const remark = carNumberHistoryPayloadFromPeriod(railcarId!, p, movedAt);
-            if (!remark) continue;
-            const key = carNumberHistoryNaturalKey({
-              railcarId: remark.railcar_id,
-              old_car_initial: remark.old_car_initial,
-              old_car_number: remark.old_car_number,
-              new_car_initial: remark.new_car_initial,
-              new_car_number: remark.new_car_number,
-              changed_at: remark.changed_at,
-            });
-            const existing = cnhByKey.get(key);
-            if (existing) {
-              remarkUnchanged += 1;
-              remarkHistory += 1;
-              continue;
-            }
-            const { data: ins, error } = await supabase
-              .from("car_number_history")
-              .insert(remark)
-              .select("id")
-              .single();
-            if (error) throw error;
-            cnhByKey.set(key, { id: ins!.id, ...remark });
-            remarkInserted += 1;
-            remarkHistory += 1;
-          }
-          historyRows += 1;
-        }
-      }
-
-      // After VCF writes raw car lease dates, re-apply Asset Report precedence
-      // (and V_Valid fallback only for OLs the report omits).
-      let riderExpirationSync: Awaited<ReturnType<typeof governLeaseDates>> | null = null;
-      try {
-        riderExpirationSync = await governLeaseDates(supabase);
-      } catch (syncErr) {
-        console.warn("[vcf/commit] lease date governance failed", syncErr);
-      }
-
-      await deleteVcfPreview(supabaseAdmin, String(previewId), writerId);
-
-      res.json({
-        ok: true,
-        inserted,
-        updated,
-        carsProcessed: review.cars.length,
-        assignmentPeriods,
-        assignmentInserted,
-        assignmentUpdated,
-        assignmentUnchanged,
-        assignmentClosed,
-        assignmentSkipped,
-        remarkHistory,
-        remarkInserted,
-        remarkUpdated,
-        remarkUnchanged,
-        multipleActiveFlagged: review.multipleActiveCount,
-        riderExpirationSync,
+      const result = await runVcfCommit({
+        db: supabaseAdmin,
+        writerId,
+        previewId: String(previewId ?? ""),
+        confirmProductionImport: confirmProductionImport === true,
+        progress: (phase) => emit({ type: "progress", phase }),
       });
+      if (stream) {
+        emit({ type: "done", result });
+        res.end();
+      } else {
+        res.json(result);
+      }
+    } catch (err) {
+      const extra =
+        err instanceof VcfCommitError
+          ? { stage: err.stage, loadId: err.loadId, written: err.written }
+          : {};
+      const message = err instanceof Error ? err.message : String(err);
+      if (stream && res.headersSent) {
+        emit({ type: "error", message, ...extra });
+        res.end();
+        return;
+      }
+      if (err instanceof VcfCommitError) {
+        return res.status(400).json({ message, ...extra });
+      }
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/import/vcf/loads", async (req: Request, res: Response) => {
+    try {
+      const uid = await requireWrite(req, res);
+      if (!uid) return;
+      const { data, error } = await supabaseAdmin
+        .from("vcf_load_log")
+        .select("id, loaded_at, loaded_by, file_name, summary, checks")
+        .order("loaded_at", { ascending: false })
+        .limit(24);
+      if (error) {
+        if (/vcf_load_log/i.test(error.message)) return res.json({ loads: [] });
+        throw error;
+      }
+      res.json({ loads: data ?? [] });
     } catch (err) { errHandler(res, err); }
   });
 

@@ -27,17 +27,18 @@ export async function getVcfPreview(
   db: SupabaseClient,
   id: string,
   writerId: string
-): Promise<VcfRawRow[] | null> {
+): Promise<{ rows: VcfRawRow[]; fileName: string | null } | null> {
   const { data, error } = await db
     .from("vcf_preview_cache")
-    .select("rows, loaded_by, created_at")
+    .select("rows, loaded_by, created_at, file_name")
     .eq("id", id)
     .maybeSingle();
   if (error || !data) return null;
   if (String(data.loaded_by) !== writerId) return null;
   const age = Date.now() - new Date(data.created_at).getTime();
   if (age > TTL_HOURS * 60 * 60 * 1000) return null;
-  return Array.isArray(data.rows) ? (data.rows as VcfRawRow[]) : null;
+  if (!Array.isArray(data.rows) || data.rows.length === 0) return null;
+  return { rows: data.rows as VcfRawRow[], fileName: (data.file_name as string | null) ?? null };
 }
 
 export async function deleteVcfPreview(

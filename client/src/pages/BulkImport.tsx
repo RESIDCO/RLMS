@@ -103,7 +103,16 @@ interface VcfReviewResult {
   totalRows: number;
   distinctCars: number;
   newCars: number;
+  newActiveCars?: number;
+  newInactiveCars?: number;
   updatedCars: number;
+  reactivatedCars?: number;
+  deactivatedCars?: number;
+  skippedManualCount?: number;
+  skippedManualCars?: Array<{ car_initial: string; car_number: string }>;
+  notInFileCount?: number;
+  projectedTotalCars?: number;
+  projectedActiveCars?: number;
   multipleActiveCount: number;
   multipleActiveCars: Array<{
     car_initial: string;
@@ -787,7 +796,15 @@ export default function BulkImportPage() {
                 <StatChip icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Rows processed" value={vcfReview.totalRows} />
                 <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />} label="Distinct cars" value={vcfReview.distinctCars} color="emerald" />
                 <StatChip icon={<Info className="h-3.5 w-3.5" />} label="New cars" value={vcfReview.newCars} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="New, active" value={vcfReview.newActiveCars ?? 0} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="New, inactive" value={vcfReview.newInactiveCars ?? 0} />
                 <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Updated cars" value={vcfReview.updatedCars} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Reactivated" value={vcfReview.reactivatedCars ?? 0} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Deactivated" value={vcfReview.deactivatedCars ?? 0} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="skipped, manual" value={vcfReview.skippedManualCount ?? 0} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="not in file, left alone" value={vcfReview.notInFileCount ?? 0} />
+                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="After load, cars" value={vcfReview.projectedTotalCars ?? 0} />
+                <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="After load, active" value={vcfReview.projectedActiveCars ?? 0} />
                 <StatChip
                   icon={<AlertTriangle className={`h-3.5 w-3.5 ${vcfReview.multipleActiveCount > 0 ? "text-amber-400" : "text-muted-foreground"}`} />}
                   label="Double-active flags"
@@ -795,6 +812,19 @@ export default function BulkImportPage() {
                   color={vcfReview.multipleActiveCount > 0 ? "amber" : undefined}
                 />
               </div>
+
+              {(vcfReview.skippedManualCount ?? 0) > 0 && (
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <div className="text-sm font-medium text-foreground mb-2">
+                    skipped, manual ({vcfReview.skippedManualCount}) — active / status / active_status held
+                  </div>
+                  <div className="text-xs font-mono text-muted-foreground space-y-0.5">
+                    {(vcfReview.skippedManualCars ?? []).map((c) => (
+                      <div key={`${c.car_initial}-${c.car_number}`}>{c.car_initial} {c.car_number}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {vcfReview.multipleActiveCount > 0 && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">

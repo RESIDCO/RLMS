@@ -45,7 +45,7 @@ import {
   type SummaryRowForRefresh,
   type FinancialParsedRow,
 } from "../shared/financial-import";
-import { looksLikeVcf } from "../shared/vcf-import";
+import { buildVcfReview, compactVcfRowsFromMatrix, looksLikeVcf } from "../shared/vcf-import";
 import {
   buildGapWarning,
   buildLoadChangeReport,
@@ -682,6 +682,49 @@ eq(
   false,
   "Master Car List is not a VCF"
 );
+{
+  const compact = compactVcfRowsFromMatrix([
+    ["CAR_INITIAL", "CAR_NUMBER", "ACTIVE", "ASSIGNMENT_ID", "EXTRA"],
+    ["ABCX", "123456", "-1", "9", "drop-me"],
+  ]);
+  eq(compact.length, 1, "compact keeps data rows");
+  eq("EXTRA" in compact[0], false, "compact drops unknown columns");
+  eq(compact[0].CAR_NUMBER, "123456", "compact keeps CAR_NUMBER");
+}
+
+{
+  const vcfRow = (o: Record<string, unknown>) => ({
+    CAR_INITIAL: "ABCX",
+    CAR_NUMBER: "123456",
+    ACTIVE: "-1",
+    ASSIGNMENT_ID: "1",
+    ...o,
+  });
+  const existing = new Map([
+    ["ABCX|123456", { active: false, active_source: "auto" }],
+    ["TEST|999011", { active: false, active_source: "manual" }],
+    ["TEST|999012", { active: true, active_source: "auto" }],
+  ]);
+  const review = buildVcfReview(
+    [
+      vcfRow({ ACTIVE: "-1" }),
+      { CAR_INITIAL: "NEWX", CAR_NUMBER: "000001", ACTIVE: "-1", ASSIGNMENT_ID: "2" },
+      { CAR_INITIAL: "NEWX", CAR_NUMBER: "000002", ACTIVE: "0", ASSIGNMENT_ID: "3" },
+      { CAR_INITIAL: "TEST", CAR_NUMBER: "999011", ACTIVE: "-1", ASSIGNMENT_ID: "4" },
+    ],
+    new Set(existing.keys()),
+    { keepCars: false, existingCars: existing }
+  );
+  eq(review.newCars, 2, "review new cars");
+  eq(review.newActiveCars, 1, "review new active");
+  eq(review.newInactiveCars, 1, "review new inactive");
+  eq(review.reactivatedCars, 1, "review reactivated");
+  eq(review.deactivatedCars, 0, "review deactivated");
+  eq(review.skippedManualCount, 1, "review skipped manual");
+  eq(review.skippedManualCars[0]?.car_number, "999011", "manual car listed");
+  eq(review.notInFileCount, 1, "TEST 999012 not in file");
+  eq(review.projectedTotalCars, 5, "projected total = existing + new");
+}
 
 {
   const k = (o: Record<string, unknown>) =>

@@ -29,6 +29,12 @@ async function throwIfResNotOk(res: Response) {
           "This file is too large to send as JSON (HTTP 413). Drop the Excel/CSV so the server can parse it."
       );
     }
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      throw new Error(
+        parseErrorBody(res.status, text) ||
+          `preview failed: the server stopped while reading the file (HTTP ${res.status}). Often out of memory or a request timeout — retry after the slimmer parser is live.`
+      );
+    }
     throw new Error(parseErrorBody(res.status, text));
   }
 }

@@ -1,31 +1,49 @@
-/** In-memory VCF preview rows so commit can send only previewId, not 40k JSON rows. */
-const TTL_MS = 2 * 60 * 60 * 1000;
-const MAX_ENTRIES = 4;
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { VcfRawRow } from "@shared/vcf-import";
 
-type Entry = { rows: Record<string, string>[]; writerId: string; createdAt: number };
+const TTL_HOURS = 24;
 
-const store = new Map<string, Entry>();
-
-function prune() {
-  const now = Date.now();
-  for (const [id, e] of Array.from(store.entries())) {
-    if (now - e.createdAt > TTL_MS) store.delete(id);
-  }
-  if (store.size <= MAX_ENTRIES) return;
-  const oldest = Array.from(store.entries()).sort((a, b) => a[1].createdAt - b[1].createdAt);
-  for (let i = 0; i < oldest.length - MAX_ENTRIES; i++) store.delete(oldest[i][0]);
-}
-
-export function putVcfPreview(writerId: string, rows: Record<string, string>[]): string {
-  prune();
+export async function putVcfPreview(
+  db: SupabaseClient,
+  writerId: string,
+  rows: VcfRawRow[],
+  fileName?: string | null
+): Promise<string> {
   const id = crypto.randomUUID();
-  store.set(id, { rows, writerId, createdAt: Date.now() });
+  await db.from("vcf_preview_cache").delete().eq("loaded_by", writerId);
+  const { error } = await db.from("vcf_preview_cache").insert({
+    id,
+    loaded_by: writerId,
+    file_name: fileName ?? null,
+    rows,
+  });
+  if (error) throw error;
+  const cutoff = new Date(Date.now() - TTL_HOURS * 60 * 60 * 1000).toISOString();
+  await db.from("vcf_preview_cache").delete().lt("created_at", cutoff);
   return id;
 }
 
-export function getVcfPreview(id: string, writerId: string): Record<string, string>[] | null {
-  prune();
-  const e = store.get(id);
-  if (!e || e.writerId !== writerId) return null;
-  return e.rows;
+export async function getVcfPreview(
+  db: SupabaseClient,
+  id: string,
+  writerId: string
+): Promise<VcfRawRow[] | null> {
+  const { data, error } = await db
+    .from("vcf_preview_cache")
+    .select("rows, loaded_by, created_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  if (String(data.loaded_by) !== writerId) return null;
+  const age = Date.now() - new Date(data.created_at).getTime();
+  if (age > TTL_HOURS * 60 * 60 * 1000) return null;
+  return Array.isArray(data.rows) ? (data.rows as VcfRawRow[]) : null;
+}
+
+export async function deleteVcfPreview(
+  db: SupabaseClient,
+  id: string,
+  writerId: string
+): Promise<void> {
+  await db.from("vcf_preview_cache").delete().eq("id", id).eq("loaded_by", writerId);
 }

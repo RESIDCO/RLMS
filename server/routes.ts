@@ -134,18 +134,23 @@ import {
 } from "@shared/residco-import";
 import {
   buildVcfReview,
+  vcfCarKeyFromDb,
+  type VcfExistingCar,
   railcarPayloadFromCurrent,
   assignmentHistoryPayloadFromPeriod,
   carNumberHistoryNaturalKey,
   carNumberHistoryPayloadFromPeriod,
 } from "@shared/vcf-import";
-import { parseVcfUpload } from "./vcf-workbook";
-import { getVcfPreview, putVcfPreview } from "./vcf-preview-cache";
+import { parseVcfUpload, parseVcfUploadFromPath } from "./vcf-workbook";
+import { deleteVcfPreview, getVcfPreview, putVcfPreview } from "./vcf-preview-cache";
+import { unlink } from "fs/promises";
+import { tmpdir } from "os";
 import {
   closeoutClosePatch,
   closeoutStats,
   planVcfAssignmentCloseout,
   skipVcfAssignmentWrites,
+  VCF_MANUAL_PROTECTED_RAILCAR_FIELDS,
   type ExistingHistoryRow,
 } from "@shared/vcf-assignment-closeout";
 import {
@@ -225,6 +230,17 @@ import { enrichDvResultWarnings, validateMaterialCompositionForSave } from "@sha
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 52 * 1024 * 1024 }, // 50 MB
+});
+
+const vcfUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, tmpdir()),
+    filename: (_req, file, cb) => {
+      const safe = String(file.originalname || "upload.xlsx").replace(/[^\w.\-]+/g, "_");
+      cb(null, `vcf-${Date.now()}-${safe}`);
+    },
+  }),
+  limits: { fileSize: 52 * 1024 * 1024 },
 });
 
 const STORAGE_BUCKET = "rlms-attachments";
@@ -2941,46 +2957,91 @@ export async function registerRoutes(
 
   // ---------- Valid Car File (V_VALID_CARS) — assignment-grouped preview (§2 / §2.3) ----------
   // Dry-run review only unless a separate commit endpoint is used after Bruce sign-off.
-  app.post("/api/import/vcf/preview", upload.single("file"), async (req: Request, res: Response) => {
+  app.post("/api/import/vcf/preview", vcfUpload.single("file"), async (req: Request, res: Response) => {
+    let stage = "auth";
+    const mem = (label: string) => {
+      const m = process.memoryUsage();
+      console.log(
+        `[vcf-preview] ${label} rss=${(m.rss / 1048576).toFixed(0)}MB heap=${(m.heapUsed / 1048576).toFixed(0)}MB`
+      );
+    };
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      let rows: Record<string, string>[] | undefined;
+      let rows: Record<string, unknown>[] | undefined;
       const file = (req as any).file as Express.Multer.File | undefined;
-      if (file?.buffer) {
-        rows = parseVcfUpload(file.buffer, file.originalname || "upload.xlsx");
-      } else {
-        rows = (req.body as { rows?: Record<string, string>[] }).rows;
+      try {
+        if (file?.path) {
+          stage = "parse";
+          mem("before-parse");
+          rows = await parseVcfUploadFromPath(file.path, file.originalname || "upload.xlsx");
+          mem("after-parse");
+        } else if (file?.buffer) {
+          stage = "parse";
+          mem("before-parse");
+          rows = await parseVcfUpload(file.buffer, file.originalname || "upload.xlsx");
+          mem("after-parse");
+        } else {
+          stage = "parse";
+          rows = (req.body as { rows?: Record<string, unknown>[] }).rows;
+        }
+      } finally {
+        if (file?.path) await unlink(file.path).catch(() => undefined);
       }
       if (!Array.isArray(rows) || rows.length === 0) {
-        return res.status(400).json({ message: "No rows provided — drop the Valid Car File Excel/CSV (do not POST parsed JSON)." });
+        return res.status(400).json({ message: "preview failed: parse: No rows provided — drop the Valid Car File Excel/CSV." });
       }
 
-      const existingKeys = new Set<string>();
-      const { data: existing, error: eErr } = await supabase
-        .from("railcars")
-        .select("car_initial, car_number, reporting_marks");
-      if (eErr) throw eErr;
-      for (const r of existing ?? []) {
-        const initial = String((r as any).car_initial || (r as any).reporting_marks || "")
-          .trim()
-          .toUpperCase();
-        const num = String((r as any).car_number ?? "").trim();
-        if (initial || num) existingKeys.add(`${initial}|${num}`);
+      stage = "load_existing";
+      mem("before-existing");
+      const existingRows = await fetchAllRows<{
+        car_initial?: string | null;
+        car_number?: string | null;
+        reporting_marks?: string | null;
+        active?: boolean | null;
+        active_source?: string | null;
+      }>((from, to) =>
+        supabaseAdmin
+          .from("railcars")
+          .select("car_initial, car_number, reporting_marks, active, active_source")
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
+      const existingCars = new Map<string, VcfExistingCar>();
+      for (const r of existingRows) {
+        const k = vcfCarKeyFromDb(r);
+        if (k === "|") continue;
+        existingCars.set(k, { active: r.active ?? null, active_source: r.active_source ?? null });
       }
+      mem("after-existing");
 
-      const review = buildVcfReview(rows, existingKeys);
-      const previewId = putVcfPreview(writerId, rows);
+      stage = "build_review";
+      const review = buildVcfReview(rows, new Set(existingCars.keys()), { keepCars: false, existingCars });
+      mem("after-review");
+      stage = "store_preview";
+      const previewId = await putVcfPreview(supabaseAdmin, writerId, rows, file?.originalname);
+      mem("after-store");
+      rows = undefined;
       // Omit full cars[] from response (can be 30k+) — keep summary + flags for UI.
       res.json({
         ok: true,
         mode: "vcf",
         previewId,
-        existingCarsInDb: existingKeys.size,
+        existingCarsInDb: existingCars.size,
         totalRows: review.totalRows,
         distinctCars: review.distinctCars,
         newCars: review.newCars,
+        newActiveCars: review.newActiveCars,
+        newInactiveCars: review.newInactiveCars,
         updatedCars: review.updatedCars,
+        reactivatedCars: review.reactivatedCars,
+        deactivatedCars: review.deactivatedCars,
+        skippedManualCount: review.skippedManualCount,
+        skippedManualCars: review.skippedManualCars,
+        notInFileCount: review.notInFileCount,
+        notInFileSample: review.notInFileSample,
+        projectedTotalCars: review.projectedTotalCars,
+        projectedActiveCars: review.projectedActiveCars,
         multipleActiveCount: review.multipleActiveCount,
         multipleActiveCars: review.multipleActiveCars,
         badActiveCount: review.badActiveCount,
@@ -2988,14 +3049,17 @@ export async function registerRoutes(
         unmappedManagedCategoryCount: review.unmappedManagedCategoryCount,
         unmappedManagedCategories: review.unmappedManagedCategories,
         // Sample of needs-review cars for UI (full list is multipleActiveCars)
-        needsReviewSample: review.cars.filter((c) => c.needsReview).slice(0, 50).map((c) => ({
+        needsReviewSample: review.multipleActiveCars.slice(0, 50).map((c) => ({
           car_initial: c.car_initial,
           car_number: c.car_number,
-          periodCount: c.periodCount,
+          periodCount: c.activePeriodCount,
           activePeriodCount: c.activePeriodCount,
         })),
       });
-    } catch (err) { errHandler(res, err); }
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      errHandler(res, Object.assign(new Error(`preview failed: ${stage}: ${raw}`), { cause: err }));
+    }
   });
 
   // VCF commit — gated. Requires confirmProductionImport === true after Bruce review.
@@ -3010,8 +3074,7 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const { rows: bodyRows, previewId, confirmProductionImport } = req.body as {
-        rows?: any[];
+      const { previewId, confirmProductionImport } = req.body as {
         previewId?: string;
         confirmProductionImport?: boolean;
       };
@@ -3020,33 +3083,32 @@ export async function registerRoutes(
           message: "VCF commit blocked — set confirmProductionImport: true only after Bruce signs off on the §2.3 review.",
         });
       }
-      let rows: any[] | undefined = bodyRows;
-      if ((!Array.isArray(rows) || rows.length === 0) && previewId) {
-        const cached = getVcfPreview(String(previewId), writerId);
-        if (!cached) {
-          return res.status(400).json({
-            message: "Preview expired or not found. Drop the Valid Car File again, then commit with that previewId.",
-          });
-        }
-        rows = cached;
+      if (!previewId) {
+        return res.status(400).json({ message: "Preview expired, re-drop the file" });
       }
-      if (!Array.isArray(rows) || rows.length === 0) {
-        return res.status(400).json({ message: "No rows provided — send previewId from the review step, not the parsed workbook as JSON." });
+      const rows = await getVcfPreview(supabaseAdmin, String(previewId), writerId);
+      if (!rows?.length) {
+        return res.status(400).json({ message: "Preview expired, re-drop the file" });
       }
 
       const existingKeys = new Set<string>();
-      const { data: existing } = await supabase
-        .from("railcars")
-        .select("id, car_initial, car_number, reporting_marks");
+      const existingList = await fetchAllRows<{
+        id: number;
+        car_initial?: string | null;
+        car_number?: string | null;
+        reporting_marks?: string | null;
+      }>((from, to) =>
+        supabase
+          .from("railcars")
+          .select("id, car_initial, car_number, reporting_marks")
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       const keyToId = new Map<string, number>();
-      for (const r of existing ?? []) {
-        const initial = String((r as any).car_initial || (r as any).reporting_marks || "")
-          .trim()
-          .toUpperCase();
-        const num = String((r as any).car_number ?? "").trim();
-        const k = `${initial}|${num}`;
+      for (const r of existingList) {
+        const k = vcfCarKeyFromDb(r);
         existingKeys.add(k);
-        keyToId.set(k, (r as any).id);
+        keyToId.set(k, r.id);
       }
 
       const review = buildVcfReview(rows, existingKeys);
@@ -3160,10 +3222,9 @@ export async function registerRoutes(
             // later VCF that still lists the old mark as ACTIVE cannot revive them.
             const activeManual = (existingCar as any)?.active_source === "manual";
             if (activeManual) {
-              delete (updatePayload as any).active;
-              delete (updatePayload as any).active_status;
-              delete (updatePayload as any).status;
-              delete (updatePayload as any).active_source;
+              for (const key of VCF_MANUAL_PROTECTED_RAILCAR_FIELDS) {
+                delete (updatePayload as any)[key];
+              }
             } else {
               (updatePayload as any).active_source = "auto";
               if (typeof payload.active === "boolean") {
@@ -3287,6 +3348,8 @@ export async function registerRoutes(
       } catch (syncErr) {
         console.warn("[vcf/commit] lease date governance failed", syncErr);
       }
+
+      await deleteVcfPreview(supabaseAdmin, String(previewId), writerId);
 
       res.json({
         ok: true,

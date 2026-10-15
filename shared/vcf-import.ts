@@ -13,13 +13,18 @@ import { normalizeStoredCarNumber } from "./residco-import";
 
 export type VcfRawRow = Record<string, unknown>;
 
-/** Header fingerprint for V_VALID_CARS vs Master Car List. */
-export function looksLikeVcf(rows: Array<Record<string, unknown>>): boolean {
-  if (!rows.length) return false;
-  const keys = Object.keys(rows[0]).map((k) => k.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+export function looksLikeVcfHeaderNames(names: string[]): boolean {
+  const keys = names.map((k) => String(k ?? "").toLowerCase().replace(/[^a-z0-9]+/g, ""));
   const has = (s: string) => keys.includes(s);
   return has("carinitial") && has("carnumber") && has("active") && (has("assignmentid") || has("assignment"));
 }
+
+/** Header fingerprint for V_VALID_CARS vs Master Car List. */
+export function looksLikeVcf(rows: Array<Record<string, unknown>>): boolean {
+  if (!rows.length) return false;
+  return looksLikeVcfHeaderNames(Object.keys(rows[0]));
+}
+
 
 export type ParsedActive =
   | { ok: true; active: boolean; raw: string }
@@ -76,11 +81,42 @@ export type CarGroupReview = {
   isUpdate: boolean;
 };
 
+export type VcfExistingCar = {
+  active?: boolean | null;
+  active_source?: string | null;
+};
+
+export function vcfCarKeyFromDb(r: {
+  car_initial?: string | null;
+  reporting_marks?: string | null;
+  car_number?: string | null;
+}): string {
+  const initial = String(r.car_initial || r.reporting_marks || "")
+    .trim()
+    .toUpperCase();
+  const num = String(r.car_number ?? "").trim();
+  return `${initial}|${num}`;
+}
+
+export function vcfIncomingActive(current: { activeParse: ParsedActive }): boolean {
+  return current.activeParse.ok && current.activeParse.active === true;
+}
+
 export type VcfReviewSummary = {
   totalRows: number;
   distinctCars: number;
   newCars: number;
+  newActiveCars: number;
+  newInactiveCars: number;
   updatedCars: number;
+  reactivatedCars: number;
+  deactivatedCars: number;
+  skippedManualCount: number;
+  skippedManualCars: Array<{ car_initial: string; car_number: string }>;
+  notInFileCount: number;
+  notInFileSample: Array<{ carKey: string }>;
+  projectedTotalCars: number;
+  projectedActiveCars: number;
   multipleActiveCount: number;
   multipleActiveCars: Array<{
     car_initial: string;
@@ -168,6 +204,32 @@ const VCF_HEADERS: Record<string, string> = (() => {
   add("mechanical_designation", "MECHANICAL_DESIGNATION");
   return m;
 })();
+
+/** Keep only columns the VCF parser uses (drop extra workbook fields). */
+export function compactVcfRowsFromMatrix(matrix: unknown[][]): VcfRawRow[] {
+  if (!matrix.length) return [];
+  const headers = (matrix[0] ?? []).map((h) => String(h ?? ""));
+  if (!looksLikeVcfHeaderNames(headers)) {
+    throw new Error("This does not look like a Valid Car File (need CAR_INITIAL, CAR_NUMBER, ACTIVE, ASSIGNMENT_ID).");
+  }
+  const keep: Array<{ name: string; i: number }> = [];
+  headers.forEach((name, i) => {
+    if (VCF_HEADERS[normKey(name)]) keep.push({ name, i });
+  });
+  const out: VcfRawRow[] = [];
+  for (let r = 1; r < matrix.length; r++) {
+    const line = matrix[r] ?? [];
+    const row: VcfRawRow = {};
+    let any = false;
+    for (const { name, i } of keep) {
+      const v = line[i];
+      if (v != null && v !== "") any = true;
+      row[name] = v;
+    }
+    if (any) out.push(row);
+  }
+  return out;
+}
 
 export function normalizeVcfHeaderRow(row: VcfRawRow): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -334,19 +396,22 @@ export function pickCurrentRow(periods: VcfParsedRow[]): {
 
 /**
  * Build §2.3 review summary. existingKeys = Set of "INITIAL|NUMBER" already in railcars.
+ * Pass existingCars (same keys) to classify reactivated / deactivated / manual / not-in-file.
  */
 export function buildVcfReview(
   rawRows: VcfRawRow[],
-  existingKeys: Set<string> = new Set()
+  existingKeys: Set<string> = new Set(),
+  opts?: { keepCars?: boolean; existingCars?: Map<string, VcfExistingCar> }
 ): VcfReviewSummary {
-  const parsed: VcfParsedRow[] = [];
+  const keepCars = opts?.keepCars !== false;
+  const existingCars = opts?.existingCars;
+  const keys = existingCars ? new Set(existingCars.keys()) : existingKeys;
+  const byCar = new Map<string, VcfParsedRow[]>();
+  let parsedCount = 0;
   for (let i = 0; i < rawRows.length; i++) {
     const p = parseVcfRow(rawRows[i], i + 2); // +2 ≈ header on row 1
-    if (p) parsed.push(p);
-  }
-
-  const byCar = new Map<string, VcfParsedRow[]>();
-  for (const p of parsed) {
+    if (!p) continue;
+    parsedCount += 1;
     const list = byCar.get(p.carKey) ?? [];
     list.push(p);
     byCar.set(p.carKey, list);
@@ -355,27 +420,67 @@ export function buildVcfReview(
   const cars: CarGroupReview[] = [];
   const multipleActiveCars: VcfReviewSummary["multipleActiveCars"] = [];
   let newCars = 0;
+  let newActiveCars = 0;
+  let newInactiveCars = 0;
   let updatedCars = 0;
+  let reactivatedCars = 0;
+  let deactivatedCars = 0;
+  const skippedManualCars: VcfReviewSummary["skippedManualCars"] = [];
+  const badMap = new Map<string, { count: number; sampleRows: number[] }>();
+  const umMap = new Map<string, number>();
+  let projectedActiveCars = 0;
 
-  for (const [carKey, periods] of byCar) {
+  for (const [carKey, periods] of Array.from(byCar.entries())) {
     const { current, multipleActive, needsReview } = pickCurrentRow(periods);
-    const exists = existingKeys.has(carKey);
-    if (exists) updatedCars += 1;
-    else newCars += 1;
+    const exists = keys.has(carKey);
+    const incomingActive = vcfIncomingActive(current);
+    const prior = existingCars?.get(carKey);
+    const manual = String(prior?.active_source ?? "").trim() === "manual";
+    if (exists) {
+      updatedCars += 1;
+      if (manual) {
+        skippedManualCars.push({ car_initial: current.car_initial, car_number: current.car_number });
+        if (prior?.active === true) projectedActiveCars += 1;
+      } else {
+        if (prior && prior.active !== true && incomingActive) reactivatedCars += 1;
+        if (prior && prior.active === true && !incomingActive) deactivatedCars += 1;
+        if (incomingActive) projectedActiveCars += 1;
+      }
+    } else {
+      newCars += 1;
+      if (incomingActive) {
+        newActiveCars += 1;
+        projectedActiveCars += 1;
+      } else newInactiveCars += 1;
+    }
     const activePeriodCount = periods.filter((p) => p.activeParse.ok && p.activeParse.active).length;
-    cars.push({
-      carKey,
-      car_initial: current.car_initial,
-      car_number: current.car_number,
-      periodCount: periods.length,
-      activePeriodCount,
-      multipleActive,
-      needsReview,
-      current,
-      periods,
-      isNew: !exists,
-      isUpdate: exists,
-    });
+    if (keepCars) {
+      cars.push({
+        carKey,
+        car_initial: current.car_initial,
+        car_number: current.car_number,
+        periodCount: periods.length,
+        activePeriodCount,
+        multipleActive,
+        needsReview,
+        current,
+        periods,
+        isNew: !exists,
+        isUpdate: exists,
+      });
+    }
+    for (const p of periods) {
+      if (!p.activeParse.ok) {
+        const raw = p.activeParse.raw;
+        const e = badMap.get(raw) ?? { count: 0, sampleRows: [] };
+        e.count += 1;
+        if (e.sampleRows.length < 5) e.sampleRows.push(p.sourceRow);
+        badMap.set(raw, e);
+      }
+      if (p.managed_category_unmapped && p.managed_category_raw) {
+        umMap.set(p.managed_category_raw, (umMap.get(p.managed_category_raw) ?? 0) + 1);
+      }
+    }
     if (multipleActive) {
       multipleActiveCars.push({
         car_initial: current.car_initial,
@@ -391,35 +496,40 @@ export function buildVcfReview(
     }
   }
 
-  // Bad ACTIVE tallies
-  const badMap = new Map<string, { count: number; sampleRows: number[] }>();
-  for (const p of parsed) {
-    if (p.activeParse.ok) continue;
-    const raw = p.activeParse.raw;
-    const e = badMap.get(raw) ?? { count: 0, sampleRows: [] };
-    e.count += 1;
-    if (e.sampleRows.length < 5) e.sampleRows.push(p.sourceRow);
-    badMap.set(raw, e);
+  const notInFileSample: Array<{ carKey: string }> = [];
+  let notInFileCount = 0;
+  for (const key of keys) {
+    if (byCar.has(key)) continue;
+    notInFileCount += 1;
+    if (notInFileSample.length < 20) notInFileSample.push({ carKey: key });
+    if (existingCars?.get(key)?.active === true) projectedActiveCars += 1;
   }
+
   const badActiveValues = [...badMap.entries()]
     .map(([raw, v]) => ({ raw, count: v.count, sampleRows: v.sampleRows }))
     .sort((a, b) => b.count - a.count);
 
-  // Unmapped managed category
-  const umMap = new Map<string, number>();
-  for (const p of parsed) {
-    if (!p.managed_category_unmapped || !p.managed_category_raw) continue;
-    umMap.set(p.managed_category_raw, (umMap.get(p.managed_category_raw) ?? 0) + 1);
-  }
   const unmappedManagedCategories = [...umMap.entries()]
     .map(([raw, count]) => ({ raw, count }))
     .sort((a, b) => b.count - a.count);
 
   return {
-    totalRows: parsed.length,
+    totalRows: parsedCount,
     distinctCars: byCar.size,
     newCars,
+    newActiveCars,
+    newInactiveCars,
     updatedCars,
+    reactivatedCars,
+    deactivatedCars,
+    skippedManualCount: skippedManualCars.length,
+    skippedManualCars: skippedManualCars.sort((a, b) =>
+      `${a.car_initial}${a.car_number}`.localeCompare(`${b.car_initial}${b.car_number}`)
+    ),
+    notInFileCount,
+    notInFileSample,
+    projectedTotalCars: keys.size + newCars,
+    projectedActiveCars,
     multipleActiveCount: multipleActiveCars.length,
     multipleActiveCars: multipleActiveCars.sort((a, b) =>
       `${a.car_initial}${a.car_number}`.localeCompare(`${b.car_initial}${b.car_number}`)

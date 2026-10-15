@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -59,6 +59,12 @@ export default function HistoryPage() {
   const [sheetCarId, setSheetCarId] = useState<number | null>(null);
   const q = search.trim();
 
+  useEffect(() => {
+    const prev = document.title;
+    document.title = "Lineage · RLMS";
+    return () => { document.title = prev; };
+  }, []);
+
   const { data, isLoading } = useQuery<ActivityResponse>({
     queryKey: ["/api/activity", "history-page", q],
     queryFn: () =>
@@ -90,7 +96,7 @@ export default function HistoryPage() {
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
-        title="History"
+        title="Lineage"
         subtitle="Lineage of railcars and leases — mark changes, assignments, notes, status, and rent events"
       />
 

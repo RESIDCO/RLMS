@@ -522,7 +522,8 @@ export default function SearchPage() {
               <button
                 type="button"
                 className="p-1 text-muted-foreground hover:text-foreground"
-                title="History"
+                title={`View lineage for ${[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}`}
+                aria-label={`View lineage for ${[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}`}
                 onClick={() => openAppTab(historyPath([r.reporting_marks, r.car_number].filter(Boolean).join(" ")))}
               >
                 <History className="h-3.5 w-3.5" />

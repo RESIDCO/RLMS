@@ -36,6 +36,15 @@ import DvNewCalculation from "@/pages/DvCalculator/NewCalculation";
 import DvHistory from "@/pages/DvCalculator/History";
 import DvReference from "@/pages/DvCalculator/Reference";
 import NotFound from "@/pages/not-found";
+import {
+  BulkCommitmentPage,
+  BulkReturnPage,
+  BulkRentStartPage,
+  StaleCommitmentsPage,
+  LeaseEndedWatchPage,
+  KpiCarListPage,
+  RentStartWatchPage,
+} from "@/pages/CommitmentOps";
 
 function RedirectAllCars() {
   const [loc] = useLocation();
@@ -101,6 +110,15 @@ function AppRouter() {
       <Route path="/photo-search" component={PhotoSearch} />
       <Route path="/programs/:id" component={ProgramDetail} />
       <Route path="/programs" component={Programs} />
+      <Route path="/commitments/bulk" component={BulkCommitmentPage} />
+      <Route path="/commitments/stale" component={StaleCommitmentsPage} />
+      <Route path="/rent-start/bulk" component={BulkRentStartPage} />
+      <Route path="/rent-start/awaiting">{() => <RentStartWatchPage kind="awaiting" />}</Route>
+      <Route path="/rent-start/shop">{() => <RentStartWatchPage kind="shop" />}</Route>
+      <Route path="/rent-start/future">{() => <RentStartWatchPage kind="future" />}</Route>
+      <Route path="/returns/bulk" component={BulkReturnPage} />
+      <Route path="/returns/watch" component={LeaseEndedWatchPage} />
+      <Route path="/kpi/cars" component={KpiCarListPage} />
       <Route path="/reports" component={Reports} />
       <Route path="/fleet-intelligence" component={Reports} />
       <Route path="/users" component={AdminOnlyUsers} />

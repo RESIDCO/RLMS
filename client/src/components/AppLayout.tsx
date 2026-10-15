@@ -66,6 +66,12 @@ const mainNav: { href: string; label: string; icon: React.ElementType; aliases?:
   { href: "/import",              label: "Bulk Import",          icon: Upload },
   { href: "/photo-search",        label: "Photo Search",         icon: Image },
   { href: "/programs",            label: "Programs",             icon: FolderOpen },
+  { href: "/commitments/bulk",    label: "Bulk Commitment",      icon: FolderOpen },
+  { href: "/rent-start/bulk",     label: "Bulk Rent Start",      icon: ClipboardList },
+  { href: "/rent-start/awaiting", label: "Awaiting rent start",  icon: ClipboardList },
+  { href: "/returns/bulk",        label: "Bulk Return",          icon: ArrowRightLeft },
+  { href: "/commitments/stale",   label: "Stale list",           icon: ClipboardList },
+  { href: "/returns/watch",       label: "Lease-ended watch",    icon: ClipboardList },
   { href: "/reports",             label: "Reports",              icon: ClipboardList },
 ];
 

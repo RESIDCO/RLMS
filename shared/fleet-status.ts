@@ -12,10 +12,10 @@
  * new/updated import rows where fleet_status_source = 'auto'.
  */
 
-export type FleetStatus = "Sold" | "Idle" | "Leased" | "Abatement";
-export type FleetStatusSource = "auto" | "manual";
+export type FleetStatus = "Sold" | "Idle" | "Leased" | "Abatement" | "Unassigned";
+export type FleetStatusSource = "auto" | "manual" | "derived";
 
-export const FLEET_STATUSES: FleetStatus[] = ["Leased", "Idle", "Sold", "Abatement"];
+export const FLEET_STATUSES: FleetStatus[] = ["Leased", "Idle", "Unassigned", "Sold", "Abatement"];
 
 /** Entity assigned counts — Abatement still counts as on-lease for RPS/Main util bars. */
 export function countsAsLeasedForKpi(status: FleetStatus | string | null | undefined): boolean {
@@ -44,7 +44,7 @@ export type FleetStatusInput = {
 
 export function parseFleetStatus(raw: unknown): FleetStatus | null {
   const s = String(raw ?? "").trim();
-  if (s === "Sold" || s === "Idle" || s === "Leased" || s === "Abatement") return s;
+  if (s === "Sold" || s === "Idle" || s === "Leased" || s === "Abatement" || s === "Unassigned") return s;
   return null;
 }
 

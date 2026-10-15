@@ -95,8 +95,8 @@ export type Railcar = {
   lining_material: string | null;
   active: boolean;
   status: string | null;
-  fleet_status?: "Leased" | "Idle" | "Sold" | "Abatement" | null;
-  fleet_status_source?: "auto" | "manual" | null;
+  fleet_status?: "Leased" | "Idle" | "Sold" | "Abatement" | "Unassigned" | null;
+  fleet_status_source?: "auto" | "manual" | "derived" | null;
   /** auto = import may refresh active; manual = guarded Inactive/Reactivate owns it. */
   active_source?: "auto" | "manual" | null;
   coating: string | null;
@@ -316,7 +316,7 @@ export const insertRailcarSchema = z.object({
   lining_material: z.string().nullable().optional(),
   active: z.boolean().optional(),
   status: z.string().nullable().optional(),
-  fleet_status: z.enum(["Leased", "Idle", "Sold", "Abatement"]).optional(),
+  fleet_status: z.enum(["Leased", "Idle", "Sold", "Abatement", "Unassigned"]).optional(),
   active_source: z.enum(["auto", "manual"]).optional(),
   coating: z.string().nullable().optional(),
   transit_status: z.string().nullable().optional(),
@@ -382,6 +382,8 @@ export const moveCarsSchema = z.object({
   moved_by: z.string().nullable().optional(),
   /** YYYY-MM-DD; omitted/today uses the current timestamp. Past dates backdate the audit trail. */
   effective_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  /** Explicit date. Omitted on a same-rider move keeps the existing date; a rider change clears it. */
+  rent_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 export type MoveCarsInput = z.infer<typeof moveCarsSchema>;
 

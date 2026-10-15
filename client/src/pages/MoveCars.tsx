@@ -62,6 +62,7 @@ export default function MoveCars() {
   const [newFleetName, setNewFleetName] = useState("");
   const [reason, setReason] = useState("");
   const [effectiveDate, setEffectiveDate] = useState(todayIsoDateOnly);
+  const [rentStartDate, setRentStartDate] = useState("");
   const [search, setSearch] = useState("");
   const { toast } = useToast();
 
@@ -128,6 +129,7 @@ export default function MoveCars() {
         reason: reason.trim() || null,
         moved_by: "rlms-ui",
         effective_date: effectiveDate || null,
+        rent_start_date: rentStartDate || null,
       });
     },
     onSuccess: () => {
@@ -142,6 +144,7 @@ export default function MoveCars() {
       setNewFleetName("");
       setReason("");
       setEffectiveDate(todayIsoDateOnly());
+      setRentStartDate("");
     },
     onError: (e: Error) =>
       toast({ title: "Move failed", description: e.message, variant: "destructive" }),
@@ -155,6 +158,11 @@ export default function MoveCars() {
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
+      <div className="mx-4 sm:mx-8 mt-4 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm">
+        Ending an OL? Prompt: Move to EA x-lessee? Use{" "}
+        <a className="underline" href="#/returns/bulk">Bulk return</a> so the preview shows old link → new link.
+        Moving onto a new OL clears Rent Start Date unless you supply one below — the car stays Idle (awaiting rent start), not Unassigned.
+      </div>
       <PageHeader
         title="Move Cars"
         subtitle="Reassign one or more railcars from one rider to another. Every move is logged."
@@ -324,6 +332,17 @@ export default function MoveCars() {
                 />
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Defaults to today. Set a past date to backdate the History log. Does not recalculate this month’s rent or depreciation.
+                </p>
+              </div>
+              <div>
+                <Label>Rent start date (optional)</Label>
+                <Input
+                  type="date"
+                  value={rentStartDate}
+                  onChange={(e) => setRentStartDate(e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Leave blank to reset rent start on the new OL (Idle until a date is set).
                 </p>
               </div>
             </div>

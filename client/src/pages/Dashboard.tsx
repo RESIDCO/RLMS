@@ -102,6 +102,23 @@ type DashboardData = {
     lessee_count?: number;
     lease_authority?: string;
     lease_status_counts?: Record<string, number>;
+    off_rent_main?: number;
+    off_rent_coal?: number;
+    off_rent_rps?: number;
+    unassigned_main?: number;
+    unassigned_rps?: number;
+    no_lease_link?: number;
+    month_to_month?: number;
+    going_on_lease_leases?: number;
+    going_on_lease_cars?: number;
+    going_on_lease_earliest_end?: string | null;
+    stale_commitments?: number;
+    stale_programs?: number;
+    idle_on_ol_review?: number;
+    awaiting_rent_start?: number;
+    shop_conflict?: number;
+    future_rent_start?: number;
+    lease_ended_watch?: number;
   };
   detail: {
     all_cars: CarRow[];
@@ -178,6 +195,7 @@ const STATUS_BADGE: Record<string, string> = {
   Leased: "bg-umler-teal/15 text-umler-teal border-umler-teal/25",
   Sold: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
   Idle: "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
+  Unassigned: "bg-umler-teal/10 text-umler-teal border-umler-teal/25",
   Storage: "bg-umler-amber/15 text-umler-amber border-umler-amber/25",
   "Bad Order": "bg-umler-signal/15 text-umler-signal border-umler-signal/25",
   "Off-Lease": "bg-umler-steel/15 text-umler-steel border-umler-steel/25",
@@ -482,35 +500,27 @@ export default function Dashboard() {
               />
               <KpiCard
                 testId="kpi-idle"
-                label="Idle"
+                label="Idle (committed)"
                 value={data.kpis.idle_count ?? 0}
-                subtext="Active cars tagged Idle"
+                subtext="Off rent with a Commitment, or on OL awaiting rent start"
                 icon={PauseCircle}
-                onClick={() => navigate("/railcars?filter=offlease")}
-              />
-              <KpiCard
-                testId="kpi-abatement"
-                label="Abatement"
-                value={data.kpis.abatement_count ?? 0}
-                subtext="Tagged Abatement; netted out of Active Cars"
-                icon={TimerOff}
-                onClick={() => navigate("/railcars?filter=abatement")}
+                onClick={() => navigate("/kpi/cars?bucket=idle")}
               />
               <KpiCard
                 testId="kpi-active-assignments"
                 label="Active Cars"
                 value={data.kpis.active_cars ?? data.kpis.active_assignments}
-                subtext="Total Fleet − Idle − Abatement − Unassigned"
+                subtext="Operating − Off Rent"
                 icon={LinkIcon}
-                onClick={() => navigate("/railcars?filter=leased")}
+                onClick={() => navigate("/kpi/cars?bucket=on_rent")}
               />
               <KpiCard
                 testId="kpi-unassigned"
-                label="Unassigned Cars"
+                label="Unassigned / Available for Opportunities"
                 value={data.kpis.unassigned_cars}
-                subtext="Neither idle nor leased (no assignment row)"
+                subtext={`Off rent, not on OL, no Commitment${data.kpis.unassigned_main != null ? ` · Main ${data.kpis.unassigned_main} / RPS ${data.kpis.unassigned_rps ?? 0}` : ""}`}
                 icon={CircleDashed}
-                onClick={() => navigate("/railcars?filter=unassigned")}
+                onClick={() => navigate("/kpi/cars?bucket=unassigned")}
               />
               <KpiCard
                 testId="kpi-in-program"
@@ -524,7 +534,7 @@ export default function Dashboard() {
               <button
                 type="button"
                 className="rounded-xl border border-card-border bg-card shadow-card p-4 flex flex-col gap-2 text-left w-full min-w-0 overflow-hidden cursor-pointer hover:border-umler-steel/40 hover:bg-card/80 group transition-all"
-                onClick={() => setDrillKey("utilization_pct")}
+                onClick={() => navigate("/kpi/cars?bucket=on_rent")}
                 data-testid="kpi-utilization"
               >
                 <div className="flex items-center justify-between gap-1 min-w-0">
@@ -560,10 +570,84 @@ export default function Dashboard() {
                 testId="kpi-off-rent"
                 label="Off Rent"
                 value={data.kpis.off_rent_count}
-                subtext="Idle ∪ Abatement ∪ latest rent event off_rent"
+                subtext={`${data.kpis.off_rent_count.toLocaleString()} confirmed${data.kpis.off_rent_main != null ? ` · Main ${data.kpis.off_rent_main} / Coal ${data.kpis.off_rent_coal ?? 0} / RPS ${data.kpis.off_rent_rps ?? 0}` : ""}${(data.kpis.idle_on_ol_review ?? 0) > 0 ? ` · ${data.kpis.idle_on_ol_review} tagged Idle on OL — under review` : ""}`}
                 icon={AlertTriangle}
                 accent={data.kpis.off_rent_count > 0 ? "warning" : "muted"}
                 marker="icon"
+                onClick={() => navigate("/kpi/cars?bucket=off_rent")}
+              />
+              <KpiCard
+                testId="kpi-awaiting-rent"
+                label="Awaiting rent start (on OL)"
+                value={data.kpis.awaiting_rent_start ?? 0}
+                subtext="On an OL but rent_start_date is blank or in the future"
+                icon={TimerOff}
+                accent={(data.kpis.awaiting_rent_start ?? 0) > 0 ? "warning" : "muted"}
+                onClick={() => navigate("/rent-start/awaiting")}
+              />
+              <KpiCard
+                testId="kpi-shop-conflict"
+                label="Shop conflict"
+                value={data.kpis.shop_conflict ?? 0}
+                subtext="On rent while in an open shop program or shop/repair ops flag"
+                icon={AlertTriangle}
+                onClick={() => navigate("/rent-start/shop")}
+              />
+              {(data.kpis.idle_on_ol_review ?? 0) > 0 && (
+                <KpiCard
+                  testId="kpi-idle-on-ol"
+                  label="Idle on OL — under review"
+                  value={data.kpis.idle_on_ol_review ?? 0}
+                  subtext="Tagged Idle on an OL. Use the rent-start review CSV before retag."
+                  icon={AlertTriangle}
+                  accent="warning"
+                  onClick={() => navigate("/kpi/cars?bucket=idle_on_ol")}
+                />
+              )}
+              <KpiCard
+                testId="kpi-mtm"
+                label="Month to Month"
+                value={data.kpis.month_to_month ?? 0}
+                subtext="Cars on MTM leases"
+                icon={CalendarDays}
+                onClick={() => navigate("/kpi/cars?bucket=mtm")}
+              />
+              <KpiCard
+                testId="kpi-going-on-lease"
+                label="Going On Lease"
+                value={`${data.kpis.going_on_lease_leases ?? 0} / ${data.kpis.going_on_lease_cars ?? 0}`}
+                subtext={
+                  data.kpis.going_on_lease_earliest_end && String(data.kpis.going_on_lease_earliest_end) < "2026-10-15"
+                    ? `Stale ${data.kpis.going_on_lease_earliest_end}`
+                    : "Leases / cars"
+                }
+                icon={TimerOff}
+                accent={data.kpis.going_on_lease_cars ? "warning" : "muted"}
+                onClick={() => navigate("/kpi/cars?bucket=off_rent")}
+              />
+              <KpiCard
+                testId="kpi-stale"
+                label="Stale Commitments"
+                value={`${data.kpis.stale_commitments ?? 0} / ${data.kpis.stale_programs ?? 0}`}
+                subtext="Stale Commitments / open programs past target"
+                icon={AlertTriangle}
+                onClick={() => navigate("/commitments/stale")}
+              />
+              <KpiCard
+                testId="kpi-watch"
+                label="Lease-ended watch"
+                value={data.kpis.lease_ended_watch ?? 0}
+                subtext="Still on OL past end date, not Month to Month"
+                icon={TimerOff}
+                onClick={() => navigate("/returns/watch")}
+              />
+              <KpiCard
+                testId="kpi-no-link"
+                label="No lease link"
+                value={data.kpis.no_lease_link ?? 0}
+                subtext="No assignment row (already inside Off Rent)"
+                icon={CircleDashed}
+                onClick={() => navigate("/kpi/cars?bucket=no_link")}
               />
               <KpiCard
                 testId="kpi-riders"
@@ -573,7 +657,7 @@ export default function Dashboard() {
                 onClick={() => navigate("/leases?filter=riders")}
               />
               {Object.entries(data.kpis.lease_status_counts ?? {})
-                .filter(([, n]) => Number(n) > 0)
+                .filter(([status, n]) => Number(n) > 0 && !/^available$/i.test(status))
                 .sort((a, b) => a[0].localeCompare(b[0]))
                 .map(([status, n]) => (
                   <KpiCard

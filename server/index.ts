@@ -4,6 +4,7 @@ dotenv.config();
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { registerRoutes } from "./routes";
+import { purgeExpiredPreviews } from "./commitment";
 import { serveStatic } from "./static";
 import { createServer, type IncomingMessage } from "http";
 
@@ -139,5 +140,6 @@ app.use((req, res, next) => {
   }
   httpServer.listen(listenOpts, () => {
     log(`serving on port ${port}`);
+    purgeExpiredPreviews().catch((e) => console.warn("[preview] startup purge skipped:", e?.message ?? e));
   });
 })();

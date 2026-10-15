@@ -1,16 +1,21 @@
 /**
- * Document / photo viewer (§D / shot 03) — opened in a new window from
- * Estimate Review "N Document(s) found".
+ * §E Document / photo viewer — own window from Estimate Review, Bad Orders, Wreck.
+ * Shot 03 layout + left category list / right preview (image, PDF, 500-byte, Office).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRoute } from "wouter";
 import {
   Download,
   Eye,
+  FileArchive,
+  RotateCw,
   Save,
+  Send,
   Trash2,
   Upload,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,10 +37,72 @@ type DocRow = {
   comment?: string | null;
   uploaded_by?: string | null;
   created_by?: string | null;
+  uploaded_role?: string | null;
   deleted_at?: string | null;
+  owner_only?: boolean;
+  source_tag?: string | null;
+  doc_revision?: number;
+  group?: string;
+  jic_photo?: boolean;
 };
 
-const CATEGORIES = ["Photograph", "SDS", "Scope of Work", "Other", "Undefined"];
+type CategoryBucket = { code: string; label: string; count: number };
+
+type ChecklistItem = {
+  key: string;
+  label: string;
+  required: boolean;
+  present: boolean;
+  count: number;
+  min?: number;
+  max?: number;
+  missing: boolean;
+};
+
+type Permissions = {
+  role: string;
+  canAdd: boolean;
+  canRemove: boolean;
+  canRecategorize: boolean;
+  canVoid: boolean;
+  canRestore: boolean;
+  canShowVoided: boolean;
+  canZip: boolean;
+  canAttachSendLessee: boolean;
+};
+
+type Scope = {
+  eventId: string;
+  estimateId: string | null;
+  wreckEventId: string | null;
+  carLabel: string;
+  reason: string | null;
+  estimateIdDisplay: string | null;
+  statusName: string | null;
+  boLifecycleStatus: string | null;
+  badOrderId: string | null;
+  recordType: string;
+};
+
+const CATEGORIES = [
+  "Photograph",
+  "estimate_pdf",
+  "aar_500byte",
+  "Invoice",
+  "SDS",
+  "Scope of Work",
+  "JIC",
+  "DDCT",
+  "Other",
+  "Undefined",
+];
+
+const UPLOADER_FILTERS = [
+  { value: "", label: "All uploaders" },
+  { value: "shop", label: "Shop" },
+  { value: "owner", label: "Owner" },
+  { value: "lessee", label: "Lessee" },
+];
 
 function fmtSize(n?: number) {
   if (n == null) return "—";
@@ -44,19 +111,66 @@ function fmtSize(n?: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function previewKind(d: DocRow): "image" | "pdf" | "aar500" | "office" | "other" {
+  const mime = String(d.mime ?? "").toLowerCase();
+  const name = String(d.original_filename ?? d.kind ?? "").toLowerCase();
+  const cat = String(d.category_code ?? d.group ?? "").toLowerCase();
+  if (
+    cat === "aar_500byte" ||
+    cat === "data_file" ||
+    d.kind === "aar_500byte" ||
+    name.endsWith(".500") ||
+    name.endsWith(".dat")
+  ) {
+    return "aar500";
+  }
+  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|bmp|webp)$/i.test(name)) {
+    return "image";
+  }
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "pdf";
+  if (
+    mime.includes("officedocument") ||
+    mime.includes("msword") ||
+    mime.includes("ms-excel") ||
+    /\.(docx?|xlsx?|pptx?)$/i.test(name)
+  ) {
+    return "office";
+  }
+  return "other";
+}
+
+function roleFromUrl(): string {
+  const hashQs = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+  return (
+    hashQs.get("role") ||
+    new URLSearchParams(window.location.search).get("role") ||
+    "reviewer"
+  );
+}
+
+function useViewerScope(): {
+  estimateId?: string;
+  eventId?: string;
+  wreckEventId?: string;
+} {
+  const [, est] = useRoute("/repair/estimates/:id/documents");
+  const [, ev] = useRoute("/repair/events/:id/documents");
+  const [, wreck] = useRoute("/repair/wreck/:eventId/documents");
+  if (est?.id) return { estimateId: est.id };
+  if (ev?.id) return { eventId: ev.id };
+  if (wreck?.eventId) return { wreckEventId: wreck.eventId };
+  return {};
+}
+
 export default function EstimateDocuments() {
-  const [, params] = useRoute("/repair/estimates/:id/documents");
-  const estimateId = params?.id ?? "";
+  const scopeIds = useViewerScope();
   const [docs, setDocs] = useState<DocRow[]>([]);
-  const [ctx, setCtx] = useState<{
-    car: string;
-    reason: string | null;
-    estimateIdDisplay: string;
-    statusName: string;
-    boLifecycleStatus: string | null;
-    eventId: string;
-  } | null>(null);
+  const [categories, setCategories] = useState<CategoryBucket[]>([]);
+  const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [scope, setScope] = useState<Scope | null>(null);
+  const [perms, setPerms] = useState<Permissions | null>(null);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [applyComment, setApplyComment] = useState("");
   const [applyCategory, setApplyCategory] = useState("Undefined");
   const [addComment, setAddComment] = useState("");
@@ -64,79 +178,121 @@ export default function EstimateDocuments() {
   const [files, setFiles] = useState<FileList | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewName, setPreviewName] = useState("");
-  const [galleryIdx, setGalleryIdx] = useState<number | null>(null);
-  /** Owner/system manager can void/recategorize; shop/viewer cannot. */
-  const [canManage, setCanManage] = useState(true);
-  const [role, setRole] = useState("reviewer");
-  const viewerOnly = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("view") === "gallery"
-    || new URLSearchParams(window.location.search).get("view") === "gallery";
+  const [role, setRole] = useState(roleFromUrl());
+  const [showVoided, setShowVoided] = useState(false);
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterUploader, setFilterUploader] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [aarPreview, setAarPreview] = useState<{
+    lines: Array<{ lineNo: number; fields: Record<string, unknown>; rawLine: string }>;
+    rawText?: string;
+    decodeError?: string;
+  } | null>(null);
+  const [aarRaw, setAarRaw] = useState(false);
+  const [leftCategory, setLeftCategory] = useState<string>("");
 
-  async function load() {
+  const queryBase = useMemo(() => {
+    const p = new URLSearchParams();
+    if (scopeIds.estimateId) p.set("estimateId", scopeIds.estimateId);
+    if (scopeIds.eventId) p.set("eventId", scopeIds.eventId);
+    if (scopeIds.wreckEventId) p.set("wreckEventId", scopeIds.wreckEventId);
+    p.set("role", role);
+    if (showVoided) p.set("showVoided", "1");
+    if (filterCategory) p.set("category", filterCategory);
+    if (filterUploader) p.set("uploader", filterUploader);
+    if (filterSearch) p.set("q", filterSearch);
+    if (filterDateFrom) p.set("dateFrom", filterDateFrom);
+    if (filterDateTo) p.set("dateTo", filterDateTo);
+    return p;
+  }, [
+    scopeIds,
+    role,
+    showVoided,
+    filterCategory,
+    filterUploader,
+    filterSearch,
+    filterDateFrom,
+    filterDateTo,
+  ]);
+
+  const load = useCallback(async () => {
     setError("");
-    const res = await apiRequest("GET", `/api/repair/estimates/${estimateId}/review`);
+    const res = await apiRequest(
+      "GET",
+      `/api/repair/documents/viewer?${queryBase.toString()}`,
+    );
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "load failed");
-    const c = data.context;
-    setCtx(
-      c
-        ? {
-            car: `${c.carInitial} ${c.carNumber}`,
-            reason: c.badOrderReason,
-            estimateIdDisplay: c.estimateIdDisplay,
-            statusName: c.statusName,
-            boLifecycleStatus: c.boLifecycleStatus,
-            eventId: c.eventId,
-          }
-        : null,
-    );
-    const list = (data.documents ?? []) as DocRow[];
-    setDocs(list.filter((d) => !d.deleted_at));
-    const qs = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
-    const roleQ =
-      qs.get("role") ||
-      new URLSearchParams(window.location.search).get("role") ||
-      "reviewer";
-    setRole(roleQ);
-    const perm = await apiRequest(
-      "GET",
-      `/api/repair/attachments/permissions?role=${encodeURIComponent(roleQ)}`,
-    );
-    const permData = await perm.json().catch(() => ({}));
-    setCanManage(Boolean(permData.canRemove));
-  }
+    setScope(data.scope ?? null);
+    setDocs((data.documents ?? []) as DocRow[]);
+    setCategories((data.categories ?? []) as CategoryBucket[]);
+    setChecklist((data.checklist?.items ?? []) as ChecklistItem[]);
+    setPerms(data.permissions ?? null);
+    setRole(String(data.permissions?.role ?? role));
+  }, [queryBase, role]);
 
   useEffect(() => {
-    if (!estimateId) return;
+    if (!scopeIds.estimateId && !scopeIds.eventId && !scopeIds.wreckEventId) return;
     void load().catch((e) =>
       setError(e instanceof Error ? e.message : "load failed"),
     );
-  }, [estimateId]);
+  }, [load, scopeIds]);
 
-  const activeDocs = useMemo(
-    () =>
-      docs.filter(
-        (d) => String(d.lifecycle_status ?? "ACTIVE").toUpperCase() !== "VOIDED",
-      ),
-    [docs],
+  const selected = useMemo(
+    () => docs.find((d) => d.id === selectedId) ?? null,
+    [docs, selectedId],
   );
 
-  async function viewDoc(d: DocRow) {
-    setPreviewName(d.original_filename || d.kind);
-    setPreviewUrl(`/api/repair/documents/${d.id}/content`);
-  }
+  const leftDocs = useMemo(() => {
+    if (!leftCategory) return docs;
+    return docs.filter(
+      (d) =>
+        String(d.group ?? "").toLowerCase() === leftCategory ||
+        String(d.category_code ?? "").toLowerCase() === leftCategory,
+    );
+  }, [docs, leftCategory]);
 
-  function downloadDoc(d: DocRow) {
-    const a = document.createElement("a");
-    a.href = `/api/repair/documents/${d.id}/content`;
-    a.download = d.original_filename || "document";
-    a.target = "_blank";
-    a.click();
+  useEffect(() => {
+    if (!selected || previewKind(selected) !== "aar500") {
+      setAarPreview(null);
+      return;
+    }
+    void (async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/repair/documents/${selected.id}/aar-preview?role=${encodeURIComponent(role)}`,
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setAarPreview({ lines: [], decodeError: data.error || "decode failed" });
+        return;
+      }
+      setAarPreview({
+        lines: (data.lines ?? []).map(
+          (l: { lineNo: number; fields: Record<string, unknown>; rawLine: string }) => ({
+            lineNo: l.lineNo,
+            fields: l.fields,
+            rawLine: l.rawLine,
+          }),
+        ),
+        rawText: data.rawText,
+        decodeError: data.decodeError,
+      });
+    })();
+  }, [selected, role]);
+
+  function contentUrl(d: DocRow, download = false) {
+    const p = new URLSearchParams({ role, audit: download ? "1" : "0" });
+    if (download) p.set("download", "1");
+    return `/api/repair/documents/${d.id}/content?${p.toString()}`;
   }
 
   async function voidDoc(d: DocRow) {
-    if (!canManage) {
+    if (!perms?.canVoid) {
       setError("Shop cannot delete, void, or recategorize attachments (add only)");
       return;
     }
@@ -148,28 +304,16 @@ export default function EstimateDocuments() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "void failed");
     setMsg("Document VOIDED");
+    if (selectedId === d.id) setSelectedId(null);
     await load();
   }
 
-  useEffect(() => {
-    if (galleryIdx == null) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "ArrowRight") {
-        setGalleryIdx((i) =>
-          i == null ? 0 : Math.min(activeDocs.length - 1, i + 1),
-        );
-      } else if (e.key === "ArrowLeft") {
-        setGalleryIdx((i) => (i == null ? 0 : Math.max(0, i - 1)));
-      } else if (e.key === "Escape") {
-        setGalleryIdx(null);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [galleryIdx, activeDocs.length]);
-
   async function uploadFiles() {
-    if (!ctx || !files?.length) return;
+    if (!scope || !files?.length) return;
+    if (!perms?.canAdd) {
+      setError("Not allowed to add documents");
+      return;
+    }
     setError("");
     try {
       for (const file of Array.from(files)) {
@@ -178,10 +322,11 @@ export default function EstimateDocuments() {
         fd.append("kind", addCategory);
         fd.append("category", addCategory);
         if (addComment) fd.append("comment", addComment);
-        const res = await fetch(`/api/repair/events/${ctx.eventId}/documents`, {
+        const res = await fetch(`/api/repair/events/${scope.eventId}/documents`, {
           method: "POST",
           body: fd,
           credentials: "include",
+          headers: { "x-repair-role": role },
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "upload failed");
@@ -196,7 +341,7 @@ export default function EstimateDocuments() {
   }
 
   async function applyToChecked() {
-    if (!canManage) {
+    if (!perms?.canRecategorize) {
       setError("Shop cannot delete, void, or recategorize attachments (add only)");
       return;
     }
@@ -222,76 +367,209 @@ export default function EstimateDocuments() {
     await load();
   }
 
-  function downloadSelected() {
+  async function downloadZip() {
     const ids = Object.entries(checked)
       .filter(([, v]) => v)
       .map(([id]) => id);
-    const targets = ids.length
-      ? activeDocs.filter((d) => ids.includes(d.id))
-      : activeDocs;
-    for (const d of targets) downloadDoc(d);
+    const targets = ids.length ? ids : docs.map((d) => d.id);
+    if (!targets.length) {
+      setError("No documents to download");
+      return;
+    }
+    const res = await fetch("/api/repair/documents/zip", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "x-repair-role": role,
+      },
+      body: JSON.stringify({
+        documentIds: targets,
+        eventId: scope?.eventId,
+        estimateId: scope?.estimateId,
+        actorRole: role,
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error || "zip failed");
+      return;
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `attachments-${targets.length}.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setMsg(`Downloaded zip (${targets.length} file(s))`);
   }
+
+  async function attachSendLessee() {
+    if (!perms?.canAttachSendLessee || !scope?.estimateId) {
+      setError("Attach to Send Lessee requires owner role and an estimate");
+      return;
+    }
+    const ids = Object.entries(checked)
+      .filter(([, v]) => v)
+      .map(([id]) => id);
+    if (!ids.length) {
+      setError("Select files to attach");
+      return;
+    }
+    const res = await apiRequest("POST", "/api/repair/documents/attach-send-lessee", {
+      estimateId: scope.estimateId,
+      documentIds: ids,
+      actorRole: role,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "attach failed");
+    setMsg(`Attached ${ids.length} file(s) for Send Lessee`);
+    if (data.sendLesseePath) {
+      window.open(data.sendLesseePath, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  const canManage = Boolean(perms?.canVoid);
 
   return (
     <RepairOwnerShell>
-      <div className="p-4 max-w-5xl mx-auto space-y-3">
+      <div className="p-3 max-w-[1400px] mx-auto space-y-3">
+        {/* Header — shot 03 */}
         <div className="flex items-start justify-between gap-3 border-b border-border pb-2">
           <div>
             <h1 className="text-lg font-semibold">File Attachments</h1>
-            <div className="text-sm font-medium">
-              {ctx?.car}{" "}
-              <span className="text-muted-foreground font-normal">
-                {ctx?.reason || ""}
-              </span>
+            <div className="text-base font-bold tracking-tight">
+              {scope?.carLabel || "—"}
             </div>
-            <div className="text-xs text-muted-foreground mt-1 space-x-3">
-              <span>Estimate: {ctx?.estimateIdDisplay}</span>
-              <span>Status: {ctx?.boLifecycleStatus || "—"} / {ctx?.statusName}</span>
+            <div className="text-sm text-muted-foreground">{scope?.reason || ""}</div>
+            <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              {scope?.badOrderId && <span>Bad Order ID: {scope.badOrderId.slice(0, 8)}</span>}
+              {scope?.estimateIdDisplay && (
+                <span>Estimate: {scope.estimateIdDisplay}</span>
+              )}
+              <span>
+                {scope?.boLifecycleStatus || "—"}
+                {scope?.statusName ? ` · ${scope.statusName}` : ""}
+              </span>
             </div>
           </div>
           <Button size="sm" variant="ghost" onClick={() => window.close()}>
-            <X className="h-4 w-4 mr-1" /> Close window
+            <X className="h-4 w-4 mr-1" /> Close
           </Button>
         </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}
         {msg && <p className="text-sm text-foreground">{msg}</p>}
 
-        <div className="flex flex-wrap gap-2 items-center">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setGalleryIdx(activeDocs.length ? 0 : null)}
-            disabled={!activeDocs.length}
+        {/* Required-docs checklist */}
+        {checklist.length > 0 && (
+          <div
+            className={cn(
+              "rounded-md border px-3 py-2 text-xs space-y-1",
+              checklist.some((c) => c.missing)
+                ? "border-amber-600/50 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-50"
+                : "border-border bg-muted/40",
+            )}
           >
-            View all (gallery)
-          </Button>
+            <div className="font-medium">Required documents</div>
+            <ul className="space-y-0.5">
+              {checklist.map((c) => (
+                <li key={c.key} className="flex gap-2">
+                  <span>{c.missing ? "⚠" : "✓"}</span>
+                  <span>
+                    {c.label}: {c.count}
+                    {c.min != null ? ` / ${c.min}${c.max != null ? `–${c.max}` : "+"}` : ""}
+                    {c.missing ? " — missing" : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-2 items-end text-xs">
+          <div>
+            <Label className="text-[10px]">Category</Label>
+            <select
+              className="mt-0.5 h-8 rounded border border-border bg-background px-2"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+            >
+              <option value="">All</option>
+              {categories.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.label} ({c.count})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label className="text-[10px]">Uploader</Label>
+            <select
+              className="mt-0.5 h-8 rounded border border-border bg-background px-2"
+              value={filterUploader}
+              onChange={(e) => setFilterUploader(e.target.value)}
+            >
+              {UPLOADER_FILTERS.map((u) => (
+                <option key={u.value || "all"} value={u.value}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label className="text-[10px]">From</Label>
+            <Input
+              type="date"
+              className="mt-0.5 h-8 w-[9.5rem]"
+              value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-[10px]">To</Label>
+            <Input
+              type="date"
+              className="mt-0.5 h-8 w-[9.5rem]"
+              value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+            />
+          </div>
+          <div className="flex-1 min-w-[10rem]">
+            <Label className="text-[10px]">Search file name</Label>
+            <Input
+              className="mt-0.5 h-8"
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+              placeholder="File name…"
+            />
+          </div>
+          {perms?.canShowVoided && (
+            <label className="flex items-center gap-1.5 h-8 mt-4">
+              <input
+                type="checkbox"
+                checked={showVoided}
+                onChange={(e) => setShowVoided(e.target.checked)}
+              />
+              Show voided
+            </label>
+          )}
           {!canManage && (
-            <span className="text-xs text-amber-700 dark:text-amber-400">
-              Role {role}: add only — delete / void / recategorize blocked server-side.
+            <span className="text-amber-700 dark:text-amber-400 mt-4">
+              Role {role}: add only — void / recategorize blocked server-side.
             </span>
           )}
         </div>
 
-        {/* Thumbnail strip */}
-        {activeDocs.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto py-1">
-            {activeDocs.map((d, i) => (
-              <button
-                key={d.id}
-                type="button"
-                className="shrink-0 w-16 h-16 border border-border rounded bg-muted/40 flex items-center justify-center text-[10px] p-1 text-center"
-                title={d.original_filename || d.kind}
-                onClick={() => setGalleryIdx(i)}
-              >
-                {(d.original_filename || d.kind || "?").slice(0, 18)}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className={cn("grid md:grid-cols-2 gap-3", viewerOnly && "hidden")}>
-          <div className={cn("border border-border rounded-md p-3 space-y-2", !canManage && "opacity-50 pointer-events-none")}>
+        {/* Apply / Add — shot 03 */}
+        <div className="grid md:grid-cols-2 gap-3">
+          <div
+            className={cn(
+              "border border-border rounded-md p-3 space-y-2",
+              !canManage && "opacity-50 pointer-events-none",
+            )}
+          >
             <div className="text-sm font-medium">Apply to Checked Files</div>
             <div>
               <Label className="text-xs">Comment</Label>
@@ -299,6 +577,7 @@ export default function EstimateDocuments() {
                 className="mt-1 h-8"
                 value={applyComment}
                 onChange={(e) => setApplyComment(e.target.value)}
+                placeholder="Optional Comment"
               />
             </div>
             <div>
@@ -313,7 +592,10 @@ export default function EstimateDocuments() {
                 ))}
               </select>
             </div>
-            <Button size="sm" onClick={() => void applyToChecked()}>
+            <Button
+              size="sm"
+              onClick={() => void applyToChecked().catch((e) => setError(String(e)))}
+            >
               <Save className="h-3.5 w-3.5 mr-1" /> Apply
             </Button>
           </div>
@@ -339,183 +621,340 @@ export default function EstimateDocuments() {
                 ))}
               </select>
             </div>
-            <Input
-              type="file"
-              multiple
-              className="h-9 text-xs"
-              onChange={(e) => setFiles(e.target.files)}
-            />
-            <Button size="sm" onClick={() => void uploadFiles()} disabled={!files?.length}>
-              <Upload className="h-3.5 w-3.5 mr-1" /> Upload Files
-            </Button>
+            <div className="flex flex-wrap gap-2 items-center">
+              <Input
+                type="file"
+                multiple
+                className="h-9 text-xs flex-1 min-w-[12rem]"
+                onChange={(e) => setFiles(e.target.files)}
+              />
+              <Button
+                size="sm"
+                onClick={() => void uploadFiles()}
+                disabled={!files?.length || !perms?.canAdd}
+              >
+                <Upload className="h-3.5 w-3.5 mr-1" /> Upload Files
+              </Button>
+            </div>
           </div>
         </div>
 
-        <div className="overflow-auto border border-border rounded-md">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-muted text-left">
-                <th className="p-2">
-                  <input
-                    type="checkbox"
-                    onChange={(e) => {
-                      const next: Record<string, boolean> = {};
-                      for (const d of activeDocs) next[d.id] = e.target.checked;
-                      setChecked(next);
-                    }}
-                  />
-                </th>
-                <th className="p-2">View</th>
-                <th className="p-2">Save</th>
-                <th className="p-2">File Name</th>
-                <th className="p-2">Type</th>
-                <th className="p-2">Category</th>
-                <th className="p-2">Loaded By</th>
-                <th className="p-2">Load Date</th>
-                <th className="p-2">File Size</th>
-                <th className="p-2">Comment</th>
-                <th className="p-2">Del</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeDocs.map((d, i) => {
-                const name = d.original_filename || d.kind || d.id.slice(0, 8);
-                const ext = name.includes(".") ? name.split(".").pop() : "";
-                return (
-                  <tr
-                    key={d.id}
-                    className={cn(
-                      "border-t border-border",
-                      i % 2 === 1 ? "bg-sky-50/50 dark:bg-slate-800/40" : "",
-                    )}
-                  >
-                    <td className="p-2">
+        {/* Left category list + right preview */}
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-3 min-h-[28rem]">
+          <div className="border border-border rounded-md overflow-hidden flex flex-col">
+            <div className="flex gap-1 overflow-x-auto border-b border-border bg-muted/50 px-2 py-1 text-[11px]">
+              <button
+                type="button"
+                className={cn(
+                  "px-2 py-1 rounded shrink-0",
+                  !leftCategory && "bg-background font-medium",
+                )}
+                onClick={() => setLeftCategory("")}
+              >
+                All ({docs.length})
+              </button>
+              {categories.map((c) => (
+                <button
+                  key={c.code}
+                  type="button"
+                  className={cn(
+                    "px-2 py-1 rounded shrink-0",
+                    leftCategory === c.code && "bg-background font-medium",
+                  )}
+                  onClick={() => setLeftCategory(c.code)}
+                >
+                  {c.label} ({c.count})
+                </button>
+              ))}
+            </div>
+            <div className="overflow-auto flex-1">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-muted text-left sticky top-0">
+                    <th className="p-2">
                       <input
                         type="checkbox"
-                        checked={Boolean(checked[d.id])}
-                        onChange={(e) =>
-                          setChecked((prev) => ({ ...prev, [d.id]: e.target.checked }))
-                        }
+                        onChange={(e) => {
+                          const next: Record<string, boolean> = {};
+                          for (const d of leftDocs) next[d.id] = e.target.checked;
+                          setChecked(next);
+                        }}
                       />
-                    </td>
-                    <td className="p-2">
-                      <button type="button" onClick={() => void viewDoc(d)} title="View">
-                        <Eye className="h-4 w-4 text-sky-700" />
-                      </button>
-                    </td>
-                    <td className="p-2">
-                      <button type="button" onClick={() => downloadDoc(d)} title="Download">
-                        <Download className="h-4 w-4 text-violet-700" />
-                      </button>
-                    </td>
-                    <td className="p-2 font-medium">{name}</td>
-                    <td className="p-2">{ext}</td>
-                    <td className="p-2">{d.category_code || d.kind}</td>
-                    <td className="p-2">{d.uploaded_by || d.created_by || "—"}</td>
-                    <td className="p-2 whitespace-nowrap">
-                      {d.uploaded_at || d.created_at
-                        ? new Date(String(d.uploaded_at || d.created_at)).toDateString()
-                        : "—"}
-                    </td>
-                    <td className="p-2">{fmtSize(d.size)}</td>
-                    <td className="p-2">{d.comment || ""}</td>
-                    <td className="p-2">
-                      {canManage ? (
-                        <button
-                          type="button"
-                          title="Void (soft-delete)"
-                          onClick={() => void voidDoc(d).catch((e) => setError(String(e)))}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </button>
-                      ) : (
-                        <span className="text-muted-foreground" title="Shop: add only">
-                          —
-                        </span>
-                      )}
-                    </td>
+                    </th>
+                    <th className="p-2">View</th>
+                    <th className="p-2">Save</th>
+                    <th className="p-2">File Name</th>
+                    <th className="p-2">Type</th>
+                    <th className="p-2">Category</th>
+                    <th className="p-2">Loaded By</th>
+                    <th className="p-2">Load Date</th>
+                    <th className="p-2">Size</th>
+                    <th className="p-2">Rev</th>
+                    <th className="p-2">Comment</th>
+                    <th className="p-2">Del</th>
                   </tr>
-                );
-              })}
-              {activeDocs.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="p-4 text-muted-foreground text-center">
-                    No documents.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {leftDocs.map((d, i) => {
+                    const name = d.original_filename || d.kind || d.id.slice(0, 8);
+                    const ext = name.includes(".") ? name.split(".").pop() : "";
+                    const voided =
+                      Boolean(d.deleted_at) ||
+                      String(d.lifecycle_status ?? "").toUpperCase() === "VOIDED";
+                    return (
+                      <tr
+                        key={d.id}
+                        className={cn(
+                          "border-t border-border cursor-pointer",
+                          i % 2 === 1 ? "bg-sky-50/50 dark:bg-slate-800/40" : "",
+                          selectedId === d.id && "ring-1 ring-inset ring-sky-600",
+                          voided && "opacity-60 line-through",
+                        )}
+                        onClick={() => {
+                          setSelectedId(d.id);
+                          setZoom(1);
+                          setRotation(0);
+                          setAarRaw(false);
+                        }}
+                      >
+                        <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(checked[d.id])}
+                            onChange={(e) =>
+                              setChecked((prev) => ({
+                                ...prev,
+                                [d.id]: e.target.checked,
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="p-2">
+                          <Eye className="h-4 w-4 text-sky-700" />
+                        </td>
+                        <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                          <a href={contentUrl(d, true)} download title="Download">
+                            <Download className="h-4 w-4 text-violet-700" />
+                          </a>
+                        </td>
+                        <td className="p-2 font-medium">
+                          <div>{name}</div>
+                          {d.source_tag && (
+                            <div className="text-[10px] text-muted-foreground font-normal">
+                              {d.source_tag}
+                            </div>
+                          )}
+                          {d.owner_only && (
+                            <div className="text-[10px] text-amber-700">Owner only</div>
+                          )}
+                        </td>
+                        <td className="p-2">{ext}</td>
+                        <td className="p-2">{d.category_code || d.kind}</td>
+                        <td className="p-2">
+                          {d.uploaded_by || d.created_by || "—"}
+                          {d.uploaded_role ? (
+                            <span className="text-muted-foreground"> ({d.uploaded_role})</span>
+                          ) : null}
+                        </td>
+                        <td className="p-2 whitespace-nowrap">
+                          {d.uploaded_at || d.created_at
+                            ? new Date(String(d.uploaded_at || d.created_at)).toDateString()
+                            : "—"}
+                        </td>
+                        <td className="p-2">{fmtSize(d.size)}</td>
+                        <td className="p-2">{d.doc_revision ?? 1}</td>
+                        <td className="p-2">{d.comment || ""}</td>
+                        <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                          {canManage && !voided ? (
+                            <button
+                              type="button"
+                              title="Void (soft-delete)"
+                              onClick={() =>
+                                void voidDoc(d).catch((e) => setError(String(e)))
+                              }
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {leftDocs.length === 0 && (
+                    <tr>
+                      <td colSpan={12} className="p-4 text-muted-foreground text-center">
+                        No documents.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Right preview */}
+          <div className="border border-border rounded-md flex flex-col min-h-[28rem] bg-muted/20">
+            {!selected ? (
+              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground p-4">
+                Select a file to preview
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border text-xs">
+                  <div className="font-medium truncate">
+                    {selected.original_filename || selected.kind}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {previewKind(selected) === "image" && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          onClick={() => setZoom((z) => Math.min(4, z + 0.25))}
+                        >
+                          <ZoomIn className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}
+                        >
+                          <ZoomOut className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          onClick={() => setRotation((r) => (r + 90) % 360)}
+                        >
+                          <RotateCw className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                    {previewKind(selected) === "aar500" && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-7"
+                        onClick={() => setAarRaw((v) => !v)}
+                      >
+                        {aarRaw ? "Field grid" : "Raw"}
+                      </Button>
+                    )}
+                    <a href={contentUrl(selected, true)} download>
+                      <Button size="sm" variant="secondary" className="h-7">
+                        <Download className="h-3.5 w-3.5 mr-1" /> Download
+                      </Button>
+                    </a>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto p-2">
+                  {previewKind(selected) === "image" && (
+                    <div className="flex items-center justify-center min-h-full">
+                      <img
+                        src={contentUrl(selected)}
+                        alt={selected.original_filename || "preview"}
+                        style={{
+                          transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                          transformOrigin: "center center",
+                          maxWidth: "100%",
+                        }}
+                        className="transition-transform"
+                      />
+                    </div>
+                  )}
+                  {previewKind(selected) === "pdf" && (
+                    <iframe
+                      title="pdf"
+                      src={contentUrl(selected)}
+                      className="w-full h-[70vh] border border-border rounded bg-white"
+                    />
+                  )}
+                  {previewKind(selected) === "office" && (
+                    <div className="flex flex-col items-center justify-center gap-3 h-full text-sm p-6 text-center">
+                      <p>
+                        Office documents (Word / Excel / PowerPoint) cannot be previewed
+                        inline. Download to open locally.
+                      </p>
+                      <a href={contentUrl(selected, true)} download>
+                        <Button>
+                          <Download className="h-4 w-4 mr-1" /> Download
+                        </Button>
+                      </a>
+                    </div>
+                  )}
+                  {previewKind(selected) === "aar500" && (
+                    <div className="space-y-2">
+                      {aarPreview?.decodeError && (
+                        <p className="text-xs text-destructive">{aarPreview.decodeError}</p>
+                      )}
+                      {aarRaw || !aarPreview?.lines?.length ? (
+                        <pre className="text-[10px] whitespace-pre-wrap font-mono bg-background border border-border rounded p-2 max-h-[70vh] overflow-auto">
+                          {aarPreview?.rawText || "Loading…"}
+                        </pre>
+                      ) : (
+                        <div className="space-y-3 max-h-[70vh] overflow-auto">
+                          {aarPreview.lines.map((line) => (
+                            <div
+                              key={line.lineNo}
+                              className="border border-border rounded bg-background"
+                            >
+                              <div className="px-2 py-1 text-[10px] font-medium bg-muted">
+                                Line {line.lineNo}
+                              </div>
+                              <table className="w-full text-[10px]">
+                                <tbody>
+                                  {Object.entries(line.fields).map(([k, v]) => (
+                                    <tr key={k} className="border-t border-border">
+                                      <td className="p-1 font-medium w-40 align-top">{k}</td>
+                                      <td className="p-1 font-mono break-all">
+                                        {v == null ? "—" : String(v)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {previewKind(selected) === "other" && (
+                    <iframe
+                      title="preview"
+                      src={contentUrl(selected)}
+                      className="w-full h-[70vh] border border-border rounded bg-white"
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
-        <div className="flex justify-center gap-3">
+        <div className="flex flex-wrap justify-center gap-3">
           <Button variant="secondary" onClick={() => window.close()}>
             <X className="h-4 w-4 mr-1" /> Close
           </Button>
-          <Button onClick={downloadSelected}>
-            <Download className="h-4 w-4 mr-1" /> Download
+          <Button onClick={() => void downloadZip()}>
+            <FileArchive className="h-4 w-4 mr-1" /> Download zip
           </Button>
+          {perms?.canAttachSendLessee && scope?.estimateId && (
+            <Button
+              variant="secondary"
+              onClick={() =>
+                void attachSendLessee().catch((e) => setError(String(e)))
+              }
+            >
+              <Send className="h-4 w-4 mr-1" /> Attach to Send Lessee
+            </Button>
+          )}
         </div>
-
-        {previewUrl && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-background border border-border rounded-md w-full max-w-4xl max-h-[90vh] overflow-auto p-3 space-y-2">
-              <div className="flex justify-between items-center">
-                <h3 className="font-medium text-sm">{previewName}</h3>
-                <Button size="sm" variant="ghost" onClick={() => setPreviewUrl(null)}>
-                  Close
-                </Button>
-              </div>
-              <iframe title="preview" src={previewUrl} className="w-full h-[70vh] border border-border rounded" />
-            </div>
-          </div>
-        )}
-
-        {galleryIdx != null && activeDocs[galleryIdx] && (
-          <div className="fixed inset-0 z-50 flex flex-col bg-black/90 text-white">
-            <div className="flex items-center justify-between px-4 py-2">
-              <div className="text-sm">
-                {galleryIdx + 1} / {activeDocs.length} ·{" "}
-                {activeDocs[galleryIdx].original_filename || activeDocs[galleryIdx].kind}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={galleryIdx <= 0}
-                  onClick={() => setGalleryIdx((i) => Math.max(0, (i ?? 0) - 1))}
-                >
-                  Prev
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={galleryIdx >= activeDocs.length - 1}
-                  onClick={() =>
-                    setGalleryIdx((i) =>
-                      Math.min(activeDocs.length - 1, (i ?? 0) + 1),
-                    )
-                  }
-                >
-                  Next
-                </Button>
-                <Button size="sm" variant="ghost" className="text-white" onClick={() => setGalleryIdx(null)}>
-                  Close
-                </Button>
-              </div>
-            </div>
-            <div className="flex-1 flex items-center justify-center p-4">
-              <iframe
-                title="gallery"
-                src={`/api/repair/documents/${activeDocs[galleryIdx].id}/content`}
-                className="w-full h-full max-w-5xl border border-white/20 rounded bg-white"
-              />
-            </div>
-            <div className="text-center text-xs text-white/70 pb-3">
-              Keyboard: ← → navigate · Esc close
-            </div>
-          </div>
-        )}
       </div>
     </RepairOwnerShell>
   );

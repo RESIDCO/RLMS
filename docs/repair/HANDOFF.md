@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **Wreck DV / settlement panel** | Apply `rlms-phase1-owner-ui-wreck-dv.bundle` on tip **`cfd1028`** (hotfix). Dollars money inputs ($ / commas → cents); gauge copy + bar (blank / under / ≥80% amber / ≥100% red); warning contrast; labor-rate citation (`placeholder – not from manual` for seed **$185/hr**). Smoke: `npm run repair:smoke-wreck`. |
+| **§E Document Viewer** | Apply `rlms-phase1-owner-ui-e-document-viewer.bundle` on tip **`ba5dc51`** (wreck DV). File Attachments own-window from Estimate / BO / Wreck; left category list + right preview (image/PDF/500-byte/Office); filters; shop view-all non-voided + add-only; lessee granted-only; `owner_only` never to shop/lessee; bulk zip + Attach Send Lessee; required-docs checklist. Smoke: `npm run repair:smoke-documents`. Typecheck: `npm run repair:typecheck-client-documents`. |
+| **Wreck DV / settlement panel** | Prior: `rlms-phase1-owner-ui-wreck-dv.bundle` on tip **`cfd1028`** → **`ba5dc51`**. Dollars money inputs ($ / commas → cents); gauge copy + bar; labor-rate citation. Smoke: `npm run repair:smoke-wreck`. |
 | **Wreck hotfix (WorkspaceTitle)** | Prior: `rlms-phase1-owner-ui-wreck-hotfix.bundle` on tip **`dc704f1`** → **`cfd1028`**. Fixes blank Chrome: named `{ WorkspaceTitle }` import. |
 | **Wreck dual-track BUILD** | Prior: `rlms-phase1-owner-ui-wreck.bundle`. Requires **`85856b6`** → **`dc704f1`**. Implements approved [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md). |
 | **Wreck dual-track spec (docs)** | Prior: `rlms-phase1-owner-ui-wreck-spec.bundle`. Requires **`c8a7138`** → **`85856b6`**. Spec approved; §11 #1/#4/#10 DECIDED (Umler/manual inconsistent-tolerant; AAR quarterly labor rate; invoice # not on estimate / HARD REJECT final invoice). |
@@ -46,10 +47,11 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
 | **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Signed off** (`468a9db`) |
 | **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r5 tip** (awaiting Bruce sign-off) |
-| **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **Spec approved + BUILD tip** (`rlms-phase1-owner-ui-wreck.bundle` on `85856b6`) |
-| 5+ | Documents polish / Lessee, etc. | Parked |
+| **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **BUILD + hotfix + DV panel** (`ba5dc51`) |
+| **5 / §E** | Document Viewer (shot 03) — [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) | Apply `rlms-phase1-owner-ui-e-document-viewer.bundle` on **`ba5dc51`** |
+| 6+ | Lessee polish, etc. | Parked |
 
-**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md)  
+**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md)  
 **Overall map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)
 
 ---
@@ -71,7 +73,33 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+19 | **`rlms-phase1-owner-ui-wreck-spec.bundle`** (§11 FF from c8a7138) | **`c8a7138`** | → **`85856b6`** |
 | N+20 | **`rlms-phase1-owner-ui-wreck.bundle`** (approved build) | **`85856b6`** | → **`dc704f1`** |
 | N+21 | `rlms-phase1-owner-ui-wreck-hotfix.bundle` (blank Chrome / WorkspaceTitle) | **`dc704f1`** | → **`cfd1028`** |
-| N+22 | **`rlms-phase1-owner-ui-wreck-dv.bundle`** (DV panel dollars / gauge / contrast / labor citation) | **`cfd1028`** | → **(see README)** |
+| N+22 | **`rlms-phase1-owner-ui-wreck-dv.bundle`** (DV panel dollars / gauge / contrast / labor citation) | **`cfd1028`** | → **`ba5dc51`** |
+| N+23 | **`rlms-phase1-owner-ui-e-document-viewer.bundle`** (§E File Attachments) | **`ba5dc51`** | → **(see README)** |
+
+---
+
+## Apply §E Document Viewer (on tip `ba5dc51`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect ba5dc51…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-e-document-viewer.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-e-document-viewer.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
+Then:
+
+```powershell
+$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+$env:REPAIR_LOCAL_DB = "1"
+$env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
+npm run repair:migrate:local
+npm run repair:typecheck-client-documents
+npm run repair:smoke-documents
+npm run repair:dev:local
+```
 
 ---
 

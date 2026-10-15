@@ -205,6 +205,15 @@ import {
   previewAttachmentContent,
   listSendLesseeHistory,
 } from "./services/send-lessee";
+import {
+  listViewerDocuments,
+  getDocumentContent,
+  decodeAar500Preview,
+  zipViewerDocuments,
+  attachDocumentsToSendLessee,
+  setDocumentOwnerOnly,
+  previewKindFor,
+} from "./services/documents-viewer";
 import { enterPodErd, listPodDates, latestPodErd, runPodReminders } from "./services/pod";
 import { setCompletedDate, rollbackCompletedDate } from "./services/completion";
 import { submitShopInvoice, listInvoicesForEvent, approveInvoiceMatch } from "./services/invoices";
@@ -1673,36 +1682,203 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     }
   });
 
-  /** Single-document viewer / download (Bad Order History attachment icon). */
+  /** Single-document viewer / download — server-side ACL (§E). */
   app.get("/api/repair/documents/:id/content", async (req, res) => {
     try {
       const uid = await maybeRequireUser(deps, req, res);
       if (!uid) return;
-      const { rows } = await q(
-        `SELECT id, storage_key, mime, original_filename, kind, category_code, comment
-         FROM repair.documents
-         WHERE id = $1 AND deleted_at IS NULL
-           AND COALESCE(lifecycle_status, 'ACTIVE') <> 'VOIDED'`,
-        [String(req.params.id)],
+      const role = String(
+        req.query.role ?? req.headers["x-repair-role"] ?? roleFrom(req),
       );
-      if (!rows[0]) return res.status(404).json({ error: "Document not found" });
-      const stored = await getStorageProvider().get(String(rows[0].storage_key));
+      const grantedRaw = req.query.granted;
+      const grantedDocumentIds = grantedRaw
+        ? String(grantedRaw)
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined;
+      const result = await getDocumentContent({
+        documentId: String(req.params.id),
+        actorRole: role,
+        grantedDocumentIds,
+        actor: actorFrom(req),
+        audit: String(req.query.audit ?? "1") !== "0",
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
       const filename = String(
-        rows[0].original_filename || rows[0].kind || "document",
+        result.document.original_filename || result.document.kind || "document",
       );
+      const disposition =
+        String(req.query.download ?? "") === "1" ? "attachment" : "inline";
       res.setHeader(
         "Content-Type",
-        String(rows[0].mime || "application/octet-stream"),
+        String(result.document.mime || "application/octet-stream"),
       );
       res.setHeader(
         "Content-Disposition",
-        `inline; filename="${filename.replace(/"/g, "")}"`,
+        `${disposition}; filename="${filename.replace(/"/g, "")}"`,
       );
-      return res.send(stored.bytes);
+      res.setHeader("X-Repair-Preview-Kind", previewKindFor(result.document));
+      return res.send(result.bytes);
     } catch (err) {
       console.error("[repair/documents/:id/content]", err);
       return res.status(500).json({ error: "Document download failed" });
     }
+  });
+
+  /** §E Document Viewer payload (estimate / BO event / wreck). */
+  app.get("/api/repair/documents/viewer", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const role = String(
+        req.query.role ?? req.headers["x-repair-role"] ?? roleFrom(req),
+      );
+      const grantedRaw = req.query.granted;
+      const result = await listViewerDocuments({
+        estimateId: req.query.estimateId
+          ? String(req.query.estimateId)
+          : undefined,
+        eventId: req.query.eventId ? String(req.query.eventId) : undefined,
+        wreckEventId: req.query.wreckEventId
+          ? String(req.query.wreckEventId)
+          : undefined,
+        actorRole: role,
+        showVoided: String(req.query.showVoided ?? "") === "1",
+        grantedDocumentIds: grantedRaw
+          ? String(grantedRaw)
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+        categoryCode: req.query.category
+          ? String(req.query.category)
+          : undefined,
+        revisionId: req.query.revisionId
+          ? String(req.query.revisionId)
+          : undefined,
+        uploaderRole: req.query.uploader
+          ? String(req.query.uploader)
+          : undefined,
+        dateFrom: req.query.dateFrom ? String(req.query.dateFrom) : undefined,
+        dateTo: req.query.dateTo ? String(req.query.dateTo) : undefined,
+        search: req.query.q ? String(req.query.q) : undefined,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    } catch (err) {
+      console.error("[repair/documents/viewer]", err);
+      return res.status(500).json({ error: "Document viewer load failed" });
+    }
+  });
+
+  /** 500-byte decoded field grid (+ raw). */
+  app.get("/api/repair/documents/:id/aar-preview", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const role = String(
+        req.query.role ?? req.headers["x-repair-role"] ?? roleFrom(req),
+      );
+      const grantedRaw = req.query.granted;
+      const result = await decodeAar500Preview({
+        documentId: String(req.params.id),
+        actorRole: role,
+        grantedDocumentIds: grantedRaw
+          ? String(grantedRaw)
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    } catch (err) {
+      console.error("[repair/documents/:id/aar-preview]", err);
+      return res.status(500).json({ error: "AAR preview failed" });
+    }
+  });
+
+  /** Bulk zip download (audited). */
+  app.post("/api/repair/documents/zip", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const role = String(
+        req.body?.actorRole ?? req.headers["x-repair-role"] ?? roleFrom(req),
+      );
+      const ids = Array.isArray(req.body?.documentIds)
+        ? req.body.documentIds.map(String)
+        : [];
+      const result = await zipViewerDocuments({
+        documentIds: ids,
+        eventId: req.body?.eventId ? String(req.body.eventId) : undefined,
+        estimateId: req.body?.estimateId
+          ? String(req.body.estimateId)
+          : undefined,
+        actorRole: role,
+        grantedDocumentIds: Array.isArray(req.body?.grantedDocumentIds)
+          ? req.body.grantedDocumentIds.map(String)
+          : undefined,
+        actor: actorFrom(req),
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${result.filename}"`,
+      );
+      res.setHeader("X-Repair-Zip-Count", String(result.count));
+      res.setHeader("X-Repair-Zip-Sha256", result.sha256);
+      return res.send(result.bytes);
+    } catch (err) {
+      console.error("[repair/documents/zip]", err);
+      return res.status(500).json({ error: "Zip download failed" });
+    }
+  });
+
+  /** Owner: attach selected docs to Send Lessee staging. */
+  app.post("/api/repair/documents/attach-send-lessee", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const role = String(
+        req.body?.actorRole ?? req.headers["x-repair-role"] ?? roleFrom(req),
+      );
+      const result = await attachDocumentsToSendLessee({
+        estimateId: String(req.body?.estimateId ?? ""),
+        documentIds: Array.isArray(req.body?.documentIds)
+          ? req.body.documentIds.map(String)
+          : [],
+        actor: actorFrom(req),
+        actorRole: role,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    } catch (err) {
+      console.error("[repair/documents/attach-send-lessee]", err);
+      return res.status(500).json({ error: "Attach Send Lessee failed" });
+    }
+  });
+
+  app.post("/api/repair/documents/:id/owner-only", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await setDocumentOwnerOnly({
+      documentId: String(req.params.id),
+      ownerOnly: req.body?.ownerOnly !== false,
+      actor: actorFrom(req),
+      actorRole: String(req.body?.actorRole ?? roleFrom(req)),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** Shop link soft-delete / recategorize stay 403 (add only). */
+  app.post("/api/repair/e/:token/documents/:id/recategorize", async (_req, res) => {
+    return res.status(403).json({
+      error: "Shop cannot delete, void, or recategorize attachments (add only)",
+    });
   });
 
   app.get("/api/repair/events/:id", async (req, res) => {

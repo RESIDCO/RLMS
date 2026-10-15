@@ -26,6 +26,8 @@
     "repair:smoke-estimate-review": "tsx modules/repair/dev/smoke-estimate-review-d.ts",
     "repair:smoke-wreck": "tsx modules/repair/dev/smoke-wreck.ts",
     "repair:typecheck-client-wreck": "tsx modules/repair/dev/typecheck-client-wreck.ts",
+    "repair:smoke-documents": "tsx modules/repair/dev/smoke-documents-e.ts",
+    "repair:typecheck-client-documents": "tsx modules/repair/dev/typecheck-client-documents.ts",
     "repair:import-ref-data": "tsx modules/repair/dev/import-ref-data.ts",
     "repair:demo:local": "tsx modules/repair/dev/demo-local.ts",
     "repair:seed:estimates-history": "tsx modules/repair/dev/seed-estimates-history.ts"

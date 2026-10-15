@@ -218,12 +218,28 @@ export async function linkEventDocumentRefs(opts: {
 
   const created: Record<string, unknown>[] = [];
   for (const src of sources) {
+    const { rows: srcEv } = await q(
+      `SELECT e.id, e.car_mark, e.car_number, e.created_at, d.event_id AS src_event_id
+       FROM repair.documents d
+       LEFT JOIN repair.events e ON e.id = d.event_id
+       WHERE d.id = $1`,
+      [String(src.id)],
+    );
+    const srcEvent = srcEv[0];
+    const car = `${srcEvent?.car_mark ?? ""} ${srcEvent?.car_number ?? ""}`.trim();
+    const when = srcEvent?.created_at
+      ? new Date(String(srcEvent.created_at)).toISOString().slice(0, 10)
+      : "";
+    const sourceTag = car
+      ? `From BO ${car}${when ? ` ${when}` : ""}`
+      : `From BO document ${String(src.id).slice(0, 8)}`;
+
     const { rows } = await q(
       `INSERT INTO repair.documents
          (tenant_id, event_id, kind, category_code, comment, storage_key, sha256,
           size, mime, uploaded_by, created_by, original_filename, is_shared,
-          lifecycle_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,'ACTIVE')
+          lifecycle_status, source_document_id, source_event_id, source_tag)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,'ACTIVE',$13,$14,$15)
        RETURNING *`,
       [
         tenantId,
@@ -238,6 +254,9 @@ export async function linkEventDocumentRefs(opts: {
         opts.actor,
         src.original_filename != null ? String(src.original_filename) : null,
         Boolean(src.is_shared),
+        String(src.id),
+        srcEvent?.src_event_id != null ? String(srcEvent.src_event_id) : null,
+        sourceTag,
       ],
     );
     const doc = rows[0];

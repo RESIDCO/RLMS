@@ -139,7 +139,9 @@ function AppRouter() {
       <Route path="/repair/reference-data" component={ReferenceData} />
       <Route path="/repair/help" component={RepairComingSoon} />
       {/* §D Estimate Review sub-routes before :id */}
+      <Route path="/repair/wreck/:eventId/documents" component={EstimateDocuments} />
       <Route path="/repair/wreck/:eventId" component={WreckEvent} />
+      <Route path="/repair/events/:id/documents" component={EstimateDocuments} />
       <Route path="/repair/estimates/:id/responsibilities" component={UpdateResponsibilities} />
       <Route path="/repair/estimates/:id/documents" component={EstimateDocuments} />
       <Route path="/repair/estimates/:id/send-lessee" component={SendLessee} />

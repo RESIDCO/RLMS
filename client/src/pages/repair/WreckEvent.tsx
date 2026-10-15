@@ -443,7 +443,22 @@ export default function WreckEvent() {
             </section>
 
             <section className="space-y-2">
-              <h2 className="text-base font-semibold">Shared documents</h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-semibold">Shared documents</h2>
+                <button
+                  type="button"
+                  className="text-sm text-sky-700 dark:text-sky-400 underline"
+                  onClick={() =>
+                    window.open(
+                      `#/repair/wreck/${wreckId}/documents`,
+                      `wreck-docs-${wreckId}`,
+                      "noopener,noreferrer,width=1200,height=860",
+                    )
+                  }
+                >
+                  Open File Attachments
+                </button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 JIC photo set: 4–10 photos per unit (OM 103.A). Gallery is event-scoped.
               </p>

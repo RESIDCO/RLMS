@@ -1054,16 +1054,12 @@ function BadOrdersBody() {
   };
 
   const openDocViewer = async (eventId: string) => {
-    try {
-      const r = await apiRequest(
-        "GET",
-        `/api/repair/events/${eventId}/documents`,
-      );
-      const d = await r.json();
-      setViewer({ eventId, docs: d.documents ?? [] });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load documents");
-    }
+    // §E Document Viewer — own window scoped to this Bad Order event
+    window.open(
+      `#/repair/events/${eventId}/documents`,
+      `event-docs-${eventId}`,
+      "noopener,noreferrer,width=1200,height=860",
+    );
   };
 
   const submitNew = async () => {

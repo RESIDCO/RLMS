@@ -4,31 +4,61 @@
  * Convert to dollars only once for numeric(14,2) storage or display.
  */
 
-/** Parse dollars (number or decimal string) to integer cents. */
-export function dollarsToCents(value: number | string | null | undefined): number {
-  if (value == null || value === "") return 0;
-  if (typeof value === "string") {
-    const t = value.trim();
-    if (!t) return 0;
-    const neg = t.startsWith("-");
-    const s = neg ? t.slice(1) : t.startsWith("+") ? t.slice(1) : t;
-    const m = /^(\d+)(?:\.(\d*))?$/.exec(s);
-    if (m) {
-      const whole = Number.parseInt(m[1], 10);
-      const fracRaw = m[2] ?? "";
-      const frac = (fracRaw + "00").slice(0, 2);
-      // Extra fractional digits beyond 2 → round from third digit
-      const third = fracRaw.length > 2 ? Number.parseInt(fracRaw[2] ?? "0", 10) : 0;
-      let cents = whole * 100 + Number.parseInt(frac, 10);
-      if (third >= 5) cents += 1;
-      return neg ? -cents : cents;
-    }
-    const n = Number(t);
-    if (!Number.isFinite(n)) return 0;
-    return Math.round(n * 100);
+/**
+ * Normalize a user money string: strip `$`, commas, spaces.
+ * Keeps leading sign. Empty / non-numeric → null (caller decides 0 vs blank).
+ */
+export function normalizeMoneyInput(
+  value: string | null | undefined,
+): string | null {
+  if (value == null) return null;
+  let t = String(value).trim();
+  if (!t) return null;
+  t = t.replace(/[$,\s]/g, "");
+  if (!t || t === "-" || t === "+" || t === "." || t === "-." || t === "+.") {
+    return null;
   }
-  if (!Number.isFinite(value)) return 0;
-  return Math.round(value * 100);
+  return t;
+}
+
+/**
+ * Parse user dollars (`$48,250.00`, `48250`, `48,250.5`) → integer cents.
+ * Blank / unparseable → null (optional fields). Use dollarsToCents for 0-default.
+ */
+export function parseDollarsToCents(
+  value: number | string | null | undefined,
+): number | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return Math.round(value * 100);
+  }
+  const normalized = normalizeMoneyInput(value);
+  if (normalized == null) return null;
+  const neg = normalized.startsWith("-");
+  const s = neg
+    ? normalized.slice(1)
+    : normalized.startsWith("+")
+      ? normalized.slice(1)
+      : normalized;
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(s);
+  if (m) {
+    const whole = Number.parseInt(m[1], 10);
+    const fracRaw = m[2] ?? "";
+    const frac = (fracRaw + "00").slice(0, 2);
+    const third = fracRaw.length > 2 ? Number.parseInt(fracRaw[2] ?? "0", 10) : 0;
+    let cents = whole * 100 + Number.parseInt(frac, 10);
+    if (third >= 5) cents += 1;
+    return neg ? -cents : cents;
+  }
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return Math.round((neg ? -n : n) * 100);
+}
+
+/** Parse dollars (number or decimal string) to integer cents. Blank → 0. */
+export function dollarsToCents(value: number | string | null | undefined): number {
+  return parseDollarsToCents(value) ?? 0;
 }
 
 /** Single conversion after integer math — safe for numeric(14,2) / display. */

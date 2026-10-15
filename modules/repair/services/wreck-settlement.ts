@@ -5,18 +5,77 @@
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
 import { getRule107Calculator } from "../providers/rule107-calculator";
+import { formatCentsAsMoney } from "./money";
 
 export type SettlementGauge = {
   resp3TotalCents: number;
   depreciatedValueCents: number | null;
   salvageCents: number | null;
   settlementCapCents: number | null;
+  /** Percent of DV (null when DV blank). */
+  pctOfDv: number | null;
+  /** Bar fill 0–100 (capped); 0 when DV blank. */
+  barPct: number;
+  /** ≥100% of DV (or resp3 ≥ DV). */
   overDv: boolean;
+  /** ≥80% of DV (amber). */
   warn: boolean;
   message: string;
   require5399: boolean;
   note5399: string;
 };
+
+/** Pure gauge copy + thresholds — unit-tested via smoke. */
+export function buildSettlementGaugeView(opts: {
+  resp3TotalCents: number;
+  depreciatedValueCents: number | null;
+  salvageCents?: number | null;
+  settlementCapCents?: number | null;
+}): SettlementGauge {
+  const resp3 = Math.trunc(opts.resp3TotalCents);
+  const dv =
+    opts.depreciatedValueCents == null
+      ? null
+      : Math.trunc(opts.depreciatedValueCents);
+
+  if (dv == null) {
+    return {
+      resp3TotalCents: resp3,
+      depreciatedValueCents: null,
+      salvageCents: opts.salvageCents ?? null,
+      settlementCapCents: opts.settlementCapCents ?? null,
+      pctOfDv: null,
+      barPct: 0,
+      overDv: false,
+      warn: false,
+      message: "DV not entered",
+      require5399: false,
+      note5399:
+        "If repair continues at/above settlement cap, require JC 5399 credit (negative material, detail source DC/JI/JD, no labor — OM 102.D.7 / 107.I.3)",
+    };
+  }
+
+  const pctRaw = dv === 0 ? (resp3 > 0 ? 100 : 0) : (resp3 / dv) * 100;
+  const pctOfDv = Math.round(pctRaw);
+  const overDv = resp3 >= dv;
+  const warn = pctOfDv >= 80;
+  const barPct = Math.max(0, Math.min(100, pctOfDv));
+
+  return {
+    resp3TotalCents: resp3,
+    depreciatedValueCents: dv,
+    salvageCents: opts.salvageCents ?? null,
+    settlementCapCents: opts.settlementCapCents ?? dv,
+    pctOfDv,
+    barPct,
+    overDv,
+    warn,
+    message: `Resp 3 total ${formatCentsAsMoney(resp3)} of DV ${formatCentsAsMoney(dv)} (${pctOfDv}%)`,
+    require5399: overDv,
+    note5399:
+      "If repair continues at/above settlement cap, require JC 5399 credit (negative material, detail source DC/JI/JD, no labor — OM 102.D.7 / 107.I.3)",
+  };
+}
 
 export async function computeSettlementGauge(opts: {
   wreckEventId: string;
@@ -59,22 +118,13 @@ export async function computeSettlementGauge(opts: {
           ? Number(w.ddct_estimated_dv_cents)
           : null;
 
-  const overDv = dv != null && resp3TotalCents >= dv;
-  return {
+  return buildSettlementGaugeView({
     resp3TotalCents,
     depreciatedValueCents: dv,
     salvageCents: w.salvage_cents != null ? Number(w.salvage_cents) : null,
     settlementCapCents:
       w.settlement_cap_cents != null ? Number(w.settlement_cap_cents) : dv,
-    overDv,
-    warn: overDv,
-    message: overDv
-      ? "Resp 3 at or over depreciated value — owner warning/flag only; owner decides settle vs repair (no auto-reject)"
-      : "Resp 3 under depreciated value / settlement cap",
-    require5399: overDv,
-    note5399:
-      "If repair continues at/above settlement cap, require JC 5399 credit (negative material, detail source DC/JI/JD, no labor — OM 102.D.7 / 107.I.3)",
-  };
+  });
 }
 
 export async function saveSettlementCalc(opts: {

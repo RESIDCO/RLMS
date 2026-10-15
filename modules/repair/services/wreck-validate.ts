@@ -94,29 +94,80 @@ function classifyPurity(detail: ParsedAarLine[]): {
   };
 }
 
+export type AarLaborRateInfo = {
+  quarter: string;
+  laborRateCents: number;
+  edition: string | null;
+  source: string | null;
+  rulePage: string | null;
+  /** True when seed/demo — not cited from a published AAR manual edition. */
+  isPlaceholder: boolean;
+  /** UI line: source + edition, or placeholder copy. */
+  citation: string;
+};
+
+function mapLaborRateRow(row: {
+  effective_quarter: string;
+  labor_rate_cents: string;
+  edition: string | null;
+  source: string | null;
+  rule_page: string | null;
+}): AarLaborRateInfo {
+  const source = row.source?.trim() || null;
+  const edition = row.edition?.trim() || null;
+  const rulePage = row.rule_page?.trim() || null;
+  const isPlaceholder =
+    !source ||
+    source.toLowerCase() === "placeholder" ||
+    source.toLowerCase() === "demo" ||
+    source.toLowerCase() === "seed";
+  const citation = isPlaceholder
+    ? "placeholder – not from manual"
+    : [edition, rulePage ? `Rule ${rulePage}` : null, source]
+        .filter(Boolean)
+        .join(", ");
+  return {
+    quarter: row.effective_quarter,
+    laborRateCents: Number(row.labor_rate_cents),
+    edition,
+    source,
+    rulePage,
+    isPlaceholder,
+    citation,
+  };
+}
+
 /** Current AAR quarterly labor rate (cents/hour) from price master. */
 export async function getCurrentAarLaborRateCents(
   tenantId = DEFAULT_TENANT_ID,
   quarter?: string | null,
-): Promise<{ quarter: string; laborRateCents: number } | null> {
+): Promise<AarLaborRateInfo | null> {
+  const cols = `effective_quarter, labor_rate_cents, edition, source, rule_page`;
   if (quarter) {
-    const { rows } = await q<{ effective_quarter: string; labor_rate_cents: string }>(
-      `SELECT effective_quarter, labor_rate_cents
+    const { rows } = await q<{
+      effective_quarter: string;
+      labor_rate_cents: string;
+      edition: string | null;
+      source: string | null;
+      rule_page: string | null;
+    }>(
+      `SELECT ${cols}
        FROM repair.ref_aar_labor_rates
        WHERE tenant_id = $1 AND effective_quarter = $2
          AND deleted_at IS NULL AND active AND retired_at IS NULL
        ORDER BY created_at DESC LIMIT 1`,
       [tenantId, quarter],
     );
-    if (rows[0]) {
-      return {
-        quarter: rows[0].effective_quarter,
-        laborRateCents: Number(rows[0].labor_rate_cents),
-      };
-    }
+    if (rows[0]) return mapLaborRateRow(rows[0]);
   }
-  const { rows } = await q<{ effective_quarter: string; labor_rate_cents: string }>(
-    `SELECT effective_quarter, labor_rate_cents
+  const { rows } = await q<{
+    effective_quarter: string;
+    labor_rate_cents: string;
+    edition: string | null;
+    source: string | null;
+    rule_page: string | null;
+  }>(
+    `SELECT ${cols}
      FROM repair.ref_aar_labor_rates
      WHERE tenant_id = $1 AND deleted_at IS NULL AND active AND retired_at IS NULL
      ORDER BY effective_quarter DESC, created_at DESC
@@ -124,10 +175,7 @@ export async function getCurrentAarLaborRateCents(
     [tenantId],
   );
   if (!rows[0]) return null;
-  return {
-    quarter: rows[0].effective_quarter,
-    laborRateCents: Number(rows[0].labor_rate_cents),
-  };
+  return mapLaborRateRow(rows[0]);
 }
 
 async function lookupPriceCents(

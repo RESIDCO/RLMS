@@ -12,6 +12,8 @@ import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceBanner } from "./WorkspaceTitle";
 import { cn } from "@/lib/utils";
 import type { EstimateLine } from "./EstimateDataFile";
+import { MoneyInput } from "./MoneyInput";
+import { formatCentsAsMoney, parseDollarsToCents } from "./moneyFormat";
 
 type RespCode = { code: string; display_name: string };
 
@@ -62,7 +64,8 @@ export default function UpdateResponsibilities() {
   const [taxPreview, setTaxPreview] = useState<
     Array<{ respCode: string; taxCents: number; taxDisplay: string; basisCents: number }>
   >([]);
-  const [taxCentsInput, setTaxCentsInput] = useState("");
+  /** Dollars display — stored/submitted as integer cents. */
+  const [taxDollarsInput, setTaxDollarsInput] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [meta, setMeta] = useState<Record<string, string | null>>({});
@@ -255,9 +258,9 @@ export default function UpdateResponsibilities() {
   }
 
   async function runTaxPreview() {
-    const taxCents = Number(taxCentsInput);
-    if (!Number.isFinite(taxCents) || taxCents <= 0) {
-      setError("Enter tax amount in integer cents");
+    const taxCents = parseDollarsToCents(taxDollarsInput);
+    if (taxCents == null || taxCents <= 0) {
+      setError("Enter tax amount in dollars (e.g. $12.34)");
       return;
     }
     const payload = lines.map((l) => ({
@@ -465,11 +468,12 @@ export default function UpdateResponsibilities() {
               ) : (
                 <div>
                   <Label className="text-xs">Fixed $ (child 1a)</Label>
-                  <Input
-                    className="mt-1 h-9 w-28"
+                  <MoneyInput
+                    className="mt-1 h-9 w-32 rounded-md border border-input bg-background px-2 text-sm tabular-nums"
                     value={fixedDollars}
-                    onChange={(e) => setFixedDollars(e.target.value)}
-                    placeholder="12.34"
+                    onValueChange={setFixedDollars}
+                    placeholder="$12.34"
+                    aria-label="Fixed dollars for split child 1a"
                   />
                 </div>
               )}
@@ -563,12 +567,13 @@ export default function UpdateResponsibilities() {
           )}
           <div className="flex flex-wrap gap-2 items-end pt-2 border-t border-border">
             <div>
-              <Label className="text-xs">Tax cents (prorate preview)</Label>
-              <Input
-                className="mt-1 h-8 w-32"
-                value={taxCentsInput}
-                onChange={(e) => setTaxCentsInput(e.target.value)}
-                placeholder="1234"
+              <Label className="text-xs">Tax amount (prorate preview)</Label>
+              <MoneyInput
+                className="mt-1 h-8 w-36 rounded-md border border-input bg-background px-2 text-sm tabular-nums"
+                value={taxDollarsInput}
+                onValueChange={setTaxDollarsInput}
+                placeholder="$12.34"
+                aria-label="Tax amount in dollars"
               />
             </div>
             <Button
@@ -581,8 +586,9 @@ export default function UpdateResponsibilities() {
             {taxPreview.map((s) => (
               <span key={s.respCode} className="text-xs tabular-nums">
                 R{s.respCode}:{" "}
-                {(s as { taxMoney?: string }).taxMoney ?? `$${s.taxDisplay}`} (
-                {s.taxCents}¢ / basis {s.basisCents}¢)
+                {(s as { taxMoney?: string }).taxMoney ??
+                  formatCentsAsMoney(s.taxCents)}{" "}
+                (basis {formatCentsAsMoney(s.basisCents)})
               </span>
             ))}
           </div>

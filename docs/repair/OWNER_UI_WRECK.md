@@ -216,8 +216,10 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 | Engine | Existing pure calculator lives in `shared/rule107.ts` (AAR Office Manual Rule 107.E / settlement exhibits). **Do not wire** a live DV module into wreck UI in this build. |
 | Provider | Add a **`RlmsRule107Calculator` provider interface** (read-only link / later swap) — stub or no-op adapter only; **do not wire** to production DV service now. |
 | Worksheet | Owner-side worksheet should mirror OM p.72–74 (reproduction → DV → salvage → basis → cap). Store which Exhibit edition was used. Override with reason + audit. |
-| Settlement gauge | **Owner-only** on wreck event: Resp 3 at or over DV raises **warnings/flags** (never auto-reject the load). Owner decides **settle vs repair** (107.C.2/C.3). If repair continues at/above settlement cap, require **JC 5399** credit line (negative material, detail source DC/JI/JD, no labor — OM 102.D.7 / 107.I.3). Over-DV and other edge cases are handled **owner-side** (Bruce §11 #3, #5). |
-| Threshold | At/over DV → owner-only warn/flag (Bruce §11 #5). Optional earlier soft-warn % is UX polish, not a hard gate. Cap behavior at **≥100%** is per OM. |
+| Settlement gauge | **Owner-only** on wreck event. Copy: `Resp 3 total $X of DV $Y (NN%)` + progress bar. Blank DV → `DV not entered` (no percent). Amber warn **≥80%**; red **≥100%** / at-or-over DV (never auto-reject the load). Owner decides **settle vs repair** (107.C.2/C.3). If repair continues at/above settlement cap, require **JC 5399** credit line (negative material, detail source DC/JI/JD, no labor — OM 102.D.7 / 107.I.3). Over-DV and other edge cases are handled **owner-side** (Bruce §11 #3, #5). |
+| Money inputs | Owner enters **dollars** with `$` / commas / 2 decimals (e.g. `$48,250.00`); storage remains **integer cents**. Never ask for cents in the UI. |
+| Threshold | Soft amber **≥80%** of DV; at/over DV (**≥100%**) → owner-only warn/flag + 5399 note (Bruce §11 #5). Cap behavior at **≥100%** is per OM. |
+| Labor rate line | Show **source + edition** (e.g. AAR Office Manual + Rule 111) when imported from price master; otherwise **`placeholder – not from manual`**. Local seed **$185.00/hr** is a demo placeholder — not extracted from OM 111. |
 | Compare to DDCT | Show comparison to DDCT Actual/Estimated DV when owner pastes/enters it; damaging road may challenge under 107.B.2.a.(1). |
 | Shops / lessees | No DV dollars, no settlement matrix, no 5399 prompt. |
 

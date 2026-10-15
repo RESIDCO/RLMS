@@ -13,6 +13,8 @@
  * 8. Invoice # not required on estimate load; HARD REJECT on final invoice
  * 9. Rebill notes present (shop→owner; owner CRB to RR)
  * 10. Client typecheck gate (named WorkspaceTitle import; WreckEvent tsc clean)
+ * 11. Dollars↔cents round-trip ($48,250.00 → 4825000¢); gauge blank / under / 80% / over
+ * 12. Labor rate citation is placeholder (seed $185/hr not from AAR manual)
  *
  * Run: npm run repair:smoke-wreck
  */
@@ -34,6 +36,7 @@ import {
 } from "../services/wreck-events";
 import { buildJicTracker, addCalendarDays } from "../services/wreck-jic";
 import {
+  buildSettlementGaugeView,
   computeSettlementGauge,
   saveSettlementCalc,
   omitOwnerDv,
@@ -41,6 +44,12 @@ import {
 import { getRule107Calculator } from "../providers/rule107-calculator";
 import { buildSendLesseePreview, sendLesseeFromPreview } from "../services/send-lessee";
 import { setCompletedDate } from "../services/completion";
+import {
+  dollarsToCents,
+  formatCentsAsMoney,
+  parseDollarsToCents,
+} from "../services/money";
+import { getCurrentAarLaborRateCents } from "../services/wreck-validate";
 import { migrateLocal } from "./migrate-local";
 import { assertWreckClientTypecheck } from "./typecheck-client-wreck";
 
@@ -534,24 +543,83 @@ async function main() {
     bad("resp3 estimate id", "missing after load");
   }
 
-  // ── 5. Settlement gauge + 5399 ──
+  // ── 5a. Dollars ↔ cents round-trip (user types dollars, store cents) ──
+  const sampleDollars = "$48,250.00";
+  const sampleCents = parseDollarsToCents(sampleDollars);
+  if (sampleCents !== 4_825_000) {
+    bad("dollars→cents", `${sampleDollars} → ${sampleCents}`);
+  }
+  if (dollarsToCents("36,732.04") !== 3_673_204) {
+    bad("comma dollars", String(dollarsToCents("36,732.04")));
+  }
+  if (formatCentsAsMoney(3_673_204) !== "$36,732.04") {
+    bad("cents→money", formatCentsAsMoney(3_673_204));
+  }
+  if (parseDollarsToCents("") != null) bad("blank dollars", "expected null");
+  ok(`dollars↔cents round-trip ${sampleDollars} = ${sampleCents}¢`);
+
+  // ── 5b. Pure gauge states: blank / under / 80% / over ──
+  const blankG = buildSettlementGaugeView({
+    resp3TotalCents: 3_673_204,
+    depreciatedValueCents: null,
+  });
+  if (blankG.message !== "DV not entered" || blankG.pctOfDv != null || blankG.warn) {
+    bad("gauge blank", JSON.stringify(blankG));
+  }
+  ok("gauge blank DV → 'DV not entered' (no percent)");
+
+  const underG = buildSettlementGaugeView({
+    resp3TotalCents: 50_00,
+    depreciatedValueCents: 100_00,
+  });
+  if (
+    underG.pctOfDv !== 50 ||
+    underG.warn ||
+    underG.overDv ||
+    !underG.message.includes("of DV") ||
+    !underG.message.includes("(50%)")
+  ) {
+    bad("gauge under", JSON.stringify(underG));
+  }
+  ok(`gauge under: ${underG.message}`);
+
+  const warnG = buildSettlementGaugeView({
+    resp3TotalCents: 80_00,
+    depreciatedValueCents: 100_00,
+  });
+  if (!warnG.warn || warnG.overDv || warnG.pctOfDv !== 80) {
+    bad("gauge 80%", JSON.stringify(warnG));
+  }
+  ok(`gauge ≥80% amber: ${warnG.message}`);
+
+  const overG = buildSettlementGaugeView({
+    resp3TotalCents: 120_00,
+    depreciatedValueCents: 100_00,
+  });
+  if (!overG.overDv || !overG.warn || !overG.require5399 || overG.barPct !== 100) {
+    bad("gauge over", JSON.stringify(overG));
+  }
+  ok(`gauge ≥100% red + 5399: ${overG.message}`);
+
+  // ── 5c. Settlement gauge + 5399 (persisted) ──
   const sett = await saveSettlementCalc({
     wreckEventId: wreckId,
     actor: "smoke-wreck",
-    originalCostCents: null, // blank OK
+    originalCostCents: sampleCents, // dollars typed as $48,250.00
     depreciatedValueCents: 100_00,
     settlementCapCents: 100_00,
     exhibitEdition: "OM-2026",
   });
   if (!sett.ok) bad("settlement", sett.error);
-  // Fake high resp3 total by checking gauge message path
   const gauge = await computeSettlementGauge({ wreckEventId: wreckId });
   if (!gauge) bad("gauge", "null");
-  ok(`settlement gauge resp3=${gauge.resp3TotalCents} dv=${gauge.depreciatedValueCents} overDv=${gauge.overDv}`);
+  ok(
+    `settlement gauge resp3=${gauge.resp3TotalCents} dv=${gauge.depreciatedValueCents} pct=${gauge.pctOfDv} overDv=${gauge.overDv}`,
+  );
   if (!gauge.note5399.includes("5399")) bad("5399", gauge.note5399);
   ok("5399 owner-side note present");
 
-  // Over-DV warn when we set DV below total
+  // Over-DV when we set DV below total
   if (gauge.resp3TotalCents > 0) {
     await saveSettlementCalc({
       wreckEventId: wreckId,
@@ -560,11 +628,27 @@ async function main() {
       settlementCapCents: 1,
     });
     const over = await computeSettlementGauge({ wreckEventId: wreckId });
-    if (!over?.overDv || !over.warn) bad("over DV", JSON.stringify(over));
+    if (!over?.overDv || !over.warn || over.pctOfDv == null) {
+      bad("over DV", JSON.stringify(over));
+    }
+    if (!over.message.includes("of DV")) bad("over message", over.message);
     ok("over-DV owner warn/flag only (no auto-reject)");
   } else {
-    ok("over-DV path checked via require5399 note (zero total this run)");
+    ok("over-DV path checked via pure gauge view (zero total this run)");
   }
+
+  // Clear DV → blank message
+  await saveSettlementCalc({
+    wreckEventId: wreckId,
+    actor: "smoke-wreck",
+    depreciatedValueCents: null,
+    settlementCapCents: null,
+  });
+  const blankPersisted = await computeSettlementGauge({ wreckEventId: wreckId });
+  if (blankPersisted?.message !== "DV not entered") {
+    bad("persisted blank DV", JSON.stringify(blankPersisted));
+  }
+  ok("persisted blank DV → DV not entered");
 
   // ── 7. Send Lessee excluded ──
   const ownerEstId =
@@ -600,6 +684,22 @@ async function main() {
   wreck = await getWreckEvent(wreckId);
   if (!wreck?.aarLaborRate) bad("payload rate", "missing");
   ok("wreck payload includes AAR labor rate + dual tracks + JIC + owner DV");
+
+  // ── 12. Labor rate $185 origin = local seed placeholder (not OM 111) ──
+  const rateInfo = await getCurrentAarLaborRateCents();
+  if (!rateInfo) bad("labor rate info", "missing");
+  if (rateInfo.laborRateCents !== 18500) {
+    bad("labor rate cents", String(rateInfo.laborRateCents));
+  }
+  if (!rateInfo.isPlaceholder) {
+    bad("labor rate placeholder", JSON.stringify(rateInfo));
+  }
+  if (rateInfo.citation !== "placeholder – not from manual") {
+    bad("labor rate citation", rateInfo.citation);
+  }
+  ok(
+    `$185.00/hr = seed placeholder (${rateInfo.quarter}); citation="${rateInfo.citation}" — not from AAR Office Manual`,
+  );
 
   console.log("=== repair:smoke-wreck PASS ===");
 }

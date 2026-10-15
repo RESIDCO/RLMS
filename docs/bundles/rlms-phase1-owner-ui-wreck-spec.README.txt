@@ -4,28 +4,34 @@ Requires tip: 0c0be23f9187a4ccf97f1ef172a5dfe03bd07542
 (§D Estimate Review r5)
 
 Canonical Bundle tip / size / SHA-256: see Project store copy
-  /cursor/stores/self/docs/bundles/rlms-phase1-owner-ui-wreck-spec.README.txt
-(or the same filenames next to this README after Bruce receives the bundle zip).
+  docs/bundles/rlms-phase1-owner-ui-wreck-spec.README.txt
+(next to the .bundle file Bruce receives).
 
 What this delivers
 ----------------------------------------------------------------
   Docs only — NO wreck UI, load APIs, or validation code.
 
   1) docs/repair/OWNER_UI_WRECK.md
-     - Bruce's six corrections WIN (one event; two shop files;
-       Resp 3 HARD REJECT vs flag; quarterly rates; owner-only
-       Rule 107 DV; JIC deadline tracker from shop arrival)
-     - HARD REJECT critical billing fields listed with App. G / Railinc
-       / Manual_Gap_Review citations
-     - OPEN: gaps from missing WRECK_DUAL_TRACK.md
+     - Bruce's six corrections WIN (one event; two shop files —
+       NO mixed-file auto-split; Resp 3 HARD REJECT vs flag;
+       quarterly rates; owner-only Rule 107 DV; JIC clocks from
+       shop arrival)
+     - Folded WRECK_DUAL_TRACK.md: OM/FM citations, data model,
+       JIC photo 4–10, settlement exhibits/ref tables, rebill CRIP
+       outline, timeline + billing limits, detail sources
+     - HARD REJECT: current-quarter AAR pricing, invalid/missing
+       Detail Source, App. G critical billing fields (cited)
+     - CID missing → ACCEPT + FLAG; block completed date + invoice
+     - Remaining OPEN: listed in §11 of the spec
 
   2) docs/owner-ui-wreck.md — short top-level pointer
 
-  3) docs/repair/HANDOFF.md — wreck spec next; build after §D r5 sign-off
+  3) docs/repair/HANDOFF.md — wreck spec folded; build after §D r5
 
 Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
 -------------------------------------------------------
   git rev-parse HEAD   # expect 0c0be23… (§D r5)
+  # If already on 9935a0f (prior wreck-spec), this pull still applies
   # If still on f911faa, pull rlms-phase1-owner-ui-d-estimate-review-r5.bundle first
   git bundle verify PATH\TO\rlms-phase1-owner-ui-wreck-spec.bundle
   git pull PATH\TO\rlms-phase1-owner-ui-wreck-spec.bundle HEAD

@@ -10,7 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
-| **Wreck dual-track spec (docs only)** | Apply `rlms-phase1-owner-ui-wreck-spec.bundle`. Requires **`0c0be23`** (§D r5). Lands tip in bundle README. Spec: [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md). **No wreck UI/APIs yet** — build after §D r5 sign-off. |
+| **Wreck dual-track spec (docs only)** | Apply `rlms-phase1-owner-ui-wreck-spec.bundle`. Requires **`0c0be23`** (§D r5). Lands tip in bundle README. Spec: [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) — Bruce’s six corrections WIN; `WRECK_DUAL_TRACK.md` folded (OM/FM cites, data model, JIC 4–10, settlement/rebill, clocks from shop arrival). **No wreck UI/APIs yet** — build after §D r5 sign-off. |
 | **§D Estimate Review r5** | Apply `rlms-phase1-owner-ui-d-estimate-review-r5.bundle`. Requires **`f911faa`**. Lands tip in bundle README. (1) Lessee Loc/Qty/RJOB/QR/Description/CID via same `enrichLineFromRaw` as owner grid. (2) Gear → Reference Data admin: tabs, soft-retire/restore, audit, dry-run import, export. |
 | **§D Estimate Review r4** | Prior: `rlms-phase1-owner-ui-d-estimate-review-r4.bundle`. Requires **`d864588`** → **`f911faa`**. Qualifier multi-path; header LOCK/EDIT/FREE; lessee token 403; cent reconcile; $0 Send block. |
 | **§D Estimate Review r3** | Prior: `rlms-phase1-owner-ui-d-estimate-review-r3.bundle`. Requires **`2d987c9`** → **`d864588`**. Hover close; car# lock 409; money commas; send-lessee preview + local outbox. |
@@ -28,7 +28,7 @@
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
 If PC is on **`f911faa`**, apply §D **estimate-review-r5** first → **`0c0be23`**, then the **wreck-spec** docs bundle.  
-If PC is already on **`0c0be23`**, apply **`rlms-phase1-owner-ui-wreck-spec.bundle`** next.  
+If PC is already on **`0c0be23`** or prior wreck-spec tip **`9935a0f`**, apply **`rlms-phase1-owner-ui-wreck-spec.bundle`** next (replaced fold tip — see bundle README).  
 **Wreck build** (UI/APIs) waits for §D r5 sign-off + Bruce acceptance of [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md).
 
 ---
@@ -41,7 +41,7 @@ If PC is already on **`0c0be23`**, apply **`rlms-phase1-owner-ui-wreck-spec.bund
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
 | **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Signed off** (`468a9db`) |
 | **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r5 tip** (awaiting Bruce sign-off) |
-| **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **Spec next** (docs-only tip; build after §D r5 sign-off) |
+| **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **Spec folded** (docs-only tip; `WRECK_DUAL_TRACK` merged; build after §D r5 sign-off) |
 | 5+ | Documents polish / Lessee, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md)  
@@ -63,7 +63,7 @@ If PC is already on **`0c0be23`**, apply **`rlms-phase1-owner-ui-wreck-spec.bund
 | N+16 | `rlms-phase1-owner-ui-d-estimate-review-r3.bundle` | `2d987c9` | → **`d864588`** |
 | N+17 | `rlms-phase1-owner-ui-d-estimate-review-r4.bundle` | `d864588` | → **`f911faa`** |
 | N+18 | `rlms-phase1-owner-ui-d-estimate-review-r5.bundle` | `f911faa` | → **`0c0be23`** |
-| N+19 | **`rlms-phase1-owner-ui-wreck-spec.bundle`** | **`0c0be23`** | → **(see README)** |
+| N+19 | **`rlms-phase1-owner-ui-wreck-spec.bundle`** (replaced — fold) | **`0c0be23`** | → **(see README)** |
 
 ---
 
@@ -135,5 +135,5 @@ Expect: car edit **409**; money thousands separators; hover tips not stuck; Send
 
 - Full AAR Bad Order Reason list still incomplete (do not invent) — admin-extensible via `/#/repair/bo-reasons`.
 - Q1 / Q2 remain in open-questions.md.
-- **Wreck:** `WRECK_DUAL_TRACK.md` missing — see `OPEN:` markers in [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) (JIC day-type rules, 5399 UX, quarterly CSV source, Q18 vs Resp 3 invoice #).
+- **Wreck:** `WRECK_DUAL_TRACK.md` folded into [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md). Remaining `OPEN:` — JIC Standard vs Alternate / who sends; settle warn %; quarterly CSV source; Q18 vs Resp 3 invoice #; rebill party; unpriced labor table; Canadian taxes; short-pay queue; lessee 6/7; Send Lessee wreck portion; flag UI taxonomy; calendar vs business days.
 - Screen E document polish / Screen F Lessee after §D sign-off (wreck build may intercalate per Bruce).

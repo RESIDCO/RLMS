@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
 import RepairOwnerShell from "./RepairOwnerShell";
-import WorkspaceTitle from "./WorkspaceTitle";
+import { WorkspaceTitle } from "./WorkspaceTitle";
 
 type JicRow = {
   key: string;

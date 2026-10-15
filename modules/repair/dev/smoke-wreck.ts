@@ -12,6 +12,7 @@
  * 7. Send Lessee excluded for wreck
  * 8. Invoice # not required on estimate load; HARD REJECT on final invoice
  * 9. Rebill notes present (shop→owner; owner CRB to RR)
+ * 10. Client typecheck gate (named WorkspaceTitle import; WreckEvent tsc clean)
  *
  * Run: npm run repair:smoke-wreck
  */
@@ -41,6 +42,7 @@ import { getRule107Calculator } from "../providers/rule107-calculator";
 import { buildSendLesseePreview, sendLesseeFromPreview } from "../services/send-lessee";
 import { setCompletedDate } from "../services/completion";
 import { migrateLocal } from "./migrate-local";
+import { assertWreckClientTypecheck } from "./typecheck-client-wreck";
 
 function ok(msg: string) {
   console.log(`  OK  ${msg}`);
@@ -151,6 +153,8 @@ async function seedCar(mark: string, number: string) {
 
 async function main() {
   console.log("=== repair:smoke-wreck (OWNER_UI_WRECK dual-track) ===");
+  // Fail fast: default WorkspaceTitle import blanks Chrome before App mounts.
+  assertWreckClientTypecheck();
   if (!process.env.DATABASE_URL && !process.env.REPAIR_DATABASE_URL) {
     throw new Error("Set DATABASE_URL");
   }

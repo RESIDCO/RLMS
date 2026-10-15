@@ -10,6 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
+| **Wreck hotfix (WorkspaceTitle)** | Apply `rlms-phase1-owner-ui-wreck-hotfix.bundle` on tip **`dc704f1`**. Fixes blank Chrome: `WreckEvent.tsx` named-imports `{ WorkspaceTitle }`. Smoke: `npm run repair:typecheck-client-wreck` (also first step of `repair:smoke-wreck`). |
 | **Wreck dual-track BUILD** | Apply `rlms-phase1-owner-ui-wreck.bundle`. Requires **`85856b6`** (wreck-spec §11). Lands tip in bundle README. Implements approved [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md): wreck event dual-track, Resp 3 hard/flag validation, JIC tracker, owner DV shell, Send Lessee exclude, invoice # gate. Smoke: `npm run repair:smoke-wreck`. |
 | **Wreck dual-track spec (docs)** | Prior: `rlms-phase1-owner-ui-wreck-spec.bundle`. Requires **`c8a7138`** → **`85856b6`**. Spec approved; §11 #1/#4/#10 DECIDED (Umler/manual inconsistent-tolerant; AAR quarterly labor rate; invoice # not on estimate / HARD REJECT final invoice). |
 | **§D Estimate Review r5** | Apply `rlms-phase1-owner-ui-d-estimate-review-r5.bundle`. Requires **`f911faa`**. Lands tip in bundle README. (1) Lessee Loc/Qty/RJOB/QR/Description/CID via same `enrichLineFromRaw` as owner grid. (2) Gear → Reference Data admin: tabs, soft-retire/restore, audit, dry-run import, export. |
@@ -28,8 +29,9 @@
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`85856b6`**, apply **`rlms-phase1-owner-ui-wreck.bundle`** next (build tip — see bundle README).  
-If PC is on **`c8a7138`**, apply wreck-spec first → **`85856b6`**, then the build bundle.  
+If PC is on **`dc704f1`**, apply **`rlms-phase1-owner-ui-wreck-hotfix.bundle`** next (blank-client fix).  
+If PC is on **`85856b6`**, apply **`rlms-phase1-owner-ui-wreck.bundle`** then the hotfix.  
+If PC is on **`c8a7138`**, apply wreck-spec first → **`85856b6`**, then the build + hotfix bundles.  
 If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec first.
 
 ---
@@ -65,7 +67,8 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+17 | `rlms-phase1-owner-ui-d-estimate-review-r4.bundle` | `d864588` | → **`f911faa`** |
 | N+18 | `rlms-phase1-owner-ui-d-estimate-review-r5.bundle` | `f911faa` | → **`0c0be23`** |
 | N+19 | **`rlms-phase1-owner-ui-wreck-spec.bundle`** (§11 FF from c8a7138) | **`c8a7138`** | → **`85856b6`** |
-| N+20 | **`rlms-phase1-owner-ui-wreck.bundle`** (approved build) | **`85856b6`** | → **(see README)** |
+| N+20 | **`rlms-phase1-owner-ui-wreck.bundle`** (approved build) | **`85856b6`** | → **`dc704f1`** |
+| N+21 | **`rlms-phase1-owner-ui-wreck-hotfix.bundle`** (blank Chrome / WorkspaceTitle) | **`dc704f1`** | → **(see README)** |
 
 ---
 
@@ -79,6 +82,15 @@ git pull PATH\TO\rlms-phase1-owner-ui-wreck.bundle HEAD
 git push -u origin cursor/repair-module-phase1-4199
 ```
 
+Then hotfix (on tip `dc704f1`):
+
+```powershell
+git rev-parse HEAD   # expect dc704f1…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-wreck-hotfix.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-wreck-hotfix.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
 Then:
 
 ```powershell
@@ -87,6 +99,7 @@ $env:REPAIR_LOCAL_DB = "1"
 $env:REPAIR_DEV_BYPASS_AUTH = "1"
 npm install
 npm run repair:migrate:local
+npm run repair:typecheck-client-wreck
 npm run repair:smoke-wreck
 npm run repair:dev:local
 # http://127.0.0.1:5000/#/repair/wreck/<wreckEventId>

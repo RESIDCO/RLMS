@@ -20,6 +20,24 @@ export function useWorkspaceTitle(): string {
   return title;
 }
 
+/** Page heading used inside owner shells (not the red banner). Named export only. */
+export function WorkspaceTitle({
+  title,
+  subtitle,
+}: {
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+      {subtitle ? (
+        <p className="text-sm text-muted-foreground">{subtitle}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function WorkspaceBanner({
   pageTitle,
   right,

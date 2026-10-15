@@ -25,6 +25,7 @@
     "repair:smoke-bad-orders": "tsx modules/repair/dev/smoke-bad-orders-c.ts",
     "repair:smoke-estimate-review": "tsx modules/repair/dev/smoke-estimate-review-d.ts",
     "repair:smoke-wreck": "tsx modules/repair/dev/smoke-wreck.ts",
+    "repair:typecheck-client-wreck": "tsx modules/repair/dev/typecheck-client-wreck.ts",
     "repair:import-ref-data": "tsx modules/repair/dev/import-ref-data.ts",
     "repair:demo:local": "tsx modules/repair/dev/demo-local.ts",
     "repair:seed:estimates-history": "tsx modules/repair/dev/seed-estimates-history.ts"

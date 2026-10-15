@@ -16,7 +16,7 @@ export type ExistingHistoryRow = AssignmentHistoryPeriodPayload & {
 };
 
 export type CloseoutAction =
-  | { op: "unchanged"; existingId: number }
+  | { op: "unchanged"; existingId: number; payload: AssignmentHistoryPeriodPayload }
   | { op: "update"; existingId: number; payload: AssignmentHistoryPeriodPayload }
   | { op: "insert"; payload: AssignmentHistoryPeriodPayload }
   | { op: "close"; existingId: number; end_date: string | null; comment: string };
@@ -142,7 +142,7 @@ function pairIncomingToExisting(
       assignment_id_ext: hist.assignment_id_ext || keep.assignment_id_ext,
     };
     if (assignmentHistoryContentEqual(keep, merged)) {
-      actions.push({ op: "unchanged", existingId: keep.id });
+      actions.push({ op: "unchanged", existingId: keep.id, payload: merged });
     } else {
       actions.push({ op: "update", existingId: keep.id, payload: merged });
     }
@@ -158,7 +158,7 @@ function pairIncomingToExisting(
       assignment_id_ext: hist.assignment_id_ext || keep.assignment_id_ext,
     };
     if (assignmentHistoryContentEqual(keep, merged)) {
-      actions.push({ op: "unchanged", existingId: keep.id });
+      actions.push({ op: "unchanged", existingId: keep.id, payload: merged });
     } else {
       actions.push({ op: "update", existingId: keep.id, payload: merged });
     }

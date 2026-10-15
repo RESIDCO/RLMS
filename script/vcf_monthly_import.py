@@ -468,11 +468,7 @@ def main():
             incoming = []
             for p in c["periods"]:
                 start = None if p["start_date_unknown"] else p.get("start_date")
-                end = (
-                    None
-                    if p["end_date_unknown"] or p["end_date_indefinite"]
-                    else p.get("end_date")
-                )
+                end = None if p["end_date_indefinite"] else p.get("end_date")
                 incoming.append(
                     {
                         "railcar_id": rid,

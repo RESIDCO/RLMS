@@ -9,6 +9,7 @@ import {
   skipVcfAssignmentWrites,
   stripManualProtectedRailcarFields,
 } from "./vcf-assignment-closeout";
+import { storedVcfEndDate, storedVcfStartDate } from "./vcf-import";
 import type { AssignmentHistoryPeriodPayload } from "./vcf-import";
 
 let passed = 0;
@@ -33,6 +34,7 @@ function hist(
     active: true,
     comment: null,
     assignment_id_ext: null,
+    valid_car_id_ext: null,
     moved_at: "2026-08-13T00:00:00.000Z",
     moved_by: "vcf-import",
     reason: "V_VALID_CARS assignment period",
@@ -67,6 +69,9 @@ ok(
 );
 ok(endDateMatchKey("4000-12-31") === "" && endDateMatchKey("4000-12-21") === "", "indefinite ends match as open");
 ok(endDateMatchKey(null) === endDateMatchKey("4000-12-31"), "null end matches 4000-12-31");
+ok(storedVcfEndDate("1901-01-01") === "1901-01-01", "1901 end is stored, not open");
+ok(storedVcfEndDate("4000-12-31") === null, "4000 end stores as null open");
+ok(storedVcfStartDate("1901-01-01") === null, "1901 start stores as null");
 
 // Same key, two existing opens, one incoming: match filled id; leftover sibling stays
 {

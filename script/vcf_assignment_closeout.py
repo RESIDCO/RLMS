@@ -99,7 +99,7 @@ def _pair_incoming_to_existing(existing_rows, incoming):
         merged = dict(hist)
         merged["assignment_id_ext"] = hist.get("assignment_id_ext") or keep.get("assignment_id_ext")
         if content_equal_ah(keep, merged):
-            actions.append({"op": "unchanged", "existing_id": keep["id"]})
+            actions.append({"op": "unchanged", "existing_id": keep["id"], "payload": merged})
         else:
             actions.append({"op": "update", "existing_id": keep["id"], "payload": merged})
 

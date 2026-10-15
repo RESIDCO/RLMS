@@ -19,6 +19,7 @@ def hist(**partial):
         "active": True,
         "comment": None,
         "assignment_id_ext": None,
+        "valid_car_id_ext": None,
         "moved_at": "2026-08-13T00:00:00.000Z",
         "moved_by": "vcf-import",
         "reason": "V_VALID_CARS assignment period",

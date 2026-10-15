@@ -366,6 +366,7 @@ export async function runVcfCommit(opts: {
     stage = "write_history";
     const ahClosePayloads: { id: number; patch: Record<string, unknown> }[] = [];
     const ahUpdatePayloads: { id: number; payload: Record<string, unknown> }[] = [];
+    const ahStampPayloads: { id: number; payload: Record<string, unknown> }[] = [];
     for (const item of planned) {
       const { car } = item;
       const railcarId = item.existingId ?? keyToId.get(car.carKey);
@@ -383,11 +384,27 @@ export async function runVcfCommit(opts: {
               });
         const plannedStats = closeoutStats(actions);
         for (const action of actions) {
-          if (action.op === "unchanged") continue;
-          if (action.op === "update") {
-            ahUpdatePayloads.push({ id: action.existingId, payload: action.payload as Record<string, unknown> });
+          if (action.op === "unchanged") {
+            ahStampPayloads.push({
+              id: action.existingId,
+              payload: {
+                last_seen_load_id: loadId,
+                valid_car_id_ext: action.payload.valid_car_id_ext ?? null,
+              },
+            });
+          } else if (action.op === "update") {
+            ahUpdatePayloads.push({
+              id: action.existingId,
+              payload: {
+                ...(action.payload as Record<string, unknown>),
+                last_seen_load_id: loadId,
+              },
+            });
           } else if (action.op === "insert") {
-            ahInsertPayloads.push(action.payload as Record<string, unknown>);
+            ahInsertPayloads.push({
+              ...(action.payload as Record<string, unknown>),
+              last_seen_load_id: loadId,
+            });
           } else if (action.op === "close") {
             ahClosePayloads.push({ id: action.existingId, patch: closeoutClosePatch(action, movedAt) });
           }
@@ -407,11 +424,15 @@ export async function runVcfCommit(opts: {
       }
     }
 
-    progress(`Writing assignment history (${ahUpdatePayloads.length} updates, ${ahClosePayloads.length} closes, ${ahInsertPayloads.length} inserts)`);
+    progress(`Writing assignment history (${ahUpdatePayloads.length} updates, ${ahStampPayloads.length} stamps, ${ahClosePayloads.length} closes, ${ahInsertPayloads.length} inserts)`);
     for (const u of ahUpdatePayloads) {
       const { error } = await db.from("assignment_history").update(u.payload).eq("id", u.id);
       if (error) fail(error.message);
       written.assignmentUpdated += 1;
+    }
+    for (const s of ahStampPayloads) {
+      const { error } = await db.from("assignment_history").update(s.payload).eq("id", s.id);
+      if (error) fail(error.message);
     }
     for (const c of ahClosePayloads) {
       const { error } = await db.from("assignment_history").update(c.patch).eq("id", c.id);

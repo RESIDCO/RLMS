@@ -150,7 +150,8 @@ const MANAGED_CATEGORY_MAP: Record<string, (typeof MANAGED_CATEGORY_CANONICAL)[n
 };
 
 const UNKNOWN_START = new Set(["1901-01-01"]);
-const UNKNOWN_END = new Set(["1900-01-06", "1901-01-01"]);
+/** Placeholder / garbage ends that are not "open". 1901-01-01 stays stored. */
+const UNKNOWN_END = new Set(["1900-01-06"]);
 
 /**
  * VCF uses 4000-12-31 as "indefinite / open-ended". Source files also produce
@@ -610,11 +611,9 @@ export function railcarPayloadFromCurrent(
     rider_external_id: current.rider_external_id,
     lessee_name: current.lessee_name,
     assignment_label: current.assignment_label,
-    lease_start_date: current.start_date_unknown ? null : current.start_date,
-    lease_end_date:
-      current.end_date_unknown || current.end_date_indefinite ? null : current.end_date,
-    lease_expiry:
-      current.end_date_unknown || current.end_date_indefinite ? null : current.end_date,
+    lease_start_date: storedVcfStartDate(current.start_date),
+    lease_end_date: storedVcfEndDate(current.end_date),
+    lease_expiry: storedVcfEndDate(current.end_date),
     dot_code: current.dot_code,
     dot_specification: current.dot_code,
     comment_event_note: comment,
@@ -676,6 +675,24 @@ export function carNumberHistoryNaturalKey(input: {
   ].join("|");
 }
 
+/** Start 1901-01-01 is stored null. Other starts keep their ISO date. */
+export function storedVcfStartDate(iso: string | null | undefined): string | null {
+  const s = String(iso ?? "").trim().slice(0, 10);
+  if (!s || UNKNOWN_START.has(s)) return null;
+  return s;
+}
+
+/**
+ * Only year ≥ 3000 is stored as null (open). 1901-01-01 is a closed placeholder
+ * and is stored as 1901-01-01.
+ */
+export function storedVcfEndDate(iso: string | null | undefined): string | null {
+  const s = String(iso ?? "").trim().slice(0, 10);
+  if (!s) return null;
+  if (isIndefiniteEndDate(s)) return null;
+  return s;
+}
+
 export type AssignmentHistoryPeriodPayload = {
   railcar_id: number;
   rider_external_id: string | null;
@@ -685,6 +702,8 @@ export type AssignmentHistoryPeriodPayload = {
   active: boolean | null;
   comment: string | null;
   assignment_id_ext: string | null;
+  valid_car_id_ext: string | null;
+  last_seen_load_id?: string | null;
   moved_at: string;
   moved_by: string;
   reason: string;
@@ -700,11 +719,12 @@ export function assignmentHistoryPayloadFromPeriod(
     railcar_id: railcarId,
     rider_external_id: p.rider_external_id,
     assignment_label: p.assignment_label,
-    start_date: p.start_date_unknown ? null : p.start_date,
-    end_date: p.end_date_unknown || p.end_date_indefinite ? null : p.end_date,
+    start_date: storedVcfStartDate(p.start_date),
+    end_date: storedVcfEndDate(p.end_date),
     active: p.activeParse.ok ? p.activeParse.active : null,
     comment: p.comment,
     assignment_id_ext: p.assignment_id,
+    valid_car_id_ext: p.legacy_valid_car_id,
     moved_at: movedAtIso,
     moved_by: "vcf-import",
     reason: "V_VALID_CARS assignment period",

@@ -1,10 +1,11 @@
 # Owner UI — Wreck dual-track (Rule 107 / Resp 3)
 
-**Status:** **Spec only.** No wreck UI, load-validation changes, or APIs in this tip.  
+**Status:** **Spec approved.** Build lands on tip after this fold (see HANDOFF / wreck build bundle).  
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) (§C Bad Orders · §D Estimate Review · §G Railinc validation)  
-**Tip base:** `0c0be23f9187a4ccf97f1ef172a5dfe03bd07542` (§D Estimate Review r5)  
+**Tip base:** `85856b6b224a15464d2e1c1cb032c1d7b01a431c` (wreck-spec §11 FF from `c8a7138`)  
 **Authoritative corrections:** Bruce (2026-10-14) — **WIN** over any conflicting prior notes, including the design proposal `WRECK_DUAL_TRACK.md`.  
 **§11 answers:** Bruce (2026-10-15) — folded below; six corrections still **WIN**.  
+**§11 final OPEN (#1 / #4 / #10):** Bruce (2026-10-15) — **DECIDED** below. Spec **approved**.  
 **Folded source:** `WRECK_DUAL_TRACK.md` (draft 2026-10-14; AAR Office Manual 2026 Rev 2026-03-18 “OM”; AAR Field Manual 2026 Rev 2026-01-27 “FM”). Non-conflicting detail folded below; conflicts resolved per Bruce.
 
 **Delivery rules (unchanged):** integer cents; local Postgres only; no hard deletes; draft PR only; no merge/deploy; no Supabase; no paid services; **bundles only** → Bruce pulls at `C:\Users\BruceHarbridge\rlms-push`. Never push `RESIDCO/RLMS` via GitHub MCP.
@@ -13,7 +14,7 @@
 
 ## Intent
 
-One **wreck event** is the owner’s control surface for a Rule 107 / Defect Card–JIC incident: it links the Bad Order, hand-entered DDCT info, **two** estimate tracks (owner/contract + Resp 3), shared photos/docs, owner-only depreciated-value / settlement controls, and the **JIC deadline tracker**. **JIC first:** the contract shop prepares the JIC and sends it to the car owner; the owner submits it to the damaging road for endorsement; **only after endorsement** does the shop submit the detailed owner + Resp 3 estimate data files (two separate 500-byte files; no mixed-file split). Build is blocked until §D r5 is signed off; this document is the approval gate for that build.
+One **wreck event** is the owner’s control surface for a Rule 107 / Defect Card–JIC incident: it links the Bad Order, hand-entered DDCT info, **two** estimate tracks (owner/contract + Resp 3), shared photos/docs, owner-only depreciated-value / settlement controls, and the **JIC deadline tracker**. **JIC first:** the contract shop prepares the JIC and sends it to the car owner; the owner submits it to the damaging road for endorsement; **only after endorsement** does the shop submit the detailed owner + Resp 3 estimate data files (two separate 500-byte files; no mixed-file split). Spec is **approved**; implement per this document.
 
 ---
 
@@ -120,7 +121,7 @@ Load is **rejected entirely** (no estimate created / no Queued row) when any of 
 | Billing / Invoicing Party | 2–5 | Critical mark (Railinc §5) |
 | Billed Party | 6–9 | Critical mark (Railinc §5) |
 | Account Date YYMM | 10–13 | Billing period key |
-| Invoice Number | 14–29 | Invoice identity — **OPEN (§11 #10):** reject vs flag when blank on Resp 3 wreck (Q18 detail-only extracts may interact) |
+| Invoice Number | 14–29 | Invoice identity — **NOT required on estimate / approval loads** (blank OK). **HARD REJECT** only on the shop’s **final invoice** load when blank (Bruce §11 #10 DECIDED). Q18 blank-invoice path remains for non-wreck / non-final-invoice cases. |
 | Price Master Currency | 30 | Pricing key (LOCK set on §D) |
 | Detail Source | 31–32 | Same as H2 |
 | Car Initial + Car Number | 48–57 | + **VCF** hard fail if unknown (existing load / invoice audit) |
@@ -195,7 +196,7 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 | Source file | **AAR Office Manual** or **Railinc** Price Master / labor tables each quarter (Bruce §11 #11). Import via Reference Data. **Q4 2026 not available yet** — keep the **current edition in use** until the next quarter file is imported. |
 | Estimate stamp | Each Resp 3 estimate (revision) **records the quarter** it was priced against; H1 validates against that quarter’s table. |
 | Owner track | May warn if off-quarter or over contract/AAR; does **not** hard-reject for off-quarter pricing. |
-| Unpriced items | Hours × rate check for unpriced wreck-track jobs — **OPEN (§11 #4)** which AAR table/quarter vs shop contract rate. |
+| Unpriced items | Hours × rate check for unpriced wreck-track jobs uses the **AAR quarterly labor rate from the Reference Data price master (current edition)** (Bruce §11 #4 DECIDED). Not the shop contract rate. |
 | Owner rebill pricing | When the **owner** rebills the damaging road (CRB), OM 111 matrix pricing applies in full (see §8). Shop never bills the RR. |
 
 **Acceptance**
@@ -211,7 +212,7 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 | Rule | Spec |
 |---|---|
 | Visibility | **Owner / system manager / reviewer** only. **Never** on shop event link or lessee token page (API 403 + UI hidden). |
-| Inputs | Owner enters or overrides **by hand for now** (Bruce §11 #1 — still OPEN for Umler/RLMS source later): **original cost** (**optional** — missing for some cars), **build / rebuilt / ILS date**, **additions / betterments** (DDCT A&B type codes per Exhibit V), car type class (Exhibit II), lightweight / non-metallic / Al / SS weights for salvage. |
+| Inputs | **Original cost** and **A&B** are **Umler fields**. Owner enters or overrides **by hand for now**; optional future RLMS read of Umler (expect incomplete) — validation is **inconsistent-tolerant** (Bruce §11 #1 DECIDED). Cost may be blank. Also: **build / rebuilt / ILS date**, car type class (Exhibit II), lightweight / non-metallic / Al / SS weights for salvage. |
 | Engine | Existing pure calculator lives in `shared/rule107.ts` (AAR Office Manual Rule 107.E / settlement exhibits). **Do not wire** a live DV module into wreck UI in this build. |
 | Provider | Add a **`RlmsRule107Calculator` provider interface** (read-only link / later swap) — stub or no-op adapter only; **do not wire** to production DV service now. |
 | Worksheet | Owner-side worksheet should mirror OM p.72–74 (reproduction → DV → salvage → basis → cap). Store which Exhibit edition was used. Override with reason + audit. |
@@ -396,26 +397,24 @@ Resolved by Bruce (2026-10-14 six corrections + 2026-10-15 §11 answers) or this
 | R14 (§11 #11) | Price Master source | **AAR Office Manual** or **Railinc** each quarter via Reference Data importer. Q4 2026 not out yet — keep current edition in use. |
 | R15 (§11 #12) | Who clears flags | **Car owner** or **managing partner** only (audited). Shops fix data but cannot clear flags. |
 | R16 (§11 #13) | JIC day counting | **Calendar days**. |
+| R17 (§11 #1) | Original cost / A&B source | **Umler fields.** Manual owner entry for now; optional future RLMS Umler read (expect incomplete) → **inconsistent-tolerant**. Cost may be blank. |
+| R18 (§11 #4) | Unpriced wreck labor rate | **AAR quarterly labor rate** from Reference Data **price master (current edition)**. |
+| R19 (§11 #10) | Resp 3 invoice number | **Not required** on approval / estimate loads. **HARD REJECT** on shop’s **final invoice** load only if missing. |
 
-Still **OPEN** for Bruce:
+All prior `OPEN:` items in §11 are **DECIDED**. Spec **approved**.
 
-1. Where do original cost, rebuilt/ILS date, A&B items, and lightweight live: RLMS, Umler export, or manual entry? **For now: manual entry** (cost may be blank). Source-of-truth integration later.
-4. Labor rate for **unpriced** items on the wreck track: which AAR table/quarter vs shop contract rate for the hours×rate check?
-10. Missing Resp 3 **invoice number** — HARD REJECT vs ACCEPT+FLAG (Q18 blank-invoice interaction).
-
-**Known gaps (data):** Exhibits IV, V, and Settlement Value Worksheet not yet extracted to CSV (complex layout). Railinc CRB Procedures Manual edit charts / error codes not in the OM/FM PDFs — pull separately for rebill validator. Contract-shop labor rates are contractual, not AAR-mandated.
+**Known gaps (data):** Exhibits IV, V, and Settlement Value Worksheet not yet extracted to CSV (complex layout). Railinc CRB Procedures Manual edit charts / error codes not in the OM/FM PDFs — pull separately for rebill validator. Contract-shop labor rates are contractual, not AAR-mandated (wreck unpriced check uses AAR quarterly labor rate, not contract rate).
 
 ---
 
-## 12. Out of scope (this spec / next build)
+## 12. Out of scope (this build)
 
-- Implementing any wreck UI or new load APIs in the tip that carries **only** this document.
 - Live DDCT system integration (hand entry only).
-- Wiring `RlmsRule107Calculator` to a hosted DV service.
+- Wiring `RlmsRule107Calculator` to a hosted DV service (interface + stub only).
 - Auto-splitting mixed Resp 3 uploads.
 - Inventing full AAR shopping-reason lists or unpublished CRBDX codes.
-- Changing §D r5 Reference Data tabs beyond adding quarterly price/labor + Rule 107 ref imports when the wreck **build** lands.
-- Screen E document polish / Screen F Lessee (still parked after §D sign-off unless Bruce reorders).
+- Full outbound CRB/CRIP rebill exporter polish beyond Phase 1 stub/notes (follow existing CRIP patterns).
+- Screen E document polish / Screen F Lessee (still parked).
 
 ---
 
@@ -423,8 +422,8 @@ Still **OPEN** for Bruce:
 
 | Step | Content | Status |
 |---|---|---|
-| **Spec** | This document + docs-only bundle | **Awaiting Bruce review** |
-| **Build** | Wreck event UI + Resp 3 hard validation + quarterly import + owner DV shell + JIC tracker | **Blocked until §D r5 sign-off** and Bruce accepts this spec (incl. remaining `OPEN:` items he cares about) |
+| **Spec** | This document (six corrections + all §11 answers incl. #1/#4/#10) | **Approved** |
+| **Build** | Wreck event UI + Resp 3 hard validation + quarterly import + owner DV shell + JIC tracker + smokes | **Approved to build** on tip `85856b6` FF chain |
 
 ---
 
@@ -433,7 +432,7 @@ Still **OPEN** for Bruce:
 | Source | Use |
 |---|---|
 | Bruce corrections (2026-10-14) | **WIN** — event model, two files (no split), hard vs flag (CID → flag), quarterly rates, owner-only DV (unwired provider; optional cost), JIC clocks from shop arrival |
-| Bruce §11 answers (2026-10-15) | JIC shop→owner→RR + files after endorse; owner CRB rebill (shop never bills RR); over-DV warn/flag owner decides; no Resp 3 taxes; 1–7% FE out of scope; Resp 3 purity hard reject; no Send Lessee on wreck; Price Master AAR/Railinc quarterly; flag clear owner/MP only; calendar days |
+| Bruce §11 answers (2026-10-15) | JIC shop→owner→RR + files after endorse; owner CRB rebill (shop never bills RR); over-DV warn/flag owner decides; no Resp 3 taxes; 1–7% FE out of scope; Resp 3 purity hard reject; no Send Lessee on wreck; Price Master AAR/Railinc quarterly; flag clear owner/MP only; calendar days; #1 Umler/manual inconsistent-tolerant; #4 AAR quarterly labor rate; #10 invoice # not required on estimate loads / HARD REJECT on final invoice only |
 | `WRECK_DUAL_TRACK.md` | Folded OM/FM citations, data model, JIC 4–10 photos, settlement exhibits/ref tables, rebill CRIP outline, timeline/billing limits, detail sources, screen list; conflicts overridden by Bruce |
 | Manual_Gap_Review.md | RS #1 errors/warnings; #3 Resp 3 separate; #4 yard arrival |
 | Railinc_Data_File_Reference.md / App. G | Detail Source R; critical marks; Format 1 R field list; Price Master note; DDCT col 341; CID col 327 |
@@ -446,4 +445,5 @@ Still **OPEN** for Bruce:
 
 ## Bundle
 
-`docs/bundles/rlms-phase1-owner-ui-wreck-spec.bundle` — requires **`0c0be23`** (also fast-forwards from prior wreck tip **`c8a7138`**). Docs only. Tip / SHA-256 in companion README.
+- Spec tip: `docs/bundles/rlms-phase1-owner-ui-wreck-spec.bundle` — requires **`c8a7138`** → lands **`85856b6`**.
+- Build tip: `docs/bundles/rlms-phase1-owner-ui-wreck.bundle` — requires **`85856b6`** → lands tip in companion README.

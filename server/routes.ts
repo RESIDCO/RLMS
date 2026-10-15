@@ -139,6 +139,8 @@ import {
   carNumberHistoryNaturalKey,
   carNumberHistoryPayloadFromPeriod,
 } from "@shared/vcf-import";
+import { parseVcfUpload } from "./vcf-workbook";
+import { getVcfPreview, putVcfPreview } from "./vcf-preview-cache";
 import {
   closeoutClosePatch,
   closeoutStats,
@@ -2939,13 +2941,19 @@ export async function registerRoutes(
 
   // ---------- Valid Car File (V_VALID_CARS) — assignment-grouped preview (§2 / §2.3) ----------
   // Dry-run review only unless a separate commit endpoint is used after Bruce sign-off.
-  app.post("/api/import/vcf/preview", async (req: Request, res: Response) => {
+  app.post("/api/import/vcf/preview", upload.single("file"), async (req: Request, res: Response) => {
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const { rows } = req.body as { rows: any[] };
+      let rows: Record<string, string>[] | undefined;
+      const file = (req as any).file as Express.Multer.File | undefined;
+      if (file?.buffer) {
+        rows = parseVcfUpload(file.buffer, file.originalname || "upload.xlsx");
+      } else {
+        rows = (req.body as { rows?: Record<string, string>[] }).rows;
+      }
       if (!Array.isArray(rows) || rows.length === 0) {
-        return res.status(400).json({ message: "No rows provided" });
+        return res.status(400).json({ message: "No rows provided — drop the Valid Car File Excel/CSV (do not POST parsed JSON)." });
       }
 
       const existingKeys = new Set<string>();
@@ -2962,10 +2970,12 @@ export async function registerRoutes(
       }
 
       const review = buildVcfReview(rows, existingKeys);
+      const previewId = putVcfPreview(writerId, rows);
       // Omit full cars[] from response (can be 30k+) — keep summary + flags for UI.
       res.json({
         ok: true,
         mode: "vcf",
+        previewId,
         existingCarsInDb: existingKeys.size,
         totalRows: review.totalRows,
         distinctCars: review.distinctCars,
@@ -3000,8 +3010,9 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const { rows, confirmProductionImport } = req.body as {
-        rows: any[];
+      const { rows: bodyRows, previewId, confirmProductionImport } = req.body as {
+        rows?: any[];
+        previewId?: string;
         confirmProductionImport?: boolean;
       };
       if (!confirmProductionImport) {
@@ -3009,8 +3020,18 @@ export async function registerRoutes(
           message: "VCF commit blocked — set confirmProductionImport: true only after Bruce signs off on the §2.3 review.",
         });
       }
+      let rows: any[] | undefined = bodyRows;
+      if ((!Array.isArray(rows) || rows.length === 0) && previewId) {
+        const cached = getVcfPreview(String(previewId), writerId);
+        if (!cached) {
+          return res.status(400).json({
+            message: "Preview expired or not found. Drop the Valid Car File again, then commit with that previewId.",
+          });
+        }
+        rows = cached;
+      }
       if (!Array.isArray(rows) || rows.length === 0) {
-        return res.status(400).json({ message: "No rows provided" });
+        return res.status(400).json({ message: "No rows provided — send previewId from the review step, not the parsed workbook as JSON." });
       }
 
       const existingKeys = new Set<string>();

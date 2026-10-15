@@ -17,7 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiUpload } from "@/lib/queryClient";
+import { looksLikeVcf } from "@shared/vcf-import";
 import AcquisitionImportSection from "./AcquisitionImportSection";
 import MarkContactsImportSection from "./MarkContactsImportSection";
 import {
@@ -97,6 +98,7 @@ interface CommitResult {
 interface VcfReviewResult {
   ok: boolean;
   mode: "vcf";
+  previewId?: string;
   existingCarsInDb: number;
   totalRows: number;
   distinctCars: number;
@@ -114,13 +116,6 @@ interface VcfReviewResult {
   badActiveValues: Array<{ raw: string; count: number; sampleRows: number[] }>;
   unmappedManagedCategoryCount: number;
   unmappedManagedCategories: Array<{ raw: string; count: number }>;
-}
-
-function looksLikeVcf(rows: Record<string, string>[]): boolean {
-  if (!rows.length) return false;
-  const keys = Object.keys(rows[0]).map((k) => k.toLowerCase().replace(/[^a-z0-9]+/g, ""));
-  const has = (s: string) => keys.includes(s);
-  return has("carinitial") && has("carnumber") && has("active") && (has("assignmentid") || has("assignment"));
 }
 
 // ── CSV parser (client-side, no library needed for simple cases) ───────────────
@@ -441,8 +436,10 @@ export default function BulkImportPage() {
         const rows = parseCSV(text);
         if (rows.length === 0) throw new Error("No data rows found in file.");
         if (looksLikeVcf(rows)) {
-          setVcfRawRows(rows);
-          const res = await apiRequest("POST", "/api/import/vcf/preview", { rows });
+          setVcfRawRows([]);
+          const form = new FormData();
+          form.append("file", file);
+          const res = await apiUpload("/api/import/vcf/preview", form, { timeoutMs: 120_000 });
           setVcfReview(await res.json());
         } else {
           const res = await apiRequest("POST", "/api/import/preview", { rows });
@@ -455,8 +452,10 @@ export default function BulkImportPage() {
         if (parsed.kind === "financial") {
           throw new Error("This looks like an Asset Report. Drop it in Financial Data Refresh below.");
         } else if (parsed.kind === "vcf") {
-          setVcfRawRows(parsed.rows);
-          const res = await apiRequest("POST", "/api/import/vcf/preview", { rows: parsed.rows });
+          setVcfRawRows([]);
+          const form = new FormData();
+          form.append("file", file);
+          const res = await apiUpload("/api/import/vcf/preview", form, { timeoutMs: 120_000 });
           setVcfReview(await res.json());
           toast({ title: "Valid Car File review ready" });
         } else {
@@ -468,7 +467,12 @@ export default function BulkImportPage() {
         }
       }
     } catch (e: any) {
-      toast({ title: "Parse error", description: e.message, variant: "destructive" });
+      const tooLarge = /413|too large|entity too large/i.test(String(e.message ?? ""));
+      toast({
+        title: tooLarge ? "File too large to send" : "Parse error",
+        description: e.message,
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -776,7 +780,7 @@ export default function BulkImportPage() {
                 <div className="text-sm font-semibold text-foreground">Valid Car File — §2.3 review (dry-run)</div>
                 <div className="text-xs text-muted-foreground mt-1">
                   No production write yet. Bruce must sign off on these counts before commit.
-                  {vcfRawRows.length > 0 ? ` · ${vcfRawRows.length.toLocaleString()} sheet rows uploaded` : null}
+                  {vcfReview.totalRows ? ` · ${vcfReview.totalRows.toLocaleString()} sheet rows on the server` : null}
                 </div>
               </div>
               <div className="flex items-center gap-3 flex-wrap">

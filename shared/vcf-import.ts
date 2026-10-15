@@ -13,6 +13,14 @@ import { normalizeStoredCarNumber } from "./residco-import";
 
 export type VcfRawRow = Record<string, unknown>;
 
+/** Header fingerprint for V_VALID_CARS vs Master Car List. */
+export function looksLikeVcf(rows: Array<Record<string, unknown>>): boolean {
+  if (!rows.length) return false;
+  const keys = Object.keys(rows[0]).map((k) => k.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+  const has = (s: string) => keys.includes(s);
+  return has("carinitial") && has("carnumber") && has("active") && (has("assignmentid") || has("assignment"));
+}
+
 export type ParsedActive =
   | { ok: true; active: boolean; raw: string }
   | { ok: false; active: null; raw: string; error: string };

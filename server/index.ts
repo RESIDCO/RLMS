@@ -37,12 +37,15 @@ function attachRawBody(req: IncomingMessage, _res: unknown, buf: Buffer) {
   req.rawBody = buf;
 }
 
-// Bulk Import posts parsed workbooks as JSON (financial sheet matrices, VCF rows,
-// acquisitions, master car list). Express's default 100kb ceiling 413s a real Asset Report.
+// Bulk Import posts parsed workbooks as JSON (financial sheet matrices,
+// acquisitions, master car list). Default Express 100kb 413s those.
+// VCF should be multipart (the xlsx/csv file); 60mb is the JSON safety net
+// if a client still posts rows. Render's Node web service does not document
+// a smaller request-body cap than this.
 app.use(
   "/api/import",
   express.json({
-    limit: "20mb",
+    limit: "60mb",
     verify: attachRawBody,
   }),
 );
@@ -95,8 +98,12 @@ app.use((req, res, next) => {
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const multerTooBig = err?.code === "LIMIT_FILE_SIZE";
+    const status = multerTooBig ? 413 : err.status || err.statusCode || 500;
+    const tooLarge = status === 413 || err?.type === "entity.too.large" || multerTooBig;
+    const message = tooLarge
+      ? "This upload is too large. Drop the Excel/CSV file so the server can parse it (Valid Car File: 50 MB file, 60 MB JSON). HTTP 413."
+      : err.message || "Internal Server Error";
 
     console.error("Internal Server Error:", err);
 

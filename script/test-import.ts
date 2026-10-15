@@ -45,6 +45,7 @@ import {
   type SummaryRowForRefresh,
   type FinancialParsedRow,
 } from "../shared/financial-import";
+import { looksLikeVcf } from "../shared/vcf-import";
 import {
   buildGapWarning,
   buildLoadChangeReport,
@@ -671,6 +672,16 @@ eq(pickBaseMonth(["2026-08-01"], "2026-10-01"), "2026-08-01", "gap month uses la
   );
 }
 eq(stripFormerDeal("xOL2312"), "OL2312", "Former Deal strips leading x");
+eq(
+  looksLikeVcf([{ CAR_INITIAL: "ABCX", CAR_NUMBER: "123456", ACTIVE: "Y", ASSIGNMENT_ID: "1" }]),
+  true,
+  "VCF header fingerprint"
+);
+eq(
+  looksLikeVcf([{ "Car Number": "123456", "Rider ID": "OL1" }]),
+  false,
+  "Master Car List is not a VCF"
+);
 
 {
   const k = (o: Record<string, unknown>) =>

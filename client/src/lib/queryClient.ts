@@ -23,7 +23,53 @@ function parseErrorBody(status: number, text: string): string {
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    if (res.status === 413) {
+      throw new Error(
+        parseErrorBody(res.status, text) ||
+          "This file is too large to send as JSON (HTTP 413). Drop the Excel/CSV so the server can parse it."
+      );
+    }
     throw new Error(parseErrorBody(res.status, text));
+  }
+}
+
+/** POST multipart (do not set Content-Type — the browser sets the boundary). */
+export async function apiUpload(
+  url: string,
+  form: FormData,
+  init?: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<Response> {
+  const headers: Record<string, string> = {};
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
+
+  const timeoutMs = init?.timeoutMs;
+  const outer = init?.signal;
+  const ctrl = timeoutMs || outer ? new AbortController() : null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (ctrl && timeoutMs && timeoutMs > 0) {
+    timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  }
+  const onOuterAbort = () => ctrl?.abort();
+  outer?.addEventListener("abort", onOuterAbort);
+
+  try {
+    const res = await fetch(`${API_BASE}${url}`, {
+      method: "POST",
+      headers,
+      body: form,
+      signal: ctrl?.signal,
+    });
+    await throwIfResNotOk(res);
+    return res;
+  } catch (err) {
+    if (ctrl?.signal.aborted && !outer?.aborted) {
+      throw new Error("Request timed out");
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+    outer?.removeEventListener("abort", onOuterAbort);
   }
 }
 

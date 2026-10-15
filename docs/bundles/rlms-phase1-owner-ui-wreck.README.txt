@@ -1,0 +1,75 @@
+RLMS repair — Owner UI wreck dual-track BUILD (approved)
+====================================================================
+Requires tip: 85856b6b224a15464d2e1c1cb032c1d7b01a431c
+(wreck-spec §11 FF from c8a7138)
+
+Bundle tip (after apply): e836ae031d7abe8871da329a5c66f4f9ce65eb4b
+Bundle size: ~37K
+
+What this delivers
+----------------------------------------------------------------
+  Spec fold (§11 #1/#4/#10 DECIDED) + full wreck dual-track build.
+
+  1) docs/repair/OWNER_UI_WRECK.md — approved; #1 Umler/manual
+     inconsistent-tolerant; #4 AAR quarterly labor rate from price
+     master; #10 invoice # not required on estimate loads, HARD REJECT
+     on final invoice only.
+
+  2) repair.wreck_events + settlement_calcs + wreck_flags +
+     ref_aar_labor_rates + ref_detail_sources (migration
+     20261015_repair_owner_ui_wreck.sql).
+
+  3) Dual-track load: OWNER_CONTRACT vs R107_RESP3; mixed / non-pure
+     Resp 3 HARD REJECT (no auto-split). Resp 3 H1–H3 + tax reject;
+     CID ACCEPT+FLAG; completed date + invoice blocked until owner/MP
+     clears flags.
+
+  4) JIC deadline tracker (calendar days from shop arrival);
+     estimate upload gated until endorsement (shop→owner→RR).
+
+  5) Owner-only DV / settlement gauge + 5399 note; RlmsRule107Calculator
+     interface unwired (stub). Send Lessee excluded for wreck.
+
+  6) UI: /#/repair/wreck/:eventId + APIs under /api/repair/wreck-events*
+
+Smoke: npm run repair:smoke-wreck PASS (local Postgres;
+  REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1).
+
+Files (highlights)
+----------------------------------------------------------------
+  modules/repair/migrations/20261015_repair_owner_ui_wreck.sql
+  modules/repair/services/wreck-{events,validate,jic,settlement}.ts
+  modules/repair/providers/rule107-calculator.ts
+  modules/repair/services/{estimate-load,completion,send-lessee,
+    inbound-invoice-audit}.ts
+  modules/repair/routes.ts
+  modules/repair/dev/smoke-wreck.ts
+  client/src/pages/repair/WreckEvent.tsx
+  docs/repair/{OWNER_UI_WRECK,HANDOFF}.md
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect 85856b6…
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-wreck.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-wreck.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:smoke-wreck
+  npm run repair:dev:local
+  # http://127.0.0.1:5000/#/repair/wreck/<wreckEventId>
+
+Verified (agent local Postgres)
+-------------------------------
+  repair:smoke-wreck PASS
+  git bundle verify + pull onto 85856b6 → lands e836ae031d7abe8871da329a5c66f4f9ce65eb4b
+  git merge-base --is-ancestor 85856b6 <tip> ✓
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.
+Integer cents. Local Postgres. Append-only / VOIDED. Repair schema only.

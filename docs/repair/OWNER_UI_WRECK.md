@@ -4,6 +4,7 @@
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) (§C Bad Orders · §D Estimate Review · §G Railinc validation)  
 **Tip base:** `0c0be23f9187a4ccf97f1ef172a5dfe03bd07542` (§D Estimate Review r5)  
 **Authoritative corrections:** Bruce (2026-10-14) — **WIN** over any conflicting prior notes, including the design proposal `WRECK_DUAL_TRACK.md`.  
+**§11 answers:** Bruce (2026-10-15) — folded below; six corrections still **WIN**.  
 **Folded source:** `WRECK_DUAL_TRACK.md` (draft 2026-10-14; AAR Office Manual 2026 Rev 2026-03-18 “OM”; AAR Field Manual 2026 Rev 2026-01-27 “FM”). Non-conflicting detail folded below; conflicts resolved per Bruce.
 
 **Delivery rules (unchanged):** integer cents; local Postgres only; no hard deletes; draft PR only; no merge/deploy; no Supabase; no paid services; **bundles only** → Bruce pulls at `C:\Users\BruceHarbridge\rlms-push`. Never push `RESIDCO/RLMS` via GitHub MCP.
@@ -12,7 +13,7 @@
 
 ## Intent
 
-One **wreck event** is the owner’s control surface for a Rule 107 / Defect Card–JIC incident: it links the Bad Order, hand-entered DDCT info, **two** estimate tracks (owner/contract + Resp 3), shared photos/docs, owner-only depreciated-value / settlement controls, and the **JIC deadline tracker**. Shops upload **two separate 500-byte files** (no mixed-file split). Build is blocked until §D r5 is signed off; this document is the approval gate for that build.
+One **wreck event** is the owner’s control surface for a Rule 107 / Defect Card–JIC incident: it links the Bad Order, hand-entered DDCT info, **two** estimate tracks (owner/contract + Resp 3), shared photos/docs, owner-only depreciated-value / settlement controls, and the **JIC deadline tracker**. **JIC first:** the contract shop prepares the JIC and sends it to the car owner; the owner submits it to the damaging road for endorsement; **only after endorsement** does the shop submit the detailed owner + Resp 3 estimate data files (two separate 500-byte files; no mixed-file split). Build is blocked until §D r5 is signed off; this document is the approval gate for that build.
 
 ---
 
@@ -42,7 +43,7 @@ Page numbers are printed-manual pages (FM “— nnn —” footers). Licensed A
 | Time limits | OM 112.E (p.83) | BR/GB/DC/DM: **3 months** from repair. JI: **6 months** from repair. JD/RE/JR/DR/CB/OT: 6 months from each source’s defined date. DE: 3 months from settlement accepted in DDCT. Absolute: **24 months** from original repair. D/C repairs within **48 months** of D/C issue or DDCT incident; JIC repairs within **48 months** of endorsement. Taxes follow parent detail source. |
 | Owner extensive repairs | OM/FM 108 (OM p.76; FM p.731) | Owner-responsibility extensive repairs under Rule 108; dismantle JC 5299 / DM. |
 
-**Contract shops vs AAR rates:** Manuals govern interchange billing between subscribers, not what a contract shop may charge its customer. RESIDCO practice: contract shops use the AAR framework but AAR labor rates are **not** mandatory on the owner track — hence owner-portion pricing checks are **warnings only**. Once Resp 3 is rebilled to a railroad, OM 111 pricing applies in full.
+**Contract shops vs AAR rates:** Manuals govern interchange billing between subscribers, not what a contract shop may charge its customer. RESIDCO practice: contract shops use the AAR framework but AAR labor rates are **not** mandatory on the owner track — hence owner-portion pricing checks are **warnings only**. The shop bills the **car owner** for Resp 3; when the **owner** rebills the damaging road via CRB, OM 111 pricing applies in full.
 
 ---
 
@@ -83,8 +84,9 @@ Page numbers are printed-manual pages (FM “— nnn —” footers). Licensed A
 |---|---|---|
 | Count | Shops **must** send **two** separate 500-byte files per wreck event: (1) owner / non–Resp 3 file, (2) Resp 3–only file. | Bruce; Manual_Gap_Review #3 (RS p.7, 9); `estimate-load.ts` `RESP3_MIXED` |
 | Mixed file | **HARD REJECT** a single file that mixes Resp 3 lines with any other responsibility. **Do not** auto-split a mixed file into two tracks. | Bruce (**wins** over proposal that allowed system split + audit) |
-| Pure Resp 3 | File where **every** Format 1 line has Responsibility Code `3` → loads onto `R107_RESP3` track. | Bruce; CRB App. G col 138; public CRB responsibility list includes **3 Defect Card/JIC** |
+| Pure Resp 3 | A wreck Resp 3 estimate / file may contain **ONLY** Responsibility Code `3` lines. **Any other responsibility code = HARD REJECT** (same as mixed-file rule). Clean all-3 file → loads onto `R107_RESP3` track. | Bruce §11 #8; CRB App. G col 138; public CRB responsibility list includes **3 Defect Card/JIC** |
 | Owner file | File with **no** Resp 3 lines → loads onto `OWNER_CONTRACT` track (resp 1 + RESIDCO internal 4–9 splits as today). | Bruce |
+| Sequence | Shop uploads the two detailed estimate files **only after** JIC endorsement (see §6). | Bruce §11 #2 |
 | Line moves | Lines may move between tracks only with reason + audit (after both files are loaded as separate estimates). | Folded from proposal; does not relax two-file rule |
 | Multi-car | Unchanged from §G / load slice: multi-car may WARN and split; Resp 3 separation still applies **per file**. | Manual_Gap_Review #3 |
 
@@ -118,7 +120,7 @@ Load is **rejected entirely** (no estimate created / no Queued row) when any of 
 | Billing / Invoicing Party | 2–5 | Critical mark (Railinc §5) |
 | Billed Party | 6–9 | Critical mark (Railinc §5) |
 | Account Date YYMM | 10–13 | Billing period key |
-| Invoice Number | 14–29 | Invoice identity — **OPEN:** detail-only extracts may interact with Q18 blank-invoice policy; for **Resp 3 wreck** Bruce’s hard-reject intent wins unless Bruce clarifies Q18 exception |
+| Invoice Number | 14–29 | Invoice identity — **OPEN (§11 #10):** reject vs flag when blank on Resp 3 wreck (Q18 detail-only extracts may interact) |
 | Price Master Currency | 30 | Pricing key (LOCK set on §D) |
 | Detail Source | 31–32 | Same as H2 |
 | Car Initial + Car Number | 48–57 | + **VCF** hard fail if unknown (existing load / invoice audit) |
@@ -158,16 +160,17 @@ Folded checks that are **flag** (not hard reject) on Resp 3 unless they also fai
 | DDCT incident ID on Format 1 (col 341) | Flag if blank on lines (event still requires hand-entered ID) | CRB col 341 |
 | Group billing on Resp 3 | Flag (112.A.3.b forbids group bill of non-owner responsibility) | OM 112.A.3.b |
 | Invoice time-limit approaching | Flag / escalate; do not invent hard reject beyond existing billing limits UI | OM 112.E; §6 |
-| Settlement total &gt; cap without 5399 | Owner-side prompt (see §5); not a shop-file hard reject | OM 102.D.7; 107.I.3 |
+| Settlement total &gt; cap / at or over DV | Owner-only warnings/flags (see §5); **no** shop-file hard reject; owner decides settle vs repair | Bruce §11 #5; OM 102.D.7; 107.I.3 |
+| Tax lines on Resp 3 (PT/QT/GT/HT/IV) | **No taxes on Resp 3** per AAR rules — **reject or flag** tax lines on the Resp 3 file; owner absorbs that tax outside the Resp 3 bill | Bruce §11 #6; OM 112.A.4 |
 
 Until **all** Resp 3 flags on that estimate are cleared:
 
 | Blocked | Allowed |
 |---|---|
 | Applying **completed / outbound** date | Estimate stays in review lifecycle (Queued → … → Approved) |
-| **Invoicing** the estimate / event | Owner review, revision request, document upload, flag clearance |
+| **Invoicing** the estimate / event | Owner review, revision request, document upload |
 
-`OPEN:` Exact flag taxonomy UI (badge copy, bulk clear, who may clear) — default to §D Issues panel + load-findings pattern until Bruce specifies.
+**Flag clearance (Bruce §11 #12):** Flags are cleared by **car owner** or **managing partner** only (audited who/when/reason). Shops may fix underlying data and re-upload / revise, but **cannot** clear flags. Badge copy / bulk-clear UX defaults to §D Issues panel + load-findings pattern.
 
 ### 3c. Owner / contract track
 
@@ -189,10 +192,11 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 |---|---|
 | Storage | Quarterly-versioned reference table(s) (labor rates + job Price Master / price-list rows as imported). |
 | Import path | **Gear → Reference Data** admin importer (same dry-run → confirm pattern as §D r5). CSV upload; edition/**quarter** recorded on confirm. |
-| Source file | Railinc and/or AAR publications — **still being decided**. `OPEN:` which CSV/product is authoritative each quarter. |
+| Source file | **AAR Office Manual** or **Railinc** Price Master / labor tables each quarter (Bruce §11 #11). Import via Reference Data. **Q4 2026 not available yet** — keep the **current edition in use** until the next quarter file is imported. |
 | Estimate stamp | Each Resp 3 estimate (revision) **records the quarter** it was priced against; H1 validates against that quarter’s table. |
 | Owner track | May warn if off-quarter or over contract/AAR; does **not** hard-reject for off-quarter pricing. |
-| Rebill | When Resp 3 is rebilled to a railroad, OM 111 matrix pricing applies in full (see §8). |
+| Unpriced items | Hours × rate check for unpriced wreck-track jobs — **OPEN (§11 #4)** which AAR table/quarter vs shop contract rate. |
+| Owner rebill pricing | When the **owner** rebills the damaging road (CRB), OM 111 matrix pricing applies in full (see §8). Shop never bills the RR. |
 
 **Acceptance**
 
@@ -207,12 +211,12 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 | Rule | Spec |
 |---|---|
 | Visibility | **Owner / system manager / reviewer** only. **Never** on shop event link or lessee token page (API 403 + UI hidden). |
-| Inputs | Owner enters or overrides: **original cost** (**optional** — missing for some cars), **build / rebuilt / ILS date**, **additions / betterments** (DDCT A&B type codes per Exhibit V), car type class (Exhibit II), lightweight / non-metallic / Al / SS weights for salvage. |
+| Inputs | Owner enters or overrides **by hand for now** (Bruce §11 #1 — still OPEN for Umler/RLMS source later): **original cost** (**optional** — missing for some cars), **build / rebuilt / ILS date**, **additions / betterments** (DDCT A&B type codes per Exhibit V), car type class (Exhibit II), lightweight / non-metallic / Al / SS weights for salvage. |
 | Engine | Existing pure calculator lives in `shared/rule107.ts` (AAR Office Manual Rule 107.E / settlement exhibits). **Do not wire** a live DV module into wreck UI in this build. |
 | Provider | Add a **`RlmsRule107Calculator` provider interface** (read-only link / later swap) — stub or no-op adapter only; **do not wire** to production DV service now. |
 | Worksheet | Owner-side worksheet should mirror OM p.72–74 (reproduction → DV → salvage → basis → cap). Store which Exhibit edition was used. Override with reason + audit. |
-| Settlement gauge | **Owner-side** on wreck event: as Resp 3 + authorized additional costs approach settlement value, warn; at/above cap flag “Settle vs repair” (107.C.2/C.3) and require **JC 5399** credit line if repair continues (negative material, detail source DC/JI/JD, no labor — OM 102.D.7 / 107.I.3). |
-| Threshold | `OPEN:` warn threshold (proposal suggested **80%**) — Bruce sets. Cap behavior at **≥100%** is per OM. |
+| Settlement gauge | **Owner-only** on wreck event: Resp 3 at or over DV raises **warnings/flags** (never auto-reject the load). Owner decides **settle vs repair** (107.C.2/C.3). If repair continues at/above settlement cap, require **JC 5399** credit line (negative material, detail source DC/JI/JD, no labor — OM 102.D.7 / 107.I.3). Over-DV and other edge cases are handled **owner-side** (Bruce §11 #3, #5). |
+| Threshold | At/over DV → owner-only warn/flag (Bruce §11 #5). Optional earlier soft-warn % is UX polish, not a hard gate. Cap behavior at **≥100%** is per OM. |
 | Compare to DDCT | Show comparison to DDCT Actual/Estimated DV when owner pastes/enters it; damaging road may challenge under 107.B.2.a.(1). |
 | Shops / lessees | No DV dollars, no settlement matrix, no 5399 prompt. |
 
@@ -235,13 +239,16 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 
 ---
 
-## 6. JIC deadline tracker (wreck event page)
+## 6. JIC process & deadline tracker (wreck event page)
 
 | Rule | Spec |
 |---|---|
 | Belongs to | **JIC process**, **not** the Resp 3 estimate status machine. |
+| Who prepares / sends | **Contract shop** prepares the JIC and sends it to the **car owner**; the **owner** submits it to the damaging road for endorsement (Bruce §11 #2). |
+| Estimate files | Shop submits the detailed owner + Resp 3 data files **only after** JIC endorsement. |
 | Clock start | **Shop arrival date** (yard arrival / on-hand) — same arrival already required before shop Submit for Approval (Manual_Gap_Review #4, RS p.9–10). Bruce **wins**: JIC prep/send/endorse clocks start from **shop arrival**, not from DDCT notify (notify/owner-reply/inspection remain informational timeline dates). |
-| Clocks (Bruce + OM 103) | **JIC prep** 30 days (45 Alternate Standard) · **Send / forward** 15 days · **Endorse** 30–60 days with **auto-endorse** (Alternate: auto at 45 days if &lt;$25k; auto at 75 days if ≥$25k per OM 103.B) · **billing limits** per OM 112.E (see below). |
+| Day counting | **Calendar days** (Bruce §11 #13). |
+| Clocks (Bruce + OM 103) | **JIC prep** 30 calendar days (45 Alternate Standard) · **Send / forward** 15 calendar days · **Endorse** 30–60 calendar days with **auto-endorse** (Alternate: auto at 45 days if &lt;$25k; auto at 75 days if ≥$25k per OM 103.B) · **billing limits** per OM 112.E (see below). |
 | Placement | Shown on the **wreck event** page (not buried only on estimate D). |
 | Color | Green → amber at **75%** of allowed time → red when overdue (folded UX from proposal). |
 
@@ -257,15 +264,14 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 | D/C repair window | Within 48 months of D/C issue or DDCT incident |
 | JIC repair window | Within 48 months of endorsement |
 
-**Informational timeline dates** (store on `wreck_event`; not the JIC clock start): notified (≤7d), owner reply (≤7d), inspection (≤15d), facility/shop arrival (**clock zero**), JIC prepared, forwarded, endorsed / auto-endorsed, repair complete, billed.
-
-`OPEN:` Business vs calendar days (manuals say “days” without business-day language — treat as calendar unless Bruce says otherwise). Default Standard vs Alternate JIC process. Who prepares/sends the JIC (RESIDCO vs shop).
+**Informational timeline dates** (store on `wreck_event`; not the JIC clock start): notified (≤7d), owner reply (≤7d), inspection (≤15d), facility/shop arrival (**clock zero**), JIC prepared (by shop), sent to owner, owner forwarded to RR, endorsed / auto-endorsed, estimate files received, repair complete, billed.
 
 **Acceptance**
 
-- [ ] Tracker hidden/zeroed until arrival date exists; starts when arrival is set.
+- [ ] Tracker hidden/zeroed until arrival date exists; starts when arrival is set; due dates use **calendar** days.
 - [ ] Wreck event page shows prep / send / endorse / billing-limit rows with due dates + state (open / due / past / auto-endorsed).
 - [ ] Changing arrival date recalculates clocks with audit.
+- [ ] UI/copy reflects shop→owner→RR JIC path; estimate upload gated until endorsement recorded.
 
 ---
 
@@ -290,7 +296,7 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 | bad_order_id | Link to existing BO (DDCT Event ID may already exist on BO) |
 | owner_estimate_id / wreck_estimate_id | The two track estimates |
 | defect_card | party, date, PDF |
-| jic | type standard\|alternate; prepared/forwarded/endorsed; endorsing road; PDF; decline reason |
+| jic | type standard\|alternate; prepared by shop; sent to owner; owner forwarded to RR; endorsed; endorsing road; PDF; decline reason |
 | settlement_calc_id | Owner-only worksheet |
 
 ### Estimates / tracks
@@ -313,21 +319,28 @@ Owner-track loads get **warnings only** (no Resp 3 hard-reject set). Mixed-file 
 
 ---
 
-## 8. Rebill to handling / damaging line (CRB outline)
+## 8. Rebill to damaging road (owner CRB) — shop never bills the RR
 
-After the shop’s wreck invoice is approved (flags cleared; completed date allowed):
+**Billing parties (Bruce §11 #3, #9):**
 
-1. Generate outbound **500-byte CRIP**:
-   - Billing party = RESIDCO mark; billed party = handling or damaging road (`OPEN:` always railroad vs sometimes lessee — Bruce).
-   - Detail source **JI** (endorsed JIC), **DC** (DDCT defect card), or **JD**.
+| Who | Bills whom | Notes |
+|---|---|---|
+| **Contract shop** | **Car owner** (for Resp 3 work on the wreck) | Shop invoice to owner only. Shop **never** bills the railroad. |
+| **Owner (RESIDCO)** | **Damaging road** | Owner rebills by changing detail source and creating **rebuttal billing (CRB)**. |
+| **Lessee** | — | **Never** any lessee rebill on wreck estimates. Wreck estimates are **excluded from Send Lessee** entirely (§9). |
+
+After the shop’s invoice to the owner is approved (flags cleared by owner/managing partner; completed date allowed):
+
+1. Owner generates outbound **500-byte CRIP** (rebill / rebuttal):
+   - Billing party = RESIDCO mark; billed party = **damaging road** (not lessee).
+   - Detail source **JI** (endorsed JIC), **DC** (DDCT defect card), **JD**, or rebuttal **DR** / **JR** as appropriate (OM 112.C — change source code for rebill).
    - Each line: resp 3; D/C or JIC party + date (cols 139–148); DDCT incident ID (col 341); component ID; matrix pricing (OM 111).
    - Format 8 subtotal per detail source; Format 6 BP contact; Format 8 ZZ; Format 9.
    - Destroyed unit: bill **DE** / JC **5199** for settlement value instead.
-2. Rebuttal path: **DR** or **JR** when an intermediate line repaired and billed the owner (OM 112.C).
+   - **No tax lines** on Resp 3 rebill (Bruce §11 #6).
+2. Over-DV and other edge cases are resolved **owner-side** before/with the rebill (Bruce §11 #3, #5).
 3. Track Railinc accept/reject + CBA exceptions; keep original file bytes.
-4. Alternate JIC auto-pay: show expected auto-pay amount (estimate × cost-factor ratio within 1–7% band — OM 103.A.3.c). `OPEN:` whether short-pay feeds an exception queue.
-
-Canadian taxes GT/HT/PT/QT on wreck rebills (112.E.10): `OPEN:`.
+4. **1–7% auto-pay tolerance** (OM 103.A.3.c): **out of scope** for shop/owner front end — park for back-end CRB / billed-party phase (Bruce §11 #7). Spec may still *display* expected auto-pay amount later; no short-pay exception queue in this UI slice.
 
 ---
 
@@ -341,9 +354,9 @@ Canadian taxes GT/HT/PT/QT on wreck rebills (112.E.10): `OPEN:`.
 | **Update Responsibilities** | Resp 3 lines locked to Wreck track. |
 | **Wreck Event page (new)** | Timeline, documents, settlement worksheet (owner), JIC generator shell (PDF + Alternate email draft — build later), rebill builder/status, **deadline tracker**. |
 | **Intake validation (§G)** | Wreck-tier rules when shop uploads the Resp 3 file. |
-| **Send Lessee** | `OPEN:` exclude wreck portion vs show read-only. |
-| **Shop token** | Upload **two** files; arrival; **no** DV. |
-| **Lessee token** | §F; **no** DV / Resp 3 settlement. |
+| **Send Lessee** | **Exclude wreck estimates entirely** — never Send Lessee / never lessee rebill on wreck (Bruce §11 #9). |
+| **Shop token** | Upload **two** files **after JIC endorsement**; arrival; **no** DV; cannot clear flags. |
+| **Lessee token** | §F for non-wreck; wreck events do not route here. |
 
 ---
 
@@ -355,7 +368,7 @@ Canadian taxes GT/HT/PT/QT on wreck rebills (112.E.10): `OPEN:`.
 | `/#/repair/estimates/:id` | Owner | Existing §D (each track’s estimate) |
 | `/#/repair/bad-orders` | Owner | §C; Is Wreck? / Wreck Est / DDCT fields feed event create |
 | `/#/repair/e/:token` | Shop | Upload **two** files; arrival; **no** DV |
-| `/#/repair/lessee/:token` | Lessee | §F; **no** DV / Resp 3 settlement |
+| `/#/repair/lessee/:token` | Lessee | §F for non-wreck only; wreck estimates never sent here |
 
 `OPEN:` Final path name (`wreck` vs `events/:id/wreck`) — pick at build time; keep deep-linkable from §A `Wreck?` and BO history.
 
@@ -363,7 +376,7 @@ Canadian taxes GT/HT/PT/QT on wreck rebills (112.E.10): `OPEN:`.
 
 ## 11. Open questions (remaining)
 
-Resolved by Bruce or this fold — **cleared**:
+Resolved by Bruce (2026-10-14 six corrections + 2026-10-15 §11 answers) or this fold — **cleared**:
 
 | # | Topic | Resolution |
 |---|---|---|
@@ -373,22 +386,22 @@ Resolved by Bruce or this fold — **cleared**:
 | R4 | JIC clock zero | **Shop arrival date** on wreck event page. |
 | R5 | DDCT integration this slice | Hand entry only (no API). |
 | R6 | 5399 / settlement exhibits | Folded from OM 102.D.7 / 107.E / Exh. I–V; gauge + 5399 owner-side. |
+| R7 (§11 #2) | Who prepares / sends JIC | **Contract shop** prepares → sends to **car owner** → owner submits to RR for endorsement. Detailed estimate files **after** endorsement only. |
+| R8 (§11 #3) | Resp 3 rebill party | Shop bills **car owner**; **owner** rebills **damaging road** via source-code change + CRB rebuttal. Shop never bills the RR. Over-DV / edge cases owner-side. |
+| R9 (§11 #5) | Over DV / settle vs repair | Resp 3 at/over DV → owner-only **warnings/flags**; **no auto-reject**; owner decides settle vs repair. |
+| R10 (§11 #6) | Taxes on Resp 3 | **No taxes** on Resp 3 per AAR. Reject or flag tax lines on the Resp 3 file; owner absorbs that tax. |
+| R11 (§11 #7) | 1–7% auto-pay tolerance | **Out of scope** for shop/owner front end; park for back-end CRB / billed-party phase. |
+| R12 (§11 #8) | Resp 3 purity | Wreck Resp 3 estimate may contain **ONLY** resp 3 lines; any other code = **HARD REJECT**. |
+| R13 (§11 #9) | Lessee / Send Lessee | **Never** lessee rebill on wreck. Wreck estimates **excluded from Send Lessee** entirely. |
+| R14 (§11 #11) | Price Master source | **AAR Office Manual** or **Railinc** each quarter via Reference Data importer. Q4 2026 not out yet — keep current edition in use. |
+| R15 (§11 #12) | Who clears flags | **Car owner** or **managing partner** only (audited). Shops fix data but cannot clear flags. |
+| R16 (§11 #13) | JIC day counting | **Calendar days**. |
 
 Still **OPEN** for Bruce:
 
-1. Where do original cost, rebuilt/ILS date, A&B items, and lightweight live: RLMS, Umler export, or manual entry? (Cost may be blank.)
-2. Who prepares and sends the JIC — RESIDCO or the shop? Default Standard vs Alternate?
-3. Is Resp 3 rebill always to the handling/damaging railroad, or sometimes lessee / another party?
+1. Where do original cost, rebuilt/ILS date, A&B items, and lightweight live: RLMS, Umler export, or manual entry? **For now: manual entry** (cost may be blank). Source-of-truth integration later.
 4. Labor rate for **unpriced** items on the wreck track: which AAR table/quarter vs shop contract rate for the hours×rate check?
-5. Settlement **warn** threshold (proposal 80%) and who approves settle-vs-repair.
-6. Canadian taxes on wreck rebills (GT/HT/PT/QT with lines)?
-7. Should 1–7% auto-pay tolerance feed a short-pay exception queue?
-8. Are lessee responsibility codes 6/7 ever used inside a wreck event, or strictly owner 1 vs railroad 3?
-9. Send Lessee: exclude wreck portion or show it?
-10. Q18 blank-invoice vs Resp 3 invoice-number hard reject.
-11. Authoritative quarterly Price Master / labor CSV product each quarter.
-12. Flag taxonomy UI (badge copy, bulk clear, who clears).
-13. Business vs calendar days for JIC clocks (default calendar if unspecified).
+10. Missing Resp 3 **invoice number** — HARD REJECT vs ACCEPT+FLAG (Q18 blank-invoice interaction).
 
 **Known gaps (data):** Exhibits IV, V, and Settlement Value Worksheet not yet extracted to CSV (complex layout). Railinc CRB Procedures Manual edit charts / error codes not in the OM/FM PDFs — pull separately for rebill validator. Contract-shop labor rates are contractual, not AAR-mandated.
 
@@ -420,6 +433,7 @@ Still **OPEN** for Bruce:
 | Source | Use |
 |---|---|
 | Bruce corrections (2026-10-14) | **WIN** — event model, two files (no split), hard vs flag (CID → flag), quarterly rates, owner-only DV (unwired provider; optional cost), JIC clocks from shop arrival |
+| Bruce §11 answers (2026-10-15) | JIC shop→owner→RR + files after endorse; owner CRB rebill (shop never bills RR); over-DV warn/flag owner decides; no Resp 3 taxes; 1–7% FE out of scope; Resp 3 purity hard reject; no Send Lessee on wreck; Price Master AAR/Railinc quarterly; flag clear owner/MP only; calendar days |
 | `WRECK_DUAL_TRACK.md` | Folded OM/FM citations, data model, JIC 4–10 photos, settlement exhibits/ref tables, rebill CRIP outline, timeline/billing limits, detail sources, screen list; conflicts overridden by Bruce |
 | Manual_Gap_Review.md | RS #1 errors/warnings; #3 Resp 3 separate; #4 yard arrival |
 | Railinc_Data_File_Reference.md / App. G | Detail Source R; critical marks; Format 1 R field list; Price Master note; DDCT col 341; CID col 327 |
@@ -432,4 +446,4 @@ Still **OPEN** for Bruce:
 
 ## Bundle
 
-`docs/bundles/rlms-phase1-owner-ui-wreck-spec.bundle` — requires **`0c0be23`**. Docs only. Tip / SHA-256 in companion README.
+`docs/bundles/rlms-phase1-owner-ui-wreck-spec.bundle` — requires **`0c0be23`** (also fast-forwards from prior wreck tip **`c8a7138`**). Docs only. Tip / SHA-256 in companion README.

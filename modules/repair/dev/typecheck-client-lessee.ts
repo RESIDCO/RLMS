@@ -43,7 +43,20 @@ export function assertLesseeClientTypecheck(): void {
   if (!lessee.includes("Resp6") && !lessee.includes("downloads")) {
     bad("downloads", "LesseeApproval must offer Resp6 downloads");
   }
-  ok("LesseeApproval has brand, Accept/Reject, confirm, name/email, downloads");
+  if (!lessee.includes("Accepted on") || !lessee.includes("Thank you")) {
+    bad("success-banner", "LesseeApproval must show Accepted on <ET> by <name>. Thank you.");
+  }
+  if (!lessee.includes("fixed bottom-0") && !lessee.includes("sticky")) {
+    // sticky footer via fixed bottom bar
+    bad("sticky-footer", "LesseeApproval must sticky-footer total + Accept/Reject");
+  }
+  if (!lessee.includes("brcLessee") && !lessee.includes("BRC")) {
+    bad("brc-header", "LesseeApproval must use BRC header presentation");
+  }
+  if (!lessee.includes("preventDefault") && !lessee.includes("Submitting")) {
+    bad("confirm-lock", "Confirm must prevent silent dismiss / show submitting");
+  }
+  ok("LesseeApproval has brand, Accept/Reject, confirm, banner, sticky footer, BRC");
 
   if (!docs.includes("granted") && !docs.includes("documents-viewer")) {
     bad("docs", "LesseeDocuments must use lessee documents-viewer");
@@ -56,7 +69,13 @@ export function assertLesseeClientTypecheck(): void {
   if (!review.includes("Record phone/email") && !review.includes("lessee-manual")) {
     bad("manual", "EstimateReview must allow manual phone/email record");
   }
-  ok("EstimateReview has lessee status + manual record");
+  if (!review.includes("30_000") && !review.includes("30000")) {
+    bad("polling", "EstimateReview must poll lessee-status within 30s");
+  }
+  if (!review.includes("decidedAtEt") && !review.includes("respondentName")) {
+    bad("decider", "EstimateReview must show decider name/email/ET");
+  }
+  ok("EstimateReview has lessee status + manual record + 30s poll");
 
   const tsc = spawnSync(
     process.platform === "win32" ? "npx.cmd" : "npx",

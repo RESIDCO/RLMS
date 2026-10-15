@@ -2,14 +2,14 @@
  * Shared Data File header + RS line grid + totals + attachments for
  * internal estimate review and lessee estimate (read-only mode).
  */
-import { useEffect, useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertCircle, FileCode2, Flag, Lock, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
-import { closeHover, openHover, subscribeHover } from "./codeHoverBus";
+import { CodeHover, dash } from "./CodeHover";
 
 type HeaderMode = "LOCK" | "EDIT_AUDIT" | "FREE";
 
@@ -98,6 +98,8 @@ function moneyCell(opts: {
   money?: string;
   cents?: number;
   centsLabel?: string;
+  /** Lessee / BRC presentation: dollars only, no cents sub-line */
+  moneyOnly?: boolean;
 }) {
   const cents =
     opts.cents != null
@@ -107,6 +109,9 @@ function moneyCell(opts: {
     opts.money && opts.money.includes(",")
       ? opts.money
       : formatDisplayMoney(cents);
+  if (opts.moneyOnly) {
+    return <div className="tabular-nums text-right text-slate-900">{dollars}</div>;
+  }
   const centsLabel =
     opts.centsLabel ??
     (opts.cents != null ? String(opts.cents) : String(cents));
@@ -117,70 +122,6 @@ function moneyCell(opts: {
         <div className="text-[9px] text-muted-foreground tabular-nums">{centsLabel}¢</div>
       ) : null}
     </div>
-  );
-}
-
-function CodeHover({
-  kind,
-  code,
-  qualifier,
-  children,
-}: {
-  kind: string;
-  code?: string | null;
-  qualifier?: string | null;
-  children: React.ReactNode;
-}) {
-  const id = useId();
-  const [tip, setTip] = useState<string | null>(null);
-  const [active, setActive] = useState(false);
-  useEffect(() => subscribeHover((a) => setActive(a === id)), [id]);
-  useEffect(() => {
-    // Qualifier lookup may use job as code + empty/"00" qualifier → "No qualifier"
-    const isQual = kind === "qualifier" || kind === "removed_qualifier";
-    if (!active || (!code && !isQual)) return;
-    let cancelled = false;
-    const qs = new URLSearchParams({ kind, code: code ?? "" });
-    if (isQual || qualifier != null) qs.set("qualifier", qualifier ?? "");
-    void apiRequest("GET", `/api/repair/ref/lookup?${qs}`)
-      .then(async (res) => {
-        const data = await res.json();
-        if (cancelled) return;
-        const cat = [data.category, data.sub_category].filter(Boolean).join(" / ");
-        setTip(
-          data.found
-            ? `${data.description}${cat ? ` · ${cat}` : ""}`
-            : data.description || "Not in reference table",
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setTip("Not in reference table");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [active, kind, code, qualifier]);
-  const isQual = kind === "qualifier" || kind === "removed_qualifier";
-  if (!code && !isQual) return <>{children}</>;
-  return (
-    <span
-      className="relative cursor-help border-b border-dotted border-muted-foreground/50"
-      tabIndex={0}
-      onMouseEnter={() => openHover(id)}
-      onMouseLeave={() => closeHover(id)}
-      onFocus={() => openHover(id)}
-      onBlur={() => closeHover(id)}
-    >
-      {children}
-      {active && tip ? (
-        <span
-          role="tooltip"
-          className="pointer-events-none absolute z-20 left-0 top-full mt-1 max-w-[16rem] rounded border border-border bg-popover px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-normal"
-        >
-          {tip}
-        </span>
-      ) : null}
-    </span>
   );
 }
 
@@ -203,6 +144,13 @@ type Props = {
   hideAttachments?: boolean;
   hideAudit?: boolean;
   onLineIssueClick?: (line: EstimateLine) => void;
+  /**
+   * Lessee BRC presentation: light grid, no 500/PM, no cents sub-line,
+   * wrap description, blank → "—", Loc/WM/C/Resp hovers.
+   */
+  presentation?: "default" | "brcLessee";
+  /** Hide in-table totals footer (lessee uses sticky page footer). */
+  hideTotalsFooter?: boolean;
 };
 
 export function EstimateDataFile(props: Props) {
@@ -223,7 +171,13 @@ export function EstimateDataFile(props: Props) {
     hideAttachments = false,
     hideAudit = false,
     onLineIssueClick,
+    presentation = "default",
+    hideTotalsFooter = false,
   } = props;
+  const brcLessee = presentation === "brcLessee";
+  const showCid = brcLessee
+    ? lines.some((l) => Boolean(l.aar_component_id) || l.component_id_flag)
+    : true;
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -294,24 +248,52 @@ export function EstimateDataFile(props: Props) {
       {msg && <p className="text-sm text-foreground">{msg}</p>}
 
       {!hideHeader && (
-        <section className="space-y-3 border border-border rounded-md p-4">
-          <h2 className="text-sm font-semibold tracking-wide uppercase text-muted-foreground">
-            Data File header
+        <section
+          className={cn(
+            "space-y-3 border rounded-md p-4",
+            brcLessee
+              ? "border-slate-300 bg-white text-slate-900"
+              : "border-border",
+          )}
+        >
+          <h2
+            className={cn(
+              "text-sm font-semibold tracking-wide uppercase",
+              brcLessee ? "text-slate-700" : "text-muted-foreground",
+            )}
+          >
+            {brcLessee ? "Billing Repair Card header" : "Data File header"}
           </h2>
-          <p className="text-xs text-muted-foreground">
-            Full 500-byte header block (billing road, source code, shop, car, dates, invoice /
-            account fields).
-            {!readOnly && canPencilEdit
-              ? " Use the pencil to edit a field — each change requires a reason and is audited."
-              : null}
-          </p>
+          {!brcLessee ? (
+            <p className="text-xs text-muted-foreground">
+              Full 500-byte header block (billing road, source code, shop, car, dates, invoice /
+              account fields).
+              {!readOnly && canPencilEdit
+                ? " Use the pencil to edit a field — each change requires a reason and is audited."
+                : null}
+            </p>
+          ) : null}
           {groups.map(([group, fields]) => (
             <div key={group} className="space-y-2">
-              <h3 className="text-xs font-medium text-muted-foreground pt-2">{group}</h3>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <h3
+                className={cn(
+                  "text-xs font-medium pt-2",
+                  brcLessee ? "text-slate-600" : "text-muted-foreground",
+                )}
+              >
+                {group}
+              </h3>
+              <div
+                className={cn(
+                  "grid gap-2",
+                  brcLessee
+                    ? "sm:grid-cols-2 lg:grid-cols-4"
+                    : "sm:grid-cols-2 lg:grid-cols-3",
+                )}
+              >
                 {fields.map((f) => {
                   const val = header[f.key];
-                  const display = val == null || val === "" ? "—" : String(val);
+                  const display = dash(val);
                   const isEditing = editingKey === f.key;
                   const mode: HeaderMode = f.mode ?? "EDIT_AUDIT";
                   const locked = mode === "LOCK";
@@ -444,14 +426,33 @@ export function EstimateDataFile(props: Props) {
 
       {!hideLines && (
       <section className="space-y-2">
-        <div className="overflow-auto border border-border rounded-md">
-          <table className="w-full text-[11px] border-collapse">
+        <div
+          className={cn(
+            "overflow-auto border rounded-md",
+            brcLessee ? "border-slate-300 bg-white" : "border-border",
+          )}
+        >
+          <table
+            className={cn(
+              "w-full text-[11px] border-collapse",
+              brcLessee ? "text-slate-900" : "",
+            )}
+          >
             <thead>
-              <tr className="bg-[#8b1e1e] text-white text-left">
-                <th className="p-1.5 w-7" title="Issue / comment" />
-                <th className="p-1.5">Item</th>
+              <tr
+                className={cn(
+                  "text-left",
+                  brcLessee
+                    ? "bg-slate-800 text-white"
+                    : "bg-[#8b1e1e] text-white",
+                )}
+              >
+                {!brcLessee ? (
+                  <th className="p-1.5 w-7" title="Issue / comment" />
+                ) : null}
+                <th className="p-1.5">{brcLessee ? "Line" : "Item"}</th>
                 <th className="p-1.5">Loc</th>
-                <th className="p-1.5">Qnty</th>
+                <th className="p-1.5">{brcLessee ? "Qty" : "Qnty"}</th>
                 <th className="p-1.5">C</th>
                 <th className="p-1.5">AJOB</th>
                 <th className="p-1.5">QA</th>
@@ -459,59 +460,81 @@ export function EstimateDataFile(props: Props) {
                 <th className="p-1.5">WM</th>
                 <th className="p-1.5">RJOB</th>
                 <th className="p-1.5">QR</th>
-                <th className="p-1.5">R</th>
+                <th className="p-1.5">{brcLessee ? "Resp" : "R"}</th>
                 <th className="p-1.5 text-right">Labor</th>
                 <th className="p-1.5 text-right">Material</th>
                 <th className="p-1.5 text-right">Amount</th>
-                <th className="p-1.5">Component Id</th>
-                <th className="p-1.5">500</th>
-                <th className="p-1.5">PM</th>
+                {showCid ? (
+                  <th className="p-1.5">{brcLessee ? "CID" : "Component Id"}</th>
+                ) : null}
+                {!brcLessee ? (
+                  <>
+                    <th className="p-1.5">500</th>
+                    <th className="p-1.5">PM</th>
+                  </>
+                ) : null}
                 {readOnly && onDecideLine ? <th className="p-1.5">Your action</th> : null}
               </tr>
             </thead>
             <tbody>
               {lines.map((l, idx) => {
                 const own = ownRespCodes.includes(String(l.resp_code));
+                const desc =
+                  l.description ||
+                  [l.repair_category, l.sub_category].filter(Boolean).join(" / ") ||
+                  "";
                 return (
                   <tr
                     key={l.id ?? l.line_no}
                     className={cn(
-                      "border-t border-border",
-                      idx % 2 === 1 ? "bg-orange-50/70 dark:bg-slate-800/40" : "bg-background",
+                      "border-t",
+                      brcLessee
+                        ? cn(
+                            "border-slate-200",
+                            idx % 2 === 1 ? "bg-slate-50" : "bg-white",
+                          )
+                        : cn(
+                            "border-border",
+                            idx % 2 === 1
+                              ? "bg-orange-50/70 dark:bg-slate-800/40"
+                              : "bg-background",
+                          ),
                     )}
                   >
-                    <td className="p-1 text-center">
-                      <button
-                        type="button"
-                        className={cn(
-                          "inline-flex h-5 w-5 items-center justify-center rounded-full",
-                          l.has_comment
-                            ? "bg-amber-500 text-white"
-                            : "bg-amber-400/80 text-white",
-                        )}
-                        title="Issue / comment"
-                        onClick={() => onLineIssueClick?.(l)}
-                      >
-                        <AlertCircle className="h-3 w-3" />
-                      </button>
-                    </td>
-                    <td className="p-1.5 tabular-nums">
-                      {l.display_line_no ?? l.line_no}
+                    {!brcLessee ? (
+                      <td className="p-1 text-center">
+                        <button
+                          type="button"
+                          className={cn(
+                            "inline-flex h-5 w-5 items-center justify-center rounded-full",
+                            l.has_comment
+                              ? "bg-amber-500 text-white"
+                              : "bg-amber-400/80 text-white",
+                          )}
+                          title="Issue / comment"
+                          onClick={() => onLineIssueClick?.(l)}
+                        >
+                          <AlertCircle className="h-3 w-3" />
+                        </button>
+                      </td>
+                    ) : null}
+                    <td className="p-1.5 tabular-nums text-slate-900">
+                      {dash(l.display_line_no ?? l.line_no)}
                     </td>
                     <td className="p-1.5">
                       <CodeHover kind="location" code={l.location_on_car}>
-                        {l.location_on_car ?? ""}
+                        {dash(l.location_on_car)}
                       </CodeHover>
                     </td>
-                    <td className="p-1.5 tabular-nums">{l.quantity ?? ""}</td>
+                    <td className="p-1.5 tabular-nums">{dash(l.quantity)}</td>
                     <td className="p-1.5">
                       <CodeHover kind="condition" code={l.condition_code}>
-                        {l.condition_code ?? ""}
+                        {dash(l.condition_code)}
                       </CodeHover>
                     </td>
-                    <td className="p-1.5 font-mono">
+                    <td className="p-1.5 font-mono no-underline">
                       <CodeHover kind="job" code={l.aar_job_code} qualifier={l.qualifier}>
-                        {l.aar_job_code ?? ""}
+                        {dash(l.aar_job_code)}
                       </CodeHover>
                     </td>
                     <td className="p-1.5">
@@ -520,22 +543,28 @@ export function EstimateDataFile(props: Props) {
                         code={l.aar_job_code}
                         qualifier={l.qualifier ?? ""}
                       >
-                        {l.qualifier ?? ""}
+                        {dash(l.qualifier)}
                       </CodeHover>
                     </td>
-                    <td className="p-1.5 uppercase max-w-[14rem] truncate" title={l.description ?? ""}>
-                      {l.description ||
-                        [l.repair_category, l.sub_category].filter(Boolean).join(" / ") ||
-                        ""}
+                    <td
+                      className={cn(
+                        "p-1.5 uppercase text-slate-900",
+                        brcLessee
+                          ? "max-w-[18rem] whitespace-normal break-words"
+                          : "max-w-[14rem] truncate",
+                      )}
+                      title={desc || undefined}
+                    >
+                      {dash(desc)}
                     </td>
                     <td className="p-1.5">
                       <CodeHover kind="why_made" code={l.why_made}>
-                        {l.why_made ?? ""}
+                        {dash(l.why_made)}
                       </CodeHover>
                     </td>
-                    <td className="p-1.5 font-mono">
+                    <td className="p-1.5 font-mono no-underline">
                       <CodeHover kind="job" code={l.removed_job_code}>
-                        {l.removed_job_code ?? ""}
+                        {dash(l.removed_job_code)}
                       </CodeHover>
                     </td>
                     <td className="p-1.5">
@@ -544,12 +573,12 @@ export function EstimateDataFile(props: Props) {
                         code={l.removed_job_code}
                         qualifier={l.removed_qualifier ?? ""}
                       >
-                        {l.removed_qualifier ?? ""}
+                        {dash(l.removed_qualifier)}
                       </CodeHover>
                     </td>
                     <td className="p-1.5 font-semibold">
                       <CodeHover kind="responsibility" code={l.resp_code}>
-                        {l.resp_code ?? ""}
+                        {dash(l.resp_code)}
                       </CodeHover>
                     </td>
                     <td className="p-1.5 text-right">
@@ -559,6 +588,7 @@ export function EstimateDataFile(props: Props) {
                         money: l.labor_money,
                         cents: l.labor_cents,
                         centsLabel: l.labor_cents_label,
+                        moneyOnly: brcLessee,
                       })}
                     </td>
                     <td className="p-1.5 text-right">
@@ -568,6 +598,7 @@ export function EstimateDataFile(props: Props) {
                         money: l.material_money,
                         cents: l.material_cents,
                         centsLabel: l.material_cents_label,
+                        moneyOnly: brcLessee,
                       })}
                     </td>
                     <td className="p-1.5 text-right font-medium">
@@ -577,42 +608,49 @@ export function EstimateDataFile(props: Props) {
                         money: l.amount_money,
                         cents: l.total_cents,
                         centsLabel: l.amount_cents_label,
+                        moneyOnly: brcLessee,
                       })}
                     </td>
-                    <td className="p-1.5 text-[10px]">
-                      <span className="inline-flex items-center gap-0.5">
-                        {l.component_id_flag ? (
-                          <span title="Component Id required" className="inline-flex">
-                            <Flag className="h-3 w-3 text-red-600" />
-                          </span>
-                        ) : null}
-                        {l.aar_component_id ?? ""}
-                      </span>
-                    </td>
-                    <td className="p-1.5">
-                      {l.raw_line ? (
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-0.5 text-emerald-700 dark:text-emerald-400"
-                          title="View raw 500-byte record"
-                          onClick={() => setRawPreview(String(l.raw_line))}
-                        >
-                          <FileCode2 className="h-3.5 w-3.5" />
-                          <span className="font-semibold">500</span>
-                        </button>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="p-1.5 text-center">
-                      {l.machine_priceable === "Y" || l.machine_priceable === "D" ? (
-                        <span className="text-emerald-700 font-semibold" title="Price Master">
-                          $
+                    {showCid ? (
+                      <td className="p-1.5 text-[10px]">
+                        <span className="inline-flex items-center gap-0.5">
+                          {l.component_id_flag ? (
+                            <span title="Component Id required" className="inline-flex">
+                              <Flag className="h-3 w-3 text-red-600" />
+                            </span>
+                          ) : null}
+                          {dash(l.aar_component_id)}
                         </span>
-                      ) : (
-                        ""
-                      )}
-                    </td>
+                      </td>
+                    ) : null}
+                    {!brcLessee ? (
+                      <>
+                        <td className="p-1.5">
+                          {l.raw_line ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-0.5 text-emerald-700 dark:text-emerald-400"
+                              title="View raw 500-byte record"
+                              onClick={() => setRawPreview(String(l.raw_line))}
+                            >
+                              <FileCode2 className="h-3.5 w-3.5" />
+                              <span className="font-semibold">500</span>
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="p-1.5 text-center">
+                          {l.machine_priceable === "Y" || l.machine_priceable === "D" ? (
+                            <span className="text-emerald-700 font-semibold" title="Price Master">
+                              $
+                            </span>
+                          ) : (
+                            ""
+                          )}
+                        </td>
+                      </>
+                    ) : null}
                     {readOnly && onDecideLine ? (
                       <td className="p-1.5">
                         {own ? (
@@ -641,26 +679,45 @@ export function EstimateDataFile(props: Props) {
                 );
               })}
             </tbody>
-            <tfoot>
-              <tr className="bg-[#8b1e1e] text-white font-semibold">
-                <td className="p-1.5" colSpan={12}>
-                  Totals
-                </td>
-                <td className="p-1.5 text-right">
-                  <div className="tabular-nums">{totals.labor}</div>
-                  <div className="text-[9px] opacity-80">{totals.laborCents}¢</div>
-                </td>
-                <td className="p-1.5 text-right">
-                  <div className="tabular-nums">{totals.material}</div>
-                  <div className="text-[9px] opacity-80">{totals.materialCents}¢</div>
-                </td>
-                <td className="p-1.5 text-right">
-                  <div className="tabular-nums">{totals.total}</div>
-                  <div className="text-[9px] opacity-80">{totals.totalCents}¢</div>
-                </td>
-                <td colSpan={readOnly && onDecideLine ? 4 : 3} />
-              </tr>
-            </tfoot>
+            {!hideTotalsFooter ? (
+              <tfoot>
+                <tr
+                  className={cn(
+                    "font-semibold",
+                    brcLessee ? "bg-slate-800 text-white" : "bg-[#8b1e1e] text-white",
+                  )}
+                >
+                  <td className="p-1.5" colSpan={brcLessee ? 11 : 12}>
+                    Totals
+                  </td>
+                  <td className="p-1.5 text-right">
+                    <div className="tabular-nums">{totals.labor}</div>
+                    {!brcLessee ? (
+                      <div className="text-[9px] opacity-80">{totals.laborCents}¢</div>
+                    ) : null}
+                  </td>
+                  <td className="p-1.5 text-right">
+                    <div className="tabular-nums">{totals.material}</div>
+                    {!brcLessee ? (
+                      <div className="text-[9px] opacity-80">{totals.materialCents}¢</div>
+                    ) : null}
+                  </td>
+                  <td className="p-1.5 text-right">
+                    <div className="tabular-nums">{totals.total}</div>
+                    {!brcLessee ? (
+                      <div className="text-[9px] opacity-80">{totals.totalCents}¢</div>
+                    ) : null}
+                  </td>
+                  <td
+                    colSpan={
+                      (showCid ? 1 : 0) +
+                      (brcLessee ? 0 : 2) +
+                      (readOnly && onDecideLine ? 1 : 0)
+                    }
+                  />
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
         </div>
       </section>

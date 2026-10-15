@@ -481,6 +481,8 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
   /** Lessee login-free link (Resp 6 primary path). Shows Resp 6 portion only. */
   app.get("/api/repair/lessee/:token", async (req, res) => {
     try {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
       const view = await getLesseeViewForToken(String(req.params.token));
       if (!view) {
         return res.status(401).json({ error: "Invalid, expired, or revoked link" });
@@ -494,6 +496,7 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
 
   app.post("/api/repair/lessee/:token/decide", async (req, res) => {
     try {
+      res.setHeader("Cache-Control", "no-store");
       const decision =
         String(req.body?.decision ?? "").toUpperCase() === "REJECT" ? "REJECT" : "APPROVE";
       const forwarded = String(req.headers["x-forwarded-for"] ?? "");
@@ -2182,6 +2185,9 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
   /** §F Owner: lessee status / due / history on Estimate Review. */
   app.get("/api/repair/estimates/:id/lessee-status", async (req, res) => {
     try {
+      // Never cache — Accept/Reject must surface on poll / refresh (r2 root-cause).
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
       const uid = await maybeRequireUser(deps, req, res);
       if (!uid) return;
       const panel = await getOwnerLesseePanel({
@@ -3673,9 +3679,12 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     });
   });
 
+  /**
+   * Ref code hover lookup — public GET (codes are not secrets) so lessee
+   * login-free pages and shop grids can hover Loc/WM/C/Resp without auth.
+   */
   app.get("/api/repair/ref/lookup", async (req, res) => {
-    const uid = await maybeRequireUser(deps, req, res);
-    if (!uid) return;
+    res.setHeader("Cache-Control", "public, max-age=300");
     const kind = String(req.query.kind ?? "job") as
       | "job"
       | "qualifier"
@@ -3691,6 +3700,14 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       code: String(req.query.code ?? ""),
       qualifier: req.query.qualifier != null ? String(req.query.qualifier) : null,
     });
+    // Normalize not-found copy for hover: "<code> – not in reference table"
+    if (!hit.found) {
+      return res.json({
+        ...hit,
+        description: "not in reference table",
+        warning: `${String(req.query.code ?? "").trim() || "—"} – not in reference table`,
+      });
+    }
     return res.json(hit);
   });
 

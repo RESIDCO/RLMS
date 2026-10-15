@@ -22,6 +22,9 @@ import {
   loadLesseeWindowConfig,
 } from "./lessee-window";
 
+/** Re-export ET formatter for decide responses / owner panel. */
+export { formatDueEt };
+
 /** Owner-facing status labels (brief §F). */
 export type LesseeOwnerStatus =
   | "Sent"
@@ -602,6 +605,11 @@ export async function approveViaLesseeLink(opts: {
     decision,
     channel: "url" as const,
     readOnly: true,
+    decidedAtEt: formatDueEt(updated[0]?.decided_at),
+    respondentName: name,
+    respondentEmail: email,
+    sendVersion:
+      approval.send_version != null ? Number(approval.send_version) : null,
   };
 }
 
@@ -929,6 +937,23 @@ export async function getLesseeViewForToken(rawToken: string) {
   );
   const base = brcAttachmentBaseName(carInitial, carNumber, estimateNo);
 
+  // BRC header block for lessee page (replaces 500-byte Data File header)
+  let brcHeader: Record<string, unknown> | null = null;
+  try {
+    const { loadBrcDocument } = await import("./brc-pdf");
+    const brc = await loadBrcDocument({
+      estimateId,
+      audience: "lessee",
+      revisionId,
+      tenantId: approval?.tenant_id ?? DEFAULT_TENANT_ID,
+    });
+    if (brc.ok) {
+      brcHeader = { ...brc.doc.header };
+    }
+  } catch {
+    brcHeader = null;
+  }
+
   return {
     link: {
       id: link.id,
@@ -983,19 +1008,24 @@ export async function getLesseeViewForToken(rawToken: string) {
     amountPresented: amountPresentedDollars,
     amountPresentedCents: bundle.totalCents,
     amountMoney: bundle.amountMoney,
+    /** BRC header fields for 4-col lessee block (not 500-byte Data File). */
+    brcHeader,
     approval: approval
       ? {
           id: approval.id,
           status: approval.status,
           ownerStatus,
           decision: approval.decision ?? null,
+          comment: approval.comment ?? null,
           responseDueAt: approval.response_due_at ?? null,
           responseDueAtEt: formatDueEt(approval.response_due_at),
           viewedAt: approval.viewed_at ?? null,
           decidedAt: approval.decided_at ?? null,
+          decidedAtEt: formatDueEt(approval.decided_at),
           sendVersion: approval.send_version != null
             ? Number(approval.send_version)
             : null,
+          revisionId: approval.revision_id ?? revisionId,
           respondentName: approval.respondent_name ?? null,
           respondentEmail: approval.respondent_email ?? null,
         }
@@ -1004,9 +1034,7 @@ export async function getLesseeViewForToken(rawToken: string) {
     canDecide,
     canPencilEdit: false,
     hideAppNav: true,
-    note: canDecide
-      ? "Login-free lessee view: Resp 6 lines exactly as granted, matching totals, and attachments from this send only. Accept or Reject the whole estimate (Reject requires a comment)."
-      : "You have already responded. This link is read-only.",
+    note: "",
   };
 }
 
@@ -1132,16 +1160,27 @@ export async function getOwnerLesseePanel(opts: {
     `SELECT *
      FROM repair.lessee_approvals
      WHERE estimate_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
-     ORDER BY created_at DESC`,
+     ORDER BY COALESCE(send_version, 0) DESC, created_at DESC`,
     [opts.estimateId, tenantId],
   );
-  const current = approvals[0] ?? null;
+  /**
+   * Root-cause fix (owner stale / wrong send):
+   * Prefer the latest non-SUPERSEDED/EXPIRED send — not merely created_at DESC,
+   * which could surface a voided row ahead of the live send/revision decision.
+   */
+  const current =
+    approvals.find(
+      (a) =>
+        !["SUPERSEDED", "EXPIRED"].includes(String(a.status ?? "")),
+    ) ??
+    approvals[0] ??
+    null;
   const ownerStatus = current
     ? mapApprovalToOwnerStatus(current)
     : ("None" as LesseeOwnerStatus);
 
   const { rows: history } = await q(
-    `SELECT d.*, a.send_version
+    `SELECT d.*, a.send_version, a.revision_id
      FROM repair.lessee_approval_decisions d
      JOIN repair.lessee_approvals a ON a.id = d.approval_id
      WHERE a.estimate_id = $1 AND a.tenant_id = $2
@@ -1159,6 +1198,8 @@ export async function getOwnerLesseePanel(opts: {
     ownerStatus,
     overdue: Boolean(est[0]?.lessee_response_overdue) || ownerStatus === "Overdue",
     overdueAt: est[0]?.lessee_response_overdue_at ?? null,
+    /** Tip for clients: always revalidate; do not cache this panel. */
+    cacheControl: "no-store",
     current: current
       ? {
           id: current.id,
@@ -1168,8 +1209,10 @@ export async function getOwnerLesseePanel(opts: {
           responseDueAtEt: formatDueEt(current.response_due_at),
           viewedAt: current.viewed_at ?? null,
           decidedAt: current.decided_at ?? null,
+          decidedAtEt: formatDueEt(current.decided_at),
           sendVersion:
             current.send_version != null ? Number(current.send_version) : null,
+          revisionId: current.revision_id ?? null,
           amountPresentedCents: current.amount_presented_cents
             ? Number(current.amount_presented_cents)
             : null,
@@ -1185,22 +1228,28 @@ export async function getOwnerLesseePanel(opts: {
       status: a.status,
       ownerStatus: mapApprovalToOwnerStatus(a),
       sendVersion: a.send_version != null ? Number(a.send_version) : null,
+      revisionId: a.revision_id ?? null,
       createdAt: a.created_at,
       responseDueAt: a.response_due_at,
       responseDueAtEt: formatDueEt(a.response_due_at),
       decidedAt: a.decided_at,
+      decidedAtEt: formatDueEt(a.decided_at),
       viewedAt: a.viewed_at,
+      respondentName: a.respondent_name ?? null,
+      respondentEmail: a.respondent_email ?? null,
     })),
     history: history.map((h) => ({
       id: h.id,
       decision: h.decision,
       channel: h.channel,
       decidedAt: h.decided_at,
+      decidedAtEt: formatDueEt(h.decided_at),
       comment: h.comment,
       respondentName: h.respondent_name,
       respondentEmail: h.respondent_email,
       respondentIp: h.respondent_ip,
       sendVersion: h.send_version != null ? Number(h.send_version) : null,
+      revisionId: h.revision_id ?? null,
       confirmedByReviewer: h.confirmed_by_reviewer,
     })),
   };

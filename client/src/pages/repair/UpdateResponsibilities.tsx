@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import type { EstimateLine } from "./EstimateDataFile";
 import { MoneyInput } from "./MoneyInput";
 import { formatCentsAsMoney, parseDollarsToCents } from "./moneyFormat";
+import { CodeHover, dash } from "./CodeHover";
 
 type RespCode = { code: string; display_name: string };
 
@@ -669,18 +670,34 @@ export default function UpdateResponsibilities() {
                   <td className="p-1.5 tabular-nums">
                     {String(l.line_no).padStart(5, "0")}
                   </td>
-                  <td className="p-1.5">{l.location_on_car ?? ""}</td>
-                  <td className="p-1.5">{l.quantity ?? ""}</td>
-                  <td className="p-1.5">{l.condition_code ?? ""}</td>
-                  <td className="p-1.5 font-mono">{l.aar_job_code ?? ""}</td>
-                  <td className="p-1.5">{l.qualifier ?? ""}</td>
-                  <td className="p-1.5 uppercase max-w-[12rem] truncate">
-                    {l.description ?? ""}
+                  <td className="p-1.5">
+                    <CodeHover kind="location" code={l.location_on_car}>
+                      {dash(l.location_on_car)}
+                    </CodeHover>
                   </td>
-                  <td className="p-1.5">{l.why_made ?? ""}</td>
-                  <td className="p-1.5 font-mono">{l.removed_job_code ?? ""}</td>
-                  <td className="p-1.5">{l.removed_qualifier ?? ""}</td>
-                  <td className="p-1.5 font-semibold">{l.resp_code ?? ""}</td>
+                  <td className="p-1.5">{dash(l.quantity)}</td>
+                  <td className="p-1.5">
+                    <CodeHover kind="condition" code={l.condition_code}>
+                      {dash(l.condition_code)}
+                    </CodeHover>
+                  </td>
+                  <td className="p-1.5 font-mono">{dash(l.aar_job_code)}</td>
+                  <td className="p-1.5">{dash(l.qualifier)}</td>
+                  <td className="p-1.5 uppercase max-w-[12rem] truncate" title={l.description ?? ""}>
+                    {dash(l.description)}
+                  </td>
+                  <td className="p-1.5">
+                    <CodeHover kind="why_made" code={l.why_made}>
+                      {dash(l.why_made)}
+                    </CodeHover>
+                  </td>
+                  <td className="p-1.5 font-mono">{dash(l.removed_job_code)}</td>
+                  <td className="p-1.5">{dash(l.removed_qualifier)}</td>
+                  <td className="p-1.5 font-semibold">
+                    <CodeHover kind="responsibility" code={l.resp_code}>
+                      {dash(l.resp_code)}
+                    </CodeHover>
+                  </td>
                   <td className="p-1.5">
                     <select
                       className="h-7 rounded border border-border bg-background px-1"

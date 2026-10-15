@@ -1,5 +1,5 @@
 /**
- * Smoke: OWNER_UI §F — Lessee screen
+ * Smoke: OWNER_UI §F — Lessee screen (+ r2 E2E Accept/Reject)
  *
  * 1. Accept via link (name/email/IP/send version)
  * 2. Reject requires comment
@@ -8,13 +8,21 @@
  * 5. Superseded link → voided after newer send
  * 6. Scoping: no other lines / docs / DV
  * 7. Email text "within 3 business days"
+ * 8. E2E: real HTTP decide route + owner lessee-status → Accepted/Rejected
+ * 9. Ref lookup hover public (Loc/C/WM/Resp)
  *
  * Run: npm run repair:smoke-lessee
  */
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import express from "express";
+import type { Server } from "http";
 import { DEFAULT_TENANT_ID, q } from "../db";
+import {
+  registerRepairAuthedRoutes,
+  registerRepairPublicRoutes,
+} from "../routes";
 import { createBadOrder } from "../services/bo";
 import { shopAcknowledge, shopArrivalDate } from "../services/bo-lifecycle";
 import { issueEventLink, resolveActiveLink } from "../services/event-links";
@@ -443,6 +451,143 @@ async function main() {
     if (ungranted.ok) bad("scope-doc", "ungranted allowed");
   }
   ok("scoping: ungranted attachment blocked");
+
+  // ── §F r2 E2E: real UI route/API Accept + owner status ────────────
+  const { estimateId: estE2e } = await seedEstimate();
+  const sentE2e = await sendOnce(estE2e);
+  if (!sentE2e.ok) bad("e2e-send", sentE2e.error ?? "");
+  const tokenE2e = String(sentE2e.lesseeUrlPath ?? "").split("/").pop()!;
+  if (!tokenE2e) bad("e2e-token", "missing");
+
+  const app = express();
+  app.use(express.json({ limit: "2mb" }));
+  registerRepairPublicRoutes(app);
+  registerRepairAuthedRoutes(app);
+  const server: Server = await new Promise((resolve) => {
+    const s = app.listen(0, "127.0.0.1", () => resolve(s));
+  });
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    const viewRes = await fetch(`${base}/api/repair/lessee/${tokenE2e}`, {
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!viewRes.ok) bad("e2e-view", await viewRes.text());
+    const viewBody = (await viewRes.json()) as {
+      canDecide?: boolean;
+      brcHeader?: unknown;
+    };
+    if (viewBody.canDecide !== true) bad("e2e-view-decide", "expected canDecide");
+    if (!viewBody.brcHeader) bad("e2e-brc-header", "missing brcHeader");
+
+    const acceptRes = await fetch(`${base}/api/repair/lessee/${tokenE2e}/decide`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "APPROVE",
+        name: "E2E Pat",
+        email: "e2e.pat@lessee.test",
+        comment: "E2E accept",
+      }),
+    });
+    const acceptBody = (await acceptRes.json()) as {
+      ok?: boolean;
+      error?: string;
+      decidedAtEt?: string | null;
+      approval?: { status?: string };
+    };
+    if (!acceptRes.ok || acceptBody.ok === false) {
+      bad("e2e-accept", JSON.stringify(acceptBody));
+    }
+    if (!acceptBody.decidedAtEt) bad("e2e-accept-et", "missing decidedAtEt");
+    ok(`E2E Accept via HTTP decide → ${acceptBody.approval?.status}`);
+
+    const statusRes = await fetch(
+      `${base}/api/repair/estimates/${estE2e}/lessee-status?_=${Date.now()}`,
+      { headers: { "Cache-Control": "no-cache" } },
+    );
+    if (!statusRes.ok) bad("e2e-owner-status", await statusRes.text());
+    const statusCc = statusRes.headers.get("cache-control") ?? "";
+    if (!/no-store/i.test(statusCc)) {
+      bad("e2e-cache", `expected no-store, got ${statusCc}`);
+    }
+    const panel = (await statusRes.json()) as {
+      ownerStatus?: string;
+      current?: {
+        respondentName?: string;
+        respondentEmail?: string;
+        decidedAtEt?: string;
+      };
+    };
+    if (panel.ownerStatus !== "Accepted") {
+      bad("e2e-owner-accepted", panel.ownerStatus ?? "missing");
+    }
+    if (panel.current?.respondentName !== "E2E Pat") {
+      bad("e2e-owner-name", JSON.stringify(panel.current));
+    }
+    ok("E2E owner lessee-status → Accepted (name/email/ET, no-store)");
+
+    // Reject path on a fresh send
+    const { estimateId: estRej } = await seedEstimate();
+    const sentRej = await sendOnce(estRej);
+    if (!sentRej.ok) bad("e2e-rej-send", sentRej.error ?? "");
+    const tokenRej = String(sentRej.lesseeUrlPath ?? "").split("/").pop()!;
+    const rejRes = await fetch(`${base}/api/repair/lessee/${tokenRej}/decide`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "REJECT",
+        name: "E2E Casey",
+        email: "e2e.casey@lessee.test",
+        comment: "E2E reject labor",
+      }),
+    });
+    const rejBody = await rejRes.json();
+    if (!rejRes.ok) bad("e2e-reject", JSON.stringify(rejBody));
+    const rejPanelRes = await fetch(
+      `${base}/api/repair/estimates/${estRej}/lessee-status?_=${Date.now()}`,
+    );
+    const rejPanel = (await rejPanelRes.json()) as {
+      ownerStatus?: string;
+      current?: { comment?: string };
+    };
+    if (rejPanel.ownerStatus !== "Rejected") {
+      bad("e2e-owner-rejected", rejPanel.ownerStatus ?? "");
+    }
+    if (!String(rejPanel.current?.comment ?? "").includes("E2E reject")) {
+      bad("e2e-rej-comment", JSON.stringify(rejPanel.current));
+    }
+    ok("E2E Reject via HTTP + owner Rejected with comment");
+
+    // Public ref lookup for Loc/C/WM/Resp hovers (demo codes)
+    for (const [kind, code] of [
+      ["condition", "A"],
+      ["location", "AR"],
+      ["why_made", "01"],
+      ["responsibility", "6"],
+    ] as const) {
+      const lr = await fetch(
+        `${base}/api/repair/ref/lookup?kind=${kind}&code=${encodeURIComponent(code)}`,
+      );
+      if (!lr.ok) bad(`ref-${kind}`, await lr.text());
+      const hit = (await lr.json()) as { found?: boolean; description?: string };
+      if (hit.found) {
+        ok(`ref hover ${kind}=${code}: found — ${String(hit.description).slice(0, 40)}`);
+      } else {
+        // Table may be empty in fresh local DB — still must return not-found copy
+        if (!String(hit.description ?? "").includes("not in reference table")) {
+          bad(`ref-${kind}-msg`, JSON.stringify(hit));
+        }
+        ok(`ref hover ${kind}=${code}: not in reference table (empty seed OK)`);
+      }
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
 
   console.log("=== repair:smoke-lessee PASS ===");
 }

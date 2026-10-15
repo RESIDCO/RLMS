@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceBanner } from "./WorkspaceTitle";
+import { CodeHover, dash } from "./CodeHover";
 
 type GalleryDoc = {
   id: string;
@@ -370,15 +371,31 @@ export default function SendLessee() {
                           className="border-t border-border"
                         >
                           <td className="p-1.5">{l.display_line_no ?? l.line_no}</td>
-                          <td className="p-1.5">{l.location_on_car}</td>
-                          <td className="p-1.5">{l.quantity}</td>
-                          <td className="p-1.5">{l.condition_code}</td>
-                          <td className="p-1.5 font-mono">{l.aar_job_code}</td>
-                          <td className="p-1.5">{l.qualifier}</td>
-                          <td className="p-1.5">{l.why_made}</td>
-                          <td className="p-1.5 font-mono">{l.removed_job_code}</td>
-                          <td className="p-1.5">{l.removed_qualifier}</td>
-                          <td className="p-1.5">{l.resp_code}</td>
+                          <td className="p-1.5">
+                            <CodeHover kind="location" code={l.location_on_car}>
+                              {dash(l.location_on_car)}
+                            </CodeHover>
+                          </td>
+                          <td className="p-1.5">{dash(l.quantity)}</td>
+                          <td className="p-1.5">
+                            <CodeHover kind="condition" code={l.condition_code}>
+                              {dash(l.condition_code)}
+                            </CodeHover>
+                          </td>
+                          <td className="p-1.5 font-mono">{dash(l.aar_job_code)}</td>
+                          <td className="p-1.5">{dash(l.qualifier)}</td>
+                          <td className="p-1.5">
+                            <CodeHover kind="why_made" code={l.why_made}>
+                              {dash(l.why_made)}
+                            </CodeHover>
+                          </td>
+                          <td className="p-1.5 font-mono">{dash(l.removed_job_code)}</td>
+                          <td className="p-1.5">{dash(l.removed_qualifier)}</td>
+                          <td className="p-1.5">
+                            <CodeHover kind="responsibility" code={l.resp_code}>
+                              {dash(l.resp_code)}
+                            </CodeHover>
+                          </td>
                           <td className="p-1.5 max-w-[10rem] truncate" title={l.description ?? ""}>
                             {l.description}
                           </td>

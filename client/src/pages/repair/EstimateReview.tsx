@@ -188,13 +188,19 @@ export default function EstimateReview() {
     current: {
       responseDueAtEt?: string | null;
       sendVersion?: number | null;
+      revisionId?: string | null;
       decision?: string | null;
+      decidedAtEt?: string | null;
+      respondentName?: string | null;
+      respondentEmail?: string | null;
+      comment?: string | null;
     } | null;
     history: Array<{
       id: string;
       decision: string;
       channel: string;
       decidedAt: string;
+      decidedAtEt?: string | null;
       comment?: string | null;
       respondentName?: string | null;
       respondentEmail?: string | null;
@@ -207,9 +213,12 @@ export default function EstimateReview() {
   async function loadLesseePanel() {
     if (!estimateId) return;
     try {
+      // Cache-bust: Accept/Reject must not read a stale Sent/Viewed response.
       const res = await apiRequest(
         "GET",
-        `/api/repair/estimates/${estimateId}/lessee-status`,
+        `/api/repair/estimates/${estimateId}/lessee-status?_=${Date.now()}`,
+        undefined,
+        { "Cache-Control": "no-cache", Pragma: "no-cache" },
       );
       const data = await res.json();
       if (res.ok) setLesseePanel(data);
@@ -274,6 +283,17 @@ export default function EstimateReview() {
 
   useEffect(() => {
     if (estimateId) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estimateId]);
+
+  // §F r2: poll lessee status every 30s while Estimate Review is open so
+  // Accept/Reject from the lessee link surfaces without a full page remount.
+  useEffect(() => {
+    if (!estimateId) return;
+    const id = window.setInterval(() => {
+      void loadLesseePanel();
+    }, 30_000);
+    return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimateId]);
 
@@ -617,7 +637,9 @@ export default function EstimateReview() {
                       lesseePanel.overdue ? "text-amber-800 dark:text-amber-200" : ""
                     }
                   >
-                    {lesseePanel.overdue
+                    {lesseePanel.overdue &&
+                    lesseePanel.ownerStatus !== "Accepted" &&
+                    lesseePanel.ownerStatus !== "Rejected"
                       ? "Lessee response overdue"
                       : lesseePanel.ownerStatus}
                   </strong>
@@ -632,6 +654,31 @@ export default function EstimateReview() {
                     Send #{lesseePanel.current.sendVersion}
                   </span>
                 ) : null}
+                {lesseePanel.current?.decidedAtEt ? (
+                  <span className="text-xs text-muted-foreground">
+                    {lesseePanel.current.decidedAtEt}
+                  </span>
+                ) : null}
+                {lesseePanel.current?.respondentName ? (
+                  <span className="text-xs">
+                    {lesseePanel.current.respondentName}
+                    {lesseePanel.current.respondentEmail
+                      ? ` <${lesseePanel.current.respondentEmail}>`
+                      : ""}
+                  </span>
+                ) : null}
+                {lesseePanel.current?.comment ? (
+                  <span className="text-xs text-muted-foreground">
+                    — {lesseePanel.current.comment}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  className="text-xs underline text-sky-700"
+                  onClick={() => void loadLesseePanel()}
+                >
+                  Refresh status
+                </button>
                 <Link
                   href={`#/repair/estimates/${estimateId}/send-lessee`}
                   className="text-xs underline text-sky-700"
@@ -680,9 +727,10 @@ export default function EstimateReview() {
                       <span>via {h.channel}</span>
                       {h.sendVersion != null ? <span>send #{h.sendVersion}</span> : null}
                       <span className="text-muted-foreground">
-                        {h.decidedAt
-                          ? new Date(h.decidedAt).toLocaleString()
-                          : ""}
+                        {h.decidedAtEt ||
+                          (h.decidedAt
+                            ? new Date(h.decidedAt).toLocaleString()
+                            : "")}
                       </span>
                       {h.respondentName ? (
                         <span>

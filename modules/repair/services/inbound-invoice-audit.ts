@@ -1094,6 +1094,48 @@ async function ingestCrbInvoiceForEvent(opts: IntakeBase & {
   const invoiceNo = resolvedNo.invoiceNo;
   const jobCodes = jobCodesFromLines(parsed.lines);
 
+  // Wreck Resp 3 final invoice: blank invoice # → HARD REJECT (§11 #10).
+  // Also block when open wreck flags remain.
+  {
+    const { rows: wreckRows } = await q(
+      `SELECT we.id AS wreck_event_id, e.is_wreck,
+              est.id AS estimate_id, est.wreck_flags_block, est.wreck_track_type
+       FROM repair.events e
+       LEFT JOIN repair.wreck_events we ON we.event_id = e.id AND we.deleted_at IS NULL
+       LEFT JOIN repair.estimates est ON est.event_id = e.id AND est.deleted_at IS NULL
+         AND (est.wreck_track_type = 'R107_RESP3' OR est.id IN (
+           SELECT estimate_id FROM repair.event_tracks
+           WHERE event_id = e.id AND track_type = 'R107_RESP3' AND deleted_at IS NULL
+         ))
+       WHERE e.id = $1 AND e.deleted_at IS NULL
+       LIMIT 1`,
+      [eventId],
+    );
+    const wr = wreckRows[0];
+    const isWreckResp3 =
+      wr &&
+      (wr.is_wreck || wr.wreck_event_id) &&
+      (wr.wreck_track_type === "R107_RESP3" || wr.estimate_id);
+    if (isWreckResp3 && resolvedNo.blank) {
+      return {
+        ok: false as const,
+        status: 422,
+        error:
+          "Resp 3 wreck final invoice requires invoice number — HARD REJECT (estimate loads may omit it)",
+        code: "RESP3_INVOICE_NO_REQUIRED",
+      };
+    }
+    if (wr?.wreck_flags_block) {
+      return {
+        ok: false as const,
+        status: 409,
+        error:
+          "Cannot invoice while Resp 3 wreck flags remain open — car owner / managing partner must clear flags first",
+        wreckFlagsBlock: true as const,
+      };
+    }
+  }
+
   // Q19(a): same billing party + invoice_no any period = hard block (before insert)
   const hardDups = await findHardDuplicateInvoice({
     tenantId,

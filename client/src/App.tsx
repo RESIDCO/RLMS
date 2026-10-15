@@ -49,6 +49,7 @@ import ShopMaster from "@/pages/repair/ShopMaster";
 import ShopProfile from "@/pages/repair/ShopProfile";
 import RepairAdmin from "@/pages/repair/RepairAdmin";
 import ReferenceData from "@/pages/repair/ReferenceData";
+import WreckEvent from "@/pages/repair/WreckEvent";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -138,6 +139,7 @@ function AppRouter() {
       <Route path="/repair/reference-data" component={ReferenceData} />
       <Route path="/repair/help" component={RepairComingSoon} />
       {/* §D Estimate Review sub-routes before :id */}
+      <Route path="/repair/wreck/:eventId" component={WreckEvent} />
       <Route path="/repair/estimates/:id/responsibilities" component={UpdateResponsibilities} />
       <Route path="/repair/estimates/:id/documents" component={EstimateDocuments} />
       <Route path="/repair/estimates/:id/send-lessee" component={SendLessee} />

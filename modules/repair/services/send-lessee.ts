@@ -54,12 +54,35 @@ export function dataFileLesseeTotalCents(rawLines: string[]): number {
   return cents;
 }
 
+async function assertNotWreckEstimate(estimateId: string, tenantId: string) {
+  const { rows } = await q(
+    `SELECT e.id, e.is_wreck, est.wreck_track_type, we.id AS wreck_event_id
+     FROM repair.estimates est
+     JOIN repair.events e ON e.id = est.event_id
+     LEFT JOIN repair.wreck_events we ON we.event_id = e.id AND we.deleted_at IS NULL
+     WHERE est.id = $1 AND est.tenant_id = $2 AND est.deleted_at IS NULL`,
+    [estimateId, tenantId],
+  );
+  if (!rows[0]) return { ok: false as const, error: "Estimate not found" };
+  if (rows[0].is_wreck || rows[0].wreck_event_id || rows[0].wreck_track_type === "R107_RESP3") {
+    return {
+      ok: false as const,
+      error:
+        "Wreck estimates are excluded from Send Lessee entirely (Bruce §11 #9) — no lessee rebill on wreck",
+    };
+  }
+  return { ok: true as const };
+}
+
 export async function buildSendLesseePreview(opts: {
   estimateId: string;
   tenantId?: string;
   taxCents?: number;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const wreckGate = await assertNotWreckEstimate(opts.estimateId, tenantId);
+  if (!wreckGate.ok) return { ok: false as const, error: wreckGate.error };
+
   const totals = await computeLesseeTotals({
     estimateId: opts.estimateId,
     tenantId,
@@ -308,6 +331,10 @@ export async function sendLesseeFromPreview(opts: {
     };
   }
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const wreckGate = await assertNotWreckEstimate(opts.estimateId, tenantId);
+  if (!wreckGate.ok) {
+    return { ok: false as const, status: 409, error: wreckGate.error };
+  }
   const recipients = [
     ...new Set(opts.recipients.map((e) => e.trim().toLowerCase()).filter(Boolean)),
   ];

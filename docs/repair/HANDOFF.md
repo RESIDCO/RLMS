@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **Wreck dual-track spec (docs only)** | Apply `rlms-phase1-owner-ui-wreck-spec.bundle`. Requires **`c8a7138`** (prior fold). Lands tip in bundle README. Spec: [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) — Bruce’s six corrections WIN; fold + §11 answers (JIC shop→owner→RR; owner CRB rebill; over-DV warn; no Resp 3 taxes; no Send Lessee on wreck; Price Master AAR/Railinc; flag clear owner/MP; calendar days). Remaining OPEN: #1 (manual for now), #4, #10. **No wreck UI/APIs yet** — build after §D r5 sign-off. |
+| **Wreck dual-track BUILD** | Apply `rlms-phase1-owner-ui-wreck.bundle`. Requires **`85856b6`** (wreck-spec §11). Lands tip in bundle README. Implements approved [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md): wreck event dual-track, Resp 3 hard/flag validation, JIC tracker, owner DV shell, Send Lessee exclude, invoice # gate. Smoke: `npm run repair:smoke-wreck`. |
+| **Wreck dual-track spec (docs)** | Prior: `rlms-phase1-owner-ui-wreck-spec.bundle`. Requires **`c8a7138`** → **`85856b6`**. Spec approved; §11 #1/#4/#10 DECIDED (Umler/manual inconsistent-tolerant; AAR quarterly labor rate; invoice # not on estimate / HARD REJECT final invoice). |
 | **§D Estimate Review r5** | Apply `rlms-phase1-owner-ui-d-estimate-review-r5.bundle`. Requires **`f911faa`**. Lands tip in bundle README. (1) Lessee Loc/Qty/RJOB/QR/Description/CID via same `enrichLineFromRaw` as owner grid. (2) Gear → Reference Data admin: tabs, soft-retire/restore, audit, dry-run import, export. |
 | **§D Estimate Review r4** | Prior: `rlms-phase1-owner-ui-d-estimate-review-r4.bundle`. Requires **`d864588`** → **`f911faa`**. Qualifier multi-path; header LOCK/EDIT/FREE; lessee token 403; cent reconcile; $0 Send block. |
 | **§D Estimate Review r3** | Prior: `rlms-phase1-owner-ui-d-estimate-review-r3.bundle`. Requires **`2d987c9`** → **`d864588`**. Hover close; car# lock 409; money commas; send-lessee preview + local outbox. |
@@ -27,9 +28,9 @@
 | **§B Shop master + Entity** | Prior: `rlms-phase1-owner-ui-b-shops-entity.bundle` → **`2039b7f`**. |
 | **§A final** | Prior: `rlms-phase1-owner-ui-a-final.bundle` → **`1f6aa47`**. |
 
-If PC is on **`f911faa`**, apply §D **estimate-review-r5** first → **`0c0be23`**, then the **wreck-spec** docs bundle.  
-If PC is on prior fold tip **`c8a7138`**, apply **`rlms-phase1-owner-ui-wreck-spec.bundle`** next (§11 FF tip — see bundle README). If still on **`0c0be23`** / **`9935a0f`**, pull the prior fold bundle first to reach **`c8a7138`**, then this tip.  
-**Wreck build** (UI/APIs) waits for §D r5 sign-off + Bruce acceptance of [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md).
+If PC is on **`85856b6`**, apply **`rlms-phase1-owner-ui-wreck.bundle`** next (build tip — see bundle README).  
+If PC is on **`c8a7138`**, apply wreck-spec first → **`85856b6`**, then the build bundle.  
+If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec first.
 
 ---
 
@@ -41,7 +42,7 @@ If PC is on prior fold tip **`c8a7138`**, apply **`rlms-phase1-owner-ui-wreck-sp
 | **2** | Shop master (spec §B) + Entity/workspace + railroads + Shop Profile + Map | **Signed off** (`dd5acc7`) |
 | **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Signed off** (`468a9db`) |
 | **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r5 tip** (awaiting Bruce sign-off) |
-| **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **Spec + §11 answers** (docs-only tip; build after §D r5 sign-off) |
+| **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **Spec approved + BUILD tip** (`rlms-phase1-owner-ui-wreck.bundle` on `85856b6`) |
 | 5+ | Documents polish / Lessee, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md)  
@@ -63,7 +64,33 @@ If PC is on prior fold tip **`c8a7138`**, apply **`rlms-phase1-owner-ui-wreck-sp
 | N+16 | `rlms-phase1-owner-ui-d-estimate-review-r3.bundle` | `2d987c9` | → **`d864588`** |
 | N+17 | `rlms-phase1-owner-ui-d-estimate-review-r4.bundle` | `d864588` | → **`f911faa`** |
 | N+18 | `rlms-phase1-owner-ui-d-estimate-review-r5.bundle` | `f911faa` | → **`0c0be23`** |
-| N+19 | **`rlms-phase1-owner-ui-wreck-spec.bundle`** (replaced — §11 FF from c8a7138) | **`c8a7138`** | → **(see README)** |
+| N+19 | **`rlms-phase1-owner-ui-wreck-spec.bundle`** (§11 FF from c8a7138) | **`c8a7138`** | → **`85856b6`** |
+| N+20 | **`rlms-phase1-owner-ui-wreck.bundle`** (approved build) | **`85856b6`** | → **(see README)** |
+
+---
+
+## Apply wreck build (on tip `85856b6`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect 85856b6…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-wreck.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-wreck.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
+Then:
+
+```powershell
+$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+$env:REPAIR_LOCAL_DB = "1"
+$env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
+npm run repair:migrate:local
+npm run repair:smoke-wreck
+npm run repair:dev:local
+# http://127.0.0.1:5000/#/repair/wreck/<wreckEventId>
+```
 
 ---
 
@@ -135,5 +162,5 @@ Expect: car edit **409**; money thousands separators; hover tips not stuck; Send
 
 - Full AAR Bad Order Reason list still incomplete (do not invent) — admin-extensible via `/#/repair/bo-reasons`.
 - Q1 / Q2 remain in open-questions.md.
-- **Wreck:** [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) fold + Bruce §11 answers applied. Remaining `OPEN:` — **#1** cost/A&B source (manual entry for now); **#4** unpriced wreck labor rate table; **#10** missing Resp 3 invoice number (reject vs flag / Q18).
-- Screen E document polish / Screen F Lessee after §D sign-off (wreck build may intercalate per Bruce).
+- **Wreck:** Spec approved; §11 #1/#4/#10 DECIDED. Build bundle on `85856b6` — see tip table.
+- Screen E document polish / Screen F Lessee after §D sign-off.

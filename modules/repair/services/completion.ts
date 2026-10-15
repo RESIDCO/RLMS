@@ -8,6 +8,7 @@ import { notify } from "./notifications";
 import { getStatusByCode, assertTransitionAllowed } from "./status-machine";
 import { resolveActiveLink } from "./event-links";
 import { isOtpRequired, verifyStepOtp } from "./otp";
+import { estimateHasOpenWreckFlags } from "./wreck-validate";
 
 const ROLLBACK_ROLES = new Set(["reviewer", "admin", "fleet_manager", "mech_manager"]);
 
@@ -90,6 +91,17 @@ export async function setCompletedDate(opts: {
       ok: false as const,
       status: 409,
       error: `Estimate must be APPROVED to complete (found ${estimate.status_code})`,
+    };
+  }
+
+  // Resp 3 wreck flags block completed date until owner/MP clears
+  if (await estimateHasOpenWreckFlags(String(estimate.id), tenantId)) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Cannot set completed date while Resp 3 wreck flags remain open — car owner / managing partner must clear flags first",
+      wreckFlagsBlock: true as const,
     };
   }
 

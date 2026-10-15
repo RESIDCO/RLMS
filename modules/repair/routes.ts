@@ -219,6 +219,20 @@ import {
 } from "./services/inbound-invoice-audit";
 import { relayDispo, listDispo } from "./services/dispo";
 import {
+  createWreckEvent,
+  getWreckEvent,
+  getWreckEventByEventId,
+  updateWreckEvent,
+  clearWreckFlags,
+} from "./services/wreck-events";
+import {
+  computeSettlementGauge,
+  saveSettlementCalc,
+  omitOwnerDv,
+} from "./services/wreck-settlement";
+import { validateWreckLoad } from "./services/wreck-validate";
+import { parseAarFile } from "./services/aar-parser";
+import {
   listContacts,
   upsertContact,
   softDeleteContact,
@@ -3714,5 +3728,153 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     if (!uid) return;
     const result = await cropImportPhase2Stub({ actor: actorFrom(req) });
     return res.status(501).json(result);
+  });
+
+  // ── Wreck dual-track (owner-only DV / settlement) ───────────────────
+  app.post("/api/repair/wreck-events", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await createWreckEvent({
+      actor: actorFrom(req),
+      carMark: String(body.carMark ?? ""),
+      carNumber: String(body.carNumber ?? ""),
+      shopId: body.shopId ?? null,
+      badOrderId: body.badOrderId ?? null,
+      eventId: body.eventId ?? null,
+      ddctIncidentId: String(body.ddctIncidentId ?? ""),
+      incidentDate: body.incidentDate ?? null,
+      splc: body.splc ?? null,
+      damagingRoad: body.damagingRoad ?? null,
+      handlingRoad: body.handlingRoad ?? null,
+      ruleBasis: body.ruleBasis ?? "107",
+      fm95aCondition: body.fm95aCondition ?? null,
+      lastCommodity: body.lastCommodity ?? null,
+      stcc: body.stcc ?? null,
+      disposition: body.disposition ?? null,
+      shopArrivalDate: body.shopArrivalDate ?? null,
+      jicType: body.jicType ?? "STANDARD",
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    const full = await getWreckEvent(result.wreckEventId);
+    return res.status(201).json({ ...result, wreck: full });
+  });
+
+  app.get("/api/repair/wreck-events/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const wreck = await getWreckEvent(String(req.params.id));
+    if (!wreck) return res.status(404).json({ error: "Wreck event not found" });
+    const gauge = await computeSettlementGauge({ wreckEventId: String(req.params.id) });
+    return res.json({ wreck, gauge });
+  });
+
+  app.get("/api/repair/events/:eventId/wreck", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const wreck = await getWreckEventByEventId(String(req.params.eventId));
+    if (!wreck) return res.status(404).json({ error: "No wreck event for this event" });
+    const gauge = await computeSettlementGauge({ wreckEventId: String(wreck.id) });
+    return res.json({ wreck, gauge });
+  });
+
+  app.patch("/api/repair/wreck-events/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await updateWreckEvent({
+      wreckEventId: String(req.params.id),
+      actor: actorFrom(req),
+      patch: req.body ?? {},
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    const wreck = await getWreckEvent(String(req.params.id));
+    return res.json({ ok: true, wreck });
+  });
+
+  app.post("/api/repair/wreck-events/:id/clear-flags", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await clearWreckFlags({
+      wreckEventId: String(req.params.id),
+      estimateId: body.estimateId ?? undefined,
+      flagIds: body.flagIds ?? undefined,
+      actor: actorFrom(req),
+      actorRole: String(body.actorRole ?? "owner"),
+      reason: String(body.reason ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/wreck-events/:id/settlement", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const body = req.body ?? {};
+    const result = await saveSettlementCalc({
+      wreckEventId: String(req.params.id),
+      actor: actorFrom(req),
+      originalCostCents:
+        body.originalCostCents != null ? Number(body.originalCostCents) : null,
+      reproductionCents:
+        body.reproductionCents != null ? Number(body.reproductionCents) : null,
+      depreciatedValueCents:
+        body.depreciatedValueCents != null
+          ? Number(body.depreciatedValueCents)
+          : null,
+      salvageCents: body.salvageCents != null ? Number(body.salvageCents) : null,
+      settlementBasis: body.settlementBasis ?? null,
+      settlementCapCents:
+        body.settlementCapCents != null ? Number(body.settlementCapCents) : null,
+      exhibitEdition: body.exhibitEdition ?? null,
+      overrideReason: body.overrideReason ?? null,
+      inputsJson: body.inputsJson ?? undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/wreck-events/:id/settlement-gauge", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const gauge = await computeSettlementGauge({
+      wreckEventId: String(req.params.id),
+    });
+    if (!gauge) return res.status(404).json({ error: "Wreck event not found" });
+    return res.json({ gauge });
+  });
+
+  /** Dry-run wreck file validation (owner review). */
+  app.post(
+    "/api/repair/wreck/validate-file",
+    upload.single("file"),
+    async (req, res) => {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const file = req.file;
+      if (!file?.buffer?.length) {
+        return res.status(400).json({ error: "500-byte file required" });
+      }
+      const parsed = parseAarFile(file.buffer);
+      const result = await validateWreckLoad({
+        lines: parsed.lines,
+        track: (req.body?.track as "OWNER_CONTRACT" | "R107_RESP3") ?? "UNKNOWN",
+        mode: req.body?.mode === "FINAL_INVOICE" ? "FINAL_INVOICE" : "ESTIMATE",
+        isWreckEvent: true,
+      });
+      return res.json(result);
+    },
+  );
+
+  /** Shop/lessee must never receive owner DV — helper for token payloads. */
+  app.get("/api/repair/wreck-events/:id/public-safe", async (req, res) => {
+    // Still requires auth in authed router; shop token routes omit DV separately.
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const wreck = await getWreckEvent(String(req.params.id));
+    if (!wreck) return res.status(404).json({ error: "Wreck event not found" });
+    return res.json({
+      wreck: omitOwnerDv(wreck as unknown as Record<string, unknown>),
+    });
   });
 }

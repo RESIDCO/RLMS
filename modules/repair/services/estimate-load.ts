@@ -22,6 +22,12 @@ import { getInboundEmailProvider } from "../providers/inbound-email";
 import { notify } from "./notifications";
 import { centsToDollars } from "./money";
 import { headerFromAarFields } from "./header-edits";
+import { validateWreckLoad } from "./wreck-validate";
+import {
+  assertWreckEstimateUploadGate,
+  attachEstimateToWreckTrack,
+  persistWreckFlags,
+} from "./wreck-events";
 
 export type LoadFinding = {
   severity: "ERROR" | "WARNING";
@@ -248,28 +254,68 @@ async function applyCarEstimate(opts: {
   actor: string;
   actorName: string;
   comment?: string;
+  /** Dual-track: prefer estimate bound to this track (wreck). */
+  trackType?: "OWNER_CONTRACT" | "R107_RESP3" | null;
+  pricedQuarter?: string | null;
 }): Promise<{ estimateId: string; revisionId: string; labor: number; material: number; total: number }> {
   const tenantId = opts.tenantId;
-  const { rows: existing } = await q(
-    `SELECT e.*, s.code AS status_code
-     FROM repair.estimates e
-     JOIN repair.statuses s ON s.id = e.status_id
-     WHERE e.event_id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL
-     ORDER BY e.created_at ASC LIMIT 1`,
-    [opts.eventId, tenantId],
-  );
+  let estimate: Record<string, unknown> | undefined;
 
-  let estimate = existing[0];
+  if (opts.trackType) {
+    const { rows: trackEst } = await q(
+      `SELECT e.*, s.code AS status_code
+       FROM repair.event_tracks t
+       JOIN repair.estimates e ON e.id = t.estimate_id AND e.deleted_at IS NULL
+       JOIN repair.statuses s ON s.id = e.status_id
+       WHERE t.event_id = $1 AND t.track_type = $2 AND t.deleted_at IS NULL
+       LIMIT 1`,
+      [opts.eventId, opts.trackType],
+    );
+    estimate = trackEst[0];
+    if (!estimate) {
+      const { rows: byType } = await q(
+        `SELECT e.*, s.code AS status_code
+         FROM repair.estimates e
+         JOIN repair.statuses s ON s.id = e.status_id
+         WHERE e.event_id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL
+           AND e.wreck_track_type = $3
+         ORDER BY e.created_at ASC LIMIT 1`,
+        [opts.eventId, tenantId, opts.trackType],
+      );
+      estimate = byType[0];
+    }
+  }
+
+  if (!estimate && !opts.trackType) {
+    const { rows: existing } = await q(
+      `SELECT e.*, s.code AS status_code
+       FROM repair.estimates e
+       JOIN repair.statuses s ON s.id = e.status_id
+       WHERE e.event_id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL
+       ORDER BY e.created_at ASC LIMIT 1`,
+      [opts.eventId, tenantId],
+    );
+    estimate = existing[0];
+  }
+
   const queued = await getStatusByCode(tenantId, "ESTIMATE", "QUEUED");
   if (!queued) throw new Error("ESTIMATE/QUEUED missing");
 
   if (!estimate) {
     const ins = await q(
       `INSERT INTO repair.estimates
-         (tenant_id, event_id, current_revision, status_id, created_by)
-       VALUES ($1,$2,0,$3,$4)
+         (tenant_id, event_id, current_revision, status_id, created_by,
+          wreck_track_type, priced_quarter)
+       VALUES ($1,$2,0,$3,$4,$5,$6)
        RETURNING *`,
-      [tenantId, opts.eventId, queued.id, opts.actor],
+      [
+        tenantId,
+        opts.eventId,
+        queued.id,
+        opts.actor,
+        opts.trackType ?? null,
+        opts.pricedQuarter ?? null,
+      ],
     );
     estimate = { ...ins.rows[0], status_code: "QUEUED" };
   }
@@ -323,6 +369,13 @@ async function applyCarEstimate(opts: {
         throw new Error(allowed.reason);
       }
     }
+  }
+
+  if (opts.pricedQuarter) {
+    await q(
+      `UPDATE repair.estimates SET priced_quarter = COALESCE(priced_quarter, $2) WHERE id = $1`,
+      [estimate.id, opts.pricedQuarter],
+    );
   }
 
   const lineInputs: Array<{
@@ -501,6 +554,10 @@ export async function loadEstimateAar(opts: {
   /** When true, apply even if only WARNINGS (used after owner accept). */
   forceAcceptWarnings?: boolean;
   existingLoadRunId?: string;
+  /** ESTIMATE (default) vs FINAL_INVOICE — invoice # HARD REJECT only on final (§11 #10). */
+  wreckLoadMode?: "ESTIMATE" | "FINAL_INVOICE";
+  /** Force wreck-track validation even if event not yet flagged is_wreck. */
+  wreckTrack?: "OWNER_CONTRACT" | "R107_RESP3";
 }) {
   const actorName = opts.actorName ?? opts.actor;
   let tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
@@ -518,10 +575,53 @@ export async function loadEstimateAar(opts: {
   }
 
   const sha256 = createHash("sha256").update(opts.bytes).digest("hex");
-  const { findings: baseFindings, cars } = analyzeFile(opts.bytes);
+  const { findings: baseFindings, cars, parsed } = analyzeFile(opts.bytes);
 
   // Per-car VCF + open-event checks
   const findings = [...baseFindings];
+
+  // Wreck dual-track: gate + Resp 3 hard/flag validation
+  let wreckEventId: string | null = null;
+  let wreckSuggestedTrack: "OWNER_CONTRACT" | "R107_RESP3" | null =
+    opts.wreckTrack ?? null;
+  let wreckPricedQuarter: string | null = null;
+  let wreckFlagFindings: LoadFinding[] = [];
+  if (preferredEventId) {
+    const gate = await assertWreckEstimateUploadGate(preferredEventId, tenantId);
+    if (!gate.ok) {
+      findings.push({
+        severity: "ERROR",
+        code: "WRECK_JIC_GATE",
+        message: gate.error,
+      });
+    } else if (gate.wreck) {
+      wreckEventId = String(gate.wreck.id);
+      const wreckVal = await validateWreckLoad({
+        lines: parsed?.lines ?? [],
+        track: opts.wreckTrack ?? "UNKNOWN",
+        mode: opts.wreckLoadMode ?? "ESTIMATE",
+        tenantId,
+        isWreckEvent: true,
+      });
+      findings.push(...wreckVal.findings);
+      wreckSuggestedTrack = wreckVal.suggestedTrack;
+      wreckPricedQuarter = wreckVal.pricedQuarter;
+      wreckFlagFindings = wreckVal.findings.filter((f) => f.severity === "WARNING");
+    }
+  } else if (opts.wreckTrack === "R107_RESP3" || opts.wreckLoadMode === "FINAL_INVOICE") {
+    const wreckVal = await validateWreckLoad({
+      lines: parsed?.lines ?? parseAarFile(opts.bytes).lines,
+      track: opts.wreckTrack ?? "R107_RESP3",
+      mode: opts.wreckLoadMode ?? "ESTIMATE",
+      tenantId,
+      isWreckEvent: true,
+    });
+    findings.push(...wreckVal.findings);
+    wreckSuggestedTrack = wreckVal.suggestedTrack;
+    wreckPricedQuarter = wreckVal.pricedQuarter;
+    wreckFlagFindings = wreckVal.findings.filter((f) => f.severity === "WARNING");
+  }
+
   for (const car of cars) {
     if (!car.carMark || !car.carNumber) {
       findings.push({
@@ -717,6 +817,7 @@ export async function loadEstimateAar(opts: {
       continue;
     }
     const loadKind = await estimateLoadKind(tenantId, String(event.id));
+    const trackType = wreckSuggestedTrack;
     const result = await applyCarEstimate({
       tenantId,
       eventId: String(event.id),
@@ -726,7 +827,40 @@ export async function loadEstimateAar(opts: {
       actor: opts.actor,
       actorName,
       comment: opts.comment,
+      trackType,
+      pricedQuarter: wreckPricedQuarter,
     });
+
+    if (trackType) {
+      await attachEstimateToWreckTrack({
+        eventId: String(event.id),
+        estimateId: result.estimateId,
+        trackType,
+        wreckEventId,
+        tenantId,
+        actor: opts.actor,
+      });
+    }
+
+    if (wreckEventId && trackType === "R107_RESP3" && wreckFlagFindings.length) {
+      await persistWreckFlags({
+        tenantId,
+        wreckEventId,
+        estimateId: result.estimateId,
+        loadRunId: run.id,
+        findings: wreckFlagFindings,
+        actor: opts.actor,
+        pricedQuarter: wreckPricedQuarter,
+      });
+    } else if (trackType === "R107_RESP3" && wreckPricedQuarter) {
+      await q(
+        `UPDATE repair.estimates
+         SET priced_quarter = COALESCE(priced_quarter, $2), wreck_track_type = 'R107_RESP3'
+         WHERE id = $1`,
+        [result.estimateId, wreckPricedQuarter],
+      );
+    }
+
     await q(
       `INSERT INTO repair.estimate_load_cars
          (tenant_id, load_run_id, car_mark, car_number, event_id, estimate_id,
@@ -775,6 +909,7 @@ export async function loadEstimateAar(opts: {
       estimateId: result.estimateId,
       revisionId: result.revisionId,
       loadKind,
+      trackType,
       total: result.total,
     });
   }

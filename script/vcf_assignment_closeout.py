@@ -46,6 +46,99 @@ def is_open(row) -> bool:
     return end is None or str(end).strip() == ""
 
 
+def end_date_match_key(end) -> str:
+    s = str(end or "").strip()[:10]
+    if not s:
+        return ""
+    try:
+        if int(s[:4]) >= 3000:
+            return ""
+    except ValueError:
+        pass
+    return s
+
+
+def assignment_ids_compatible(a, b) -> bool:
+    x = str(a or "").strip()
+    y = str(b or "").strip()
+    if not x or not y:
+        return True
+    return x == y
+
+
+def _end_date_distance(a, b) -> float:
+    from datetime import datetime
+
+    ka = end_date_match_key(a) or "4000-12-31"
+    kb = end_date_match_key(b) or "4000-12-31"
+    try:
+        da = datetime.fromisoformat(ka)
+        db = datetime.fromisoformat(kb)
+    except ValueError:
+        return float("inf")
+    return abs((da - db).total_seconds())
+
+
+def _pick_exact_existing(cands):
+    if not cands:
+        return None
+    return sorted(
+        cands,
+        key=lambda row: (1 if row.get("assignment_id_ext") else 0, row.get("id") or 0),
+        reverse=True,
+    )[0]
+
+
+def _pair_incoming_to_existing(existing_rows, incoming):
+    actions = []
+    used_e = set()
+    used_i = set()
+
+    def emit_pair(hist, keep):
+        used_e.add(keep["id"])
+        merged = dict(hist)
+        merged["assignment_id_ext"] = hist.get("assignment_id_ext") or keep.get("assignment_id_ext")
+        if content_equal_ah(keep, merged):
+            actions.append({"op": "unchanged", "existing_id": keep["id"]})
+        else:
+            actions.append({"op": "update", "existing_id": keep["id"], "payload": merged})
+
+    for i, hist in enumerate(incoming):
+        want_end = end_date_match_key(hist.get("end_date"))
+        cands = [
+            e
+            for e in existing_rows
+            if e["id"] not in used_e
+            and end_date_match_key(e.get("end_date")) == want_end
+            and assignment_ids_compatible(e.get("assignment_id_ext"), hist.get("assignment_id_ext"))
+        ]
+        keep = _pick_exact_existing(cands)
+        if keep is None:
+            continue
+        used_i.add(i)
+        emit_pair(hist, keep)
+
+    left_i = [(i, h) for i, h in enumerate(incoming) if i not in used_i]
+    left_e = [e for e in existing_rows if e["id"] not in used_e]
+    if len(left_i) == 1 and len(left_e) == 1:
+        used_i.add(left_i[0][0])
+        emit_pair(left_i[0][1], left_e[0])
+    elif left_i and left_e:
+        avail = list(left_e)
+        for i, hist in left_i:
+            if not avail:
+                break
+            avail.sort(key=lambda e: _end_date_distance(e.get("end_date"), hist.get("end_date")))
+            keep = avail.pop(0)
+            used_i.add(i)
+            emit_pair(hist, keep)
+
+    for i, hist in enumerate(incoming):
+        if i not in used_i:
+            actions.append({"op": "insert", "payload": hist})
+    return actions
+
+
 def append_comment(existing, note: str) -> str:
     cur = str(existing or "").strip()
     if not cur:
@@ -89,104 +182,39 @@ def _prefer_filled_then_later(a, b):
 def plan_vcf_assignment_closeout(existing_rows, incoming):
     """Return a list of {op, ...} actions. Never deletes."""
     actions = []
-    incoming_open = [p for p in incoming if is_open(p)]
-    incoming_closed = [p for p in incoming if not is_open(p)]
-    existing_open = [r for r in existing_rows if is_open(r)]
-
-    by_natural = {}
+    incoming_keys = set(
+        open_period_match_key(p.get("railcar_id"), p.get("rider_external_id"), p.get("start_date"))
+        for p in incoming
+    )
+    groups = {k: {"existing": [], "incoming": []} for k in incoming_keys}
+    for hist in incoming:
+        key = open_period_match_key(hist.get("railcar_id"), hist.get("rider_external_id"), hist.get("start_date"))
+        groups[key]["incoming"].append(hist)
     for row in existing_rows:
-        by_natural[
-            ah_natural_key(
-                row.get("railcar_id"),
-                row.get("assignment_id_ext"),
-                row.get("start_date"),
-                row.get("end_date"),
-            )
-        ] = row
+        key = open_period_match_key(row.get("railcar_id"), row.get("rider_external_id"), row.get("start_date"))
+        if key in groups:
+            groups[key]["existing"].append(row)
 
-    for hist in incoming_closed:
-        key = ah_natural_key(
-            hist.get("railcar_id"),
-            hist.get("assignment_id_ext"),
-            hist.get("start_date"),
-            hist.get("end_date"),
-        )
-        existing = by_natural.get(key)
-        if not existing:
-            actions.append({"op": "insert", "payload": hist})
-        elif content_equal_ah(existing, hist):
-            actions.append({"op": "unchanged", "existing_id": existing["id"]})
-        else:
-            actions.append({"op": "update", "existing_id": existing["id"], "payload": hist})
+    claimed = set()
+    for g in groups.values():
+        part = _pair_incoming_to_existing(g["existing"], g["incoming"])
+        for a in part:
+            actions.append(a)
+            if a["op"] in ("update", "unchanged"):
+                claimed.add(a["existing_id"])
 
+    incoming_open = [p for p in incoming if is_open(p)]
     if not incoming_open:
         return actions
 
-    incoming_by_match = {}
-    for hist in incoming_open:
-        match_key = open_period_match_key(
-            hist.get("railcar_id"),
-            hist.get("rider_external_id"),
-            hist.get("start_date"),
-        )
-        prev = incoming_by_match.get(match_key)
-        incoming_by_match[match_key] = _prefer_filled_then_later(prev, hist) if prev else hist
-
-    latest_incoming_start = None
     starts = sorted(str(p.get("start_date") or "") for p in incoming_open)
-    if starts:
-        latest_incoming_start = starts[-1] or None
+    latest_incoming_start = starts[-1] or None if starts else None
 
-    claimed = set()
-    for match_key, current_open in incoming_by_match.items():
-        matches = [
-            row
-            for row in existing_open
-            if row["id"] not in claimed
-            and open_period_match_key(
-                row.get("railcar_id"),
-                row.get("rider_external_id"),
-                row.get("start_date"),
-            )
-            == match_key
-        ]
-        keep = None
-        if matches:
-            keep = sorted(
-                matches,
-                key=lambda row: (
-                    1 if row.get("assignment_id_ext") else 0,
-                    row.get("id") or 0,
-                ),
-                reverse=True,
-            )[0]
-        for row in matches:
-            if keep is not None and row["id"] == keep["id"]:
-                continue
-            claimed.add(row["id"])
-            actions.append(
-                {
-                    "op": "close",
-                    "existing_id": row["id"],
-                    "end_date": current_open.get("start_date"),
-                    "comment": append_comment(row.get("comment"), CLOSE_DUP),
-                }
-            )
-        if keep is not None:
-            claimed.add(keep["id"])
-            merged = dict(current_open)
-            merged["assignment_id_ext"] = (
-                current_open.get("assignment_id_ext") or keep.get("assignment_id_ext")
-            )
-            if content_equal_ah(keep, merged):
-                actions.append({"op": "unchanged", "existing_id": keep["id"]})
-            else:
-                actions.append({"op": "update", "existing_id": keep["id"], "payload": merged})
-        else:
-            actions.append({"op": "insert", "payload": current_open})
-
-    for row in existing_open:
-        if row["id"] in claimed:
+    for row in existing_rows:
+        if not is_open(row) or row["id"] in claimed:
+            continue
+        key = open_period_match_key(row.get("railcar_id"), row.get("rider_external_id"), row.get("start_date"))
+        if key in incoming_keys:
             continue
         actions.append(
             {

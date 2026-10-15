@@ -8,7 +8,6 @@
 
 import {
   assignmentHistoryContentEqual,
-  assignmentHistoryNaturalKey,
   type AssignmentHistoryPeriodPayload,
 } from "./vcf-import";
 
@@ -73,22 +72,127 @@ function isOpen(row: { end_date?: string | null }): boolean {
   return row.end_date == null || String(row.end_date).trim() === "";
 }
 
-function preferFilledThenLater<T extends { assignment_id_ext?: string | null; start_date?: string | null; id?: number }>(
-  a: T,
-  b: T,
-): T {
-  const aFilled = a.assignment_id_ext ? 1 : 0;
-  const bFilled = b.assignment_id_ext ? 1 : 0;
-  if (aFilled !== bFilled) return aFilled > bFilled ? a : b;
-  const cmp = String(b.start_date ?? "").localeCompare(String(a.start_date ?? ""));
-  if (cmp !== 0) return cmp > 0 ? b : a;
-  return (b.id ?? 0) > (a.id ?? 0) ? b : a;
+function trimExt(v: string | null | undefined) {
+  return String(v ?? "").trim();
+}
+
+/** Open sentinel (null/blank, 4000-12-31, or any end year ≥ 3000) for matching. */
+export function endDateMatchKey(end: string | null | undefined): string {
+  const s = String(end ?? "").trim().slice(0, 10);
+  if (!s) return "";
+  const y = Number(s.slice(0, 4));
+  if (Number.isFinite(y) && y >= 3000) return "";
+  return s;
+}
+
+export function assignmentIdsCompatible(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const x = trimExt(a);
+  const y = trimExt(b);
+  if (!x || !y) return true;
+  return x === y;
+}
+
+function endDateDistance(a: string | null | undefined, b: string | null | undefined): number {
+  const ka = endDateMatchKey(a) || "4000-12-31";
+  const kb = endDateMatchKey(b) || "4000-12-31";
+  const da = Date.parse(ka);
+  const db = Date.parse(kb);
+  if (!Number.isFinite(da) || !Number.isFinite(db)) return Number.POSITIVE_INFINITY;
+  return Math.abs(da - db);
+}
+
+function pickExactExisting(
+  cands: ExistingHistoryRow[],
+): ExistingHistoryRow | undefined {
+  if (!cands.length) return undefined;
+  return [...cands].sort((a, b) => {
+    const aFilled = a.assignment_id_ext ? 1 : 0;
+    const bFilled = b.assignment_id_ext ? 1 : 0;
+    if (aFilled !== bFilled) return bFilled - aFilled;
+    return (b.id ?? 0) - (a.id ?? 0);
+  })[0];
+}
+
+function pairIncomingToExisting(
+  existingRows: ExistingHistoryRow[],
+  incoming: AssignmentHistoryPeriodPayload[],
+): CloseoutAction[] {
+  const actions: CloseoutAction[] = [];
+  const usedE = new Set<number>();
+  const usedI = new Set<number>();
+
+  for (let i = 0; i < incoming.length; i++) {
+    const hist = incoming[i];
+    const wantEnd = endDateMatchKey(hist.end_date);
+    const cands = existingRows.filter(
+      (e) =>
+        !usedE.has(e.id) &&
+        endDateMatchKey(e.end_date) === wantEnd &&
+        assignmentIdsCompatible(e.assignment_id_ext, hist.assignment_id_ext),
+    );
+    const keep = pickExactExisting(cands);
+    if (!keep) continue;
+    usedE.add(keep.id);
+    usedI.add(i);
+    const merged: AssignmentHistoryPeriodPayload = {
+      ...hist,
+      assignment_id_ext: hist.assignment_id_ext || keep.assignment_id_ext,
+    };
+    if (assignmentHistoryContentEqual(keep, merged)) {
+      actions.push({ op: "unchanged", existingId: keep.id });
+    } else {
+      actions.push({ op: "update", existingId: keep.id, payload: merged });
+    }
+  }
+
+  const leftI = incoming.map((h, i) => ({ h, i })).filter(({ i }) => !usedI.has(i));
+  const leftE = existingRows.filter((e) => !usedE.has(e.id));
+
+  const pairOne = (hist: AssignmentHistoryPeriodPayload, keep: ExistingHistoryRow) => {
+    usedE.add(keep.id);
+    const merged: AssignmentHistoryPeriodPayload = {
+      ...hist,
+      assignment_id_ext: hist.assignment_id_ext || keep.assignment_id_ext,
+    };
+    if (assignmentHistoryContentEqual(keep, merged)) {
+      actions.push({ op: "unchanged", existingId: keep.id });
+    } else {
+      actions.push({ op: "update", existingId: keep.id, payload: merged });
+    }
+  };
+
+  if (leftI.length === 1 && leftE.length === 1) {
+    pairOne(leftI[0].h, leftE[0]);
+    usedI.add(leftI[0].i);
+  } else if (leftI.length && leftE.length) {
+    const avail = [...leftE];
+    for (const { h, i } of leftI) {
+      if (!avail.length) break;
+      avail.sort((a, b) => endDateDistance(a.end_date, h.end_date) - endDateDistance(b.end_date, h.end_date));
+      const keep = avail.shift()!;
+      pairOne(h, keep);
+      usedI.add(i);
+    }
+  }
+
+  for (const { h, i } of incoming.map((hist, idx) => ({ h: hist, i: idx }))) {
+    if (usedI.has(i)) continue;
+    actions.push({ op: "insert", payload: h });
+  }
+  return actions;
 }
 
 /**
  * Plan history writes for one car. Caller applies in one transaction.
- * Incoming closed periods still upsert on the full natural key.
- * Incoming open periods match existing opens by rider+start (not ASSIGNMENT_ID).
+ *
+ * Per (car + rider + start) group: exact end-date match first, then one-to-one
+ * leftover pairing when a period's end/ACTIVE changed. Two file rows that share
+ * the key but differ on end date stay two rows. Extra DB rows in the group are
+ * left alone (collapse script). Unmatched existing *opens* on a different
+ * rider+start still close when this car has incoming rows (period changed).
  */
 export function planVcfAssignmentCloseout(args: {
   existingRows: ExistingHistoryRow[];
@@ -96,54 +200,34 @@ export function planVcfAssignmentCloseout(args: {
 }): CloseoutAction[] {
   const { existingRows, incoming } = args;
   const actions: CloseoutAction[] = [];
-  const incomingOpen = incoming.filter(isOpen);
-  const incomingClosed = incoming.filter((p) => !isOpen(p));
-  const existingOpen = existingRows.filter(isOpen);
-
-  const byNatural = new Map<string, ExistingHistoryRow>();
+  const incomingKeys = new Set(
+    incoming.map((p) => openPeriodMatchKey(p.railcar_id, p.rider_external_id, p.start_date)),
+  );
+  const groups = new Map<string, { existing: ExistingHistoryRow[]; incoming: AssignmentHistoryPeriodPayload[] }>();
+  for (const key of incomingKeys) {
+    groups.set(key, { existing: [], incoming: [] });
+  }
+  for (const hist of incoming) {
+    const key = openPeriodMatchKey(hist.railcar_id, hist.rider_external_id, hist.start_date);
+    groups.get(key)!.incoming.push(hist);
+  }
   for (const row of existingRows) {
-    byNatural.set(
-      assignmentHistoryNaturalKey(
-        row.railcar_id,
-        row.assignment_id_ext,
-        row.start_date,
-        row.end_date,
-      ),
-      row,
-    );
+    const key = openPeriodMatchKey(row.railcar_id, row.rider_external_id, row.start_date);
+    const g = groups.get(key);
+    if (g) g.existing.push(row);
   }
 
-  for (const hist of incomingClosed) {
-    const key = assignmentHistoryNaturalKey(
-      hist.railcar_id,
-      hist.assignment_id_ext,
-      hist.start_date,
-      hist.end_date,
-    );
-    const existing = byNatural.get(key);
-    if (!existing) {
-      actions.push({ op: "insert", payload: hist });
-      continue;
-    }
-    if (assignmentHistoryContentEqual(existing, hist)) {
-      actions.push({ op: "unchanged", existingId: existing.id });
-    } else {
-      actions.push({ op: "update", existingId: existing.id, payload: hist });
+  const claimed = new Set<number>();
+  for (const g of groups.values()) {
+    const part = pairIncomingToExisting(g.existing, g.incoming);
+    for (const a of part) {
+      actions.push(a);
+      if (a.op === "update" || a.op === "unchanged") claimed.add(a.existingId);
     }
   }
 
+  const incomingOpen = incoming.filter(isOpen);
   if (incomingOpen.length === 0) return actions;
-
-  const incomingByMatch = new Map<string, AssignmentHistoryPeriodPayload>();
-  for (const hist of incomingOpen) {
-    const matchKey = openPeriodMatchKey(
-      hist.railcar_id,
-      hist.rider_external_id,
-      hist.start_date,
-    );
-    const prev = incomingByMatch.get(matchKey);
-    incomingByMatch.set(matchKey, prev ? preferFilledThenLater(prev, hist) : hist);
-  }
 
   const latestIncomingStart =
     [...incomingOpen]
@@ -151,51 +235,10 @@ export function planVcfAssignmentCloseout(args: {
       .sort()
       .at(-1) || null;
 
-  const claimed = new Set<number>();
-
-  for (const [matchKey, currentOpen] of incomingByMatch) {
-    const matches = existingOpen.filter(
-      (row) =>
-        !claimed.has(row.id) &&
-        openPeriodMatchKey(row.railcar_id, row.rider_external_id, row.start_date) ===
-          matchKey,
-    );
-    const keep = [...matches].sort((a, b) => {
-      const aFilled = a.assignment_id_ext ? 1 : 0;
-      const bFilled = b.assignment_id_ext ? 1 : 0;
-      if (aFilled !== bFilled) return bFilled - aFilled;
-      return (b.id ?? 0) - (a.id ?? 0);
-    })[0];
-
-    for (const row of matches) {
-      if (keep && row.id === keep.id) continue;
-      claimed.add(row.id);
-      actions.push({
-        op: "close",
-        existingId: row.id,
-        end_date: currentOpen.start_date,
-        comment: appendComment(row.comment, CLOSE_DUP),
-      });
-    }
-
-    if (keep) {
-      claimed.add(keep.id);
-      const merged: AssignmentHistoryPeriodPayload = {
-        ...currentOpen,
-        assignment_id_ext: currentOpen.assignment_id_ext || keep.assignment_id_ext,
-      };
-      if (assignmentHistoryContentEqual(keep, merged)) {
-        actions.push({ op: "unchanged", existingId: keep.id });
-      } else {
-        actions.push({ op: "update", existingId: keep.id, payload: merged });
-      }
-    } else {
-      actions.push({ op: "insert", payload: currentOpen });
-    }
-  }
-
-  for (const row of existingOpen) {
+  for (const row of existingRows.filter(isOpen)) {
     if (claimed.has(row.id)) continue;
+    const key = openPeriodMatchKey(row.railcar_id, row.rider_external_id, row.start_date);
+    if (incomingKeys.has(key)) continue;
     actions.push({
       op: "close",
       existingId: row.id,

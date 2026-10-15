@@ -2,6 +2,7 @@
 
 from vcf_assignment_closeout import (
     closeout_stats,
+    end_date_match_key,
     open_period_match_key,
     plan_vcf_assignment_closeout,
     skip_vcf_assignment_writes,
@@ -66,6 +67,8 @@ ok(
     != open_period_match_key(1, "OL1739", "2026-07-21"),
     "EA !== OL",
 )
+ok(end_date_match_key("4000-12-31") == "" and end_date_match_key("4000-12-21") == "", "indefinite ends match as open")
+ok(end_date_match_key(None) == end_date_match_key("4000-12-31"), "null end matches 4000-12-31")
 
 actions = plan_vcf_assignment_closeout(
     [
@@ -75,16 +78,13 @@ actions = plan_vcf_assignment_closeout(
     [hist(assignment_id_ext="558", railcar_id=15516)],
 )
 stats = closeout_stats(actions)
-ok(stats["closed"] == 1, "closes null-id sibling")
+ok(stats["closed"] == 0, "does not auto-close leftover sibling in the same key")
 ok(stats["inserted"] == 0, "does not insert a third open")
 ok(
     any(a["op"] == "unchanged" and a["existing_id"] == 41074 for a in actions)
     or any(a["op"] == "update" and a["existing_id"] == 41074 for a in actions),
     "keeps filled ASSIGNMENT_ID row",
 )
-close = next(a for a in actions if a["op"] == "close")
-ok(close["existing_id"] == 32, "closes id 32")
-ok(close["end_date"] == "2026-07-21", "close end = start")
 
 incoming = hist(assignment_id_ext="558", railcar_id=15516)
 actions = plan_vcf_assignment_closeout([{"id": 41074, **incoming}], [incoming])
@@ -103,6 +103,29 @@ ok(stats["closed"] == 1, "closes old OL period")
 ok(stats["inserted"] == 1, "inserts EA period")
 close = next(a for a in actions if a["op"] == "close")
 ok(close["end_date"] == "2026-07-21", "changed close uses incoming start")
+
+closed = hist(
+    railcar_id=9,
+    rider_external_id="OL1221",
+    start_date="2012-11-01",
+    end_date="2023-12-31",
+    active=False,
+    assignment_id_ext="1221",
+)
+opened = hist(
+    railcar_id=9,
+    rider_external_id="OL1221",
+    start_date="2012-11-01",
+    end_date=None,
+    active=True,
+    assignment_id_ext="1221",
+)
+existing = [{**closed, "id": 1}, {**opened, "id": 2}]
+incoming = [closed, opened]
+stats = closeout_stats(plan_vcf_assignment_closeout(existing, incoming))
+ok(stats["unchanged"] == 2 and stats["inserted"] == 0, "HMBX-style pair matches both ends")
+stats = closeout_stats(plan_vcf_assignment_closeout(existing, incoming))
+ok(stats["unchanged"] == 2 and stats["inserted"] == 0, "second load changes nothing")
 
 print(f"{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

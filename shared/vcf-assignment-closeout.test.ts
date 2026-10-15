@@ -3,6 +3,7 @@
 
 import {
   closeoutStats,
+  endDateMatchKey,
   openPeriodMatchKey,
   planVcfAssignmentCloseout,
   skipVcfAssignmentWrites,
@@ -64,8 +65,10 @@ ok(
     openPeriodMatchKey(1, "OL1739", "2026-07-21"),
   "EA !== OL",
 );
+ok(endDateMatchKey("4000-12-31") === "" && endDateMatchKey("4000-12-21") === "", "indefinite ends match as open");
+ok(endDateMatchKey(null) === endDateMatchKey("4000-12-31"), "null end matches 4000-12-31");
 
-// 118-car bug: null id vs filled id, same rider+start → update keep, close sibling
+// Same key, two existing opens, one incoming: match filled id; leftover sibling stays
 {
   const actions = planVcfAssignmentCloseout({
     existingRows: [
@@ -75,16 +78,13 @@ ok(
     incoming: [hist({ assignment_id_ext: "558", railcar_id: 15516 })],
   });
   const stats = closeoutStats(actions);
-  ok(stats.closed === 1, "closes null-id sibling");
+  ok(stats.closed === 0, "does not auto-close leftover sibling in the same key");
   ok(stats.inserted === 0, "does not insert a third open");
   ok(
     actions.some((a) => a.op === "unchanged" && a.existingId === 41074) ||
       actions.some((a) => a.op === "update" && a.existingId === 41074),
     "keeps filled ASSIGNMENT_ID row",
   );
-  const close = actions.find((a) => a.op === "close");
-  ok(close?.op === "close" && close.existingId === 32, "closes id 32");
-  ok(close?.op === "close" && close.end_date === "2026-07-21", "close end = start");
 }
 
 // Re-run after collapse: one open, same content → unchanged, no insert
@@ -141,6 +141,53 @@ ok(
   const stats = closeoutStats(actions);
   ok(stats.inserted === 2, "inserts both incoming opens");
   ok(stats.closed === 1, "closes unmatched existing open");
+}
+
+// HMBX 291402-style: two file rows same car+start+rider, different ends — stay two rows
+{
+  const closed = hist({
+    railcar_id: 9,
+    rider_external_id: "OL1221",
+    start_date: "2012-11-01",
+    end_date: "2023-12-31",
+    active: false,
+    assignment_id_ext: "1221",
+  });
+  const opened = hist({
+    railcar_id: 9,
+    rider_external_id: "OL1221",
+    start_date: "2012-11-01",
+    end_date: null,
+    active: true,
+    assignment_id_ext: "1221",
+  });
+  const existing = [
+    { id: 1, ...closed },
+    { id: 2, ...opened },
+  ];
+  const incoming = [closed, opened];
+  const first = planVcfAssignmentCloseout({ existingRows: existing, incoming });
+  ok(closeoutStats(first).unchanged === 2 && closeoutStats(first).inserted === 0, "pair matches both ends");
+  const again = planVcfAssignmentCloseout({ existingRows: existing, incoming });
+  ok(closeoutStats(again).unchanged === 2 && closeoutStats(again).inserted === 0, "second load changes nothing");
+}
+
+// End-date change: exactly one leftover each side → update in place
+{
+  const old = hist({
+    railcar_id: 1,
+    rider_external_id: "OL1739",
+    start_date: "2020-10-01",
+    end_date: "2026-08-03",
+    active: false,
+    assignment_id_ext: "503",
+  });
+  const incoming = { ...old, end_date: "2026-08-04" };
+  const actions = planVcfAssignmentCloseout({
+    existingRows: [{ id: 26950, ...old }],
+    incoming: [incoming],
+  });
+  ok(closeoutStats(actions).updated === 1 && closeoutStats(actions).inserted === 0, "1:1 leftover updates end date");
 }
 
 console.log(`${passed} passed, ${failed} failed`);

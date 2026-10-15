@@ -135,8 +135,16 @@ export async function sendLesseeApprovalRequest(opts: {
   /** Override subject / body from Send Lessee preview page */
   subject?: string;
   bodyText?: string;
+  bodyHtml?: string;
+  /** Customary CC: owner reviewer + shop contact (shop still never in To) */
+  cc?: string[];
+  replyTo?: string;
+  fromEmail?: string;
   /** Cent-reconciled amount from Send page (preferred over recomputing) */
   amountPresentedCents?: number;
+  /** Skip re-resolve when caller already built attachments */
+  skipAttachmentsResolve?: boolean;
+  preResolvedAttachments?: Awaited<ReturnType<typeof resolveLesseeAttachments>>;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
 
@@ -155,16 +163,19 @@ export async function sendLesseeApprovalRequest(opts: {
       ? Math.trunc(opts.amountPresentedCents)
       : await resp6AmountCents(opts.revisionId);
 
-  const resolved = await resolveLesseeAttachments({
-    eventId: opts.eventId,
-    revisionId: opts.revisionId,
-    tenantId,
-    documentIds: opts.documentIds,
-    actor: opts.actor,
-    carLabel,
-    estimateId: opts.estimateId,
-    lesseeOnly: true,
-  });
+  const resolved =
+    opts.skipAttachmentsResolve && opts.preResolvedAttachments
+      ? opts.preResolvedAttachments
+      : await resolveLesseeAttachments({
+          eventId: opts.eventId,
+          revisionId: opts.revisionId,
+          tenantId,
+          documentIds: opts.documentIds,
+          actor: opts.actor,
+          carLabel,
+          estimateId: opts.estimateId,
+          lesseeOnly: true,
+        });
 
   // Resend / new send invalidates prior lessee tokens for this estimate
   await revokeLesseeLinksForEstimate({
@@ -197,8 +208,9 @@ export async function sendLesseeApprovalRequest(opts: {
     ],
   });
 
+  // Shop may appear on CC (customary email) but must never be in To
   if (!recipients.excludedShop) {
-    return { ok: false as const, status: 500, error: "Resp 6 must exclude shop" };
+    return { ok: false as const, status: 500, error: "Resp 6 must exclude shop from To" };
   }
   if (recipients.to.length === 0) {
     return {
@@ -210,7 +222,7 @@ export async function sendLesseeApprovalRequest(opts: {
   }
 
   const attachNote = resolved.usedGeneratedPdf
-    ? "Attachments: shop original file(s) when present; matching 500-byte data file; a generated estimate PDF was added because the shop did not send a PDF."
+    ? `Attachments: ${resolved.pdfFilename ?? "Resp6.pdf"}; ${resolved.dataFilename ?? "Resp6Byte500.txt"}; selected photos/docs.`
     : "Attachments: shop original file(s) (pass-through), matching 500-byte data file, and reviewer-selected docs/photos.";
   const bodyText = [
     `Please review and approve the Resp 6 (lessee) portion of the repair estimate for ${carLabel}.`,
@@ -228,19 +240,26 @@ export async function sendLesseeApprovalRequest(opts: {
     .join("\n");
 
   const subject =
-    (opts.subject ?? "").trim() || `Estimate approval requested — ${carLabel}`;
-  const finalBody =
-    (opts.bodyText ?? "").trim() || bodyText;
+    (opts.subject ?? "").trim() || `Responsibility Items ${carLabel}`;
+  let finalBody = (opts.bodyText ?? "").trim() || bodyText;
+  // Ensure approve link is present in overridden bodies
+  if (opts.bodyText && !finalBody.includes(linkPath)) {
+    finalBody = `${finalBody}\n\nReview / Approve: ${linkPath}`;
+  }
+  const cc = [...new Set((opts.cc ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean))]
+    .filter((e) => !recipients.to.includes(e));
+  const replyTo =
+    opts.replyTo?.trim() || `lessee-reply+${issued.link.id}@repair.local`;
   const send = await getEmailProvider().send({
     tenantId,
     eventId: opts.eventId,
     type: "RESP6_LESSEE_EMAIL",
     to: recipients.to,
-    // Shop never copied
-    cc: [],
+    cc,
     subject,
     bodyText: finalBody,
-    replyTo: `lessee-reply+${issued.link.id}@repair.local`,
+    bodyHtml: opts.bodyHtml,
+    replyTo,
     attachments: resolved.emailAttachments,
   });
 

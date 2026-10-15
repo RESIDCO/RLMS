@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§E Document Viewer** | Apply `rlms-phase1-owner-ui-e-document-viewer.bundle` on tip **`ba5dc51`** (wreck DV). File Attachments own-window from Estimate / BO / Wreck; left category list + right preview (image/PDF/500-byte/Office); filters; shop view-all non-voided + add-only; lessee granted-only; `owner_only` never to shop/lessee; bulk zip + Attach Send Lessee; required-docs checklist. Smoke: `npm run repair:smoke-documents`. Typecheck: `npm run repair:typecheck-client-documents`. |
+| **§E r2 BRC PDF + Lessee email** | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on tip **`73b9e3d`** (§E Document Viewer). Billing Repair Card PDF (owner/lessee/shop filters); customary Resp6 email (subject/To/CC/body table/attachments); local `.eml` outbox. Smoke: `npm run repair:smoke-brc-email`. Typecheck: `npm run repair:typecheck-client-brc-email`. |
+| **§E Document Viewer** | Prior: `rlms-phase1-owner-ui-e-document-viewer.bundle` on tip **`ba5dc51`** → **`73b9e3d`**. File Attachments own-window from Estimate / BO / Wreck; left category list + right preview (image/PDF/500-byte/Office); filters; shop view-all non-voided + add-only; lessee granted-only; `owner_only` never to shop/lessee; bulk zip + Attach Send Lessee; required-docs checklist. Smoke: `npm run repair:smoke-documents`. Typecheck: `npm run repair:typecheck-client-documents`. |
 | **Wreck DV / settlement panel** | Prior: `rlms-phase1-owner-ui-wreck-dv.bundle` on tip **`cfd1028`** → **`ba5dc51`**. Dollars money inputs ($ / commas → cents); gauge copy + bar; labor-rate citation. Smoke: `npm run repair:smoke-wreck`. |
 | **Wreck hotfix (WorkspaceTitle)** | Prior: `rlms-phase1-owner-ui-wreck-hotfix.bundle` on tip **`dc704f1`** → **`cfd1028`**. Fixes blank Chrome: named `{ WorkspaceTitle }` import. |
 | **Wreck dual-track BUILD** | Prior: `rlms-phase1-owner-ui-wreck.bundle`. Requires **`85856b6`** → **`dc704f1`**. Implements approved [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md). |
@@ -48,7 +49,7 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | **3** | Bad Orders `/#/repair/bad-orders` (spec §C) | **Signed off** (`468a9db`) |
 | **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r5 tip** (awaiting Bruce sign-off) |
 | **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **BUILD + hotfix + DV panel** (`ba5dc51`) |
-| **5 / §E** | Document Viewer (shot 03) — [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) | Apply `rlms-phase1-owner-ui-e-document-viewer.bundle` on **`ba5dc51`** |
+| **5 / §E** | Document Viewer (shot 03) + BRC PDF / Lessee email — [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on **`73b9e3d`** |
 | 6+ | Lessee polish, etc. | Parked |
 
 **Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md)  
@@ -74,7 +75,33 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+20 | **`rlms-phase1-owner-ui-wreck.bundle`** (approved build) | **`85856b6`** | → **`dc704f1`** |
 | N+21 | `rlms-phase1-owner-ui-wreck-hotfix.bundle` (blank Chrome / WorkspaceTitle) | **`dc704f1`** | → **`cfd1028`** |
 | N+22 | **`rlms-phase1-owner-ui-wreck-dv.bundle`** (DV panel dollars / gauge / contrast / labor citation) | **`cfd1028`** | → **`ba5dc51`** |
-| N+23 | **`rlms-phase1-owner-ui-e-document-viewer.bundle`** (§E File Attachments) | **`ba5dc51`** | → **(see README)** |
+| N+23 | **`rlms-phase1-owner-ui-e-document-viewer.bundle`** (§E File Attachments) | **`ba5dc51`** | → **`73b9e3d`** |
+| N+24 | **`rlms-phase1-owner-ui-e-brc-email.bundle`** (§E r2 BRC PDF + Lessee email) | **`73b9e3d`** | → **(see README)** |
+
+---
+
+## Apply §E r2 BRC + Lessee email (on tip `73b9e3d`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect 73b9e3d…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-e-brc-email.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-e-brc-email.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
+Then:
+
+```powershell
+$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+$env:REPAIR_LOCAL_DB = "1"
+$env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
+npm run repair:migrate:local
+npm run repair:typecheck-client-brc-email
+npm run repair:smoke-brc-email
+npm run repair:dev:local
+```
 
 ---
 

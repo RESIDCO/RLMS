@@ -28,6 +28,8 @@
     "repair:typecheck-client-wreck": "tsx modules/repair/dev/typecheck-client-wreck.ts",
     "repair:smoke-documents": "tsx modules/repair/dev/smoke-documents-e.ts",
     "repair:typecheck-client-documents": "tsx modules/repair/dev/typecheck-client-documents.ts",
+    "repair:smoke-brc-email": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/smoke-brc-email-e.ts",
+    "repair:typecheck-client-brc-email": "tsx modules/repair/dev/typecheck-client-brc-email.ts",
     "repair:import-ref-data": "tsx modules/repair/dev/import-ref-data.ts",
     "repair:demo:local": "tsx modules/repair/dev/demo-local.ts",
     "repair:seed:estimates-history": "tsx modules/repair/dev/seed-estimates-history.ts"

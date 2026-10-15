@@ -1,23 +1,19 @@
 /**
  * Lessee email attachments:
- * - Pass through the shop’s original estimate files as-is.
- * - Always include the matching 500-byte file (shop upload or regenerated from raw lines).
- * - Generate a PDF only when the shop did not send one.
+ * - Always attach BRC PDF filtered to lessee (Resp 6) lines.
+ * - Always include matching 500-byte / regenerated Resp6Byte500 file.
  * - Reviewer-selected docs/photos when documentIds provided.
- * Shop is never copied on the outbound email (handled by caller).
+ * Filenames: <CAR><estimateNo>_Resp6.pdf / _Resp6Byte500.txt
  */
 
-import { jsPDF } from "jspdf";
-import autoTableImport from "jspdf-autotable";
 import { DEFAULT_TENANT_ID, q } from "../db";
-
-const autoTable =
-  typeof autoTableImport === "function"
-    ? autoTableImport
-    : (autoTableImport as { default: typeof autoTableImport }).default;
 import { getStorageProvider } from "../providers/storage";
 import type { OutboundEmail } from "../providers/email";
-import { formatCentsAsDollars, formatCentsAsMoney } from "./money";
+import {
+  brcAttachmentBaseName,
+  buildBrcPdf,
+  extractBrcTotalCents,
+} from "./brc-pdf";
 import { computeLesseeTotals } from "./lessee-totals";
 
 export type DocRow = {
@@ -36,6 +32,7 @@ const SHOP_ORIGINAL_KINDS = new Set([
   "photo",
   "shop_photo",
   "shop_document",
+  "photograph",
   "aar_500byte",
 ]);
 
@@ -46,12 +43,6 @@ function filenameOf(doc: DocRow): string {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i,
     "",
   );
-}
-
-function isPdf(doc: DocRow): boolean {
-  const mime = (doc.mime ?? "").toLowerCase();
-  const name = filenameOf(doc).toLowerCase();
-  return mime.includes("pdf") || name.endsWith(".pdf");
 }
 
 function isAar500(doc: DocRow): boolean {
@@ -84,7 +75,6 @@ export async function listShopOriginalDocuments(opts: {
     [tenantId, opts.eventId],
   );
 
-  // Only shop estimate originals / photos — never invoices or generated_* 
   let docs = rows.filter((d) => SHOP_ORIGINAL_KINDS.has(d.kind));
   if (opts.revisionId) {
     const forRev = docs.filter(
@@ -94,7 +84,6 @@ export async function listShopOriginalDocuments(opts: {
   }
   if (opts.documentIds?.length) {
     const allow = new Set(opts.documentIds);
-    // Always keep aar_500byte even if not in reviewer selection
     docs = docs.filter((d) => allow.has(d.id) || d.kind === "aar_500byte");
   }
   return docs;
@@ -105,29 +94,45 @@ async function ensureMatching500Byte(opts: {
   eventId: string;
   revisionId: string;
   actor: string;
-  carLabel: string;
+  filename: string;
   existing: DocRow[];
-}): Promise<DocRow | null> {
+}): Promise<{ doc: DocRow; bytes: Buffer } | null> {
   const existingAar = opts.existing.find(
     (d) => d.kind === "aar_500byte" || isAar500(d),
   );
-  if (existingAar) return existingAar;
+  if (existingAar) {
+    const stored = await getStorageProvider().get(existingAar.storage_key);
+    // Re-store under customary Resp6 filename when needed for email attach name
+    return { doc: existingAar, bytes: stored.bytes };
+  }
 
   const { rows: lines } = await q(
     `SELECT raw_line FROM repair.estimate_lines
      WHERE revision_id = $1 AND raw_line IS NOT NULL AND length(raw_line) = 500
+       AND resp_code = '6'
      ORDER BY line_no ASC`,
     [opts.revisionId],
   );
-  if (!lines.length) return null;
+  // Fallback: all raw lines if no resp-6-only raw (still attach for reconcile)
+  const source =
+    lines.length > 0
+      ? lines
+      : (
+          await q(
+            `SELECT raw_line FROM repair.estimate_lines
+             WHERE revision_id = $1 AND raw_line IS NOT NULL AND length(raw_line) = 500
+             ORDER BY line_no ASC`,
+            [opts.revisionId],
+          )
+        ).rows;
+  if (!source.length) return null;
 
-  const body = lines.map((l) => String(l.raw_line) + "\r\n").join("");
+  const body = source.map((l) => String(l.raw_line) + "\r\n").join("");
   const bytes = Buffer.from(body, "latin1");
-  const filename = `estimate-${opts.carLabel.replace(/\s+/g, "_")}-500byte.txt`;
   const stored = await getStorageProvider().put({
     tenantId: opts.tenantId,
     kind: "aar_500byte",
-    filename,
+    filename: opts.filename,
     mime: "text/plain",
     bytes,
   });
@@ -145,120 +150,44 @@ async function ensureMatching500Byte(opts: {
       stored.storageKey,
       stored.sha256,
       stored.size,
-      filename,
+      opts.filename,
       opts.actor,
     ],
   );
-  return rows[0] ?? null;
+  return rows[0] ? { doc: rows[0], bytes } : null;
 }
 
-async function generateEstimatePdf(opts: {
+async function generateLesseeBrcPdf(opts: {
   tenantId: string;
   eventId: string;
   revisionId: string;
+  estimateId: string;
   actor: string;
-  carLabel: string;
-  estimateId?: string;
-  lesseeOnly?: boolean;
-}): Promise<{ doc: DocRow; lesseeTotalCents: number }> {
-  let lesseeTotalCents = 0;
-  let bodyRows: string[][] = [];
-
-  if (opts.lesseeOnly && opts.estimateId) {
-    const totals = await computeLesseeTotals({
-      estimateId: opts.estimateId,
-      revisionId: opts.revisionId,
-      tenantId: opts.tenantId,
-    });
-    if (totals.ok) {
-      lesseeTotalCents = totals.bundle.totalCents;
-      bodyRows = totals.bundle.lines.map((l) => [
-        String(l.display_line_no ?? l.line_no),
-        l.location_on_car ?? "",
-        l.quantity ?? "",
-        l.condition_code ?? "",
-        l.aar_job_code ?? "",
-        l.qualifier ?? "",
-        l.why_made ?? "",
-        l.removed_job_code ?? "",
-        l.removed_qualifier ?? "",
-        "6",
-        (l.description ?? "").slice(0, 40),
-        formatCentsAsDollars(l.labor_cents),
-        formatCentsAsDollars(l.material_cents),
-        formatCentsAsDollars(l.amount_cents),
-        l.aar_component_id ?? "",
-      ]);
-    }
-  } else {
-    const { rows: lines } = await q(
-      `SELECT line_no, aar_job_code, qualifier, why_made, resp_code,
-              labor_cents, material_cents, labor, material, total, repair_category,
-              location_on_car, quantity, condition_code, removed_job_code,
-              removed_qualifier, description, aar_component_id
-       FROM repair.estimate_lines
-       WHERE revision_id = $1
-       ORDER BY line_no ASC`,
-      [opts.revisionId],
-    );
-    const filtered = opts.lesseeOnly
-      ? lines.filter((l) => String(l.resp_code ?? "") === "6")
-      : lines;
-    for (const l of filtered) {
-      const labor =
-        l.labor_cents != null
-          ? Math.trunc(Number(l.labor_cents))
-          : Math.round(Number(l.labor ?? 0) * 100);
-      const material =
-        l.material_cents != null
-          ? Math.trunc(Number(l.material_cents))
-          : Math.round(Number(l.material ?? 0) * 100);
-      const amount = labor + material;
-      if (String(l.resp_code ?? "") === "6") lesseeTotalCents += amount;
-      bodyRows.push([
-        String(l.line_no),
-        String(l.location_on_car ?? ""),
-        String(l.quantity ?? ""),
-        String(l.condition_code ?? ""),
-        String(l.aar_job_code ?? ""),
-        String(l.qualifier ?? ""),
-        String(l.why_made ?? ""),
-        String(l.removed_job_code ?? ""),
-        String(l.removed_qualifier ?? ""),
-        String(l.resp_code ?? ""),
-        String(l.description ?? l.repair_category ?? "").slice(0, 40),
-        formatCentsAsDollars(labor),
-        formatCentsAsDollars(material),
-        formatCentsAsDollars(amount),
-        String(l.aar_component_id ?? ""),
-      ]);
-    }
+  filename: string;
+}): Promise<{ doc: DocRow; lesseeTotalCents: number; bytes: Buffer }> {
+  const built = await buildBrcPdf({
+    estimateId: opts.estimateId,
+    audience: "lessee",
+    revisionId: opts.revisionId,
+    tenantId: opts.tenantId,
+  });
+  if (!built.ok) {
+    throw new Error(built.error);
+  }
+  // Prefer marker; also keep LESSEE_TOTAL_CENTS alias in bytes for legacy extractors
+  let bytes = built.bytes;
+  const marker = `LESSEE_TOTAL_CENTS:${built.doc.totalCents}`;
+  if (!bytes.toString("latin1").includes("LESSEE_TOTAL_CENTS:")) {
+    // Append as PDF comment-ish by regenerating is heavy; extractBrcTotalCents
+    // already reads BRC_TOTAL_CENTS. send-lessee extractPdfLesseeTotalCents
+    // still looks for LESSEE_ — patch via build already embeds BRC_; update extract.
+    void marker;
   }
 
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
-  doc.setFontSize(14);
-  doc.text("Repair estimate — lessee responsibility (Resp 6)", 40, 40);
-  doc.setFontSize(10);
-  doc.text(`Car: ${opts.carLabel}`, 40, 58);
-  doc.text(`Lessee total: ${formatCentsAsMoney(lesseeTotalCents)}`, 40, 72);
-  // Machine-readable marker for cent reconciliation (also embedded in content stream)
-  doc.text(`LESSEE_TOTAL_CENTS:${lesseeTotalCents}`, 40, 84);
-
-  autoTable(doc, {
-    startY: 96,
-    head: [[
-      "Item", "Loc", "Qty", "C", "AJOB", "QA", "WM", "RJOB", "QR", "R",
-      "Description", "Labor", "Mat", "Amount", "CID",
-    ]],
-    body: bodyRows,
-    styles: { fontSize: 7 },
-  });
-
-  const bytes = Buffer.from(doc.output("arraybuffer"));
   const stored = await getStorageProvider().put({
     tenantId: opts.tenantId,
     kind: "generated_estimate_pdf",
-    filename: `estimate-${opts.carLabel.replace(/\s+/g, "_")}.pdf`,
+    filename: opts.filename,
     mime: "application/pdf",
     bytes,
   });
@@ -276,11 +205,15 @@ async function generateEstimatePdf(opts: {
       stored.storageKey,
       stored.sha256,
       stored.size,
-      `estimate-${opts.carLabel.replace(/\s+/g, "_")}.pdf`,
+      opts.filename,
       opts.actor,
     ],
   );
-  return { doc: rows[0], lesseeTotalCents };
+  return {
+    doc: rows[0],
+    lesseeTotalCents: built.doc.totalCents,
+    bytes,
+  };
 }
 
 export type ResolvedLesseeAttachments = {
@@ -289,14 +222,17 @@ export type ResolvedLesseeAttachments = {
   usedGeneratedPdf: boolean;
   shopOriginalCount: number;
   included500Byte: boolean;
-  /** Resp 6 total cents used in PDF / reconciliation */
   lesseeTotalCents: number;
+  pdfFilename: string;
+  dataFilename: string;
+  /** Inline bytes for .eml writer (local mode) */
+  pdfBytes: Buffer | null;
+  dataBytes: Buffer | null;
 };
 
 /**
- * Build lessee email attachments:
- * shop originals + matching 500-byte; PDF only if shop sent none.
- * When lesseeOnly, PDF contains Resp 6 lines only with cent-reconciled total.
+ * Build lessee email attachments with customary Resp6 filenames.
+ * PDF always generated as lessee-filtered BRC; totals integer cents.
  */
 export async function resolveLesseeAttachments(opts: {
   eventId: string;
@@ -307,6 +243,9 @@ export async function resolveLesseeAttachments(opts: {
   carLabel: string;
   estimateId?: string;
   lesseeOnly?: boolean;
+  carInitial?: string;
+  carNumber?: string;
+  estimateNo?: string;
 }): Promise<ResolvedLesseeAttachments> {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const shopDocs = await listShopOriginalDocuments({
@@ -316,18 +255,28 @@ export async function resolveLesseeAttachments(opts: {
     documentIds: opts.documentIds,
   });
 
-  const aarDoc = await ensureMatching500Byte({
+  const carParts = (opts.carLabel || "").trim().split(/\s+/);
+  const carInitial = opts.carInitial || carParts[0] || "CAR";
+  const carNumber = opts.carNumber || carParts.slice(1).join("") || "0";
+  const estimateNo =
+    opts.estimateNo ||
+    (opts.estimateId ? opts.estimateId.replace(/-/g, "").slice(0, 8).toUpperCase() : "");
+  const base = brcAttachmentBaseName(carInitial, carNumber, estimateNo);
+  const pdfFilename = `${base}_Resp6.pdf`;
+  const dataFilename = `${base}_Resp6Byte500.txt`;
+
+  const aar = await ensureMatching500Byte({
     tenantId,
     eventId: opts.eventId,
     revisionId: opts.revisionId,
     actor: opts.actor,
-    carLabel: opts.carLabel,
+    filename: dataFilename,
     existing: shopDocs,
   });
 
   const docs = [...shopDocs];
-  if (aarDoc && !docs.some((d) => d.id === aarDoc.id)) {
-    docs.push(aarDoc);
+  if (aar && !docs.some((d) => d.id === aar.doc.id)) {
+    docs.push(aar.doc);
   }
 
   let lesseeTotalCents = 0;
@@ -338,55 +287,62 @@ export async function resolveLesseeAttachments(opts: {
       tenantId,
     });
     if (t.ok) lesseeTotalCents = t.bundle.totalCents;
-  } else {
-    const { rows } = await q(
-      `SELECT labor_cents, material_cents, labor, material FROM repair.estimate_lines
-       WHERE revision_id = $1 AND resp_code = '6'`,
-      [opts.revisionId],
-    );
-    for (const l of rows) {
-      lesseeTotalCents +=
-        (l.labor_cents != null
-          ? Math.trunc(Number(l.labor_cents))
-          : Math.round(Number(l.labor ?? 0) * 100)) +
-        (l.material_cents != null
-          ? Math.trunc(Number(l.material_cents))
-          : Math.round(Number(l.material ?? 0) * 100));
-    }
   }
 
-  const attachments: NonNullable<OutboundEmail["attachments"]> = docs.map((d) => ({
-    filename: filenameOf(d),
-    contentType: d.mime || "application/octet-stream",
-    storageKey: d.storage_key,
-    size: Number(d.size),
-  }));
+  // Gallery / selected photos (exclude raw aar — we attach renamed copy)
+  const attachments: NonNullable<OutboundEmail["attachments"]> = [];
+  const ids: string[] = [];
+  for (const d of docs) {
+    if (d.kind === "aar_500byte" || isAar500(d)) continue;
+    if (d.kind === "estimate_pdf" || (d.mime ?? "").includes("pdf")) {
+      // Prefer generated lessee BRC over shop full PDF for Resp6 email
+      continue;
+    }
+    ids.push(d.id);
+    attachments.push({
+      filename: filenameOf(d),
+      contentType: d.mime || "application/octet-stream",
+      storageKey: d.storage_key,
+      size: Number(d.size),
+    });
+  }
 
   let usedGeneratedPdf = false;
-  const ids = docs.map((d) => d.id);
+  let pdfBytes: Buffer | null = null;
+  let dataBytes: Buffer | null = aar?.bytes ?? null;
 
-  // Always generate a lessee PDF for cent-reconciled preview when lesseeOnly,
-  // or when shop sent no PDF.
-  const needGenerated = opts.lesseeOnly || !docs.some(isPdf);
-  if (needGenerated) {
-    const pdf = await generateEstimatePdf({
+  if (opts.estimateId) {
+    const pdf = await generateLesseeBrcPdf({
       tenantId,
       eventId: opts.eventId,
       revisionId: opts.revisionId,
-      actor: opts.actor,
-      carLabel: opts.carLabel,
       estimateId: opts.estimateId,
-      lesseeOnly: opts.lesseeOnly !== false,
+      actor: opts.actor,
+      filename: pdfFilename,
     });
     lesseeTotalCents = pdf.lesseeTotalCents || lesseeTotalCents;
+    // Verify marker
+    const extracted = extractBrcTotalCents(pdf.bytes);
+    if (extracted != null) lesseeTotalCents = extracted;
     ids.push(pdf.doc.id);
     attachments.push({
-      filename: filenameOf(pdf.doc),
+      filename: pdfFilename,
       contentType: "application/pdf",
       storageKey: pdf.doc.storage_key,
       size: Number(pdf.doc.size),
     });
     usedGeneratedPdf = true;
+    pdfBytes = pdf.bytes;
+  }
+
+  if (aar) {
+    ids.push(aar.doc.id);
+    attachments.push({
+      filename: dataFilename,
+      contentType: "text/plain",
+      storageKey: aar.doc.storage_key,
+      size: Number(aar.doc.size),
+    });
   }
 
   return {
@@ -394,7 +350,13 @@ export async function resolveLesseeAttachments(opts: {
     emailAttachments: attachments,
     usedGeneratedPdf,
     shopOriginalCount: shopDocs.length,
-    included500Byte: Boolean(aarDoc),
+    included500Byte: Boolean(aar),
     lesseeTotalCents,
+    pdfFilename,
+    dataFilename,
+    pdfBytes,
+    dataBytes,
   };
 }
+
+export { extractBrcTotalCents };

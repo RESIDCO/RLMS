@@ -267,7 +267,10 @@ export default function EstimateReview() {
     }
   }
 
-  async function exportBrc(format: "csv" | "json" = "csv") {
+  async function exportBrc(
+    format: "csv" | "json" | "pdf" = "csv",
+    audience: "owner" | "lessee" | "shop" = "owner",
+  ) {
     setMenu(null);
     setMsg("");
     setError("");
@@ -275,8 +278,20 @@ export default function EstimateReview() {
       const res = await apiRequest("POST", "/api/repair/estimates/brc-export", {
         estimateIds: [estimateId],
         format,
+        audience,
       });
-      if (format === "csv") {
+      if (format === "pdf") {
+        if (!res.ok) throw new Error("BRC PDF export failed");
+        const buf = await res.arrayBuffer();
+        const blob = new Blob([buf], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `brc-${estimateId.slice(0, 8)}-${audience}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setMsg(`Billing Repair Card PDF (${audience}) downloaded`);
+      } else if (format === "csv") {
         const text = await res.text();
         if (!res.ok) throw new Error("BRC export failed");
         const blob = new Blob([text], { type: "text/csv" });
@@ -299,7 +314,7 @@ export default function EstimateReview() {
         a.download = `brc-${estimateId.slice(0, 8)}.json`;
         a.click();
         URL.revokeObjectURL(url);
-        setMsg("BRC PDF/JSON payload downloaded");
+        setMsg("BRC JSON payload downloaded");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "export failed");
@@ -473,7 +488,10 @@ export default function EstimateReview() {
                     {key === "export" && (
                       <>
                         <MenuItem onClick={() => void exportBrc("csv")} label="BRC Excel / CSV" />
-                        <MenuItem onClick={() => void exportBrc("json")} label="BRC PDF / JSON" />
+                        <MenuItem onClick={() => void exportBrc("pdf", "owner")} label="BRC PDF (owner)" />
+                        <MenuItem onClick={() => void exportBrc("pdf", "lessee")} label="BRC PDF (lessee)" />
+                        <MenuItem onClick={() => void exportBrc("pdf", "shop")} label="BRC PDF (shop)" />
+                        <MenuItem onClick={() => void exportBrc("json")} label="BRC JSON" />
                         <MenuItem onClick={() => void export500()} label="500-byte file" />
                       </>
                     )}

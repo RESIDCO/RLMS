@@ -30,8 +30,23 @@ type Preview = {
   amountMoney: string;
   amountCents: number;
   recipients: string[];
+  cc?: string[];
+  from?: string;
+  fromName?: string;
+  replyTo?: string | null;
   subject: string;
   body: string;
+  bodyHtml?: string;
+  emailTable?: {
+    category: string;
+    equipment: string;
+    dollarAmount: string;
+    client: string;
+    user: string;
+    description: string;
+  };
+  attachmentNames?: { pdf: string; data500: string };
+  responseHours?: number;
   canSend?: boolean;
   sendBlockReason?: string | null;
   lesseeLines: Array<{
@@ -76,6 +91,7 @@ export default function SendLessee() {
   const estimateId = params?.id ?? "";
   const [preview, setPreview] = useState<Preview | null>(null);
   const [recipientsText, setRecipientsText] = useState("");
+  const [ccText, setCcText] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -101,6 +117,7 @@ export default function SendLessee() {
       if (!res.ok) throw new Error(data.error || "Failed to load preview");
       setPreview(data);
       setRecipientsText((data.recipients ?? []).join(", "));
+      setCcText((data.cc ?? []).join(", "));
       setSubject(data.subject ?? "");
       setBody(data.body ?? "");
       setSelected(new Set((data.gallery ?? []).map((g: GalleryDoc) => g.id)));
@@ -160,14 +177,19 @@ export default function SendLessee() {
         .split(/[,;\s]+/)
         .map((s) => s.trim())
         .filter(Boolean);
+      const cc = ccText
+        .split(/[,;\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       const res = await apiRequest(
         "POST",
         `/api/repair/estimates/${estimateId}/send-lessee`,
         {
           recipients,
+          cc,
           subject,
           body,
-          documentIds: [...selected],
+          documentIds: Array.from(selected),
           includePdf,
           includeDataFile: includeData,
           confirm: true,
@@ -223,22 +245,38 @@ export default function SendLessee() {
             <>
               <section className="border border-border rounded-md p-4 space-y-3">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Recipients & message
+                  Customary responsibility email
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Shop is never copied. Amount presented:{" "}
+                  From: {preview.fromName ?? "Contract Shop System"} &lt;
+                  {preview.from ?? "noreply@repair.local"}&gt;
+                  {preview.replyTo ? ` · Reply-To: ${preview.replyTo}` : ""}
+                  {" · "}
+                  Amount:{" "}
                   <span className="font-medium tabular-nums text-foreground">
                     {preview.amountMoney}
                   </span>{" "}
                   ({preview.amountCents}¢)
+                  {preview.responseHours
+                    ? ` · Response window: ${preview.responseHours}h`
+                    : ""}
                 </p>
                 <div>
-                  <Label htmlFor="to">To (comma-separated)</Label>
+                  <Label htmlFor="to">To — lessee contacts</Label>
                   <Input
                     id="to"
                     className="mt-1"
                     value={recipientsText}
                     onChange={(e) => setRecipientsText(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="cc">CC — owner reviewer + shop contact</Label>
+                  <Input
+                    id="cc"
+                    className="mt-1"
+                    value={ccText}
+                    onChange={(e) => setCcText(e.target.value)}
                   />
                 </div>
                 <div>
@@ -250,12 +288,37 @@ export default function SendLessee() {
                     onChange={(e) => setSubject(e.target.value)}
                   />
                 </div>
+                {preview.emailTable && (
+                  <div className="overflow-auto border border-border rounded">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {(
+                          [
+                            ["Category", preview.emailTable.category],
+                            ["Equipment", preview.emailTable.equipment],
+                            ["Dollar Amount", `$${preview.emailTable.dollarAmount}`],
+                            ["Client", preview.emailTable.client],
+                            ["User", preview.emailTable.user],
+                            ["Description", preview.emailTable.description],
+                          ] as const
+                        ).map(([k, v]) => (
+                          <tr key={k} className="border-t border-border">
+                            <th className="p-2 text-left bg-muted/40 w-36 font-medium">
+                              {k}
+                            </th>
+                            <td className="p-2">{v}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 <div>
-                  <Label htmlFor="body">Body</Label>
+                  <Label htmlFor="body">Body (exact email text)</Label>
                   <Textarea
                     id="body"
                     className="mt-1 font-mono text-xs"
-                    rows={8}
+                    rows={10}
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                   />
@@ -343,7 +406,7 @@ export default function SendLessee() {
                       checked={includePdf}
                       onChange={(e) => setIncludePdf(e.target.checked)}
                     />
-                    Estimate PDF (generated if shop sent none)
+                    {preview.attachmentNames?.pdf ?? "…_Resp6.pdf"} (BRC lessee)
                     <Button
                       type="button"
                       size="sm"
@@ -360,7 +423,7 @@ export default function SendLessee() {
                       checked={includeData}
                       onChange={(e) => setIncludeData(e.target.checked)}
                     />
-                    Data file (500-byte / CRB)
+                    {preview.attachmentNames?.data500 ?? "…_Resp6Byte500.txt"}
                     <Button
                       type="button"
                       size="sm"
@@ -522,8 +585,8 @@ export default function SendLessee() {
               <h3 className="font-semibold">Confirm send to lessee</h3>
               <p className="text-sm text-muted-foreground">
                 {preview?.localMode
-                  ? "Local mode: this will log to the outbox only — no real email."
-                  : "This will email the lessee with the selected attachments. Shop is never copied."}
+                  ? "Local mode: logs to the outbox and writes a .eml file — no real email is sent."
+                  : "This will email the lessee (To) with owner+shop on CC and the selected attachments."}
               </p>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={() => setConfirmOpen(false)}>

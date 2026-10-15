@@ -205,6 +205,7 @@ import {
   previewAttachmentContent,
   listSendLesseeHistory,
 } from "./services/send-lessee";
+import { buildBrcPdf, type BrcAudience } from "./services/brc-pdf";
 import {
   listViewerDocuments,
   getDocumentContent,
@@ -2084,9 +2085,33 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     if (!uid) return;
     const result = await buildSendLesseePreview({
       estimateId: String(req.params.id),
+      actor: actorFrom(req),
+      actorEmail: actorFrom(req),
     });
-    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    if (!result.ok) {
+      return res.status(result.status ?? 400).json({ error: result.error });
+    }
     return res.json(result);
+  });
+
+  /** Billing Repair Card PDF — audience=owner|lessee|shop (default owner). */
+  app.get("/api/repair/estimates/:id/brc-pdf", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const raw = String(req.query.audience ?? "owner").toLowerCase();
+    const audience: BrcAudience =
+      raw === "lessee" || raw === "shop" || raw === "owner" ? raw : "owner";
+    const result = await buildBrcPdf({
+      estimateId: String(req.params.id),
+      audience,
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    const name = `${result.doc.carCompact || "estimate"}_BRC_${audience}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+    return res.send(result.bytes);
   });
 
   app.get("/api/repair/estimates/:id/send-lessee/history", async (req, res) => {
@@ -2125,6 +2150,7 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const docs = Array.isArray(body.documentIds)
       ? body.documentIds.map(String)
       : [];
+    const cc = Array.isArray(body.cc) ? body.cc.map(String) : undefined;
     const result = await sendLesseeFromPreview({
       estimateId: String(req.params.id),
       recipients,
@@ -2135,9 +2161,11 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       includeDataFile: body.includeDataFile !== false,
       note: body.note ? String(body.note) : undefined,
       actor: actorFrom(req),
+      actorEmail: actorFrom(req),
+      cc,
       confirm: Boolean(body.confirm),
     });
-    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    if (!result.ok) return res.status(result.status ?? 400).json({ error: result.error });
     return res.status(201).json(result);
   });
 
@@ -3124,6 +3152,18 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const ids = Array.isArray(req.body?.estimateIds)
       ? req.body.estimateIds.map(String)
       : [];
+    // PDF path: single estimate + audience → Billing Repair Card
+    if (req.body?.format === "pdf" && ids.length === 1) {
+      const raw = String(req.body?.audience ?? "owner").toLowerCase();
+      const audience: BrcAudience =
+        raw === "lessee" || raw === "shop" || raw === "owner" ? raw : "owner";
+      const pdf = await buildBrcPdf({ estimateId: ids[0]!, audience });
+      if (!pdf.ok) return res.status(pdf.status).json({ error: pdf.error });
+      const name = `${pdf.doc.carCompact || "estimate"}_BRC_${audience}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+      return res.send(pdf.bytes);
+    }
     const result = await exportBrcDetail({
       estimateIds: ids,
       format: req.body?.format === "json" ? "json" : "csv",

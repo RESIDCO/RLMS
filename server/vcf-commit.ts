@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "./fetch-all";
 import { deleteVcfPreview, getVcfPreview } from "./vcf-preview-cache";
 import { governLeaseDates } from "./govern-lease-dates";
-import { autoFleetStatusFromLegacyText } from "@shared/fleet-status";
 import { statusAlignedToActiveFlag } from "@shared/car-lifecycle-status";
 import { assertRailcarImporterPatch } from "@shared/rider-import-guard";
 import {
@@ -237,18 +236,8 @@ export async function runVcfCommit(opts: {
       if (existingId && existingCar) {
         updatePayload = { ...payload };
         if (existingCar.entity === payload.entity) delete updatePayload.entity;
-        if (existingCar.fleet_status_source === "manual") {
-          delete updatePayload.fleet_status;
-          delete updatePayload.fleet_status_source;
-        } else {
-          updatePayload.fleet_status = autoFleetStatusFromLegacyText({
-            active: payload.active as boolean | undefined,
-            rider_external_id: payload.rider_external_id as string | null,
-            assignment_label: payload.assignment_label as string | null,
-            managed_category: payload.managed_category as string | null,
-          });
-          updatePayload.fleet_status_source = "auto";
-        }
+        delete updatePayload.fleet_status;
+        delete updatePayload.fleet_status_source;
         const activeManual = existingCar.active_source === "manual";
         if (activeManual) {
           updatePayload = null;
@@ -269,13 +258,8 @@ export async function runVcfCommit(opts: {
         insertPayload = {
           ...payload,
           status: statusAlignedToActiveFlag(null, payload.active === true),
-          fleet_status: autoFleetStatusFromLegacyText({
-            active: payload.active as boolean | undefined,
-            rider_external_id: payload.rider_external_id as string | null,
-            assignment_label: payload.assignment_label as string | null,
-            managed_category: payload.managed_category as string | null,
-          }),
-          fleet_status_source: "auto",
+          fleet_status: "Unassigned",
+          fleet_status_source: "derived",
           active_source: "auto",
         };
         assertRailcarImporterPatch(insertPayload);

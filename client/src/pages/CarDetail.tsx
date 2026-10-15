@@ -26,6 +26,7 @@ import {
 } from "@/lib/browse-nav";
 import { hasSearchSession, searchReturnPath } from "@/lib/search-query";
 import { CarDetail, RailcarFormDialog } from "@/pages/FleetRegistry";
+import { CommitmentPanel } from "@/pages/CommitmentOps";
 
 type DetailPayload = {
   railcar: any;
@@ -173,6 +174,8 @@ export default function CarDetailPage() {
                 onRemarked={(newId) => navigate(`/cars/${newId}`)}
               />
             </div>
+
+            <CommitmentPanel carId={id} />
 
             {abs.length > 0 && (
               <section className="rounded-xl border border-card-border bg-card p-5">

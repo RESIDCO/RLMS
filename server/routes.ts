@@ -94,6 +94,7 @@ import {
   resolveProgramCars,
   logProgramActivity,
 } from "./programs";
+import { registerCommitmentRoutes, ensureProgramCommitment, recomputeStatus } from "./commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag } from "@shared/ops-flag";
@@ -365,6 +366,7 @@ export async function registerRoutes(
   app.use("/api", requireApiAuth);
 
   await recoverStaleExportJobs();
+  registerCommitmentRoutes(app, requireWrite);
 
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
@@ -996,12 +998,7 @@ export async function registerRoutes(
         : null;
 
       const sqlActiveCars = fleetKpis
-        ? formulaActiveCars(
-            fleetKpis.total_fleet,
-            fleetKpis.idle_count,
-            fleetKpis.abatement_count,
-            fleetKpis.unassigned_cars
-          )
+        ? Math.max(0, fleetKpis.total_fleet - (Number(sqlKpis.off_rent) || 0))
         : jsActiveCars;
       if (fleetKpis && fleetKpis.leased_only !== sqlActiveCars) {
         console.warn("[dashboard] Active Cars mismatch", { leased_only: fleetKpis.leased_only, byFormula: sqlActiveCars });
@@ -1043,6 +1040,18 @@ export async function registerRoutes(
               lease_authority: "asset_report",
               lease_status_counts: sqlKpis.lease_status_counts ?? {},
               railcars_scanned: fleetKpis.railcars_scanned,
+              off_rent_main: Number(sqlKpis.off_rent_main) || 0,
+              off_rent_coal: Number(sqlKpis.off_rent_coal) || 0,
+              off_rent_rps: Number(sqlKpis.off_rent_rps) || 0,
+              unassigned_main: Number(sqlKpis.unassigned_main) || 0,
+              unassigned_rps: Number(sqlKpis.unassigned_rps) || 0,
+              no_lease_link: Number(sqlKpis.no_lease_link) || 0,
+              month_to_month: Number(sqlKpis.month_to_month) || 0,
+              going_on_lease_leases: Number(sqlKpis.going_on_lease_leases) || 0,
+              going_on_lease_cars: Number(sqlKpis.going_on_lease_cars) || 0,
+              going_on_lease_earliest_end: sqlKpis.going_on_lease_earliest_end ?? null,
+              stale_commitments: Number(sqlKpis.stale_commitments) || 0,
+              lease_ended_watch: Number(sqlKpis.lease_ended_watch) || 0,
             }
           : {
           total_fleet: railcars.length,
@@ -1311,68 +1320,9 @@ export async function registerRoutes(
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
-      const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0) : [];
-      const fleet_status = parseFleetStatus(req.body?.fleet_status);
-      if (!fleet_status) {
-        return res.status(400).json({ message: "fleet_status must be Leased, Idle, Sold, or Abatement" });
-      }
-      if (idsRaw.length === 0) {
-        return res.status(400).json({ message: "ids required" });
-      }
-      if (idsRaw.length > 20_000) {
-        return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
-      }
-      const uniqueIds = [...new Set(idsRaw)];
-      const CHUNK = 200;
-      const movedAt = effectiveDateToTimestamp(
-        typeof req.body?.effective_date === "string" ? req.body.effective_date : null,
-      );
-      const movedBy = typeof req.body?.moved_by === "string" && req.body.moved_by.trim()
-        ? req.body.moved_by.trim()
-        : "bulk-action";
-      let updated = 0;
-      const historyRows: any[] = [];
-      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
-        const slice = uniqueIds.slice(i, i + CHUNK);
-        // Rental Status only — never touch active / active_status / status (Car Status).
-        const { data, error } = await supabase
-          .from("railcars")
-          .update({ fleet_status, fleet_status_source: "manual" })
-          .in("id", slice)
-          .select("id");
-        if (error) throw error;
-        updated += data?.length ?? 0;
-
-        const { data: assigns, error: aErr } = await supabase
-          .from("railcar_assignments")
-          .select("railcar_id, rider_id, fleet_name")
-          .in("railcar_id", slice);
-        if (aErr) throw aErr;
-        const byCar = new Map<number, any>();
-        for (const a of assigns ?? []) byCar.set(a.railcar_id, a);
-        for (const carId of slice) {
-          const prev = byCar.get(carId);
-          historyRows.push({
-            railcar_id: carId,
-            from_rider_id: prev?.rider_id ?? null,
-            to_rider_id: prev?.rider_id ?? null,
-            from_fleet_name: prev?.fleet_name ?? null,
-            to_fleet_name: prev?.fleet_name ?? null,
-            moved_at: movedAt,
-            moved_by: movedBy,
-            reason: `Rental status set to ${fleet_status}`,
-          });
-        }
-      }
-      if (historyRows.length) {
-        for (let i = 0; i < historyRows.length; i += CHUNK) {
-          const { error: hErr } = await supabase
-            .from("assignment_history")
-            .insert(historyRows.slice(i, i + CHUNK));
-          if (hErr) throw hErr;
-        }
-      }
-      res.json({ ok: true, updated, fleet_status });
+      return res.status(400).json({
+        message: "Rental status is derived from the lease link and Commitment. It cannot be set by hand.",
+      });
     } catch (err) {
       errHandler(res, err);
     }
@@ -1642,13 +1592,10 @@ export async function registerRoutes(
       if (createConflict) return res.status(400).json(conflictResponse(createConflict));
       const flag = parsed.ops_flag;
       const insertRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
-      if (parsed.fleet_status) {
-        insertRow.fleet_status = parsed.fleet_status;
-        insertRow.fleet_status_source = "manual";
-      } else {
-        insertRow.fleet_status = autoFleetStatusFromLegacyText(parsed);
-        insertRow.fleet_status_source = "auto";
-      }
+      delete insertRow.fleet_status;
+      delete insertRow.fleet_status_source;
+      insertRow.fleet_status = "Unassigned";
+      insertRow.fleet_status_source = "derived";
       Object.assign(insertRow, fieldsImpliedByCarStatus(String(parsed.status ?? "Active/In-Service")));
       const { data, error } = await supabase
         .from("railcars")
@@ -1664,6 +1611,11 @@ export async function registerRoutes(
         throw error;
       }
       if (flag) await persistOpsFlag([data.id], flag);
+      try {
+        await recomputeStatus(data.id);
+      } catch (e: any) {
+        console.warn("[railcars] recompute after insert:", e?.message ?? e);
+      }
       res.json(hydrateOpsFlag({ ...data, ops_flag: flag ?? null }));
     } catch (err) {
       errHandler(res, err);
@@ -1689,11 +1641,8 @@ export async function registerRoutes(
       delete updateRow.reporting_marks;
       delete updateRow.car_initial;
 
-      // Rental Status must never flip active / active_status / Car Status as a side effect.
-      if (parsed.fleet_status) {
-        updateRow.fleet_status = parsed.fleet_status;
-        updateRow.fleet_status_source = "manual";
-      }
+      delete updateRow.fleet_status;
+      delete updateRow.fleet_status_source;
 
       let priorStatus: string | null | undefined;
       let priorActive: boolean | null | undefined;
@@ -2564,14 +2513,8 @@ export async function registerRoutes(
       dot_code: dotCode,
       dot_specification: dotCode, // mirror — keeps DV calculator path working
       comment_event_note: commentEventNote,
-      fleet_status: autoFleetStatusFromLegacyText({
-        active: activeBool,
-        rider_external_id: riderExternalId,
-        assignment_label: assignmentLabel,
-        fleet_name: fleetName,
-        managed_category: managedCategory,
-      }),
-      fleet_status_source: "auto",
+      fleet_status: undefined,
+      fleet_status_source: undefined,
       // Raw original headers preserved for debugging / round-trip
       _normalized: n,
     };
@@ -3692,8 +3635,8 @@ export async function registerRoutes(
         notes: r.notes,
         comment_event_note: r.notes,
         entity,
-        fleet_status: default_rental_status,
-        fleet_status_source: "manual",
+        fleet_status: "Unassigned",
+        fleet_status_source: "derived",
         active: true,
         active_status: "Active",
         status: "Active/In-Service",
@@ -5750,7 +5693,18 @@ export async function registerRoutes(
       if (!Array.isArray(railcar_ids) || railcar_ids.length === 0) {
         return res.status(400).json({ error: "railcar_ids required" });
       }
-      res.json(await addCarsToProgram(Number(req.params.id), railcar_ids, userId));
+      const added = await addCarsToProgram(Number(req.params.id), railcar_ids, userId);
+      const { data: prog } = await supabaseAdmin.from("programs").select("id, name, status, closed_date").eq("id", Number(req.params.id)).maybeSingle();
+      if (prog && !prog.closed_date && !["closed", "complete", "completed"].includes(String(prog.status ?? "").toLowerCase())) {
+        for (const row of added.added ?? []) {
+          try {
+            await ensureProgramCommitment(row.railcar_id, { id: prog.id, name: prog.name }, userId);
+          } catch (e: any) {
+            console.warn("[programs] commitment on add skipped:", e?.message ?? e);
+          }
+        }
+      }
+      res.json(added);
     } catch (err) { errHandler(res, err); }
   });
 

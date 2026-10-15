@@ -155,6 +155,10 @@ export default function MoveCars() {
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
+      <div className="mx-4 sm:mx-8 mt-4 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm">
+        Ending an OL? Prompt: Move to EA x-lessee? Use{" "}
+        <a className="underline" href="#/returns/bulk">Bulk return</a> so the preview shows old link → new link.
+      </div>
       <PageHeader
         title="Move Cars"
         subtitle="Reassign one or more railcars from one rider to another. Every move is logged."

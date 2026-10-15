@@ -405,7 +405,7 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
 
   // Fleet status is the stored railcars.fleet_status column (not text-matching).
   const statusFleet =
-    p.status === "Sold" || p.status === "Idle" || p.status === "Leased" || p.status === "Abatement" || p.status === "Active/In-Service"
+    p.status === "Sold" || p.status === "Idle" || p.status === "Leased" || p.status === "Abatement" || p.status === "Unassigned" || p.status === "Active/In-Service"
       ? p.status === "Sold"
         ? "sold"
         : p.status === "Idle"
@@ -424,6 +424,8 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
     query = query.eq("fleet_status", "Leased");
   } else if (assignedMode === "abatement") {
     query = query.eq("fleet_status", "Abatement");
+  } else if (assignedMode === "unassigned") {
+    query = query.eq("fleet_status", "Unassigned");
   } else if (p.status) {
     query = query.eq("status", p.status);
   }
@@ -614,10 +616,6 @@ export async function queryRailcarIds(p: RailcarListParams): Promise<number[]> {
 
 async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]> {
   const slim = assignmentEmbed(p, "id, assignment:railcar_assignments(id)");
-  if (p.assigned === "unassigned") {
-    const result = await queryRailcarsWithSelect({ ...p, all: true, page: 1, pageSize: 1 }, slim);
-    return result.rows.map((r: any) => r.id);
-  }
   const data = await fetchAllRows<{ id: number }>(async (from, to) => {
     let q = supabaseAdmin.from("railcars").select(slim).order("id", { ascending: true }).range(from, to);
     q = await applyRailcarFilters(q, p);
@@ -673,7 +671,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   const db = supabaseAdmin;
   const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
 
-  if (p.assigned === "unassigned") {
+  if (p.assigned === "nolink") {
     // Left-anti-join: cars with no assignment row.
     const assigned = await fetchAllRows<{ railcar_id: number }>((from, to) =>
       db.from("railcar_assignments").select("railcar_id").order("railcar_id").range(from, to)

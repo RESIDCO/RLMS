@@ -5,7 +5,8 @@ import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
-import { displayStatusInputFromRailcar, FLEET_STATUSES, type FleetStatus } from "@shared/fleet-status";
+import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-status";
+import { CommitmentPanel } from "@/pages/CommitmentOps";
 import { carListSearchTokens } from "@shared/programs";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
@@ -1396,31 +1397,6 @@ export default function FleetRegistry() {
                 <Image className="h-4 w-4" />
                 Find Photos
               </Button>
-              {/* Bulk fleet status */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={bulkFleetStatusPending} data-testid="bulk-fleet-status-dropdown">
-                    Set Rental Status
-                    <ChevronDown className="ml-1 h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuLabel>Leased / Idle / Sold / Abatement for selected cars</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {FLEET_STATUSES.map((s) => (
-                    <DropdownMenuItem
-                      key={s}
-                      onSelect={() => {
-                        setBulkRentalTarget(s);
-                        setBulkRentalEffectiveDate(todayIsoDateOnly());
-                        setBulkRentalOpen(true);
-                      }}
-                    >
-                      {s}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
               {/* Bulk status change */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -2031,6 +2007,10 @@ export function CarDetail({
       ) : null}
 
       {/* Sold banner */}
+      <div className="mt-4">
+        <CommitmentPanel carId={carId} />
+      </div>
+
       {(r as any).sold_to && (
         <div className="mt-4 rounded-md border border-umler-amber/30 bg-umler-amber/10 px-4 py-3">
           <div className="flex items-center gap-2 text-xs font-semibold text-umler-amber uppercase tracking-wider">
@@ -2830,21 +2810,9 @@ export function RailcarFormDialog({
           <div>
             <Label>Rental Status</Label>
             <p className="text-[11px] text-muted-foreground mb-1.5">
-              Leased / Idle / Sold / Abatement — does not change Car Status or active fleet membership.
+              Derived from the lease link and Commitment. Not editable.
             </p>
-            <Select
-              value={form.fleet_status || "Leased"}
-              onValueChange={(v) => setForm({ ...form, fleet_status: v as FleetStatus })}
-            >
-              <SelectTrigger data-testid="select-fleet-status">
-                <SelectValue placeholder="Select rental status" />
-              </SelectTrigger>
-              <SelectContent>
-                {FLEET_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input value={form.fleet_status || "—"} readOnly disabled data-testid="select-fleet-status" />
           </div>
           {form.fleet_status === "Sold" && (
             <div>

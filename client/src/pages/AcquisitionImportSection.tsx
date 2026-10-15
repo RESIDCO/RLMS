@@ -342,18 +342,9 @@ export default function AcquisitionImportSection() {
         </div>
         <div>
           <Label>Default Rental Status</Label>
-          <Select value={rentalStatus} onValueChange={(v) => setRentalStatus(v as FleetStatus)}>
-            <SelectTrigger data-testid="acq-rental-status">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {FLEET_STATUSES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <p className="text-[11px] text-muted-foreground mt-1" data-testid="acq-rental-status">
+            Derived after import from the lease link (Unassigned until assigned).
+          </p>
         </div>
       </div>
 
@@ -426,7 +417,7 @@ export default function AcquisitionImportSection() {
               {" · "}
               Date: <span className="text-foreground">{acquisitionDate}</span>
               {" · "}
-              Rental status: <span className="text-foreground">{rentalStatus}</span>
+              Rental status: <span className="text-foreground">derived</span>
             </div>
             {defaultPrice.trim() && (
               <div>

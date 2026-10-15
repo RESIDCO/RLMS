@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { geoAlbersUsa, geoCentroid, geoPath, type GeoPermissibleObjects } from "d3-geo";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronDown, Pencil } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
+import { confirmAction } from "@/components/ConfirmActionDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
@@ -16,13 +18,14 @@ import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
 
 type Owner = { initials: string; full_name: string; color_hex: string; is_active: boolean; sort_order: number };
+type OwnerStat = { initials: string; counties: number; states: number };
 type MapPayload = {
   owners: Owner[];
   counties: Record<string, string | null>;
   countyMeta: Record<string, { state: string; name: string }>;
   splitStates: string[];
   wholeStates: Record<string, string | null>;
-  ownerStats: { initials: string; counties: number; states: number }[];
+  ownerStats: OwnerStat[];
 };
 type ContactAgg = {
   total: number;
@@ -60,6 +63,21 @@ const VIEW_KEY = "rlms-territory-map-view";
 const UNASSIGNED = "#9CA3AF";
 const W = 960;
 const H = 580;
+const COUNTY_ZOOM = 1.65;
+
+/** Okabe–Ito + a few extras: distinct on a filled map, colorblind-safer than a free picker. */
+const REP_PALETTE = [
+  "#0072B2",
+  "#D55E00",
+  "#009E73",
+  "#CC79A7",
+  "#56B4E9",
+  "#E69F00",
+  "#882255",
+  "#44AA99",
+  "#332288",
+  "#999933",
+];
 
 const BUCKETS: { id: string; label: string }[] = [
   { id: "mapped_county", label: "Mapped county" },
@@ -74,12 +92,17 @@ function sideOfLine(a: [number, number], b: [number, number], p: [number, number
   return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
 }
 
+function normHex(h: string) {
+  return h.trim().toUpperCase();
+}
+
 export default function TerritoryMapPage() {
   const [, navigate] = useLocation();
   const canEdit = useCanEdit();
   const isAdmin = useIsAdmin();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const [view, setView] = useState<"sales" | "contacts">(() => {
     try {
       return sessionStorage.getItem(VIEW_KEY) === "contacts" ? "contacts" : "sales";
@@ -88,9 +111,10 @@ export default function TerritoryMapPage() {
     }
   });
   const [geo, setGeo] = useState<FC | null>(null);
+  const [stateGeo, setStateGeo] = useState<FC | null>(null);
   const [editOn, setEditOn] = useState(false);
   const [tool, setTool] = useState<"state" | "county" | "split">("state");
-  const [palette, setPalette] = useState<string>("BH");
+  const [paintOwner, setPaintOwner] = useState<string | null>(null);
   const [pending, setPending] = useState<Record<string, string | null>>({});
   const [note, setNote] = useState("");
   const [splitPts, setSplitPts] = useState<[number, number][]>([]);
@@ -98,6 +122,10 @@ export default function TerritoryMapPage() {
   const [splitOwners, setSplitOwners] = useState<[string, string]>(["BH", "FF"]);
   const [flip, setFlip] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<string | null>(null);
+  const [mapScale, setMapScale] = useState(1);
+  const [histOpen, setHistOpen] = useState(false);
+  const [emptyOpen, setEmptyOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
   const [filters, setFilters] = useState({
     relationship_type: "",
     priority_tier: "",
@@ -121,7 +149,23 @@ export default function TerritoryMapPage() {
       .then((r) => r.json())
       .then(setGeo)
       .catch(() => toast({ title: "Could not load county map", variant: "destructive" }));
+    fetch("/geo/us-states.json")
+      .then((r) => r.json())
+      .then(setStateGeo)
+      .catch(() => { /* state outlines are visual only */ });
   }, [toast]);
+
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 0.9 : 1.12;
+      setMapScale((s) => Math.min(4, Math.max(1, Number((s * factor).toFixed(3)))));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [geo]);
 
   const mapQ = useQuery<MapPayload>({
     queryKey: ["/api/territories/map"],
@@ -159,9 +203,24 @@ export default function TerritoryMapPage() {
   });
 
   const owners = mapQ.data?.owners ?? [];
+  const statsByIni = useMemo(() => {
+    const m = new Map((mapQ.data?.ownerStats ?? []).map((s) => [s.initials, s]));
+    return m;
+  }, [mapQ.data?.ownerStats]);
   const colorOf = useMemo(() => {
     const m = new Map(owners.map((o) => [o.initials, o.color_hex]));
     return (ini: string | null | undefined) => (ini && m.get(ini)) || UNASSIGNED;
+  }, [owners]);
+  const usedByColor = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const o of owners) {
+      if (!o.is_active) continue;
+      const k = normHex(o.color_hex);
+      const list = m.get(k) ?? [];
+      list.push(o.initials);
+      m.set(k, list);
+    }
+    return m;
   }, [owners]);
 
   const projection = useMemo(() => {
@@ -207,6 +266,38 @@ export default function TerritoryMapPage() {
       .map(([f]) => f);
   }
 
+  const zoomedIn = mapScale >= COUNTY_ZOOM;
+  const showAllCountyLines = view === "contacts" || zoomedIn || (editOn && (tool === "county" || tool === "split"));
+
+  const pendingFips = Object.keys(pending);
+  const pendingStates = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of pendingFips) {
+      const st = mapQ.data?.countyMeta[f]?.state;
+      if (st) s.add(st);
+    }
+    return s.size;
+  }, [pendingFips, mapQ.data?.countyMeta]);
+
+  const hasDraft = pendingFips.length > 0 || (tool === "split" && splitPreview.size > 0 && splitPts.length >= 2);
+  const canApply = !applyBusy && hasDraft && (tool === "split" || !!paintOwner);
+
+  const statusLine = (() => {
+    if (tool === "split") {
+      if (!splitState) return "Split a state: click two points across a state, then click counties to flip sides.";
+      if (splitPts.length < 2) return `Split ${splitState}: click the second point.`;
+      return `Split ${splitState} — ${splitOwners[0]} / ${splitOwners[1]}`;
+    }
+    if (!paintOwner) return "Pick a rep, then click the map.";
+    if (!pendingFips.length) return "Nothing selected yet";
+    if (tool === "state") {
+      const n = pendingStates;
+      return `Painting ${paintOwner} — ${n} state${n === 1 ? "" : "s"} selected`;
+    }
+    const n = pendingFips.length;
+    return `Painting ${paintOwner} — ${n} count${n === 1 ? "y" : "ies"} selected`;
+  })();
+
   function onCountyClick(fips: string, ev?: React.MouseEvent) {
     if (view === "contacts") {
       setPanel({ county: fips });
@@ -216,21 +307,22 @@ export default function TerritoryMapPage() {
     const st = mapQ.data?.countyMeta[fips]?.state;
     if (tool === "split") {
       if (!st) return;
-      const svg = (ev?.currentTarget as SVGElement | undefined)?.ownerSVGElement;
-      if (!svg || !ev) return;
+      const node = ev?.currentTarget as SVGGraphicsElement | undefined;
+      const svg = node?.ownerSVGElement;
+      if (!svg || !ev || !node) return;
       const pt = svg.createSVGPoint();
       pt.x = ev.clientX;
       pt.y = ev.clientY;
-      const ctm = svg.getScreenCTM();
+      const ctm = node.getScreenCTM();
       if (!ctm) return;
       const loc = pt.matrixTransform(ctm.inverse());
       const xy: [number, number] = [loc.x, loc.y];
       if (!splitState) {
         setSplitState(st);
         setSplitPts([xy]);
-        const cur = mapQ.data?.wholeStates[st] || palette;
-        const other = owners.find((o) => o.initials !== cur && o.is_active)?.initials || palette;
-        setSplitOwners([cur || palette, other]);
+        const cur = mapQ.data?.wholeStates[st] || paintOwner;
+        const other = owners.find((o) => o.initials !== cur && o.is_active)?.initials || paintOwner || "BH";
+        setSplitOwners([cur || paintOwner || "BH", other]);
         setFlip(new Set());
         return;
       }
@@ -246,13 +338,17 @@ export default function TerritoryMapPage() {
       });
       return;
     }
+    if (!paintOwner) {
+      toast({ title: "Pick a rep, then click the map." });
+      return;
+    }
     if (tool === "state" && st) {
       const next: Record<string, string | null> = { ...pending };
-      for (const c of countiesInState(st)) next[c] = palette;
+      for (const c of countiesInState(st)) next[c] = paintOwner;
       setPending(next);
       return;
     }
-    setPending((p) => ({ ...p, [fips]: palette }));
+    setPending((p) => ({ ...p, [fips]: paintOwner }));
   }
 
   async function applyPending() {
@@ -312,6 +408,15 @@ export default function TerritoryMapPage() {
   }
 
   const maxCounty = Math.max(1, ...Object.values(contactsQ.data?.counties ?? { x: 1 }));
+  const histCount = histQ.data?.change_sets?.length ?? 0;
+  const withTerritory = owners.filter((o) => {
+    const s = statsByIni.get(o.initials);
+    return (s?.states ?? 0) > 0 || (s?.counties ?? 0) > 0;
+  });
+  const noTerritory = owners.filter((o) => {
+    const s = statsByIni.get(o.initials);
+    return (s?.states ?? 0) === 0 && (s?.counties ?? 0) === 0;
+  });
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -356,7 +461,7 @@ export default function TerritoryMapPage() {
         }
       />
 
-      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-4">
+      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-4">
         <div className="min-w-0">
           {view === "contacts" && (
             <div className="flex flex-wrap gap-2 mb-3 items-end">
@@ -412,50 +517,73 @@ export default function TerritoryMapPage() {
           )}
 
           {editOn && view === "sales" && (
-            <div className="flex flex-wrap gap-2 mb-3 items-center">
-              {(["state", "county", "split"] as const).map((t) => (
-                <Button key={t} size="sm" variant={tool === t ? "default" : "outline"} onClick={() => { setTool(t); setSplitPts([]); setSplitState(null); }}>
-                  {t === "state" ? "Assign state" : t === "county" ? "Assign counties" : "Draw split line"}
-                </Button>
-              ))}
-              <div className="flex gap-1">
-                {owners.filter((o) => o.is_active).map((o) => (
-                  <button
-                    key={o.initials}
-                    type="button"
-                    title={o.full_name}
-                    onClick={() => setPalette(o.initials)}
-                    className={cn("h-7 px-2 rounded text-xs border", palette === o.initials ? "ring-2 ring-foreground" : "")}
-                    style={{ background: o.color_hex }}
-                  >
-                    {o.initials}
-                  </button>
-                ))}
-              </div>
-              {tool === "split" && splitPts.length >= 2 && (
-                <div className="flex items-center gap-2 text-xs">
-                  Side A
-                  <select className="h-7 border rounded bg-background" value={splitOwners[0]} onChange={(e) => setSplitOwners([e.target.value, splitOwners[1]])}>
-                    {owners.filter((o) => o.is_active).map((o) => <option key={o.initials} value={o.initials}>{o.initials}</option>)}
-                  </select>
-                  Side B
-                  <select className="h-7 border rounded bg-background" value={splitOwners[1]} onChange={(e) => setSplitOwners([splitOwners[0], e.target.value])}>
-                    {owners.filter((o) => o.is_active).map((o) => <option key={o.initials} value={o.initials}>{o.initials}</option>)}
-                  </select>
+            <div className="mb-3 space-y-2">
+              <div className="flex flex-wrap gap-2 items-center">
+                <div className="inline-flex rounded-lg border border-border p-0.5" role="group" aria-label="Paint tool">
+                  {([
+                    { id: "state" as const, label: "Whole states" },
+                    { id: "county" as const, label: "Counties" },
+                    { id: "split" as const, label: "Split a state" },
+                  ]).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={cn(
+                        "h-8 px-3 text-xs rounded-md",
+                        tool === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => { setTool(t.id); setSplitPts([]); setSplitState(null); }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
                 </div>
-              )}
-              <Input className="h-8 w-56" placeholder="Optional note" value={note} onChange={(e) => setNote(e.target.value)} />
-              <Button size="sm" disabled={applyBusy} onClick={applyPending}>Apply</Button>
-              <Button size="sm" variant="ghost" onClick={() => { setPending({}); setSplitPts([]); setSplitState(null); }}>Clear draft</Button>
+                {tool === "split" && (
+                  <span className="text-[11px] text-muted-foreground max-w-xs">
+                    Advanced: draw a line, then click counties to flip which rep they go to.
+                  </span>
+                )}
+                {tool === "split" && splitPts.length >= 2 && (
+                  <div className="flex items-center gap-2 text-xs">
+                    Side A
+                    <select className="h-7 border rounded bg-background" value={splitOwners[0]} onChange={(e) => setSplitOwners([e.target.value, splitOwners[1]])}>
+                      {owners.filter((o) => o.is_active).map((o) => <option key={o.initials} value={o.initials}>{o.initials}</option>)}
+                    </select>
+                    Side B
+                    <select className="h-7 border rounded bg-background" value={splitOwners[1]} onChange={(e) => setSplitOwners([splitOwners[0], e.target.value])}>
+                      {owners.filter((o) => o.is_active).map((o) => <option key={o.initials} value={o.initials}>{o.initials}</option>)}
+                    </select>
+                  </div>
+                )}
+                <Input className="h-8 w-56" placeholder="Optional note" value={note} onChange={(e) => setNote(e.target.value)} />
+                <Button size="sm" disabled={!canApply} onClick={applyPending}>Apply</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setPending({}); setSplitPts([]); setSplitState(null); }}>Clear draft</Button>
+              </div>
+              <div className="text-xs text-muted-foreground">{statusLine}</div>
             </div>
           )}
 
-          <div className="rounded-xl border border-card-border bg-card overflow-hidden">
+          {editOn && view === "sales" && (
+            <div className="text-sm font-medium mb-1.5 min-h-[1.25rem]">
+              {paintOwner ? `Painting with ${paintOwner}` : "Pick a rep, then click the map."}
+            </div>
+          )}
+          <div className="rounded-xl border border-card-border bg-card overflow-hidden relative">
+            <div className="absolute top-2 right-2 z-10 flex gap-1">
+              <button type="button" className="h-7 w-7 rounded-md border bg-background/90 text-sm" title="Zoom in" onClick={() => setMapScale((s) => Math.min(4, Number((s * 1.25).toFixed(3))))}>+</button>
+              <button type="button" className="h-7 w-7 rounded-md border bg-background/90 text-sm" title="Zoom out" onClick={() => setMapScale((s) => Math.max(1, Number((s / 1.25).toFixed(3))))}>−</button>
+            </div>
             {!geo || !pathGen || mapQ.isLoading ? (
               <Skeleton className="w-full h-[420px]" />
             ) : (
-              <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="United States territory map">
-                <g>
+              <svg
+                ref={svgRef}
+                viewBox={`0 0 ${W} ${H}`}
+                className="w-full h-auto"
+                role="img"
+                aria-label="United States territory map"
+              >
+                <g transform={mapScale === 1 ? undefined : `translate(${W / 2} ${H / 2}) scale(${mapScale}) translate(${-W / 2} ${-H / 2})`}>
                   {geo.features.map((f) => {
                     const fips = String(f.id);
                     const st = mapQ.data?.countyMeta[fips]?.state;
@@ -473,13 +601,14 @@ export default function TerritoryMapPage() {
                       fill = splitPreview.get(fips) === "a" ? colorOf(splitOwners[0]) : colorOf(splitOwners[1]);
                     }
                     const d = pathGen(f as GeoPermissibleObjects) || "";
+                    const countyStroke = showAllCountyLines || split;
                     return (
                       <path
                         key={fips}
                         d={d}
                         fill={fill}
-                        stroke={split || editOn ? "rgba(15,23,42,0.35)" : "rgba(15,23,42,0.12)"}
-                        strokeWidth={split ? 0.6 : 0.3}
+                        stroke={countyStroke ? "rgba(15,23,42,0.35)" : "none"}
+                        strokeWidth={countyStroke ? (split ? 0.6 : 0.3) : 0}
                         onMouseEnter={() => setHover(fips)}
                         onMouseLeave={() => setHover((h) => (h === fips ? null : h))}
                         onClick={(e) => onCountyClick(fips, e)}
@@ -487,6 +616,16 @@ export default function TerritoryMapPage() {
                       />
                     );
                   })}
+                  {stateGeo && pathGen && view === "sales" && stateGeo.features.map((f, i) => (
+                    <path
+                      key={`st-${f.id ?? i}`}
+                      d={pathGen(f as GeoPermissibleObjects) || ""}
+                      fill="none"
+                      stroke="rgba(15,23,42,0.55)"
+                      strokeWidth={0.9}
+                      pointerEvents="none"
+                    />
+                  ))}
                   {view === "contacts" && showPins && projection && (contactsQ.data?.zips ?? []).map((z) => {
                     const p = projection([z.lng, z.lat]);
                     if (!p) return null;
@@ -514,47 +653,98 @@ export default function TerritoryMapPage() {
           </div>
         </div>
 
-        <aside className="space-y-3">
+        <aside className="space-y-3 min-w-0">
           {view === "sales" && (
             <div className="rounded-xl border border-card-border bg-card p-3">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Legend</div>
-              {(mapQ.data?.ownerStats ?? []).map((s) => {
-                const o = owners.find((x) => x.initials === s.initials);
-                if (!o) return null;
-                return (
-                  <div key={s.initials} className="flex items-center gap-2 text-sm py-1">
-                    <span className="w-3.5 h-3.5 rounded-sm border" style={{ background: o.color_hex }} />
-                    <span className="font-medium w-8">{o.initials}</span>
-                    <span className="text-muted-foreground truncate">{o.full_name}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">{s.states} st · {s.counties} co</span>
-                  </div>
-                );
-              })}
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Sales reps</div>
+              {withTerritory.map((o) => (
+                <RepRow
+                  key={o.initials}
+                  owner={o}
+                  stat={statsByIni.get(o.initials)}
+                  editOn={editOn}
+                  selected={paintOwner === o.initials}
+                  canRecolor={isAdmin}
+                  usedByColor={usedByColor}
+                  onSelect={() => { if (o.is_active) setPaintOwner(o.initials); }}
+                  onColor={(hex) => patchOwnerColor(o, hex, toast, () => qc.invalidateQueries({ queryKey: ["/api/territories/map"] }))}
+                />
+              ))}
+              {noTerritory.length > 0 && (
+                <div className="mt-1">
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground py-1"
+                    onClick={() => setEmptyOpen((x) => !x)}
+                  >
+                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", emptyOpen ? "rotate-0" : "-rotate-90")} />
+                    No territory yet ({noTerritory.length})
+                  </button>
+                  {emptyOpen && noTerritory.map((o) => (
+                    <RepRow
+                      key={o.initials}
+                      owner={o}
+                      stat={statsByIni.get(o.initials)}
+                      editOn={editOn}
+                      selected={paintOwner === o.initials}
+                      canRecolor={isAdmin}
+                      usedByColor={usedByColor}
+                      onSelect={() => { if (o.is_active) setPaintOwner(o.initials); }}
+                      onColor={(hex) => patchOwnerColor(o, hex, toast, () => qc.invalidateQueries({ queryKey: ["/api/territories/map"] }))}
+                    />
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2 text-sm py-1 mt-1">
-                <span className="w-3.5 h-3.5 rounded-sm border" style={{ background: UNASSIGNED }} />
+                <span className="w-3.5 h-3.5 rounded-full border shrink-0" style={{ background: UNASSIGNED }} />
                 <span className="text-muted-foreground">Unassigned</span>
               </div>
+
+              {isAdmin && (
+                <div className="mt-2 pt-2 border-t border-border">
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setManageOpen((x) => !x)}
+                  >
+                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", manageOpen ? "rotate-0" : "-rotate-90")} />
+                    Manage reps
+                  </button>
+                  {manageOpen && (
+                    <ManageReps
+                      owners={owners}
+                      usedByColor={usedByColor}
+                      onSaved={() => qc.invalidateQueries({ queryKey: ["/api/territories/map"] })}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           {editOn && (
             <div className="rounded-xl border border-card-border bg-card p-3">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">History</div>
-              <div className="space-y-2 max-h-64 overflow-auto">
-                {(histQ.data?.change_sets ?? []).map((cs) => (
-                  <div key={cs.change_set_id} className="text-xs border-b border-border pb-2">
-                    <div className="text-foreground">{new Date(cs.changed_at).toLocaleString()} · {cs.counties} counties</div>
-                    <div className="text-muted-foreground">{cs.changed_by}{cs.note ? ` · ${cs.note}` : ""}</div>
-                    <Button size="sm" variant="outline" className="mt-1 h-7" onClick={() => revertSet(cs.change_set_id)}>Revert</Button>
-                  </div>
-                ))}
-                {!histQ.data?.change_sets?.length && <p className="text-xs text-muted-foreground">No edits yet.</p>}
-              </div>
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground w-full"
+                onClick={() => setHistOpen((x) => !x)}
+              >
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", histOpen ? "rotate-0" : "-rotate-90")} />
+                History ({histCount})
+              </button>
+              {histOpen && (
+                <div className="space-y-2 max-h-64 overflow-auto mt-2">
+                  {(histQ.data?.change_sets ?? []).map((cs) => (
+                    <div key={cs.change_set_id} className="text-xs border-b border-border pb-2">
+                      <div className="text-foreground">{new Date(cs.changed_at).toLocaleString()} · {cs.counties} counties</div>
+                      <div className="text-muted-foreground">{cs.changed_by}{cs.note ? ` · ${cs.note}` : ""}</div>
+                      <Button size="sm" variant="outline" className="mt-1 h-7" onClick={() => revertSet(cs.change_set_id)}>Revert</Button>
+                    </div>
+                  ))}
+                  {!histQ.data?.change_sets?.length && <p className="text-xs text-muted-foreground">No edits yet.</p>}
+                </div>
+              )}
             </div>
-          )}
-
-          {isAdmin && view === "sales" && (
-            <AdminOwners owners={owners} onSaved={() => qc.invalidateQueries({ queryKey: ["/api/territories/map"] })} />
           )}
 
           {view === "contacts" && panel && (
@@ -597,6 +787,218 @@ export default function TerritoryMapPage() {
   );
 }
 
+async function patchOwnerColor(
+  o: Owner,
+  hex: string,
+  toast: ReturnType<typeof useToast>["toast"],
+  onSaved: () => void,
+) {
+  try {
+    await apiRequest("PATCH", `/api/territories/owners/${o.initials}`, { color_hex: hex });
+    onSaved();
+  } catch (e: any) {
+    toast({ title: "Could not update color", description: e.message, variant: "destructive" });
+  }
+}
+
+function RepRow({
+  owner,
+  stat,
+  editOn,
+  selected,
+  canRecolor,
+  usedByColor,
+  onSelect,
+  onColor,
+}: {
+  owner: Owner;
+  stat?: OwnerStat;
+  editOn: boolean;
+  selected: boolean;
+  canRecolor: boolean;
+  usedByColor: Map<string, string[]>;
+  onSelect: () => void;
+  onColor: (hex: string) => void;
+}) {
+  const states = stat?.states ?? 0;
+  const counties = stat?.counties ?? 0;
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 text-sm py-1 rounded-md px-1 -mx-1",
+        editOn && "cursor-pointer",
+        selected && editOn && "ring-2 ring-foreground/70 bg-muted/40",
+        !owner.is_active && "opacity-60",
+      )}
+      onClick={() => { if (editOn) onSelect(); }}
+    >
+      <ColorDot
+        color={owner.color_hex}
+        canRecolor={canRecolor}
+        usedByColor={usedByColor}
+        currentInitials={owner.initials}
+        onPick={onColor}
+      />
+      <span className="font-medium w-8 shrink-0">{owner.initials}</span>
+      <span className="text-muted-foreground truncate min-w-0">{owner.full_name}</span>
+      <span
+        className="ml-auto text-xs text-muted-foreground shrink-0"
+        title={`${states} states · ${counties.toLocaleString()} counties`}
+      >
+        {states} state{states === 1 ? "" : "s"}
+        <span className="text-[10px] text-muted-foreground/80"> · {counties.toLocaleString()} co</span>
+      </span>
+    </div>
+  );
+}
+
+function ColorDot({
+  color,
+  canRecolor,
+  usedByColor,
+  currentInitials,
+  onPick,
+}: {
+  color: string;
+  canRecolor: boolean;
+  usedByColor: Map<string, string[]>;
+  currentInitials?: string;
+  onPick: (hex: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!canRecolor) {
+    return <span className="w-3.5 h-3.5 rounded-full border shrink-0" style={{ background: color }} />;
+  }
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Change color"
+          className="relative w-3.5 h-3.5 rounded-full border shrink-0 group"
+          style={{ background: color }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Pencil className="h-2 w-2 absolute -right-1.5 -bottom-1.5 text-foreground opacity-0 group-hover:opacity-100" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-52 p-2" align="start" onClick={(e) => e.stopPropagation()}>
+        <div className="text-[11px] text-muted-foreground mb-2">Choose a color</div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {REP_PALETTE.map((hex) => {
+            const users = (usedByColor.get(normHex(hex)) ?? []).filter((i) => i !== currentInitials);
+            return (
+              <button
+                key={hex}
+                type="button"
+                className="relative h-7 w-7 rounded-md border"
+                style={{ background: hex }}
+                title={users.length ? `Also used by ${users.join(", ")}` : hex}
+                onClick={() => { onPick(hex); setOpen(false); }}
+              >
+                {users.length ? (
+                  <span className="absolute -bottom-1 -right-1 text-[8px] leading-none bg-background border rounded px-0.5">
+                    {users[0]}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ManageReps({
+  owners,
+  usedByColor,
+  onSaved,
+}: {
+  owners: Owner[];
+  usedByColor: Map<string, string[]>;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [initials, setInitials] = useState("");
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(REP_PALETTE[0]);
+  async function add() {
+    const ini = initials.trim().toUpperCase();
+    if (!/^[A-Z]{2,4}$/.test(ini)) {
+      toast({ title: "Initials must be 2–4 letters", variant: "destructive" });
+      return;
+    }
+    if (owners.some((o) => o.initials.toUpperCase() === ini)) {
+      toast({ title: "Those initials are already in use", variant: "destructive" });
+      return;
+    }
+    if (!name.trim()) {
+      toast({ title: "Full name is required", variant: "destructive" });
+      return;
+    }
+    try {
+      await apiRequest("POST", "/api/territories/owners", { initials: ini, full_name: name.trim(), color_hex: color });
+      toast({ title: "Owner added" });
+      setInitials(""); setName("");
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Could not add owner", description: e.message, variant: "destructive" });
+    }
+  }
+  async function toggleActive(o: Owner) {
+    const next = !o.is_active;
+    if (o.is_active) {
+      const ok = await confirmAction({
+        title: `Deactivate ${o.initials}?`,
+        description: "Their territories stay assigned. They will no longer appear as a choice for new edits.",
+        confirmLabel: "Deactivate",
+        variant: "destructive",
+      });
+      if (!ok) return;
+    }
+    try {
+      await apiRequest("PATCH", `/api/territories/owners/${o.initials}`, { is_active: next });
+      onSaved();
+    } catch (e: any) {
+      toast({ title: "Could not update owner", description: e.message, variant: "destructive" });
+    }
+  }
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="space-y-1">
+        {owners.map((o) => (
+          <div key={o.initials} className="flex items-center gap-2 text-xs">
+            <span className="w-8 font-medium">{o.initials}</span>
+            <span className="truncate text-muted-foreground flex-1">{o.full_name}</span>
+            <button type="button" className="text-muted-foreground hover:text-foreground shrink-0" onClick={() => toggleActive(o)}>
+              {o.is_active ? "Deactivate" : "Activate"}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-2">
+        <div className="grid gap-1">
+          <Label className="text-[11px]">Initials (2-4 letters)</Label>
+          <Input className="h-8" value={initials} onChange={(e) => setInitials(e.target.value)} maxLength={4} />
+        </div>
+        <div className="grid gap-1">
+          <Label className="text-[11px]">Full name</Label>
+          <Input className="h-8" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="grid gap-1">
+          <Label className="text-[11px]">Color</Label>
+          <div className="flex items-center gap-2">
+            <ColorDot color={color} canRecolor usedByColor={usedByColor} onPick={setColor} />
+            <span className="text-xs text-muted-foreground">{color}</span>
+          </div>
+        </div>
+        <Button size="sm" onClick={add}>Add rep</Button>
+      </div>
+    </div>
+  );
+}
+
 function groupByCompany(rows: ContactRow[]) {
   const m: Record<string, ContactRow[]> = {};
   for (const r of rows) {
@@ -613,51 +1015,6 @@ function FilterSelect({ label, value, onChange, options }: { label: string; valu
       <select className="h-8 border rounded-md bg-background text-sm px-2" value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((o) => <option key={o || "(any)"} value={o}>{o || "Any"}</option>)}
       </select>
-    </div>
-  );
-}
-
-function AdminOwners({ owners, onSaved }: { owners: Owner[]; onSaved: () => void }) {
-  const { toast } = useToast();
-  const [initials, setInitials] = useState("");
-  const [name, setName] = useState("");
-  const [color, setColor] = useState("#888888");
-  async function add() {
-    try {
-      await apiRequest("POST", "/api/territories/owners", { initials, full_name: name, color_hex: color });
-      toast({ title: "Owner added" });
-      setInitials(""); setName("");
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Could not add owner", description: e.message, variant: "destructive" });
-    }
-  }
-  async function patch(o: Owner, patch: Partial<Owner>) {
-    try {
-      await apiRequest("PATCH", `/api/territories/owners/${o.initials}`, patch);
-      onSaved();
-    } catch (e: any) {
-      toast({ title: "Could not update owner", description: e.message, variant: "destructive" });
-    }
-  }
-  return (
-    <div className="rounded-xl border border-card-border bg-card p-3 space-y-2">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Reps (admin)</div>
-      {owners.map((o) => (
-        <div key={o.initials} className="flex items-center gap-2 text-xs">
-          <input type="color" value={o.color_hex} onChange={(e) => patch(o, { color_hex: e.target.value })} />
-          <span className="w-8">{o.initials}</span>
-          <button type="button" className="text-muted-foreground" onClick={() => patch(o, { is_active: !o.is_active })}>
-            {o.is_active ? "Deactivate" : "Activate"}
-          </button>
-        </div>
-      ))}
-      <div className="grid grid-cols-3 gap-1">
-        <Input className="h-7" placeholder="IN" value={initials} onChange={(e) => setInitials(e.target.value)} />
-        <Input className="h-7" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input className="h-7" type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-      </div>
-      <Button size="sm" onClick={add}>Add rep</Button>
     </div>
   );
 }

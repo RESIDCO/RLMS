@@ -7,6 +7,7 @@ import { writeAudit } from "./audit";
 import { listComments, addComment } from "./comments";
 import { enterPodErd, listPodDates, latestPodErd } from "./pod";
 import { estimateHasOpenWreckFlags } from "./wreck-validate";
+import { revokeShopLinksOnClose } from "./shop-workflow";
 
 export type TimelineStep = {
   code: string;
@@ -27,8 +28,20 @@ export const STATUS_TIMELINE: Array<{
   {
     code: "OPEN",
     label: "Open",
-    meaning: "Bad order is open at the shop; arrival may be pending.",
-    whoActsNext: "Shop — acknowledge / set arrival",
+    meaning: "Bad order assigned; awaiting shop confirmation.",
+    whoActsNext: "Shop — confirm (accept) or decline",
+  },
+  {
+    code: "CONFIRMED",
+    label: "Confirmed",
+    meaning: "Shop accepted the assignment; car not yet on hand.",
+    whoActsNext: "Shop — mark on hand with arrival date/time",
+  },
+  {
+    code: "ON_HAND",
+    label: "On Hand",
+    meaning: "Car arrived at shop; JIC/POD clocks may start.",
+    whoActsNext: "Shop — prepare and submit estimate",
   },
   {
     code: "ESTIMATE_PENDING",
@@ -63,13 +76,13 @@ export const STATUS_TIMELINE: Array<{
   {
     code: "COMPLETED",
     label: "Completed",
-    meaning: "Repair completed; awaiting invoice / close.",
-    whoActsNext: "Owner — invoice and close",
+    meaning: "Repair completed; awaiting accepted invoice / close.",
+    whoActsNext: "Shop — upload invoice; owner — accept and close",
   },
   {
     code: "CLOSED",
     label: "Closed (Invoiced)",
-    meaning: "Completed and invoiced. Closed only after both.",
+    meaning: "Completed with an accepted invoice. Closed only after both.",
     whoActsNext: "None — record closed",
   },
 ];
@@ -80,9 +93,16 @@ export function mapBoTimelineCode(opts: {
   lifecycleStatus?: string | null;
   closedAt?: string | null;
   hasInvoice?: boolean;
+  invoiceAccepted?: boolean;
   completed?: boolean;
 }): string {
-  if (opts.closedAt || (opts.completed && opts.hasInvoice)) return "CLOSED";
+  if (
+    opts.closedAt ||
+    (opts.completed && (opts.invoiceAccepted || opts.hasInvoice))
+  ) {
+    // Prefer CLOSED only when invoice accepted or already closed_at set
+    if (opts.closedAt || opts.invoiceAccepted) return "CLOSED";
+  }
   if (opts.completed || opts.eventStatus === "COMPLETE") return "COMPLETED";
   if (opts.eventStatus === "IN_REPAIR") return "IN_REPAIR";
   const est = String(opts.estimateStatus ?? "");
@@ -92,6 +112,13 @@ export function mapBoTimelineCode(opts: {
   }
   if (est === "AWAITING_APPROVAL") return "UNDER_OWNER_REVIEW";
   if (est === "DRAFT" || est === "QUEUED") return "ESTIMATE_PENDING";
+  if (opts.eventStatus === "ON_HAND") return "ON_HAND";
+  if (
+    opts.eventStatus === "ACCEPTED" ||
+    opts.lifecycleStatus === "ACCEPTED_PENDING"
+  ) {
+    return "CONFIRMED";
+  }
   if (opts.lifecycleStatus === "QUEUED" || !est) return "OPEN";
   return "OPEN";
 }
@@ -196,11 +223,19 @@ export async function getBoLifecycleBundle(opts: {
   const podDate = ymd(latest.POD?.date_value);
 
   const { rows: inv } = await q(
-    `SELECT invoice_no, created_at FROM repair.invoices
+    `SELECT invoice_no, created_at, workflow_status, match_status
+     FROM repair.invoices
      WHERE event_id = $1 AND deleted_at IS NULL
      ORDER BY created_at DESC LIMIT 1`,
     [opts.eventId],
-  ).catch(() => ({ rows: [] as Array<{ invoice_no?: string; created_at?: string }> }));
+  ).catch(() => ({
+    rows: [] as Array<{
+      invoice_no?: string;
+      created_at?: string;
+      workflow_status?: string;
+      match_status?: string;
+    }>,
+  }));
 
   const completed =
     Boolean(ymd(bo?.completed_date)) ||
@@ -233,6 +268,12 @@ export async function getBoLifecycleBundle(opts: {
   const isClosed = Boolean(bo?.closed_at) || String(bo?.lifecycle_status ?? "") === "CLOSED";
   const invoiceNo = inv[0]?.invoice_no ? String(inv[0].invoice_no) : null;
   const invoicedAt = ymd(inv[0]?.created_at);
+  const invoiceAccepted =
+    String(inv[0]?.workflow_status ?? "") === "ACCEPTED" ||
+    String(inv[0]?.match_status ?? "") === "APPROVED";
+  const invoiceWorkflow = inv[0]?.workflow_status
+    ? String(inv[0].workflow_status)
+    : null;
   const cancelled =
     Boolean(bo?.closed_reason) &&
     /cancell?ed/i.test(String(bo?.closed_reason ?? ""));
@@ -255,6 +296,7 @@ export async function getBoLifecycleBundle(opts: {
     lifecycleStatus: bo?.lifecycle_status ? String(bo.lifecycle_status) : null,
     closedAt: bo?.closed_at ? String(bo.closed_at) : null,
     hasInvoice: Boolean(inv[0]),
+    invoiceAccepted,
     completed: Boolean(dates.completed),
   });
 
@@ -315,6 +357,7 @@ export async function getBoLifecycleBundle(opts: {
     isClosed,
     completed: dates.completed,
     hasInvoice: Boolean(inv[0]),
+    invoiceAccepted: inv[0] ? invoiceAccepted : undefined,
     openBlockingFlags: openFlagCount,
     cancelled,
   });
@@ -346,6 +389,8 @@ export async function getBoLifecycleBundle(opts: {
     closedReasonLine,
     closedAt: bo?.closed_at ? String(bo.closed_at) : null,
     invoiceNo,
+    invoiceAccepted,
+    invoiceWorkflow,
     inconsistentClosed: inconsistency.inconsistent,
     inconsistentClosedReasons: inconsistency.reasons,
   };
@@ -840,11 +885,12 @@ export function formatClosedReasonLine(opts: {
   return "Closed: repair completed and invoiced";
 }
 
-/** Closed with open flags / missing completed / missing invoice → inconsistent. */
+/** Closed with open flags / missing completed / missing accepted invoice → inconsistent. */
 export function detectClosedInconsistency(opts: {
   isClosed: boolean;
   completed?: string | null;
   hasInvoice: boolean;
+  invoiceAccepted?: boolean;
   openBlockingFlags: number;
   cancelled?: boolean;
 }): { inconsistent: boolean; reasons: string[] } {
@@ -853,6 +899,9 @@ export function detectClosedInconsistency(opts: {
   const reasons: string[] = [];
   if (!opts.completed) reasons.push("missing completed date");
   if (!opts.hasInvoice) reasons.push("missing invoice");
+  else if (opts.invoiceAccepted === false) {
+    reasons.push("invoice not accepted");
+  }
   if (opts.openBlockingFlags > 0) {
     reasons.push(`${opts.openBlockingFlags} open blocking flag(s)`);
   }
@@ -860,7 +909,7 @@ export function detectClosedInconsistency(opts: {
 }
 
 /**
- * Gate close transitions: completed + invoice + no blocking flags.
+ * Gate close transitions: completed + accepted invoice + no blocking flags.
  * Used by closeEvent / seed / any path that sets Closed.
  */
 export async function assertCloseRequirements(opts: {
@@ -874,11 +923,17 @@ export async function assertCloseRequirements(opts: {
   });
   const completed = bundle.dates.completed;
   const { rows: inv } = await q(
-    `SELECT invoice_no, created_at FROM repair.invoices
+    `SELECT invoice_no, workflow_status, match_status FROM repair.invoices
      WHERE event_id = $1 AND deleted_at IS NULL
      ORDER BY created_at DESC LIMIT 1`,
     [opts.eventId],
-  ).catch(() => ({ rows: [] as Array<{ invoice_no?: string }> }));
+  ).catch(() => ({
+    rows: [] as Array<{
+      invoice_no?: string;
+      workflow_status?: string;
+      match_status?: string;
+    }>,
+  }));
   const blocking = bundle.openFlagCount;
   if (!completed) {
     return {
@@ -892,6 +947,16 @@ export async function assertCloseRequirements(opts: {
       ok: false,
       status: 409,
       error: "Cannot close: invoice required",
+    };
+  }
+  const accepted =
+    String(inv[0].workflow_status ?? "") === "ACCEPTED" ||
+    String(inv[0].match_status ?? "") === "APPROVED";
+  if (!accepted) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Cannot close: accepted invoice required",
     };
   }
   if (blocking > 0) {
@@ -953,5 +1018,10 @@ export async function markBadOrderClosed(opts: {
     actor: opts.actor,
     via: "UI",
   });
+  await revokeShopLinksOnClose({
+    eventId: opts.eventId,
+    actor: opts.actor,
+    tenantId,
+  }).catch(() => 0);
   return { ok: true as const, closedReason: reason };
 }

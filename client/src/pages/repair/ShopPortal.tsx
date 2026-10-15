@@ -2,6 +2,7 @@
  * §G Shop portal home — own shop mark only.
  * §G r2: AA contrast, KPIs, DEV role switcher.
  * §G r3: white inputs, closed-BO reason, owner/MP read-only view.
+ * §G r4: clickable status tiles filter BO list.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
@@ -20,6 +21,9 @@ type HomePayload = {
   readOnly?: boolean;
   viewingAsShopMark?: string;
   byStatus: Record<string, number>;
+  byTile?: Record<string, number>;
+  statusTiles?: string[];
+  activeTile?: string | null;
   badOrders: Array<{
     event_id: string;
     car_mark: string;
@@ -29,6 +33,7 @@ type HomePayload = {
     owner_instructions?: string;
     yard_arrived_at?: string;
     is_wreck?: boolean;
+    statusTile?: string;
     closedReasonLine?: string | null;
     inconsistentClosed?: boolean;
     inconsistentClosedReasons?: string[];
@@ -49,7 +54,22 @@ type HomePayload = {
   };
 };
 
-const STATUS_ORDER = [
+const STATUS_TILES = [
+  "Awaiting Confirmation",
+  "Awaiting Arrival",
+  "On Hand / No Estimate",
+  "Draft",
+  "Submitted",
+  "Rejected",
+  "Adjustment for Approval",
+  "Approved / In Repair",
+  "Missed POD",
+  "Invoice Due",
+  "Invoice Submitted",
+  "Closed",
+];
+
+const ESTIMATE_STATUS_ORDER = [
   "Draft",
   "Submitted",
   "Rejected",
@@ -65,6 +85,7 @@ export default function ShopPortal() {
   const [carInitial, setCarInitial] = useState("");
   const [carNumber, setCarNumber] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [tileFilter, setTileFilter] = useState("");
   const [data, setData] = useState<HomePayload | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -76,39 +97,46 @@ export default function ShopPortal() {
     return () => window.removeEventListener("repair-dev-role", onRole);
   }, []);
 
-  const load = useCallback(async () => {
-    if (!shopMark.trim()) {
-      setError("Enter your shop mark");
-      setData(null);
-      return;
-    }
-    setBusy(true);
-    setError("");
-    localStorage.setItem("repairShopMark", shopMark.trim().toUpperCase());
-    const qs = new URLSearchParams();
-    if (carInitial.trim()) qs.set("carInitial", carInitial.trim());
-    if (carNumber.trim()) qs.set("carNumber", carNumber.trim());
-    if (statusFilter) qs.set("status", statusFilter);
-    try {
-      const res = await fetch(`/api/repair/shop/home?${qs}`, {
-        headers: {
-          ...repairDevHeaders(),
-          "x-repair-shop-mark": shopMark.trim().toUpperCase(),
-        },
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || `HTTP ${res.status}`);
+  const load = useCallback(
+    async (override?: { tile?: string; status?: string }) => {
+      if (!shopMark.trim()) {
+        setError("Enter your shop mark");
         setData(null);
         return;
       }
-      setData(json);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Network error");
-    } finally {
-      setBusy(false);
-    }
-  }, [shopMark, carInitial, carNumber, statusFilter]);
+      setBusy(true);
+      setError("");
+      localStorage.setItem("repairShopMark", shopMark.trim().toUpperCase());
+      const tile = override?.tile !== undefined ? override.tile : tileFilter;
+      const status =
+        override?.status !== undefined ? override.status : statusFilter;
+      const qs = new URLSearchParams();
+      if (carInitial.trim()) qs.set("carInitial", carInitial.trim());
+      if (carNumber.trim()) qs.set("carNumber", carNumber.trim());
+      if (tile) qs.set("tile", tile);
+      else if (status) qs.set("status", status);
+      try {
+        const res = await fetch(`/api/repair/shop/home?${qs}`, {
+          headers: {
+            ...repairDevHeaders(),
+            "x-repair-shop-mark": shopMark.trim().toUpperCase(),
+          },
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          setError(json.error || `HTTP ${res.status}`);
+          setData(null);
+          return;
+        }
+        setData(json);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Network error");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [shopMark, carInitial, carNumber, statusFilter, tileFilter],
+  );
 
   useEffect(() => {
     if (shopMark.trim()) void load();
@@ -216,16 +244,64 @@ export default function ShopPortal() {
           <>
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">
+                Status tiles
+              </h2>
+              <p className={shopAa.muted}>
+                Click a tile to filter the bad-order list. Click again to clear.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2" data-testid="shop-status-tiles">
+                {(data.statusTiles?.length ? data.statusTiles : STATUS_TILES).map(
+                  (s) => {
+                    const active = tileFilter === s;
+                    const count = data.byTile?.[s] ?? 0;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        data-testid={`shop-tile-${s}`}
+                        onClick={() => {
+                          const next = tileFilter === s ? "" : s;
+                          setTileFilter(next);
+                          setStatusFilter("");
+                          void load({ tile: next, status: "" });
+                        }}
+                        className={cn(
+                          "min-w-[7.5rem] rounded border px-3 py-2 text-left text-sm transition",
+                          active
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-300 bg-white text-slate-900 hover:border-slate-600",
+                        )}
+                      >
+                        <div className="font-medium leading-snug">{s}</div>
+                        <div
+                          className={cn(
+                            "font-mono text-lg",
+                            active ? "text-white" : "text-slate-900",
+                          )}
+                        >
+                          {count}
+                        </div>
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-slate-900">
                 Estimates by status
               </h2>
               <div className="flex flex-wrap gap-2">
-                {STATUS_ORDER.map((s) => (
+                {ESTIMATE_STATUS_ORDER.map((s) => (
                   <button
                     key={s}
                     type="button"
                     onClick={() => {
-                      setStatusFilter(statusFilter === s ? "" : s);
-                      setTimeout(() => void load(), 0);
+                      const next = statusFilter === s ? "" : s;
+                      setStatusFilter(next);
+                      setTileFilter("");
+                      void load({ status: next, tile: "" });
                     }}
                     className={cn(
                       "rounded border px-3 py-2 text-left text-sm transition",
@@ -246,6 +322,7 @@ export default function ShopPortal() {
             <section>
               <h2 className="mb-3 text-lg font-semibold text-slate-900">
                 Bad orders assigned to {data.shop.shopMark}
+                {tileFilter ? ` · ${tileFilter}` : ""}
               </h2>
               {data.badOrders.length === 0 ? (
                 <p className={shopAa.muted}>No bad orders for this shop.</p>
@@ -261,7 +338,7 @@ export default function ShopPortal() {
                           {bo.car_mark} {bo.car_number}
                         </span>
                         <span className="ml-2 text-sm text-slate-700">
-                          {bo.lifecycle_status || "—"}
+                          {bo.statusTile || bo.lifecycle_status || "—"}
                           {bo.is_wreck ? " · Wreck" : ""}
                         </span>
                         {bo.closedReasonLine && (

@@ -93,6 +93,18 @@ type RevBlock = {
   lines: EstimateLine[];
 };
 
+type ShopInvoiceRo = {
+  id: string;
+  invoiceNo: string | null;
+  total: unknown;
+  estimateTotal: unknown;
+  matchStatus: string | null;
+  workflowStatus: string | null;
+  mismatchFlagged: boolean;
+  ownerDecisionNote: string | null;
+  readOnly: true;
+};
+
 type MenuKey = "estimate" | "view" | "export" | "issues" | null;
 
 const BILLING_CATEGORIES = [
@@ -157,6 +169,7 @@ export default function EstimateReview() {
   const estimateId = params?.id ?? "";
   const [blocks, setBlocks] = useState<RevBlock[]>([]);
   const [ctx, setCtx] = useState<ReviewContext | null>(null);
+  const [shopInvoice, setShopInvoice] = useState<ShopInvoiceRo | null>(null);
   const [compare, setCompare] = useState<{
     from: number;
     to: number;
@@ -307,6 +320,7 @@ export default function EstimateReview() {
       setCanPencil(Boolean(data.canPencilEdit));
       setNeedsAdjustment(Boolean(data.needsAdjustment));
       setCtx(data.context ?? null);
+      setShopInvoice(data.shopInvoice ?? null);
       setBillingCategory(data.context?.billingCategory || "Bad Order");
       setComments(data.comments ?? []);
       if (data.revisions?.length >= 2 && cmpFrom === "" && cmpTo === "") {
@@ -1106,6 +1120,32 @@ export default function EstimateReview() {
                   </div>
                 </div>
               </div>
+
+              {shopInvoice && (
+                <div
+                  className="mt-3 rounded border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900"
+                  data-testid="shop-invoice-readonly"
+                >
+                  <p className="font-semibold">
+                    Shop invoice (read-only) ·{" "}
+                    {shopInvoice.workflowStatus || shopInvoice.matchStatus || "—"}
+                  </p>
+                  <p className="mt-1 tabular-nums">
+                    #{shopInvoice.invoiceNo || "—"} · total {String(shopInvoice.total)} vs
+                    est {String(shopInvoice.estimateTotal)}
+                    {shopInvoice.mismatchFlagged ? " · flagged" : ""}
+                  </p>
+                  {shopInvoice.ownerDecisionNote && (
+                    <p className="mt-1 text-slate-700">
+                      Decision note: {shopInvoice.ownerDecisionNote}
+                    </p>
+                  )}
+                  <p className="mt-1 text-slate-600">
+                    Approval / payment in a later phase. Accept or reject via invoice
+                    APIs.
+                  </p>
+                </div>
+              )}
 
               <div className="mt-3 flex flex-wrap gap-2 items-center">
                 {canPencil && (

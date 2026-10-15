@@ -1,8 +1,27 @@
 # Owner UI — Sub-section G: Shop portal + Railinc-style validation
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §G  
-**Routes:** `/#/repair/shop` · `/#/repair/shop/events/:eventId` · `/#/repair/shop/estimates/:id`  
-**Requires tip:** `bb837ae` (§G r2) for **r3**; prior r2 required `85199a7`
+**Routes:** `/#/repair/shop` · `/#/repair/shop/events/:eventId` · `/#/repair/shop/estimates/:id` · `/#/repair/e/:token`  
+**Requires tip:** r3 tip (`cbff463`) for **r4**; r3 required `bb837ae` (§G r2)
+
+## §G r4 — Shop BO signed-link workflow + status tiles + invoice upload
+
+| Area | Behavior |
+|---|---|
+| **One signed shop link / BO** | Scoped to shop mark + BO; reusable until close (`ensureShopBoLink`). Page shows **next action** for current step. |
+| **Confirm** | Accept assignment, or Decline with reason (owner notified via local outbox). Records who/when. |
+| **On hand** | Arrival date/time required; optional yard/track note. Starts JIC/POD clocks. |
+| **Estimate** | Existing 500-byte + photos/docs validate/submit. Draft = loaded not submitted. |
+| **After approval** | Set POD, repair start, completed date. |
+| **Invoice** | Upload final invoice **500-byte + PDF**; invoice # required. Validate vs approved estimate (totals + line/qty placeholder; hard reject / flag). Workflow: Invoice Submitted → Under Owner Review → Accepted / Rejected (line comments). Owner sees invoice read-only on Estimate Review. |
+| **Status tiles** | Clickable filters: Awaiting Confirmation, Awaiting Arrival, On Hand / No Estimate, Draft, Submitted, Rejected, Adjustment for Approval, Approved / In Repair, Missed POD, Invoice Due, Invoice Submitted, Closed. |
+| **Timeline** | Includes **Confirmed** and **On Hand**. **Closed requires accepted invoice**. |
+
+```powershell
+npm run repair:migrate:local
+npm run repair:typecheck-client-shop
+npm run repair:smoke-shop
+```
 
 ## §G r3 — Inputs contrast, closed-BO clarity, seed fix
 

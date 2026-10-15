@@ -51,6 +51,7 @@ export async function shopDeclineWork(
   }
   const resolved = await resolveActiveLink(rawToken, "SHOP");
   if (!resolved) return { ok: false as const, status: 401, error: "Invalid or revoked link" };
+  const tenantId = String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID);
   const result = await shopReject(rawToken, actorEmail, text);
   if (!result.ok) return result;
   await q(
@@ -66,7 +67,7 @@ export async function shopDeclineWork(
     [resolved.event.id],
   ).catch(() => undefined);
   await writeAudit({
-    tenantId: String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID),
+    tenantId,
     entity: "event",
     entityId: String(resolved.event.id),
     action: "BO_DECLINED_WORK",
@@ -74,6 +75,23 @@ export async function shopDeclineWork(
     actor: actorEmail,
     via: "event_link",
   });
+  // Owner notified via local outbox (never real send)
+  const label = `${resolved.event.car_mark} ${resolved.event.car_number}`;
+  await q(
+    `INSERT INTO repair.email_outbox
+       (tenant_id, event_id, notification_type, recipients, subject, body_text,
+        status, local_mode, created_by, note)
+     VALUES ($1,$2,'BO_DECLINED_WORK',$3::jsonb,$4,$5,'logged',true,$6,$7)`,
+    [
+      tenantId,
+      resolved.event.id,
+      JSON.stringify(["owner@local.invalid"]),
+      `Shop declined BO — ${label}`,
+      `Shop ${actorEmail} declined ${label}.\nReason: ${text}`,
+      actorEmail,
+      "§G r4 decline → owner local outbox",
+    ],
+  ).catch(() => undefined);
   return { ok: true as const, event: result.event, reason: text };
 }
 
@@ -81,6 +99,7 @@ export async function shopArrivalDate(
   rawToken: string,
   actorEmail: string,
   arrivalDate: string,
+  yardTrackNote?: string | null,
 ) {
   const resolved = await resolveActiveLink(rawToken, "SHOP");
   if (!resolved) return { ok: false as const, status: 401, error: "Invalid or revoked link" };
@@ -103,22 +122,32 @@ export async function shopArrivalDate(
     };
   }
 
+  const note = (yardTrackNote ?? "").trim() || null;
   await q(
     `UPDATE repair.events
-     SET yard_arrived_at = $1::timestamptz, yard_arrived_by = $2
+     SET yard_arrived_at = $1::timestamptz, yard_arrived_by = $2,
+         yard_track_note = coalesce($4, yard_track_note)
      WHERE id = $3`,
-    [d.toISOString(), actorEmail, resolved.event.id],
+    [d.toISOString(), actorEmail, resolved.event.id, note],
   );
   await writeAudit({
     tenantId,
     entity: "event",
     entityId: String(resolved.event.id),
     action: "YARD_ARRIVAL",
-    after: { arrivalDate: d.toISOString(), email: actorEmail },
+    after: {
+      arrivalDate: d.toISOString(),
+      email: actorEmail,
+      yardTrackNote: note,
+    },
     actor: actorEmail,
     via: "event_link",
   });
-  return { ok: true as const, yardArrivedAt: d.toISOString() };
+  return {
+    ok: true as const,
+    yardArrivedAt: d.toISOString(),
+    yardTrackNote: note,
+  };
 }
 
 /**

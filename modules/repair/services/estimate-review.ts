@@ -450,6 +450,56 @@ export async function buildEstimateReviewPayload(opts: {
     (OWNER_RESP_CODES as readonly string[]).includes(String(c.code)),
   );
 
+  // §G r4: shop-submitted invoice (read-only on Estimate Review; accept/reject next)
+  const { rows: shopInvRows } = await q(
+    `SELECT id, invoice_no, total, estimate_total, match_status, workflow_status,
+            mismatch_flagged, document_id, aar_document_id, owner_decision_note,
+            submitted_by_email, created_at, decided_at, decided_by
+     FROM repair.invoices
+     WHERE event_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [ctx.eventId, tenantId],
+  ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
+  const shopInvoice = shopInvRows[0]
+    ? {
+        id: String(shopInvRows[0].id),
+        invoiceNo: shopInvRows[0].invoice_no
+          ? String(shopInvRows[0].invoice_no)
+          : null,
+        total: shopInvRows[0].total,
+        estimateTotal: shopInvRows[0].estimate_total,
+        matchStatus: shopInvRows[0].match_status
+          ? String(shopInvRows[0].match_status)
+          : null,
+        workflowStatus: shopInvRows[0].workflow_status
+          ? String(shopInvRows[0].workflow_status)
+          : null,
+        mismatchFlagged: Boolean(shopInvRows[0].mismatch_flagged),
+        documentId: shopInvRows[0].document_id
+          ? String(shopInvRows[0].document_id)
+          : null,
+        aarDocumentId: shopInvRows[0].aar_document_id
+          ? String(shopInvRows[0].aar_document_id)
+          : null,
+        ownerDecisionNote: shopInvRows[0].owner_decision_note
+          ? String(shopInvRows[0].owner_decision_note)
+          : null,
+        submittedBy: shopInvRows[0].submitted_by_email
+          ? String(shopInvRows[0].submitted_by_email)
+          : null,
+        createdAt: shopInvRows[0].created_at
+          ? String(shopInvRows[0].created_at)
+          : null,
+        decidedAt: shopInvRows[0].decided_at
+          ? String(shopInvRows[0].decided_at)
+          : null,
+        decidedBy: shopInvRows[0].decided_by
+          ? String(shopInvRows[0].decided_by)
+          : null,
+        readOnly: true as const,
+      }
+    : null;
+
   const latest = withLines[withLines.length - 1];
   const header = ctx.header ?? {};
 
@@ -457,6 +507,7 @@ export async function buildEstimateReviewPayload(opts: {
     ok: true as const,
     estimateId: opts.estimateId,
     context: ctx,
+    shopInvoice,
     revisions: withLines,
     compare: compareMeta,
     compareDetail: compare,

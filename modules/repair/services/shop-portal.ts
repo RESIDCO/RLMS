@@ -32,6 +32,13 @@ import {
   formatCommentsForEmail,
   commentedLinesDiff,
 } from "./shop-clarity";
+import {
+  SHOP_STATUS_TILES,
+  classifyBoTile,
+  emptyTileCounts,
+  ensureShopBoLink,
+  type ShopStatusTile,
+} from "./shop-workflow";
 
 export type ShopActor = {
   role: string;
@@ -229,11 +236,13 @@ async function assertEstimateOwnedByShop(
   return { ok: true, estimate, event: owned.event };
 }
 
-/** Shop home: BOs + estimates by status + car search. */
+/** Shop home: BOs + estimates by status + clickable status tiles + car search. */
 export async function shopPortalHome(opts: ShopActor & {
   carInitial?: string;
   carNumber?: string;
   status?: string;
+  /** §G r4 tile filter (exact tile label) */
+  tile?: string;
 }) {
   const ctx = await resolveShopContext(opts);
   if (!ctx.ok) return ctx;
@@ -252,6 +261,7 @@ export async function shopPortalHome(opts: ShopActor & {
             bo.id AS bad_order_id, bo.lifecycle_status, bo.shopping_reason,
             bo.bo_date, bo.bo_city, bo.bo_state, bo.comments AS owner_instructions,
             bo.arrival_date, bo.closed_at, bo.closed_reason,
+            bo.completed_date, bo.missed_pod_reason_code,
             coalesce(e.is_smoke, false) OR coalesce(bo.is_smoke, false) AS is_smoke
      FROM repair.events e
      JOIN repair.statuses s ON s.id = e.status_id
@@ -306,47 +316,61 @@ export async function shopPortalHome(opts: ShopActor & {
       // Never expose lessee
     };
   });
+  const estByEvent = new Map<string, { status_code: string; estimate_id: string }>();
+  for (const e of estimates) {
+    const eid = String(e.event_id);
+    if (!estByEvent.has(eid)) {
+      estByEvent.set(eid, {
+        status_code: String(e.status_code),
+        estimate_id: String(e.estimate_id),
+      });
+    }
+  }
 
   const kpisEarly = await shopKpis({ shopId, tenantId: ctx.tenantId });
 
   const { formatClosedReasonLine, detectClosedInconsistency } = await import(
     "./shop-clarity"
   );
-  const closedIds = bos
-    .filter(
-      (bo) =>
-        bo.closed_at || String(bo.lifecycle_status ?? "") === "CLOSED",
-    )
-    .map((bo) => String(bo.event_id));
+  const allEventIds = bos.map((bo) => String(bo.event_id));
   const invByEvent = new Map<
     string,
-    { invoice_no: string | null; created_at: string | null; completed: string | null }
+    {
+      invoice_no: string | null;
+      created_at: string | null;
+      completed: string | null;
+      workflow_status: string | null;
+      match_status: string | null;
+    }
   >();
-  if (closedIds.length) {
+  if (allEventIds.length) {
     const { rows: invRows } = await q(
       `SELECT DISTINCT ON (i.event_id)
           i.event_id, i.invoice_no, i.created_at::text AS created_at,
+          i.workflow_status, i.match_status,
           bo.completed_date::text AS completed
        FROM repair.invoices i
        LEFT JOIN repair.bad_orders bo
          ON bo.event_id = i.event_id AND bo.deleted_at IS NULL
        WHERE i.event_id = ANY($1::uuid[]) AND i.deleted_at IS NULL
        ORDER BY i.event_id, i.created_at DESC`,
-      [closedIds],
+      [allEventIds],
     ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
     for (const r of invRows) {
       invByEvent.set(String(r.event_id), {
         invoice_no: r.invoice_no ? String(r.invoice_no) : null,
         created_at: r.created_at ? String(r.created_at).slice(0, 10) : null,
         completed: r.completed ? String(r.completed).slice(0, 10) : null,
+        workflow_status: r.workflow_status ? String(r.workflow_status) : null,
+        match_status: r.match_status ? String(r.match_status) : null,
       });
     }
-    // completed may exist without invoice
     const { rows: boDone } = await q(
-      `SELECT event_id, completed_date::text AS completed, closed_reason
+      `SELECT event_id, completed_date::text AS completed, closed_reason,
+              missed_pod_reason_code
        FROM repair.bad_orders
        WHERE event_id = ANY($1::uuid[]) AND deleted_at IS NULL`,
-      [closedIds],
+      [allEventIds],
     ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
     for (const r of boDone) {
       const id = String(r.event_id);
@@ -354,6 +378,8 @@ export async function shopPortalHome(opts: ShopActor & {
         invoice_no: null,
         created_at: null,
         completed: null,
+        workflow_status: null,
+        match_status: null,
       };
       if (!cur.completed && r.completed) {
         cur.completed = String(r.completed).slice(0, 10);
@@ -362,25 +388,75 @@ export async function shopPortalHome(opts: ShopActor & {
     }
   }
 
-  const badOrders = bos.map((bo) => {
+  // Missed POD: today > POD and not released
+  const today = new Date().toISOString().slice(0, 10);
+  const missedPodEvents = new Set<string>();
+  if (allEventIds.length) {
+    const { rows: podRows } = await q(
+      `SELECT DISTINCT ON (p.event_id) p.event_id, p.date_value::text AS pod
+       FROM repair.pod_dates p
+       WHERE p.event_id = ANY($1::uuid[]) AND p.kind = 'POD'
+       ORDER BY p.event_id, p.entered_at DESC`,
+      [allEventIds],
+    ).catch(() => ({ rows: [] as Array<{ event_id: string; pod: string }> }));
+    for (const p of podRows) {
+      const pod = String(p.pod).slice(0, 10);
+      if (pod && pod < today) missedPodEvents.add(String(p.event_id));
+    }
+  }
+
+  const tileCounts = emptyTileCounts();
+  const badOrdersAll = bos.map((bo) => {
+    const eid = String(bo.event_id);
     const isClosed =
       Boolean(bo.closed_at) || String(bo.lifecycle_status ?? "") === "CLOSED";
+    const meta = invByEvent.get(eid);
+    const est = estByEvent.get(eid);
+    const completed =
+      (bo.completed_date ? String(bo.completed_date).slice(0, 10) : null) ||
+      meta?.completed ||
+      null;
+    const invoiceAccepted =
+      meta?.workflow_status === "ACCEPTED" || meta?.match_status === "APPROVED";
+    const missedPodRequired =
+      missedPodEvents.has(eid) &&
+      !bo.missed_pod_reason_code &&
+      !isClosed;
+    const tile = classifyBoTile({
+      eventStatus: bo.event_status ? String(bo.event_status) : null,
+      lifecycleStatus: bo.lifecycle_status ? String(bo.lifecycle_status) : null,
+      acknowledgedAt: bo.acknowledged_at ? String(bo.acknowledged_at) : null,
+      yardArrivedAt: bo.yard_arrived_at ? String(bo.yard_arrived_at) : null,
+      estimateStatus: est?.status_code ?? null,
+      hasEstimate: Boolean(est),
+      missedPodRequired,
+      missedPodReasonCode: bo.missed_pod_reason_code
+        ? String(bo.missed_pod_reason_code)
+        : null,
+      completed,
+      invoiceWorkflow: meta?.workflow_status ?? null,
+      hasInvoice: Boolean(meta?.invoice_no),
+      closedAt: bo.closed_at ? String(bo.closed_at) : null,
+      isClosed,
+    });
+    tileCounts[tile] += 1;
+
     if (!isClosed) {
       return {
         ...bo,
+        statusTile: tile,
         closedReasonLine: null as string | null,
         inconsistentClosed: false,
         inconsistentClosedReasons: [] as string[],
       };
     }
-    const meta = invByEvent.get(String(bo.event_id));
     const cancelled = /cancell?ed/i.test(String(bo.closed_reason ?? ""));
     const closedReasonLine =
       (bo.closed_reason && String(bo.closed_reason).startsWith("Closed:")
         ? String(bo.closed_reason)
         : null) ||
       formatClosedReasonLine({
-        completed: meta?.completed ?? null,
+        completed: meta?.completed ?? completed,
         invoiceNo: meta?.invoice_no ?? null,
         invoicedAt: meta?.created_at ?? null,
         closedReason: bo.closed_reason ? String(bo.closed_reason) : null,
@@ -388,21 +464,42 @@ export async function shopPortalHome(opts: ShopActor & {
       });
     const inconsistency = detectClosedInconsistency({
       isClosed: true,
-      completed: meta?.completed ?? null,
+      completed: meta?.completed ?? completed,
       hasInvoice: Boolean(meta?.invoice_no),
-      openBlockingFlags: 0, // detail page computes flags; home shows invoice/completed gaps
+      invoiceAccepted: meta?.invoice_no ? invoiceAccepted : undefined,
+      openBlockingFlags: 0,
       cancelled,
     });
     return {
       ...bo,
       lifecycle_status: "CLOSED",
+      statusTile: tile,
       closedReasonLine,
       inconsistentClosed: inconsistency.inconsistent,
       inconsistentClosedReasons: inconsistency.reasons,
     };
   });
 
-  const base = {
+  const tileFilter = (opts.tile || opts.status || "").trim();
+  const isKnownTile = (SHOP_STATUS_TILES as readonly string[]).includes(
+    tileFilter,
+  );
+  let badOrders = badOrdersAll;
+  let filteredEstimates = estimateRows;
+  if (tileFilter && isKnownTile) {
+    badOrders = badOrdersAll.filter((b) => b.statusTile === tileFilter);
+    const keep = new Set(badOrders.map((b) => String(b.event_id)));
+    filteredEstimates = estimateRows.filter((e) => keep.has(String(e.event_id)));
+  } else if (opts.status) {
+    const want = opts.status.toLowerCase();
+    filteredEstimates = estimateRows.filter(
+      (e) =>
+        String(e.statusLabel).toLowerCase() === want ||
+        String(e.status_code).toLowerCase() === want,
+    );
+  }
+
+  return {
     ok: true as const,
     shop: {
       id: shopId,
@@ -412,27 +509,40 @@ export async function shopPortalHome(opts: ShopActor & {
     readOnly: ctx.readOnly,
     viewingAsShopMark: ctx.viewingAsShopMark,
     byStatus,
+    byTile: tileCounts,
+    statusTiles: [...SHOP_STATUS_TILES],
+    activeTile: isKnownTile ? (tileFilter as ShopStatusTile) : null,
     kpis: kpisEarly,
-  };
-
-  if (opts.status) {
-    const want = opts.status.toLowerCase();
-    return {
-      ...base,
-      badOrders,
-      estimates: estimateRows.filter(
-        (e) =>
-          String(e.statusLabel).toLowerCase() === want ||
-          String(e.status_code).toLowerCase() === want,
-      ),
-    };
-  }
-
-  return {
-    ...base,
     badOrders,
-    estimates: estimateRows,
+    estimates: filteredEstimates,
   };
+}
+
+/** Issue or reuse the one signed shop link for a BO (shop-authenticated). */
+export async function shopIssueBoLink(opts: ShopActor & {
+  eventId: string;
+  forceNew?: boolean;
+}) {
+  const ctx = await resolveShopContext(opts);
+  if (!ctx.ok) return ctx;
+  if (ctx.readOnly) {
+    return { ok: false as const, status: 403, error: "Read-only shop view" };
+  }
+  const shopId = String(ctx.shop.id);
+  const owned = await assertEventOwnedByShop(
+    opts.eventId,
+    shopId,
+    ctx.tenantId,
+  );
+  if (!owned.ok) return owned;
+  const mark = String(ctx.shop.shop_mark ?? ctx.shop.reporting_mark ?? "");
+  return ensureShopBoLink({
+    eventId: opts.eventId,
+    shopMark: mark,
+    actor: opts.actor,
+    tenantId: ctx.tenantId,
+    forceNew: opts.forceNew,
+  });
 }
 
 /** BO / event detail for shop — hides lessee; includes JIC clock for wrecks. */

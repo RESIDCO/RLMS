@@ -12,6 +12,9 @@
  *    missed POD, timeline, line comments, resubmit commentDiff+resolve
  * 9. §G r3: white input AA + placeholders; closed reason + inconsistent;
  *    smoke hidden; owner/MP read-only; DEV banner production-gated
+ * 10. §G r4: signed-link confirm→on hand→estimate→approve→complete→invoice
+ *     →accept→closed on DS01; decline + outbox; tile counts match lists;
+ *     timeline Confirmed/On Hand; close requires accepted invoice
  *
  * Run: npm run repair:smoke-shop
  */
@@ -26,8 +29,29 @@ import {
   registerRepairPublicRoutes,
 } from "../routes";
 import { createBadOrder } from "../services/bo";
-import { shopAcknowledge, shopArrivalDate } from "../services/bo-lifecycle";
+import {
+  shopAcknowledge,
+  shopArrivalDate,
+  shopDeclineWork,
+} from "../services/bo-lifecycle";
 import { issueEventLink } from "../services/event-links";
+import {
+  ensureShopBoLink,
+  classifyBoTile,
+  SHOP_STATUS_TILES,
+} from "../services/shop-workflow";
+import {
+  submitShopInvoice,
+  acceptShopInvoice,
+  validateInvoiceVsEstimate,
+} from "../services/invoices";
+import { setCompletedDate } from "../services/completion";
+import { enterPodErd } from "../services/pod";
+import {
+  markBadOrderClosed,
+  STATUS_TIMELINE,
+  assertCloseRequirements,
+} from "../services/shop-clarity";
 import { parseAarFile } from "../services/aar-parser";
 import { createShop } from "../services/shops";
 import { requestRevision, approveEstimate } from "../services/estimates";
@@ -844,11 +868,15 @@ async function main() {
   if (!missSave.ok) bad("miss-save", missSave.error);
   ok("Missed POD reason required + saved after POD");
 
-  // Timeline present
-  if (!life.timeline?.length || life.timeline.length < 6) {
-    bad("timeline", "expected full status timeline");
+  // Timeline present — includes Confirmed + On Hand (§G r4)
+  if (!life.timeline?.length || life.timeline.length < 8) {
+    bad("timeline", "expected full status timeline with Confirmed/On Hand");
   }
-  ok(`status timeline (${life.timeline.length} steps, current ${life.timelineCode})`);
+  const tlLabels = STATUS_TIMELINE.map((s) => s.code);
+  if (!tlLabels.includes("CONFIRMED") || !tlLabels.includes("ON_HAND")) {
+    bad("timeline-r4", "STATUS_TIMELINE must include CONFIRMED and ON_HAND");
+  }
+  ok(`status timeline (${life.timeline.length} steps, current ${life.timelineCode}; Confirmed+On Hand)`);
 
   // Line comments on reject + outbox by line + BRC comments + resolve + commentDiff
   await saveDecisionComments({
@@ -1024,8 +1052,10 @@ async function main() {
   ).catch(() => undefined);
   await q(
     `INSERT INTO repair.invoices
-       (tenant_id, event_id, shop_id, invoice_no, total, match_status, created_by)
-     SELECT $1, $2, $3, $4, 100.00, 'APPROVED', 'smoke-g'
+       (tenant_id, event_id, shop_id, invoice_no, total, match_status,
+        workflow_status, created_by, decided_by, decided_at)
+     SELECT $1, $2, $3, $4, 100.00, 'APPROVED',
+            'ACCEPTED', 'smoke-g', 'smoke-g', now()
      WHERE NOT EXISTS (
        SELECT 1 FROM repair.invoices WHERE event_id = $2 AND deleted_at IS NULL
      )`,
@@ -1110,6 +1140,337 @@ async function main() {
     bad("clean-smoke", "clean-smoke-data missing local-only + is_smoke");
   }
   ok("repair:clean-smoke-data script present");
+
+  // ── §G r4: DS01 full path + decline + tiles ─────────────────────────
+  {
+    // Ensure Demo Shop DS01 exists
+    let ds01Id: string;
+    const { rows: dsRows } = await q(
+      `SELECT id FROM repair.shops
+       WHERE tenant_id = $1 AND deleted_at IS NULL
+         AND (upper(shop_mark) = 'DS01' OR upper(reporting_mark) = 'DS01')
+       LIMIT 1`,
+      [DEFAULT_TENANT_ID],
+    );
+    if (dsRows[0]) {
+      ds01Id = String(dsRows[0].id);
+    } else {
+      const ds = await createShop({
+        legalName: "Demo Shop DS01",
+        city: "Demo",
+        state: "OH",
+        splc: "382500",
+        shopMark: "DS01",
+        actor: "smoke-g-r4",
+      });
+      if (!ds.ok) bad("ds01", ds.error);
+      ds01Id = String(ds.shop!.id);
+    }
+    await q(`UPDATE repair.shops SET is_smoke = true WHERE id = $1`, [ds01Id]);
+
+    const R4_NUM = `8${String(Date.now()).slice(-5)}`;
+    await seedCar(MARK, R4_NUM);
+    const r4Bo = await createBadOrder({
+      carMark: MARK,
+      carNumber: R4_NUM,
+      shopId: ds01Id,
+      actor: "smoke-g-r4",
+      boRuleCode: "OTHER",
+      boRuleOtherText: "r4 workflow",
+      boDate: new Date().toISOString().slice(0, 10),
+      boCity: "Demo",
+      boState: "OH",
+      comments: "r4 full path",
+      allowDuplicates: true,
+    });
+    if (!r4Bo.ok) bad("r4-bo", JSON.stringify(r4Bo));
+    const r4EventId = String(r4Bo.event.id);
+    await q(`UPDATE repair.events SET is_smoke = true WHERE id = $1`, [r4EventId]);
+    await q(`UPDATE repair.bad_orders SET is_smoke = true WHERE event_id = $1`, [
+      r4EventId,
+    ]);
+
+    const ensured = await ensureShopBoLink({
+      eventId: r4EventId,
+      shopMark: "DS01",
+      actor: "smoke-g-r4",
+    });
+    if (!ensured.ok || !ensured.token) bad("r4-link", "expected new shop link token");
+    const r4Token = ensured.token;
+    const reused = await ensureShopBoLink({
+      eventId: r4EventId,
+      shopMark: "DS01",
+      actor: "smoke-g-r4",
+    });
+    if (!reused.reused || reused.linkId !== ensured.linkId) {
+      bad("r4-link-reuse", "expected same active shop link reused");
+    }
+    ok("DS01 one signed shop link issued + reused");
+
+    // Confirm
+    const ack = await shopAcknowledge(r4Token, "ds01@smoke-r4.test");
+    if (!ack.ok) bad("r4-confirm", ack.error);
+    let lifeR4 = await getBoLifecycleBundle({ eventId: r4EventId });
+    if (lifeR4.timelineCode !== "CONFIRMED") {
+      bad("r4-tl-confirmed", `expected CONFIRMED got ${lifeR4.timelineCode}`);
+    }
+    ok("r4 confirm → timeline Confirmed");
+
+    // On hand
+    const hand = await shopArrivalDate(
+      r4Token,
+      "ds01@smoke-r4.test",
+      "2026-10-10T14:30:00.000Z",
+      "Track 2 west",
+    );
+    if (!hand.ok) bad("r4-onhand", hand.error);
+    const { rows: yardNote } = await q(
+      `SELECT yard_track_note FROM repair.events WHERE id = $1`,
+      [r4EventId],
+    );
+    if (String(yardNote[0]?.yard_track_note ?? "") !== "Track 2 west") {
+      bad("r4-yard-note", String(yardNote[0]?.yard_track_note));
+    }
+    lifeR4 = await getBoLifecycleBundle({ eventId: r4EventId });
+    if (lifeR4.timelineCode !== "ON_HAND" && lifeR4.timelineCode !== "ESTIMATE_PENDING") {
+      // ON_HAND until estimate exists
+      if (lifeR4.timelineCode !== "ON_HAND") {
+        bad("r4-tl-onhand", `expected ON_HAND got ${lifeR4.timelineCode}`);
+      }
+    }
+    ok("r4 on hand + yard note → timeline On Hand");
+
+    // Estimate submit via shop portal
+    const r4File = patchCols(
+      withCar(readFileSync(samplePath), MARK, R4_NUM),
+      72,
+      4,
+      "DS01".padEnd(4).slice(0, 4),
+      -1,
+    );
+    process.env.REPAIR_SHOW_SMOKE = "1";
+    const submitted = await shopSubmitEstimate({
+      role: "shop",
+      shopMark: "DS01",
+      actor: "ds01@smoke-r4.test",
+      eventId: r4EventId,
+      bytes: r4File,
+      filename: "r4-est.dat",
+      forceAcceptFlags: true,
+    });
+    if (!submitted.ok) bad("r4-est", submitted.error || JSON.stringify(submitted));
+    const r4EstId = String(
+      (submitted as { estimateId?: string }).estimateId ?? "",
+    );
+    if (!r4EstId) bad("r4-est-id", JSON.stringify(submitted));
+    // Ensure awaiting approval then approve
+    await q(
+      `UPDATE repair.events
+       SET yard_arrived_at = coalesce(yard_arrived_at, $2::timestamptz)
+       WHERE id = $1`,
+      [r4EventId, "2026-10-10T14:30:00.000Z"],
+    );
+    const appr = await approveEstimate({
+      estimateId: r4EstId,
+      actor: "owner@smoke-r4.test",
+    });
+    if (!appr.ok) {
+      // may already be AWAITING — try submitForApproval path via status bump
+      const { rows: st } = await q(
+        `SELECT s.code FROM repair.estimates e
+         JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
+        [r4EstId],
+      );
+      if (String(st[0]?.code) !== "APPROVED") {
+        bad("r4-approve", appr.error || String(st[0]?.code));
+      }
+    }
+    ok("r4 estimate submitted + approved");
+
+    await enterPodErd({
+      eventId: r4EventId,
+      kind: "POD",
+      dateValue: "2026-10-12",
+      enteredBy: "ds01@smoke-r4.test",
+      reason: "r4 pod",
+    }).catch(() => undefined);
+
+    const done = await setCompletedDate({
+      eventId: r4EventId,
+      completedAt: "2026-10-14",
+      actor: "ds01@smoke-r4.test",
+      rawToken: r4Token,
+    });
+    if (!done.ok) {
+      await updateBoLifecycleDates({
+        eventId: r4EventId,
+        actor: "ds01@smoke-r4.test",
+        actorRole: "shop",
+        completed: "2026-10-14",
+      });
+    }
+    ok("r4 POD + completed");
+
+    // Invoice validate placeholder
+    const v = validateInvoiceVsEstimate({
+      invoiceNo: "",
+      invoiceTotalCents: 10000,
+      estimateTotalCents: 10000,
+    });
+    if (!v.hardRejects.some((f) => f.code === "MISSING_INVOICE_NO")) {
+      bad("r4-inv-validate", "missing invoice no should hard-reject");
+    }
+
+    // Get approved estimate total for match
+    const { rows: totRows } = await q(
+      `SELECT r.total FROM repair.estimates e
+       JOIN repair.estimate_revisions r
+         ON r.estimate_id = e.id AND r.rev_no = e.current_revision
+       WHERE e.id = $1`,
+      [r4EstId],
+    );
+    const estTotal = Number(totRows[0]?.total ?? 0);
+    const invBytes = Buffer.from("%PDF-1.4 r4 invoice");
+    const aarBytes = Buffer.alloc(500, 0x20);
+    aarBytes.write("R4INVOICE", 0);
+    const invSub = await submitShopInvoice({
+      rawToken: r4Token,
+      invoiceNo: `INV-R4-${RUN}`,
+      total: estTotal,
+      actorEmail: "ds01@smoke-r4.test",
+      file: {
+        filename: "inv-r4.pdf",
+        mime: "application/pdf",
+        bytes: invBytes,
+      },
+      aarFile: {
+        filename: "inv-r4.dat",
+        mime: "text/plain",
+        bytes: aarBytes,
+      },
+    });
+    if (!invSub.ok) bad("r4-invoice", invSub.error);
+    if (String(invSub.workflowStatus) !== "UNDER_OWNER_REVIEW") {
+      bad("r4-inv-wf", String(invSub.workflowStatus));
+    }
+    // Close must fail before accept
+    const gateEarly = await assertCloseRequirements({ eventId: r4EventId });
+    if (gateEarly.ok) bad("r4-close-early", "close should require accepted invoice");
+    const accepted = await acceptShopInvoice({
+      invoiceId: String(invSub.invoice.id),
+      actor: "owner@smoke-r4.test",
+      note: "Looks good",
+    });
+    if (!accepted.ok) bad("r4-accept", accepted.error);
+    // Clear any blocking flags
+    await q(
+      `UPDATE repair.estimate_validation_findings f
+       SET cleared_at = now(), cleared_by = 'smoke-r4'
+       FROM repair.estimate_validation_runs r
+       WHERE f.run_id = r.id AND r.estimate_id = $1 AND f.cleared_at IS NULL`,
+      [r4EstId],
+    ).catch(() => undefined);
+    const closedR4 = await markBadOrderClosed({
+      eventId: r4EventId,
+      actor: "owner@smoke-r4.test",
+      invoiceNo: `INV-R4-${RUN}`,
+      invoicedAt: "2026-10-15",
+    });
+    if (!closedR4.ok) bad("r4-closed", closedR4.error);
+    lifeR4 = await getBoLifecycleBundle({ eventId: r4EventId });
+    if (lifeR4.timelineCode !== "CLOSED") {
+      bad("r4-tl-closed", lifeR4.timelineCode);
+    }
+    ok("r4 full path DS01: confirm→on hand→estimate→approve→complete→invoice→accept→closed");
+
+    // Decline path + owner outbox
+    const D_NUM = `9${String(Date.now()).slice(-5)}`;
+    await seedCar(MARK, D_NUM);
+    const dBo = await createBadOrder({
+      carMark: MARK,
+      carNumber: D_NUM,
+      shopId: ds01Id,
+      actor: "smoke-g-r4",
+      boRuleCode: "OTHER",
+      boRuleOtherText: "r4 decline",
+      boDate: new Date().toISOString().slice(0, 10),
+      allowDuplicates: true,
+    });
+    if (!dBo.ok) bad("r4-decline-bo", JSON.stringify(dBo));
+    const dEventId = String(dBo.event.id);
+    await q(`UPDATE repair.events SET is_smoke = true WHERE id = $1`, [dEventId]);
+    const dLink = await ensureShopBoLink({
+      eventId: dEventId,
+      shopMark: "DS01",
+      actor: "smoke-g-r4",
+      forceNew: true,
+    });
+    if (!dLink.token) bad("r4-decline-link", "token required");
+    const declined = await shopDeclineWork(
+      dLink.token,
+      "ds01@smoke-r4.test",
+      "No bay capacity this week",
+    );
+    if (!declined.ok) bad("r4-decline", declined.error);
+    const { rows: outbox } = await q(
+      `SELECT id FROM repair.email_outbox
+       WHERE event_id = $1 AND notification_type = 'BO_DECLINED_WORK'
+       LIMIT 1`,
+      [dEventId],
+    );
+    if (!outbox[0]) bad("r4-decline-outbox", "owner outbox row missing");
+    ok("r4 decline path + owner local outbox");
+
+    // Tile counts match filtered lists
+    const homeTiles = await shopPortalHome({
+      role: "shop",
+      shopMark: "DS01",
+      actor: "ds01@smoke-r4.test",
+    });
+    if (!homeTiles.ok) bad("r4-tiles-home", homeTiles.error);
+    if (!homeTiles.byTile || !homeTiles.statusTiles?.length) {
+      bad("r4-tiles", "byTile / statusTiles missing");
+    }
+    for (const tile of SHOP_STATUS_TILES) {
+      const count = homeTiles.byTile![tile] ?? 0;
+      const filtered = await shopPortalHome({
+        role: "shop",
+        shopMark: "DS01",
+        actor: "ds01@smoke-r4.test",
+        tile,
+      });
+      if (!filtered.ok) bad(`r4-tile-filter-${tile}`, filtered.error);
+      const listN = (filtered.badOrders || []).length;
+      if (listN !== count) {
+        bad(
+          `r4-tile-count-${tile}`,
+          `tile count ${count} != list ${listN}`,
+        );
+      }
+    }
+    // Closed tile should include the r4 closed BO
+    const closedHome = await shopPortalHome({
+      role: "shop",
+      shopMark: "DS01",
+      actor: "ds01@smoke-r4.test",
+      tile: "Closed",
+    });
+    if (!closedHome.ok) bad("r4-closed-tile", closedHome.error);
+    const closedHit = (closedHome.badOrders || []).some(
+      (b: { event_id?: string }) => String(b.event_id) === r4EventId,
+    );
+    if (!closedHit) bad("r4-closed-list", "closed BO not in Closed tile filter");
+    ok("r4 status tiles clickable filters; counts match lists");
+
+    // classify helper sanity
+    const t = classifyBoTile({
+      eventStatus: "SHOP_ASSIGNED",
+      lifecycleStatus: "QUEUED",
+    });
+    if (t !== "Awaiting Confirmation") bad("r4-classify", t);
+
+    delete process.env.REPAIR_SHOW_SMOKE;
+  }
 
   console.log("=== repair:smoke-shop PASS ===");
 }

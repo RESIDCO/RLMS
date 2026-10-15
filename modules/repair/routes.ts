@@ -223,7 +223,9 @@ import {
   shopEstimateDetail,
   notifyShopEstimateDecision,
   resolveShopContext,
+  shopIssueBoLink,
 } from "./services/shop-portal";
+import { describeNextShopStep } from "./services/shop-workflow";
 import {
   getRailincValidator,
   listValidationRules,
@@ -243,7 +245,13 @@ import {
 } from "./services/documents-viewer";
 import { enterPodErd, listPodDates, latestPodErd, runPodReminders } from "./services/pod";
 import { setCompletedDate, rollbackCompletedDate } from "./services/completion";
-import { submitShopInvoice, listInvoicesForEvent, approveInvoiceMatch } from "./services/invoices";
+import {
+  submitShopInvoice,
+  listInvoicesForEvent,
+  approveInvoiceMatch,
+  acceptShopInvoice,
+  rejectShopInvoice,
+} from "./services/invoices";
 import {
   submitShopCrbInvoice,
   ingestCrbInvoiceFromInboundEmail,
@@ -501,9 +509,31 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
       const shopId = resolved.event.shop_id ? String(resolved.event.shop_id) : null;
       const otpInvoice = await isOtpRequired("invoice_submit", { shopId, eventId, tenantId });
       const otpCompleted = await isOtpRequired("completed_date", { shopId, eventId, tenantId });
+      const inv0 = invoices[0] as
+        | { workflow_status?: string; match_status?: string }
+        | undefined;
+      const { rows: boClose } = await q(
+        `SELECT closed_at, completed_date FROM repair.bad_orders
+         WHERE event_id = $1 AND deleted_at IS NULL LIMIT 1`,
+        [eventId],
+      ).catch(() => ({ rows: [] as Array<{ closed_at?: string; completed_date?: string }> }));
+      const nextStep = describeNextShopStep({
+        eventStatus: String(resolved.event.status_code),
+        estimateStatus: estimates[0]?.status_code as string | undefined,
+        estimateLocked: Boolean(estimates[0]?.locked),
+        hasInvoice: Boolean(inv0),
+        invoiceWorkflow: inv0?.workflow_status
+          ? String(inv0.workflow_status)
+          : null,
+        isClosed: Boolean(boClose[0]?.closed_at),
+        completed: Boolean(
+          boClose[0]?.completed_date || estimates[0]?.completed_at,
+        ),
+      });
       return res.json({
         link: resolved.link,
         event: resolved.event,
+        nextStep,
         nextActions: nextShopActions(String(resolved.event.status_code), {
           hasPod: Boolean(pod.POD || pod.ERD),
           estimateLocked: Boolean(estimates[0]?.locked),
@@ -694,11 +724,18 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
 
   app.post("/api/repair/e/:token/on-hand", async (req, res) => {
     const email = String(req.body?.email ?? "shop@unknown");
+    const yardNote =
+      req.body?.yardTrackNote != null
+        ? String(req.body.yardTrackNote)
+        : req.body?.yardNote != null
+          ? String(req.body.yardNote)
+          : undefined;
     if (req.body?.arrivalDate) {
       const result = await shopArrivalDate(
         String(req.params.token),
         email,
         String(req.body.arrivalDate),
+        yardNote,
       );
       if (!result.ok) return res.status(result.status).json({ error: result.error });
       return res.json(result);
@@ -710,10 +747,17 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
 
   app.post("/api/repair/e/:token/arrival", async (req, res) => {
     const email = String(req.body?.email ?? "shop@unknown");
+    const yardNote =
+      req.body?.yardTrackNote != null
+        ? String(req.body.yardTrackNote)
+        : req.body?.yardNote != null
+          ? String(req.body.yardNote)
+          : undefined;
     const result = await shopArrivalDate(
       String(req.params.token),
       email,
       String(req.body?.arrivalDate ?? req.body?.date ?? ""),
+      yardNote,
     );
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
@@ -840,14 +884,29 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
 
   app.post(
     "/api/repair/e/:token/invoice",
-    upload.single("file"),
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "aarFile", maxCount: 1 },
+    ]),
     async (req, res) => {
       try {
-        const file = req.file
+        const files = req.files as
+          | { [field: string]: Express.Multer.File[] }
+          | undefined;
+        const pdf = files?.file?.[0];
+        const aar = files?.aarFile?.[0];
+        const file = pdf
           ? {
-              filename: req.file.originalname || "invoice.pdf",
-              mime: req.file.mimetype || "application/pdf",
-              bytes: req.file.buffer,
+              filename: pdf.originalname || "invoice.pdf",
+              mime: pdf.mimetype || "application/pdf",
+              bytes: pdf.buffer,
+            }
+          : undefined;
+        const aarFile = aar
+          ? {
+              filename: aar.originalname || "invoice.dat",
+              mime: aar.mimetype || "text/plain",
+              bytes: aar.buffer,
             }
           : undefined;
         const result = await submitShopInvoice({
@@ -857,11 +916,14 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
           actorEmail: String(req.body?.email ?? "shop@unknown"),
           otpCode: req.body?.otpCode ? String(req.body.otpCode) : undefined,
           file,
+          aarFile,
         });
         if (!result.ok) {
           return res.status(result.status).json({
             error: result.error,
             otpRequired: "otpRequired" in result ? result.otpRequired : undefined,
+            hardRejects: "hardRejects" in result ? result.hardRejects : undefined,
+            flags: "flags" in result ? result.flags : undefined,
           });
         }
         return res.status(201).json(result);
@@ -2566,6 +2628,41 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const result = await approveInvoiceMatch({
       invoiceId: String(req.params.id),
       actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** §G r4 owner accept shop invoice (Estimate Review read-only). */
+  app.post("/api/repair/invoices/:id/accept", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await acceptShopInvoice({
+      invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+      note: req.body?.note ? String(req.body.note) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** §G r4 owner reject shop invoice with optional line comments. */
+  app.post("/api/repair/invoices/:id/reject", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const lineComments = Array.isArray(req.body?.lineComments)
+      ? req.body.lineComments.map(
+          (c: { lineNo?: number; text?: string }) => ({
+            lineNo: Number(c.lineNo ?? 0),
+            text: String(c.text ?? ""),
+          }),
+        )
+      : undefined;
+    const result = await rejectShopInvoice({
+      invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+      note: String(req.body?.note ?? req.body?.reason ?? ""),
+      lineComments,
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
@@ -4417,6 +4514,19 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       carInitial: req.query.carInitial ? String(req.query.carInitial) : undefined,
       carNumber: req.query.carNumber ? String(req.query.carNumber) : undefined,
       status: req.query.status ? String(req.query.status) : undefined,
+      tile: req.query.tile ? String(req.query.tile) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/shop/events/:eventId/shop-link", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await shopIssueBoLink({
+      ...shopActorFrom(req),
+      eventId: String(req.params.eventId),
+      forceNew: String(req.body?.forceNew ?? "") === "1" || req.body?.forceNew === true,
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);

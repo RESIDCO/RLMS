@@ -2,6 +2,8 @@
  * Shop invoice upload on event link.
  * Match = invoice total vs approved final estimate TOTAL.
  * Mismatches flagged for review.
+ * §G r4: 500-byte + PDF; workflow INVOICE_SUBMITTED → UNDER_OWNER_REVIEW →
+ * ACCEPTED | REJECTED; close requires ACCEPTED.
  * Optional OTP per shop (shops.settings.otpSteps.invoice_submit; default off).
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
@@ -13,6 +15,9 @@ import { notify } from "./notifications";
 import { isOtpRequired, verifyStepOtp } from "./otp";
 import { maybeMarkReadyToClose } from "./close";
 import { centsToDollars, dollarsToCents, formatDollars } from "./money";
+
+/** Placeholder tolerance (cents) for invoice vs estimate total — exact match default. */
+export const INVOICE_TOTAL_TOLERANCE_CENTS = 0;
 
 async function approvedFinalEstimateTotal(
   eventId: string,
@@ -38,6 +43,74 @@ async function approvedFinalEstimateTotal(
   };
 }
 
+export type InvoiceValidateFinding = {
+  code: string;
+  severity: "HARD_REJECT" | "FLAG";
+  message: string;
+  lineNo?: number | null;
+};
+
+/** Validate invoice vs approved estimate (totals + line/qty placeholder). */
+export function validateInvoiceVsEstimate(opts: {
+  invoiceNo: string;
+  invoiceTotalCents: number;
+  estimateTotalCents: number;
+  /** Optional line-level compare placeholder */
+  lines?: Array<{
+    lineNo: number;
+    invoiceQty?: number;
+    estimateQty?: number;
+    invoiceAmountCents?: number;
+    estimateAmountCents?: number;
+  }>;
+}): { hardRejects: InvoiceValidateFinding[]; flags: InvoiceValidateFinding[] } {
+  const hardRejects: InvoiceValidateFinding[] = [];
+  const flags: InvoiceValidateFinding[] = [];
+  if (!opts.invoiceNo.trim()) {
+    hardRejects.push({
+      code: "MISSING_INVOICE_NO",
+      severity: "HARD_REJECT",
+      message: "Invoice number required",
+    });
+  }
+  const delta = Math.abs(opts.invoiceTotalCents - opts.estimateTotalCents);
+  if (delta > INVOICE_TOTAL_TOLERANCE_CENTS) {
+    flags.push({
+      code: "TOTAL_MISMATCH",
+      severity: "FLAG",
+      message: `Invoice total differs from approved estimate by ${delta} cents (tolerance ${INVOICE_TOTAL_TOLERANCE_CENTS})`,
+    });
+  }
+  for (const line of opts.lines ?? []) {
+    if (
+      line.invoiceQty != null &&
+      line.estimateQty != null &&
+      line.invoiceQty !== line.estimateQty
+    ) {
+      flags.push({
+        code: "QTY_MISMATCH",
+        severity: "FLAG",
+        message: `Line ${line.lineNo}: qty ${line.invoiceQty} ≠ estimate ${line.estimateQty}`,
+        lineNo: line.lineNo,
+      });
+    }
+    if (
+      line.invoiceAmountCents != null &&
+      line.estimateAmountCents != null &&
+      Math.abs(line.invoiceAmountCents - line.estimateAmountCents) >
+        INVOICE_TOTAL_TOLERANCE_CENTS
+    ) {
+      flags.push({
+        code: "LINE_AMOUNT_MISMATCH",
+        severity: "FLAG",
+        message: `Line ${line.lineNo}: amount mismatch vs approved estimate`,
+        lineNo: line.lineNo,
+      });
+    }
+  }
+  return { hardRejects, flags };
+}
+
 export async function submitShopInvoice(opts: {
   rawToken: string;
   invoiceNo: string;
@@ -45,6 +118,8 @@ export async function submitShopInvoice(opts: {
   actorEmail: string;
   otpCode?: string;
   file?: { filename: string; mime: string; bytes: Buffer };
+  /** §G r4 optional 500-byte AAR/CRB invoice companion file */
+  aarFile?: { filename: string; mime: string; bytes: Buffer };
 }) {
   const resolved = await resolveActiveLink(opts.rawToken, "SHOP");
   if (!resolved) return { ok: false as const, status: 401, error: "Invalid or revoked link" };
@@ -64,6 +139,13 @@ export async function submitShopInvoice(opts: {
   }
   if (!opts.file?.bytes?.length) {
     return { ok: false as const, status: 400, error: "Invoice PDF/file required" };
+  }
+  if (!opts.aarFile?.bytes?.length) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "500-byte invoice file required",
+    };
   }
 
   const shopId = event.shop_id ? String(event.shop_id) : null;
@@ -102,7 +184,21 @@ export async function submitShopInvoice(opts: {
   const estimateCents = dollarsToCents(approved.total);
   const invoiceTotal = centsToDollars(invoiceCents);
   const estimateTotal = centsToDollars(estimateCents);
-  const matched = invoiceCents === estimateCents;
+  const validation = validateInvoiceVsEstimate({
+    invoiceNo: opts.invoiceNo.trim(),
+    invoiceTotalCents: invoiceCents,
+    estimateTotalCents: estimateCents,
+  });
+  if (validation.hardRejects.length) {
+    return {
+      ok: false as const,
+      status: 422,
+      error: validation.hardRejects.map((f) => f.message).join("; "),
+      hardRejects: validation.hardRejects,
+      flags: validation.flags,
+    };
+  }
+  const matched = validation.flags.length === 0;
   const matchStatus = matched ? "MATCHED" : "MISMATCH";
 
   const stored = await getStorageProvider().put({
@@ -131,6 +227,31 @@ export async function submitShopInvoice(opts: {
     ],
   );
 
+  const aarStored = await getStorageProvider().put({
+    tenantId,
+    kind: "invoice_aar",
+    filename: opts.aarFile!.filename,
+    mime: opts.aarFile!.mime || "text/plain",
+    bytes: opts.aarFile!.bytes,
+  });
+  const { rows: aarDocs } = await q(
+    `INSERT INTO repair.documents
+       (tenant_id, event_id, kind, storage_key, sha256, size, mime,
+        uploaded_by, created_by, original_filename)
+     VALUES ($1,$2,'invoice_aar',$3,$4,$5,$6,$7,$7,$8)
+     RETURNING *`,
+    [
+      tenantId,
+      eventId,
+      aarStored.storageKey,
+      aarStored.sha256,
+      aarStored.size,
+      aarStored.mime,
+      opts.actorEmail,
+      opts.aarFile!.filename,
+    ],
+  );
+
   const entityCode =
     event.entity_code != null
       ? String(event.entity_code)
@@ -146,9 +267,9 @@ export async function submitShopInvoice(opts: {
   const { rows } = await q(
     `INSERT INTO repair.invoices
        (tenant_id, event_id, shop_id, invoice_no, total, estimate_total,
-        document_id, match_status, mismatch_flagged, submitted_by_email, created_by,
-        entity_code)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)
+        document_id, aar_document_id, match_status, mismatch_flagged,
+        submitted_by_email, created_by, entity_code, workflow_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,$12,'UNDER_OWNER_REVIEW')
      RETURNING *`,
     [
       tenantId,
@@ -158,6 +279,7 @@ export async function submitShopInvoice(opts: {
       invoiceTotal,
       estimateTotal,
       docs[0].id,
+      aarDocs[0].id,
       matchStatus,
       !matched,
       opts.actorEmail,
@@ -221,8 +343,11 @@ export async function submitShopInvoice(opts: {
     ok: true as const,
     invoice: rows[0],
     document: docs[0],
+    aarDocument: aarDocs[0],
     matchStatus,
     mismatchFlagged: !matched,
+    workflowStatus: "UNDER_OWNER_REVIEW",
+    flags: validation.flags,
     otpUsed: otpNeeded,
     readyToClose,
   };
@@ -246,7 +371,8 @@ export async function approveInvoiceMatch(opts: {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const { rows } = await q(
     `UPDATE repair.invoices
-     SET match_status = 'APPROVED', approved_by = $1, approved_at = now()
+     SET match_status = 'APPROVED', approved_by = $1, approved_at = now(),
+         workflow_status = 'ACCEPTED', decided_by = $1, decided_at = now()
      WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL
      RETURNING *`,
     [opts.actor, opts.invoiceId, tenantId],
@@ -257,7 +383,103 @@ export async function approveInvoiceMatch(opts: {
     entity: "invoice",
     entityId: opts.invoiceId,
     action: "INVOICE_APPROVED",
-    after: { match_status: "APPROVED" },
+    after: { match_status: "APPROVED", workflow_status: "ACCEPTED" },
+    actor: opts.actor,
+    via: "UI",
+  });
+  return { ok: true as const, invoice: rows[0] };
+}
+
+/** §G r4 owner accept shop invoice (Estimate Review read-only path). */
+export async function acceptShopInvoice(opts: {
+  invoiceId: string;
+  actor: string;
+  note?: string;
+  tenantId?: string;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { rows } = await q(
+    `UPDATE repair.invoices
+     SET workflow_status = 'ACCEPTED',
+         decided_by = $1, decided_at = now(),
+         owner_decision_note = $4,
+         match_status = CASE
+           WHEN match_status = 'MISMATCH' THEN match_status
+           ELSE 'APPROVED'
+         END,
+         approved_by = coalesce(approved_by, $1),
+         approved_at = coalesce(approved_at, now())
+     WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL
+       AND coalesce(workflow_status, '') <> 'ACCEPTED'
+     RETURNING *`,
+    [opts.actor, opts.invoiceId, tenantId, opts.note?.trim() || null],
+  );
+  if (!rows[0]) {
+    return { ok: false as const, status: 404, error: "Invoice not found or already accepted" };
+  }
+  await writeAudit({
+    tenantId,
+    entity: "invoice",
+    entityId: opts.invoiceId,
+    action: "INVOICE_ACCEPTED",
+    after: { workflow_status: "ACCEPTED", note: opts.note ?? null },
+    actor: opts.actor,
+    via: "UI",
+  });
+  return { ok: true as const, invoice: rows[0] };
+}
+
+/** §G r4 owner reject shop invoice with line/owner comments. */
+export async function rejectShopInvoice(opts: {
+  invoiceId: string;
+  actor: string;
+  note: string;
+  lineComments?: Array<{ lineNo: number; text: string }>;
+  tenantId?: string;
+}) {
+  const note = (opts.note ?? "").trim();
+  if (!note) {
+    return { ok: false as const, status: 400, error: "Reject reason required" };
+  }
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { rows } = await q(
+    `UPDATE repair.invoices
+     SET workflow_status = 'REJECTED',
+         decided_by = $1, decided_at = now(),
+         owner_decision_note = $4
+     WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL
+     RETURNING *`,
+    [opts.actor, opts.invoiceId, tenantId, note],
+  );
+  if (!rows[0]) return { ok: false as const, status: 404, error: "Invoice not found" };
+  const eventId = String(rows[0].event_id);
+  for (const lc of opts.lineComments ?? []) {
+    const text = (lc.text ?? "").trim();
+    if (!text) continue;
+    await q(
+      `INSERT INTO repair.comments
+         (tenant_id, event_id, body, author, created_by, subject, issue)
+       VALUES ($1, $2, $3, $4, $4, $5, $6)`,
+      [
+        tenantId,
+        eventId,
+        text,
+        opts.actor,
+        `Invoice line ${lc.lineNo}`,
+        "invoice_line_comment",
+      ],
+    ).catch(() => undefined);
+  }
+  await writeAudit({
+    tenantId,
+    entity: "invoice",
+    entityId: opts.invoiceId,
+    action: "INVOICE_REJECTED",
+    after: {
+      workflow_status: "REJECTED",
+      note,
+      lineComments: opts.lineComments ?? [],
+    },
     actor: opts.actor,
     via: "UI",
   });

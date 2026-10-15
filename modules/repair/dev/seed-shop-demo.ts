@@ -510,8 +510,10 @@ async function seedClosed(shopId: string, base: Buffer) {
 
   await q(
     `INSERT INTO repair.invoices
-       (tenant_id, event_id, shop_id, invoice_no, total, match_status, created_by)
-     SELECT $1, $2, $3, 'DEMO-INV-100005', 100.00, 'APPROVED', 'seed-shop-demo'
+       (tenant_id, event_id, shop_id, invoice_no, total, match_status,
+        workflow_status, created_by, decided_by, decided_at)
+     SELECT $1, $2, $3, 'DEMO-INV-100005', 100.00, 'APPROVED',
+            'ACCEPTED', 'seed-shop-demo', 'seed-shop-demo', now()
      WHERE NOT EXISTS (
        SELECT 1 FROM repair.invoices WHERE event_id = $2 AND deleted_at IS NULL
      )`,

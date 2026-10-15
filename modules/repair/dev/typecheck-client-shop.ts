@@ -1,5 +1,5 @@
 /**
- * Client typecheck gate for §G Shop portal (+ r2/r3 clarity).
+ * Client typecheck gate for §G Shop portal (+ r2/r3/r4).
  * Run: npm run repair:typecheck-client-shop
  */
 import { readFileSync } from "fs";
@@ -16,6 +16,7 @@ const PAGES = [
   "client/src/pages/repair/ShopEstimateDetail.tsx",
   "client/src/pages/repair/DevRoleSwitcher.tsx",
   "client/src/pages/repair/RepairNavChrome.tsx",
+  "client/src/pages/repair/ShopEventLink.tsx",
 ];
 
 function bad(label: string, detail: string): never {
@@ -65,7 +66,15 @@ export function assertShopClientTypecheck(): void {
   if (!portal.includes("Inconsistent state")) {
     bad("inconsistent", "ShopPortal must show Inconsistent state for bad Closed rows");
   }
-  ok("ShopPortal brand + status + car search + KPIs + AA labels + r3");
+  if (
+    !portal.includes("Status tiles") ||
+    !portal.includes("Awaiting Confirmation") ||
+    !portal.includes("byTile") ||
+    !portal.includes("Invoice Due")
+  ) {
+    bad("r4-tiles", "ShopPortal must show clickable status tiles (byTile)");
+  }
+  ok("ShopPortal brand + status + car search + KPIs + AA labels + r3 + r4 tiles");
 
   if (!bo.includes("Owner instructions") || !bo.includes("JIC")) {
     bad("bo", "ShopBoDetail must show owner instructions + JIC clock");
@@ -138,6 +147,37 @@ export function assertShopClientTypecheck(): void {
   }
   ok("App routes for shop portal");
 
+  const link = readFileSync(join(ROOT, PAGES[5]), "utf8");
+  if (!link.includes("Next action") || !link.includes("shop-link-next-step")) {
+    bad("r4-link-next", "ShopEventLink must show next-action panel");
+  }
+  if (!link.includes("Accept assignment") || !link.includes("Decline work")) {
+    bad("r4-link-confirm", "ShopEventLink must confirm/decline BO");
+  }
+  if (!link.includes("Mark on hand") || !link.includes("yardTrackNote")) {
+    bad("r4-link-hand", "ShopEventLink must mark on hand with yard note");
+  }
+  if (
+    !link.includes("500-byte") ||
+    !link.includes("aarFile") ||
+    !link.includes("Invoice PDF")
+  ) {
+    bad("r4-link-inv", "ShopEventLink must upload 500-byte + invoice PDF");
+  }
+  if (!link.includes("shopAa.input")) {
+    bad("r4-link-aa", "ShopEventLink must use shopAa.input");
+  }
+  ok("ShopEventLink next-step confirm→on hand→estimate→invoice (r4)");
+
+  const review = readFileSync(
+    join(ROOT, "client/src/pages/repair/EstimateReview.tsx"),
+    "utf8",
+  );
+  if (!review.includes("shopInvoice") || !review.includes("Shop invoice (read-only)")) {
+    bad("r4-review-inv", "EstimateReview must show shop invoice read-only");
+  }
+  ok("EstimateReview shop invoice read-only (r4)");
+
   const tsc = spawnSync(
     process.platform === "win32" ? "npx.cmd" : "npx",
     ["tsc", "--noEmit", "--pretty", "false"],
@@ -153,7 +193,9 @@ export function assertShopClientTypecheck(): void {
           line.includes("ShopEstimateDetail.tsx") ||
           line.includes("DevRoleSwitcher.tsx") ||
           line.includes("RepairNavChrome.tsx") ||
-          line.includes("EstimateDocuments.tsx")) &&
+          line.includes("EstimateDocuments.tsx") ||
+          line.includes("ShopEventLink.tsx") ||
+          line.includes("EstimateReview.tsx")) &&
         line.includes("error TS"),
     );
 

@@ -33,6 +33,17 @@ type Lifecycle = {
     missedPodReasonNote: string | null;
     missedPodRequired: boolean;
   };
+  status?: string;
+  statusLabel?: string;
+  statusLine?: string;
+  compactTimeline?: Array<{
+    code: string;
+    label: string;
+    kind: "done" | "current" | "next";
+    at: string | null;
+    who: string | null;
+    meaning: string;
+  }>;
   timeline: Array<{
     code: string;
     label: string;
@@ -48,6 +59,12 @@ type Lifecycle = {
     whoClears: string;
     code: string;
   }>;
+  showFlags?: boolean;
+  flagSummaryLine?: string;
+  flagSummary?: {
+    total: number;
+    byCode: Array<{ code: string; count: number; label: string }>;
+  };
   approvedWithFlags: boolean;
   openFlagCount: number;
   podHistory: Array<{
@@ -319,45 +336,66 @@ export default function ShopBoDetail() {
             {life && (
               <>
                 <section className="rounded border border-slate-300 bg-white p-4">
-                  <h2 className="font-semibold text-slate-900">Status timeline</h2>
+                  <h2 className="font-semibold text-slate-900">Status</h2>
+                  <p className="mt-2 text-base font-semibold text-slate-900">
+                    {life.statusLine ||
+                      life.statusLabel ||
+                      life.status ||
+                      "—"}
+                  </p>
                   {life.closedReasonLine && (
                     <p className="mt-2 text-sm font-semibold text-slate-900">
                       {life.closedReasonLine}
                     </p>
                   )}
-                  {life.inconsistentClosed && (
-                    <p className="mt-2 rounded border border-red-700 bg-red-50 px-2 py-1 text-sm font-semibold text-red-900">
-                      Inconsistent state
-                      {life.inconsistentClosedReasons?.length
-                        ? `: ${life.inconsistentClosedReasons.join("; ")}`
-                        : ""}
-                    </p>
-                  )}
-                  {life.approvedWithFlags && (
+                  {/* Inconsistent state is owner-only; never show to shops */}
+                  {life.approvedWithFlags && life.showFlags && (
                     <p className="mt-2 rounded border border-amber-700 bg-amber-50 px-2 py-1 text-sm text-slate-900">
-                      Approved – {life.openFlagCount} flags block completion/invoicing
+                      Approved – {life.flagSummaryLine ||
+                        `${life.openFlagCount} flags block completion/invoicing`}
                     </p>
                   )}
-                  <ol className="mt-3 space-y-2">
-                    {life.timeline.map((s) => (
+                  <ol className="mt-3 space-y-2" data-testid="bo-compact-timeline">
+                    {(life.compactTimeline?.length
+                      ? life.compactTimeline
+                      : life.timeline
+                          .filter((s) => s.active || s.current)
+                          .map((s) => ({
+                            code: s.code,
+                            label: s.label,
+                            kind: s.current
+                              ? ("current" as const)
+                              : ("done" as const),
+                            at: null as string | null,
+                            who: null as string | null,
+                            meaning: s.meaning,
+                          }))
+                    ).map((s) => (
                       <li
-                        key={s.code}
+                        key={`${s.code}-${s.kind}`}
                         className={
-                          s.current
+                          s.kind === "current"
                             ? "rounded border border-slate-900 bg-slate-100 px-3 py-2"
-                            : s.active
-                              ? "rounded border border-slate-300 px-3 py-2"
-                              : "rounded border border-slate-200 px-3 py-2 opacity-60"
+                            : s.kind === "next"
+                              ? "rounded border border-dashed border-slate-400 px-3 py-2"
+                              : "rounded border border-slate-300 px-3 py-2"
                         }
                       >
                         <p className="font-semibold text-slate-900">
                           {s.label}
-                          {s.current ? " · current" : ""}
+                          {s.kind === "current"
+                            ? " · current"
+                            : s.kind === "next"
+                              ? " · next"
+                              : ""}
                         </p>
                         <p className={shopAa.muted}>{s.meaning}</p>
-                        <p className="text-sm text-slate-700">
-                          Next: {s.whoActsNext}
-                        </p>
+                        {(s.at || s.who) && (
+                          <p className="text-sm text-slate-700">
+                            {s.at ? String(s.at).slice(0, 10) : ""}
+                            {s.who ? ` · ${s.who}` : ""}
+                          </p>
+                        )}
                       </li>
                     ))}
                   </ol>
@@ -531,30 +569,46 @@ export default function ShopBoDetail() {
                   )}
                 </section>
 
-                <section className="rounded border border-slate-300 bg-white p-4">
-                  <h2 className="font-semibold text-slate-900">Flags</h2>
-                  {life.flags.length === 0 ? (
-                    <p className={shopAa.muted}>No open flags.</p>
-                  ) : (
-                    <ul className="mt-2 space-y-2 text-sm">
-                      {life.flags.map((f, i) => (
-                        <li
-                          key={`${f.code}-${i}`}
-                          className="rounded border border-amber-700 bg-amber-50 px-2 py-1 text-slate-900"
-                        >
-                          <span className="font-semibold">{f.code}</span>: {f.what}
-                          {f.lineNo != null ? ` · line ${f.lineNo}` : ""}
-                          {f.blocksCompletion
-                            ? " · blocks completion/invoicing"
-                            : ""}
-                          <span className="block text-slate-700">
-                            Cleared by: {f.whoClears}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
+                {life.showFlags && (
+                  <section className="rounded border border-slate-300 bg-white p-4">
+                    <h2 className="font-semibold text-slate-900">
+                      Estimate flags
+                    </h2>
+                    {life.flags.length === 0 ? (
+                      <p className={shopAa.muted}>No open flags.</p>
+                    ) : (
+                      <>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">
+                          {life.flagSummaryLine ||
+                            `${life.flags.length} flags`}
+                        </p>
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-sm text-slate-800">
+                            Show flag list
+                          </summary>
+                          <ul className="mt-2 space-y-2 text-sm">
+                            {life.flags.map((f, i) => (
+                              <li
+                                key={`${f.code}-${i}`}
+                                className="rounded border border-amber-700 bg-amber-50 px-2 py-1 text-slate-900"
+                              >
+                                <span className="font-semibold">{f.code}</span>:{" "}
+                                {f.what}
+                                {f.lineNo != null ? ` · line ${f.lineNo}` : ""}
+                                {f.blocksCompletion
+                                  ? " · blocks completion/invoicing"
+                                  : ""}
+                                <span className="block text-slate-700">
+                                  Cleared by: {f.whoClears}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      </>
+                    )}
+                  </section>
+                )}
               </>
             )}
 

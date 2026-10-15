@@ -517,24 +517,69 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
          WHERE event_id = $1 AND deleted_at IS NULL LIMIT 1`,
         [eventId],
       ).catch(() => ({ rows: [] as Array<{ closed_at?: string; completed_date?: string }> }));
+      const { rows: boStatusRows } = await q(
+        `SELECT status, status_changed_at, closed_at, completed_date
+         FROM repair.bad_orders
+         WHERE event_id = $1 AND deleted_at IS NULL LIMIT 1`,
+        [eventId],
+      ).catch(() => ({
+        rows: [] as Array<{
+          status?: string;
+          status_changed_at?: string;
+          closed_at?: string;
+          completed_date?: string;
+        }>,
+      }));
+      const boStatus = boStatusRows[0]?.status
+        ? String(boStatusRows[0].status)
+        : String(resolved.event.status_code);
+      const eventStatusForStep =
+        boStatus === "ASSIGNED"
+          ? "SHOP_ASSIGNED"
+          : boStatus === "ACCEPTED"
+            ? "ACCEPTED"
+            : boStatus === "ON_HAND"
+              ? "ON_HAND"
+              : String(resolved.event.status_code);
       const nextStep = describeNextShopStep({
-        eventStatus: String(resolved.event.status_code),
+        eventStatus: eventStatusForStep,
         estimateStatus: estimates[0]?.status_code as string | undefined,
         estimateLocked: Boolean(estimates[0]?.locked),
         hasInvoice: Boolean(inv0),
         invoiceWorkflow: inv0?.workflow_status
           ? String(inv0.workflow_status)
           : null,
-        isClosed: Boolean(boClose[0]?.closed_at),
+        isClosed: Boolean(
+          boClose[0]?.closed_at || boStatusRows[0]?.closed_at || boStatus === "CLOSED",
+        ),
         completed: Boolean(
-          boClose[0]?.completed_date || estimates[0]?.completed_at,
+          boClose[0]?.completed_date ||
+            boStatusRows[0]?.completed_date ||
+            estimates[0]?.completed_at ||
+            boStatus === "COMPLETED",
         ),
       });
       return res.json({
         link: resolved.link,
-        event: resolved.event,
+        event: {
+          ...resolved.event,
+          bo_status: boStatus,
+          status_code:
+            boStatus === "ASSIGNED"
+              ? "SHOP_ASSIGNED"
+              : boStatus === "ACCEPTED"
+                ? "ACCEPTED"
+                : resolved.event.status_code,
+          status_name:
+            boStatus === "ASSIGNED"
+              ? "Awaiting Shop Acceptance"
+              : boStatus === "ACCEPTED"
+                ? "Accepted – awaiting arrival"
+                : resolved.event.status_name,
+        },
+        status: boStatus,
         nextStep,
-        nextActions: nextShopActions(String(resolved.event.status_code), {
+        nextActions: nextShopActions(eventStatusForStep, {
           hasPod: Boolean(pod.POD || pod.ERD),
           estimateLocked: Boolean(estimates[0]?.locked),
           estimateStatus: estimates[0]?.status_code as string | undefined,
@@ -1057,10 +1102,11 @@ function nextShopActions(
   const actions: string[] = [];
   switch (statusCode) {
     case "SHOP_ASSIGNED":
+    case "ASSIGNED":
       return ["accept", "reject"];
     case "ACCEPTED":
-      actions.push("on-hand", "upload-estimate");
-      break;
+      // §G r5: after accept, only Mark on hand (never estimate yet)
+      return ["on-hand"];
     case "ON_HAND":
       actions.push("upload-estimate", "pod");
       break;

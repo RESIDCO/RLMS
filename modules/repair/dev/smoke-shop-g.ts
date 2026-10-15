@@ -1207,16 +1207,26 @@ async function main() {
     }
     ok("DS01 one signed shop link issued + reused");
 
-    // Confirm
+    // Confirm (accept) — persists bo.status; reopen stays Accepted
     const ack = await shopAcknowledge(r4Token, "ds01@smoke-r4.test");
     if (!ack.ok) bad("r4-confirm", ack.error);
     let lifeR4 = await getBoLifecycleBundle({ eventId: r4EventId });
-    if (lifeR4.timelineCode !== "CONFIRMED") {
-      bad("r4-tl-confirmed", `expected CONFIRMED got ${lifeR4.timelineCode}`);
+    if (lifeR4.status !== "ACCEPTED" && lifeR4.timelineCode !== "ACCEPTED") {
+      bad("r5-tl-accepted", `expected ACCEPTED got ${lifeR4.status}/${lifeR4.timelineCode}`);
     }
-    ok("r4 confirm → timeline Confirmed");
+    if (lifeR4.showFlags) {
+      bad("r5-flags-early", "flags must not show before estimate");
+    }
+    // Idempotent reopen (accept bug fix)
+    const ack2 = await shopAcknowledge(r4Token, "ds01@smoke-r4.test");
+    if (!ack2.ok) bad("r5-accept-reopen", ack2.error);
+    lifeR4 = await getBoLifecycleBundle({ eventId: r4EventId });
+    if (lifeR4.status !== "ACCEPTED") {
+      bad("r5-accept-persist", `reopen expected ACCEPTED got ${lifeR4.status}`);
+    }
+    ok("r5 accept → ACCEPTED persists on reopen; no flags yet");
 
-    // On hand
+    // On hand (separate action — accept never marks on hand)
     const hand = await shopArrivalDate(
       r4Token,
       "ds01@smoke-r4.test",
@@ -1232,13 +1242,10 @@ async function main() {
       bad("r4-yard-note", String(yardNote[0]?.yard_track_note));
     }
     lifeR4 = await getBoLifecycleBundle({ eventId: r4EventId });
-    if (lifeR4.timelineCode !== "ON_HAND" && lifeR4.timelineCode !== "ESTIMATE_PENDING") {
-      // ON_HAND until estimate exists
-      if (lifeR4.timelineCode !== "ON_HAND") {
-        bad("r4-tl-onhand", `expected ON_HAND got ${lifeR4.timelineCode}`);
-      }
+    if (lifeR4.status !== "ON_HAND") {
+      bad("r5-tl-onhand", `expected ON_HAND got ${lifeR4.status}`);
     }
-    ok("r4 on hand + yard note → timeline On Hand");
+    ok("r5 on hand + yard note → stored status On Hand");
 
     // Estimate submit via shop portal
     const r4File = patchCols(
@@ -1378,10 +1385,13 @@ async function main() {
     });
     if (!closedR4.ok) bad("r4-closed", closedR4.error);
     lifeR4 = await getBoLifecycleBundle({ eventId: r4EventId });
-    if (lifeR4.timelineCode !== "CLOSED") {
-      bad("r4-tl-closed", lifeR4.timelineCode);
+    if (lifeR4.status !== "CLOSED" && lifeR4.timelineCode !== "CLOSED") {
+      bad("r5-tl-closed", `${lifeR4.status}/${lifeR4.timelineCode}`);
     }
-    ok("r4 full path DS01: confirm→on hand→estimate→approve→complete→invoice→accept→closed");
+    if (!lifeR4.compactTimeline?.length) {
+      bad("r5-compact-tl", "compact timeline required");
+    }
+    ok("r5 full path DS01: accept→on hand→estimate→approve→complete→invoice→closed");
 
     // Decline path + owner outbox
     const D_NUM = `9${String(Date.now()).slice(-5)}`;
@@ -1462,12 +1472,13 @@ async function main() {
     if (!closedHit) bad("r4-closed-list", "closed BO not in Closed tile filter");
     ok("r4 status tiles clickable filters; counts match lists");
 
-    // classify helper sanity
+    // classify helper sanity — stored status preferred
     const t = classifyBoTile({
-      eventStatus: "SHOP_ASSIGNED",
-      lifecycleStatus: "QUEUED",
+      boStatus: "ASSIGNED",
     });
-    if (t !== "Awaiting Confirmation") bad("r4-classify", t);
+    if (t !== "Awaiting Shop Acceptance") bad("r5-classify", t);
+    const t2 = classifyBoTile({ boStatus: "ACCEPTED" });
+    if (t2 !== "Accepted – awaiting arrival") bad("r5-classify-accepted", t2);
 
     delete process.env.REPAIR_SHOW_SMOKE;
   }

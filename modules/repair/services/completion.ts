@@ -210,6 +210,19 @@ export async function setCompletedDate(opts: {
     via,
   });
 
+  {
+    const { setBoStatus } = await import("./bo-status");
+    await setBoStatus({
+      eventId: String(estimate.event_id),
+      to: "COMPLETED",
+      actor: opts.actor,
+      actionName: "Set completed date",
+      tenantId,
+      occurredAt: completedAt.toISOString(),
+      force: true,
+    });
+  }
+
   await notify({
     tenantId,
     eventId: String(estimate.event_id),

@@ -1,30 +1,29 @@
 /**
- * §G r4 — Shop BO workflow helpers: status tiles, next-step copy,
- * one reusable signed shop link per BO until close.
+ * §G r4/r5 — Shop BO workflow helpers: status tiles from stored bo.status,
+ * next-step copy, one reusable signed shop link per BO until close.
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { issueEventLink, revokeEventLink } from "./event-links";
 import { writeAudit } from "./audit";
+import {
+  SHOP_STATUS_TILES,
+  type ShopStatusTile,
+  type BoStatus,
+  tileForStatus,
+  emptyTileCounts,
+  BO_STATUS_TILE,
+} from "./bo-status";
 
-/** Clickable shop-home status tiles (filters). */
-export const SHOP_STATUS_TILES = [
-  "Awaiting Confirmation",
-  "Awaiting Arrival",
-  "On Hand / No Estimate",
-  "Draft",
-  "Submitted",
-  "Rejected",
-  "Adjustment for Approval",
-  "Approved / In Repair",
-  "Missed POD",
-  "Invoice Due",
-  "Invoice Submitted",
-  "Closed",
-] as const;
-
-export type ShopStatusTile = (typeof SHOP_STATUS_TILES)[number];
+export {
+  SHOP_STATUS_TILES,
+  type ShopStatusTile,
+  emptyTileCounts,
+  BO_STATUS_TILE,
+};
 
 export type BoTileInput = {
+  /** §G r5 — preferred: stored bad_orders.status */
+  boStatus?: string | null;
   eventStatus?: string | null;
   lifecycleStatus?: string | null;
   acknowledgedAt?: string | null;
@@ -41,12 +40,15 @@ export type BoTileInput = {
 };
 
 /**
- * Classify a BO into exactly one home tile (priority: Closed → Missed POD →
- * invoice states → estimate states → arrival/confirm).
+ * Tile from stored bo.status (r5). Fallback derivation only when status null
+ * (pre-migration rows).
  */
 export function classifyBoTile(row: BoTileInput): ShopStatusTile {
+  if (row.boStatus) {
+    return tileForStatus(row.boStatus);
+  }
   if (row.isClosed || row.closedAt || String(row.lifecycleStatus ?? "") === "CLOSED") {
-    return "Closed";
+    return BO_STATUS_TILE.CLOSED;
   }
   const invWf = String(row.invoiceWorkflow ?? "");
   if (
@@ -54,48 +56,33 @@ export function classifyBoTile(row: BoTileInput): ShopStatusTile {
     invWf === "UNDER_OWNER_REVIEW" ||
     invWf === "REJECTED"
   ) {
-    return "Invoice Submitted";
+    return BO_STATUS_TILE.INVOICE_SUBMITTED;
   }
   if (row.completed && !row.hasInvoice) {
-    return "Invoice Due";
-  }
-  if (row.missedPodRequired && !row.missedPodReasonCode) {
-    return "Missed POD";
+    return BO_STATUS_TILE.COMPLETED;
   }
   const est = String(row.estimateStatus ?? "");
   const ev = String(row.eventStatus ?? "");
-  if (est === "APPROVED" || ev === "IN_REPAIR") {
-    return "Approved / In Repair";
+  if (ev === "IN_REPAIR") return BO_STATUS_TILE.IN_REPAIR;
+  if (est === "APPROVED") return BO_STATUS_TILE.APPROVED;
+  if (est === "REVISION_REQUESTED" || est === "ADJUSTMENT_FOR_APPROVAL") {
+    return BO_STATUS_TILE.REJECTED;
   }
-  if (est === "ADJUSTMENT_FOR_APPROVAL") {
-    return "Adjustment for Approval";
-  }
-  if (est === "REVISION_REQUESTED" || est === "REJECTED") {
-    return "Rejected";
-  }
-  if (est === "AWAITING_APPROVAL") {
-    return "Submitted";
-  }
-  if (est === "DRAFT" || est === "QUEUED") {
-    return "Draft";
-  }
+  if (est === "AWAITING_APPROVAL") return BO_STATUS_TILE.UNDER_OWNER_REVIEW;
+  if (est === "DRAFT" || est === "QUEUED") return BO_STATUS_TILE.ESTIMATE_DRAFT;
   if (ev === "ON_HAND" || (row.yardArrivedAt && !row.hasEstimate)) {
-    return "On Hand / No Estimate";
+    return BO_STATUS_TILE.ON_HAND;
   }
   if (
     ev === "ACCEPTED" ||
     String(row.lifecycleStatus ?? "") === "ACCEPTED_PENDING"
   ) {
-    return "Awaiting Arrival";
+    return BO_STATUS_TILE.ACCEPTED;
   }
-  return "Awaiting Confirmation";
+  return BO_STATUS_TILE.ASSIGNED;
 }
 
-export function emptyTileCounts(): Record<ShopStatusTile, number> {
-  const out = {} as Record<ShopStatusTile, number>;
-  for (const t of SHOP_STATUS_TILES) out[t] = 0;
-  return out;
-}
+export type { BoStatus };
 
 export type NextShopStep = {
   code: string;
@@ -127,12 +114,12 @@ export function describeNextShopStep(opts: {
   const est = String(opts.estimateStatus ?? "");
   const invWf = String(opts.invoiceWorkflow ?? "");
 
-  if (ev === "SHOP_ASSIGNED") {
+  if (ev === "SHOP_ASSIGNED" || ev === "ASSIGNED") {
     return {
       code: "CONFIRM",
-      title: "Confirm bad order",
+      title: "Awaiting shop acceptance",
       instruction:
-        "Accept this assignment to confirm, or Decline with a reason (owner is notified via local outbox).",
+        "Accept this assignment, or Decline with a reason (owner is notified via local outbox).",
       actions: ["accept", "reject"],
     };
   }
@@ -141,7 +128,7 @@ export function describeNextShopStep(opts: {
       code: "ON_HAND",
       title: "Mark on hand",
       instruction:
-        "Enter arrival date/time (required) and optional yard/track note. This starts JIC/POD clocks.",
+        "Accepted – awaiting arrival. Enter arrival date/time (required) and optional yard/track note. Only next action: Mark on hand.",
       actions: ["on-hand"],
     };
   }

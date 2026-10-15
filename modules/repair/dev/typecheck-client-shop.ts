@@ -63,18 +63,19 @@ export function assertShopClientTypecheck(): void {
   if (!portal.includes("viewing as shop") && !portal.includes("Viewing as shop")) {
     bad("readonly-banner", "ShopPortal must show Viewing as shop read-only banner");
   }
-  if (!portal.includes("Inconsistent state")) {
-    bad("inconsistent", "ShopPortal must show Inconsistent state for bad Closed rows");
+  // §G r5: Inconsistent state is owner-only — shops must not show it
+  if (portal.includes("Inconsistent state") && !portal.includes("owner-only")) {
+    bad("r5-no-inconsistent-portal", "ShopPortal must not show Inconsistent state to shops");
   }
   if (
     !portal.includes("Status tiles") ||
-    !portal.includes("Awaiting Confirmation") ||
+    !portal.includes("Awaiting Shop Acceptance") ||
     !portal.includes("byTile") ||
-    !portal.includes("Invoice Due")
+    !portal.includes("Accepted – awaiting arrival")
   ) {
-    bad("r4-tiles", "ShopPortal must show clickable status tiles (byTile)");
+    bad("r5-tiles", "ShopPortal must show stored-status tiles (Awaiting Shop Acceptance)");
   }
-  ok("ShopPortal brand + status + car search + KPIs + AA labels + r3 + r4 tiles");
+  ok("ShopPortal brand + status + car search + KPIs + AA labels + r3 + r5 tiles");
 
   if (!bo.includes("Owner instructions") || !bo.includes("JIC")) {
     bad("bo", "ShopBoDetail must show owner instructions + JIC clock");
@@ -88,11 +89,20 @@ export function assertShopClientTypecheck(): void {
   if (!bo.includes("void") || !bo.includes("shop mode")) {
     bad("docs", "ShopBoDetail must mention §E shop mode / void disabled");
   }
-  if (!bo.includes("Status timeline") || !bo.includes("POD history")) {
-    bad("lifecycle", "ShopBoDetail must show status timeline + POD history");
+  if (
+    (!bo.includes("Status timeline") && !bo.includes("compactTimeline") && !bo.includes("bo-compact-timeline")) ||
+    !bo.includes("POD history")
+  ) {
+    bad("lifecycle", "ShopBoDetail must show compact status timeline + POD history");
   }
-  if (!bo.includes("Missed POD") || !bo.includes("Flags")) {
-    bad("missed-flags", "ShopBoDetail must show missed POD + flags panel");
+  if (!bo.includes("statusLine") && !bo.includes("Status")) {
+    bad("r5-status", "ShopBoDetail must show stored status line");
+  }
+  if (!bo.includes("Missed POD") || !bo.includes("Estimate flags")) {
+    bad("missed-flags", "ShopBoDetail must show missed POD + estimate flags (when estimate exists)");
+  }
+  if (!bo.includes("flagSummaryLine") && !bo.includes("Show flag list")) {
+    bad("r5-flag-summary", "ShopBoDetail must show flag summary + expandable list");
   }
   if (!bo.includes("RepairBreadcrumbs") && !bo.includes("Shop home")) {
     bad("crumbs", "ShopBoDetail must breadcrumb Shop home > Bad Order");
@@ -100,10 +110,14 @@ export function assertShopClientTypecheck(): void {
   if (!bo.includes("shopAa.input") || !bo.includes("closedReasonLine")) {
     bad("r3-bo", "ShopBoDetail must use white shopAa.input + closedReasonLine");
   }
-  if (!bo.includes("Inconsistent state") || !bo.includes("readOnly")) {
-    bad("r3-bo-ro", "ShopBoDetail must handle Inconsistent state + readOnly");
+  if (!bo.includes("readOnly")) {
+    bad("r3-bo-ro", "ShopBoDetail must handle readOnly");
   }
-  ok("ShopBoDetail instructions, JIC, upload+hand, docs, timeline, POD, flags, r3");
+  // Inconsistent state is owner-only — shops must not surface it
+  if (bo.includes("Inconsistent state") && !bo.includes("owner-only")) {
+    bad("r5-no-inconsistent", "ShopBoDetail must not show Inconsistent state to shops");
+  }
+  ok("ShopBoDetail instructions, JIC, upload+hand, docs, compact timeline, POD, flags, r5");
 
   if (!est.includes("Withdraw") || !est.includes("Resubmit")) {
     bad("actions", "ShopEstimateDetail must offer withdraw + resubmit");

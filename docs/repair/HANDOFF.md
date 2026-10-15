@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§G r4 Shop BO workflow + tiles + invoice** | Apply `rlms-phase1-owner-ui-g-shop-r4.bundle` on tip **`cbff463`** (§G r3). Signed shop link confirm→on hand→estimate→POD/complete→invoice (500-byte+PDF); clickable status tiles; timeline Confirmed/On Hand; Closed requires accepted invoice. Smoke: `npm run repair:smoke-shop`. Typecheck: `npm run repair:typecheck-client-shop`. Spec: [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md). |
+| **§G r5 One stored BO status** | Apply `rlms-phase1-owner-ui-g-shop-r5.bundle` on tip **`0a577f0`** (§G r4). `bo.status` + state machine; accept persists; flags only on estimates; compact timeline; seed via real transitions; tile counts = stored status. Smoke: `npm run repair:smoke-shop`. Typecheck: `npm run repair:typecheck-client-shop`. Spec: [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md). |
+| **§G r4 Shop BO workflow + tiles + invoice** | Prior: `rlms-phase1-owner-ui-g-shop-r4.bundle` on tip **`cbff463`** → **`0a577f0`**. Signed shop link confirm→on hand→estimate→POD/complete→invoice; clickable status tiles; Closed requires accepted invoice. |
 | **§G r3 Inputs / closed BO / seed** | Prior: `rlms-phase1-owner-ui-g-shop-r3.bundle` on tip **`bb837ae`** → **`cbff463`**. White inputs AA; closed reason + inconsistent-state block; smoke hide/clean; seed hard-fail DEMO 100001–100005; owner/MP read-only shop view; DEV banner production-gated. |
 | **§G r2 Shop clarity + review aids** | Prior: `rlms-phase1-owner-ui-g-shop-r2.bundle` on tip **`85199a7`** → **`bb837ae`**. AA contrast; returnTo + breadcrumbs; BO dates/POD/timeline/flags/KPIs; line comments; seed + DEV role switcher. |
 | **§G Shop portal + Railinc validation** | Prior: `rlms-phase1-owner-ui-g-shop.bundle` on tip **`9296477`** (§F r3) → **`85199a7`**. Shop portal (own mark); stub Railinc validator; local outbox; cross-shop 403. |
@@ -91,7 +92,36 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+28 | **`rlms-phase1-owner-ui-g-shop.bundle`** (§G Shop portal + Railinc stub validation) | **`9296477`** | → **`85199a7`** |
 | N+29 | **`rlms-phase1-owner-ui-g-shop-r2.bundle`** (§G r2 shop clarity + review aids) | **`85199a7`** | → **`bb837ae`** |
 | N+30 | **`rlms-phase1-owner-ui-g-shop-r3.bundle`** (§G r3 inputs / closed BO / seed) | **`bb837ae`** | → **`cbff463`** |
-| N+31 | **`rlms-phase1-owner-ui-g-shop-r4.bundle`** (§G r4 shop BO workflow + tiles + invoice) | **`cbff463`** | → **(see README)** |
+| N+31 | **`rlms-phase1-owner-ui-g-shop-r4.bundle`** (§G r4 shop BO workflow + tiles + invoice) | **`cbff463`** | → **`0a577f0`** |
+| N+32 | **`rlms-phase1-owner-ui-g-shop-r5.bundle`** (§G r5 one stored BO status) | **`0a577f0`** | → **(see README)** |
+
+---
+
+## Apply §G r5 One stored BO status (on tip `0a577f0`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect 0a577f0…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-g-shop-r5.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-g-shop-r5.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
+Then:
+
+```powershell
+$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+$env:REPAIR_LOCAL_DB = "1"
+$env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
+npm run repair:migrate:local
+npm run repair:seed-shop-demo
+npm run repair:typecheck-client-shop
+npm run repair:smoke-shop
+npm run repair:dev:local
+# http://127.0.0.1:5000/#/repair/shop  (shop mark DS01)
+# Accept DEMO 100001 via signed link → reopen shows Accepted – awaiting arrival
+```
 
 ---
 

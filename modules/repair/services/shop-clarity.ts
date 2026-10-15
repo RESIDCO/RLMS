@@ -8,6 +8,16 @@ import { listComments, addComment } from "./comments";
 import { enterPodErd, listPodDates, latestPodErd } from "./pod";
 import { estimateHasOpenWreckFlags } from "./wreck-validate";
 import { revokeShopLinksOnClose } from "./shop-workflow";
+import {
+  type BoStatus,
+  buildCompactTimeline,
+  formatBoStatusLine,
+  formatFlagSummaryLine,
+  listBoStatusHistory,
+  setBoStatus,
+  summarizeFlags,
+  BO_STATUS_LABEL,
+} from "./bo-status";
 
 export type TimelineStep = {
   code: string;
@@ -290,7 +300,8 @@ export async function getBoLifecycleBundle(opts: {
         })
     : null;
 
-  const timelineCode = mapBoTimelineCode({
+  // §G r5: single stored bo.status (fallback map for pre-migration rows)
+  const legacyCode = mapBoTimelineCode({
     eventStatus: event?.status_code ? String(event.status_code) : undefined,
     estimateStatus: est?.status_code ? String(est.status_code) : null,
     lifecycleStatus: bo?.lifecycle_status ? String(bo.lifecycle_status) : null,
@@ -299,14 +310,57 @@ export async function getBoLifecycleBundle(opts: {
     invoiceAccepted,
     completed: Boolean(dates.completed),
   });
+  const legacyToBo: Record<string, BoStatus> = {
+    OPEN: "ASSIGNED",
+    CONFIRMED: "ACCEPTED",
+    ON_HAND: "ON_HAND",
+    ESTIMATE_PENDING: "ESTIMATE_DRAFT",
+    UNDER_OWNER_REVIEW: "UNDER_OWNER_REVIEW",
+    REJECTED: "REJECTED",
+    APPROVED: "APPROVED",
+    IN_REPAIR: "IN_REPAIR",
+    COMPLETED: "COMPLETED",
+    CLOSED: "CLOSED",
+  };
+  const boStatus = (bo?.status
+    ? String(bo.status)
+    : legacyToBo[legacyCode] ?? "ASSIGNED") as BoStatus;
+  // timelineCode = stored status (r5); smoke/UI should prefer `status`
+  const timelineCode = boStatus;
 
+  const history = await listBoStatusHistory({
+    eventId: opts.eventId,
+    tenantId,
+  });
+  const compact = buildCompactTimeline({
+    status: boStatus,
+    history: history.map((h) => ({
+      to: h.to,
+      at: h.at,
+      actor: h.actor,
+      note: h.note,
+    })),
+  });
+  // Full timeline kept for smoke compat; UI uses compactTimeline
   const timeline = buildStatusTimeline({
-    currentCode: timelineCode,
+    currentCode:
+      boStatus === "ASSIGNED"
+        ? "OPEN"
+        : boStatus === "ACCEPTED"
+          ? "CONFIRMED"
+          : boStatus === "ESTIMATE_DRAFT"
+            ? "ESTIMATE_PENDING"
+            : boStatus === "ESTIMATE_SUBMITTED" ||
+                boStatus === "UNDER_OWNER_REVIEW"
+              ? "UNDER_OWNER_REVIEW"
+              : boStatus === "INVOICE_SUBMITTED"
+                ? "COMPLETED"
+                : boStatus,
     closedReason: closedReasonLine,
     closedAt: bo?.closed_at ? String(bo.closed_at) : null,
   });
 
-  // Flags from validation findings (uncleared) + wreck flags
+  // Flags ONLY when an estimate exists (never on Assigned/Accepted/On Hand)
   const flags: Array<{
     what: string;
     lineNo: number | null;
@@ -335,23 +389,33 @@ export async function getBoLifecycleBundle(opts: {
         code: String(f.rule_code),
       });
     }
+    const openWreck = await estimateHasOpenWreckFlags(String(est.id)).catch(
+      () => false,
+    );
+    if (openWreck) {
+      flags.push({
+        what: "Open wreck validation flag(s)",
+        lineNo: null,
+        blocksCompletion: true,
+        whoClears: "Owner / Managing Partner",
+        code: "WRECK_FLAG",
+      });
+    }
   }
-  const openWreck = est?.id
-    ? await estimateHasOpenWreckFlags(String(est.id)).catch(() => false)
-    : false;
-  if (openWreck) {
-    flags.push({
-      what: "Open wreck validation flag(s)",
-      lineNo: null,
-      blocksCompletion: true,
-      whoClears: "Owner / Managing Partner",
-      code: "WRECK_FLAG",
-    });
-  }
-
+  const flagSummary = summarizeFlags(flags);
+  const flagSummaryLine = formatFlagSummaryLine(flagSummary);
   const openFlagCount = flags.filter((f) => f.blocksCompletion).length;
   const approvedWithFlags =
-    timelineCode === "APPROVED" && flags.some((f) => f.blocksCompletion);
+    boStatus === "APPROVED" && flags.some((f) => f.blocksCompletion);
+  const statusLine =
+    compact.statusLine ||
+    formatBoStatusLine({
+      status: boStatus,
+      statusChangedAt: bo?.status_changed_at
+        ? String(bo.status_changed_at)
+        : null,
+      arrivalAt: dates.arrival,
+    });
 
   const inconsistency = detectClosedInconsistency({
     isClosed,
@@ -376,9 +440,16 @@ export async function getBoLifecycleBundle(opts: {
 
   return {
     dates,
+    status: boStatus,
+    statusLabel: BO_STATUS_LABEL[boStatus] ?? boStatus,
+    statusLine,
+    compactTimeline: compact.steps,
     timeline,
     timelineCode,
-    flags,
+    flags: est?.id ? flags : [],
+    flagSummary,
+    flagSummaryLine,
+    showFlags: Boolean(est?.id),
     approvedWithFlags,
     openFlagCount,
     podHistory,
@@ -391,6 +462,7 @@ export async function getBoLifecycleBundle(opts: {
     invoiceNo,
     invoiceAccepted,
     invoiceWorkflow,
+    // Inconsistent state = owner-only; shops never see this block in UI
     inconsistentClosed: inconsistency.inconsistent,
     inconsistentClosedReasons: inconsistency.reasons,
   };
@@ -1009,6 +1081,15 @@ export async function markBadOrderClosed(opts: {
      WHERE event_id = $1 AND deleted_at IS NULL`,
     [opts.eventId, reason],
   );
+  await setBoStatus({
+    eventId: opts.eventId,
+    to: "CLOSED",
+    actor: opts.actor,
+    actionName: opts.cancelled ? "Cancel / close" : "Close bad order",
+    note: reason,
+    tenantId,
+    force: true,
+  });
   await writeAudit({
     tenantId,
     entity: "bad_order",

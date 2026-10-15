@@ -258,7 +258,8 @@ export async function shopPortalHome(opts: ShopActor & {
   const { rows: bos } = await q(
     `SELECT e.id AS event_id, e.car_mark, e.car_number, e.rule, e.is_wreck,
             e.yard_arrived_at, e.acknowledged_at, s.code AS event_status,
-            bo.id AS bad_order_id, bo.lifecycle_status, bo.shopping_reason,
+            bo.id AS bad_order_id, bo.lifecycle_status, bo.status AS bo_status,
+            bo.status_changed_at, bo.shopping_reason,
             bo.bo_date, bo.bo_city, bo.bo_state, bo.comments AS owner_instructions,
             bo.arrival_date, bo.closed_at, bo.closed_reason,
             bo.completed_date, bo.missed_pod_reason_code,
@@ -423,6 +424,7 @@ export async function shopPortalHome(opts: ShopActor & {
       !bo.missed_pod_reason_code &&
       !isClosed;
     const tile = classifyBoTile({
+      boStatus: bo.bo_status ? String(bo.bo_status) : null,
       eventStatus: bo.event_status ? String(bo.event_status) : null,
       lifecycleStatus: bo.lifecycle_status ? String(bo.lifecycle_status) : null,
       acknowledgedAt: bo.acknowledged_at ? String(bo.acknowledged_at) : null,
@@ -444,7 +446,9 @@ export async function shopPortalHome(opts: ShopActor & {
     if (!isClosed) {
       return {
         ...bo,
+        status: bo.bo_status ? String(bo.bo_status) : null,
         statusTile: tile,
+        missedPod: missedPodRequired,
         closedReasonLine: null as string | null,
         inconsistentClosed: false,
         inconsistentClosedReasons: [] as string[],
@@ -1114,6 +1118,20 @@ export async function shopSubmitEstimate(opts: ShopActor & {
 
   // Also ensure shop contact list is recorded for reject/approve later
   void emails;
+
+  // §G r5: advance stored BO status
+  {
+    const { setBoStatus } = await import("./bo-status");
+    const to = sub.ok ? "UNDER_OWNER_REVIEW" : "ESTIMATE_DRAFT";
+    await setBoStatus({
+      eventId: opts.eventId,
+      to,
+      actor: opts.actor,
+      actionName: sub.ok ? "Shop submit estimate" : "Shop estimate draft",
+      tenantId: ctx.tenantId,
+      force: true,
+    });
+  }
 
   return {
     ok: true as const,

@@ -55,16 +55,16 @@ type HomePayload = {
 };
 
 const STATUS_TILES = [
-  "Awaiting Confirmation",
-  "Awaiting Arrival",
-  "On Hand / No Estimate",
-  "Draft",
-  "Submitted",
-  "Rejected",
-  "Adjustment for Approval",
-  "Approved / In Repair",
-  "Missed POD",
-  "Invoice Due",
+  "Awaiting Shop Acceptance",
+  "Accepted – awaiting arrival",
+  "On Hand",
+  "Estimate Draft",
+  "Estimate Submitted",
+  "Under Owner Review",
+  "Rejected / Adjustment Requested",
+  "Approved",
+  "In Repair",
+  "Completed",
   "Invoice Submitted",
   "Closed",
 ];
@@ -346,14 +346,7 @@ export default function ShopPortal() {
                             {bo.closedReasonLine}
                           </p>
                         )}
-                        {bo.inconsistentClosed && (
-                          <p className="mt-1 rounded border border-red-700 bg-red-50 px-2 py-1 text-sm font-semibold text-red-900">
-                            Inconsistent state
-                            {bo.inconsistentClosedReasons?.length
-                              ? `: ${bo.inconsistentClosedReasons.join("; ")}`
-                              : ""}
-                          </p>
-                        )}
+                        {/* Inconsistent state is owner-only — never shown to shops */}
                         {bo.shopping_reason && (
                           <p className="text-sm text-slate-700">
                             {bo.shopping_reason}

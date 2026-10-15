@@ -1,8 +1,9 @@
 /**
- * §G r2/r3 — Idempotent shop demo seed (dev-bypass only).
+ * §G r2–r5 — Idempotent shop demo seed (dev-bypass only).
  * Demo Shop DS01; drives real transitions for DEMO 100001–100005.
- * Hard-fails (exit 1) unless all five land in required states.
+ * Hard-fails (exit 1) unless all five land in required stored bo.status.
  * Writes event/estimate IDs to gitignored shop-demo-ids.local.json.
+ * Does NOT modify tracked files (no shop-samples/README.txt writes).
  *
  * Run: npm run repair:seed-shop-demo
  */
@@ -25,6 +26,12 @@ import {
   markBadOrderClosed,
   listDecisionComments,
 } from "../services/shop-clarity";
+import {
+  shopAcknowledge,
+  shopArrivalDate,
+} from "../services/bo-lifecycle";
+import { ensureShopBoLink } from "../services/shop-workflow";
+import { getBoStoredStatus } from "../services/bo-status";
 import { enterPodErd } from "../services/pod";
 import { parseAarFile } from "../services/aar-parser";
 import { migrateLocal } from "./migrate-local";
@@ -222,6 +229,70 @@ async function ensureAwaitingApproval(estimateId: string, eventId: string) {
   }
 }
 
+/** Issue shop link + accept + on-hand via real transitions when needed. */
+async function driveToOnHand(
+  eventId: string,
+  arrivalIso: string,
+  yardNote?: string,
+) {
+  const stored = await getBoStoredStatus({ eventId });
+  if (
+    stored &&
+    ["ON_HAND", "ESTIMATE_DRAFT", "ESTIMATE_SUBMITTED", "UNDER_OWNER_REVIEW",
+      "REJECTED", "APPROVED", "IN_REPAIR", "COMPLETED", "INVOICE_SUBMITTED",
+      "CLOSED"].includes(stored.status)
+  ) {
+    return;
+  }
+  const link = await ensureShopBoLink({
+    eventId,
+    shopMark: DEMO_SHOP_MARK,
+    actor: "seed-shop-demo",
+    forceNew: !stored || stored.status === "ASSIGNED",
+  });
+  if (!link.token && stored?.status === "ASSIGNED") {
+    // Need token — force new
+    const forced = await ensureShopBoLink({
+      eventId,
+      shopMark: DEMO_SHOP_MARK,
+      actor: "seed-shop-demo",
+      forceNew: true,
+    });
+    if (!forced.token) fail(`no shop link token for ${eventId}`);
+    await acknowledgeAndArrive(forced.token, arrivalIso, yardNote);
+    return;
+  }
+  if (link.token) {
+    await acknowledgeAndArrive(link.token, arrivalIso, yardNote);
+    return;
+  }
+  // Reused link without token — mint forceNew to drive transitions
+  const forced = await ensureShopBoLink({
+    eventId,
+    shopMark: DEMO_SHOP_MARK,
+    actor: "seed-shop-demo",
+    forceNew: true,
+  });
+  if (!forced.token) fail(`no shop link token for ${eventId}`);
+  await acknowledgeAndArrive(forced.token, arrivalIso, yardNote);
+}
+
+async function acknowledgeAndArrive(
+  token: string,
+  arrivalIso: string,
+  yardNote?: string,
+) {
+  const ack = await shopAcknowledge(token, "shop@demo.seed");
+  if (!ack.ok) fail(`shopAcknowledge: ${JSON.stringify(ack)}`);
+  const hand = await shopArrivalDate(
+    token,
+    "shop@demo.seed",
+    arrivalIso,
+    yardNote ?? null,
+  );
+  if (!hand.ok) fail(`shopArrivalDate: ${JSON.stringify(hand)}`);
+}
+
 async function ensureOpenBo(shopId: string, base: Buffer) {
   const carMark = "DEMO";
   const carNumber = "100001";
@@ -233,37 +304,33 @@ async function ensureOpenBo(shopId: string, base: Buffer) {
       carMark,
       carNumber,
       shopId,
-      shoppingReason: "Demo OPEN BO",
+      shoppingReason: "Demo Assigned BO",
       comments: "Owner instructions for DS01 demo",
-      arrivalDate: "2026-10-01",
       actor: "seed-shop-demo",
       boRuleCode: "OTHER",
-      boRuleOtherText: "Demo OPEN",
+      boRuleOtherText: "Demo Assigned",
       boDate: "2026-10-01",
       allowDuplicates: true,
     });
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
-    ok(`OPEN BO ${carMark} ${carNumber}`);
+    ok(`ASSIGNED BO ${carMark} ${carNumber}`);
   } else {
-    ok(`OPEN BO already ${eventId.slice(0, 8)}`);
+    ok(`ASSIGNED BO already ${eventId.slice(0, 8)}`);
   }
 
-  await updateBoLifecycleDates({
-    eventId,
-    actor: "seed-shop-demo",
-    actorRole: "owner",
-    arrival: "2026-10-01",
-    inspected: "2026-10-02",
-  });
-  await enterPodErd({
-    eventId,
-    kind: "POD",
-    dateValue: "2026-10-20",
-    enteredBy: "seed-shop-demo",
-    reason: "Initial POD",
-    via: "seed",
-  }).catch(() => undefined);
+  // Demo 100001 must stay ASSIGNED (awaiting shop acceptance)
+  {
+    const { setBoStatus } = await import("../services/bo-status");
+    const fixed = await setBoStatus({
+      eventId,
+      to: "ASSIGNED",
+      actor: "seed-shop-demo",
+      actionName: "Seed ensure Assigned",
+      force: true,
+    });
+    if (!fixed.ok) fail(`100001 setBoStatus ASSIGNED: ${fixed.error}`);
+  }
 
   return {
     eventId,
@@ -288,7 +355,6 @@ async function seedRejected(shopId: string, base: Buffer) {
       shopId,
       shoppingReason: "Demo Rejected",
       actor: "seed-shop-demo",
-      arrivalDate: "2026-09-15",
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Rejected",
       boDate: "2026-09-15",
@@ -297,6 +363,8 @@ async function seedRejected(shopId: string, base: Buffer) {
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
   }
+
+  await driveToOnHand(eventId, "2026-09-15T12:00:00.000Z", "Track A");
 
   if (!estimateId) {
     const bytes = withShopMark(withCar(base, carMark, carNumber), DEMO_SHOP_MARK);
@@ -355,7 +423,6 @@ async function seedApprovedFlags(shopId: string, base: Buffer) {
       shopId,
       shoppingReason: "Demo Approved flags",
       actor: "seed-shop-demo",
-      arrivalDate: "2026-09-01",
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Flags",
       boDate: "2026-09-01",
@@ -364,6 +431,8 @@ async function seedApprovedFlags(shopId: string, base: Buffer) {
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
   }
+
+  await driveToOnHand(eventId, "2026-09-01T12:00:00.000Z", "Bay 1");
 
   if (!estimateId) {
     const bytes = blankCid(
@@ -396,6 +465,24 @@ async function seedApprovedFlags(shopId: string, base: Buffer) {
     arrival: "2026-09-01",
     ownerApproval: "2026-09-10",
   });
+  // Ensure NOT closed (r5: approve must not close) + stored status APPROVED
+  await q(
+    `UPDATE repair.bad_orders
+     SET closed_at = NULL, closed_reason = NULL
+     WHERE event_id = $1 AND deleted_at IS NULL`,
+    [eventId],
+  );
+  {
+    const { setBoStatus } = await import("../services/bo-status");
+    const fixed = await setBoStatus({
+      eventId,
+      to: "APPROVED",
+      actor: "owner@demo",
+      actionName: "Seed ensure approved (not closed)",
+      force: true,
+    });
+    if (!fixed.ok) fail(`100003 setBoStatus APPROVED: ${fixed.error}`);
+  }
   ok(`Approved+flags ${estimateId.slice(0, 8)}`);
   return { eventId, estimateId };
 }
@@ -411,9 +498,8 @@ async function seedMissedPod(shopId: string) {
       carMark,
       carNumber,
       shopId,
-      shoppingReason: "Demo Missed POD",
+      shoppingReason: "Demo On Hand + Missed POD",
       actor: "seed-shop-demo",
-      arrivalDate: "2026-08-01",
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Missed POD",
       boDate: "2026-08-01",
@@ -422,6 +508,10 @@ async function seedMissedPod(shopId: string) {
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
   }
+
+  // Real transitions: Assigned → Accepted → On Hand (never skip accept)
+  await driveToOnHand(eventId, "2026-08-01T10:00:00.000Z", "West yard");
+
   await enterPodErd({
     eventId,
     kind: "POD",
@@ -437,7 +527,7 @@ async function seedMissedPod(shopId: string) {
     missedPodReasonCode: "AWAITING_PARTS",
     missedPodReasonNote: "Axle on order",
   });
-  ok(`Missed POD BO ${carMark} ${carNumber}`);
+  ok(`On Hand + Missed POD BO ${carMark} ${carNumber}`);
   return { eventId };
 }
 
@@ -456,7 +546,6 @@ async function seedClosed(shopId: string, base: Buffer) {
       shopId,
       shoppingReason: "Demo Closed",
       actor: "seed-shop-demo",
-      arrivalDate: "2026-07-01",
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Closed",
       boDate: "2026-07-01",
@@ -466,7 +555,9 @@ async function seedClosed(shopId: string, base: Buffer) {
     eventId = String(bo.event.id);
   }
 
-  // Real transitions: submit → approve → completed → invoice → mark closed
+  await driveToOnHand(eventId, "2026-07-01T12:00:00.000Z", "Closed bay");
+
+  // Real transitions: accept → on hand → submit → approve → completed → invoice → close
   if (!estimateId) {
     const bytes = withShopMark(withCar(base, carMark, carNumber), DEMO_SHOP_MARK);
     const sub = await shopSubmitEstimate({
@@ -533,29 +624,34 @@ async function seedClosed(shopId: string, base: Buffer) {
 }
 
 async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
-  // 100001 Open
+  // 100001 Assigned (awaiting shop acceptance)
   {
-    const life = await getBoLifecycleBundle({
-      eventId: String((ids["100001"] as { eventId: string }).eventId),
-    });
-    if (life.isClosed || life.timelineCode === "CLOSED") {
-      fail("DEMO 100001 must be Open (not Closed)");
+    const eventId = String((ids["100001"] as { eventId: string }).eventId);
+    const st = await getBoStoredStatus({ eventId });
+    if (!st || st.status !== "ASSIGNED") {
+      fail(`DEMO 100001 expected ASSIGNED, got ${st?.status}`);
     }
-    if (!["OPEN", "ESTIMATE_PENDING"].includes(life.timelineCode)) {
-      fail(`DEMO 100001 expected Open/Estimate Pending, got ${life.timelineCode}`);
+    const life = await getBoLifecycleBundle({ eventId });
+    if (life.showFlags && life.flags.length > 0) {
+      fail("DEMO 100001 must not show estimate flags before estimate");
     }
-    ok("assert 100001 Open");
+    ok("assert 100001 Assigned");
   }
   // 100002 Rejected w/ line comments
   {
     const estId = String((ids["100002"] as { estimateId: string }).estimateId);
-    const { rows: st } = await q(
+    const eventId = String((ids["100002"] as { eventId: string }).eventId);
+    const st = await getBoStoredStatus({ eventId });
+    if (!st || st.status !== "REJECTED") {
+      fail(`DEMO 100002 expected REJECTED bo.status, got ${st?.status}`);
+    }
+    const { rows: estSt } = await q(
       `SELECT s.code FROM repair.estimates e JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
       [estId],
     );
-    const code = String(st[0]?.code ?? "");
+    const code = String(estSt[0]?.code ?? "");
     if (code !== "REVISION_REQUESTED") {
-      fail(`DEMO 100002 expected Rejected (REVISION_REQUESTED), got ${code}`);
+      fail(`DEMO 100002 expected REVISION_REQUESTED, got ${code}`);
     }
     const comments = await listDecisionComments({ estimateId: estId });
     if (comments.lineLevel.length < 2) {
@@ -563,20 +659,20 @@ async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
     }
     ok("assert 100002 Rejected w/ line comments");
   }
-  // 100003 Approved w/ flags
+  // 100003 Approved w/ flags (no closed text)
   {
     const estId = String((ids["100003"] as { estimateId: string }).estimateId);
     const eventId = String((ids["100003"] as { eventId: string }).eventId);
-    const { rows: st } = await q(
-      `SELECT s.code FROM repair.estimates e JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
-      [estId],
-    );
-    if (String(st[0]?.code) !== "APPROVED") {
-      fail(`DEMO 100003 expected APPROVED, got ${st[0]?.code}`);
+    const st = await getBoStoredStatus({ eventId });
+    if (!st || st.status !== "APPROVED") {
+      fail(`DEMO 100003 expected APPROVED, got ${st?.status}`);
     }
     const life = await getBoLifecycleBundle({ eventId });
+    if (life.isClosed || life.closedReasonLine) {
+      fail("DEMO 100003 must not be Closed / no closed text");
+    }
+    if (!life.showFlags) fail("DEMO 100003 flags section required (has estimate)");
     if (life.openFlagCount < 1 && !life.approvedWithFlags) {
-      // Missing CID should produce a flag — soft check via findings
       const { rows: flags } = await q(
         `SELECT count(*)::int AS n
          FROM repair.estimate_validation_findings f
@@ -588,11 +684,15 @@ async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
         fail("DEMO 100003 expected open flags (e.g. MISSING_CID)");
       }
     }
-    ok("assert 100003 Approved w/ flags");
+    ok("assert 100003 Approved w/ flags (not closed)");
   }
-  // 100004 Missed POD
+  // 100004 On Hand + Missed POD
   {
     const eventId = String((ids["100004"] as { eventId: string }).eventId);
+    const st = await getBoStoredStatus({ eventId });
+    if (!st || st.status !== "ON_HAND") {
+      fail(`DEMO 100004 expected ON_HAND, got ${st?.status}`);
+    }
     const life = await getBoLifecycleBundle({ eventId });
     if (!life.dates.missedPodRequired && !life.dates.missedPodReasonCode) {
       fail("DEMO 100004 expected Missed POD reason / required");
@@ -602,15 +702,20 @@ async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
         `DEMO 100004 expected missedPodReasonCode AWAITING_PARTS, got ${life.dates.missedPodReasonCode}`,
       );
     }
-    ok("assert 100004 Missed POD");
+    if (life.showFlags) {
+      fail("DEMO 100004 On Hand must not show estimate flags (no estimate)");
+    }
+    ok("assert 100004 On Hand + Missed POD");
   }
   // 100005 Closed completed+invoiced
   {
     const eventId = String((ids["100005"] as { eventId: string }).eventId);
-    const life = await getBoLifecycleBundle({ eventId });
-    if (!life.isClosed || life.timelineCode !== "CLOSED") {
-      fail(`DEMO 100005 expected Closed, got ${life.timelineCode}`);
+    const st = await getBoStoredStatus({ eventId });
+    if (!st || st.status !== "CLOSED") {
+      fail(`DEMO 100005 expected CLOSED, got ${st?.status}`);
     }
+    const life = await getBoLifecycleBundle({ eventId });
+    if (!life.isClosed) fail("DEMO 100005 expected isClosed");
     if (!life.dates.completed) fail("DEMO 100005 missing completed date");
     if (!life.invoiceNo) fail("DEMO 100005 missing invoice");
     if (life.inconsistentClosed) {
@@ -624,7 +729,6 @@ async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
     ok(`assert 100005 Closed — ${life.closedReasonLine}`);
   }
 
-  // Ensure shop exists
   void shopId;
 }
 
@@ -649,10 +753,7 @@ async function main() {
   const shop = await ensureShop();
   const shopId = String(shop.id);
 
-  writeFileSync(
-    join(SAMPLES, "README.txt"),
-    `Demo Shop ${DEMO_SHOP_MARK} samples\nshopId=${shopId}\nkey=${DEMO_SHOP_ID_KEY}\n`,
-  );
+  // §G r5: never write tracked shop-samples/README.txt (dirties git)
 
   const open = await ensureOpenBo(shopId, base);
   const rejected = await seedRejected(shopId, base);
@@ -663,22 +764,22 @@ async function main() {
   const ids = {
     shopMark: DEMO_SHOP_MARK,
     shopId,
-    "100001": { eventId: open.eventId, status: "Open" },
+    "100001": { eventId: open.eventId, status: "ASSIGNED" },
     "100002": {
       eventId: rejected.eventId,
       estimateId: rejected.estimateId,
-      status: "Rejected",
+      status: "REJECTED",
     },
     "100003": {
       eventId: approved.eventId,
       estimateId: approved.estimateId,
-      status: "Approved+flags",
+      status: "APPROVED",
     },
-    "100004": { eventId: missed.eventId, status: "MissedPOD" },
+    "100004": { eventId: missed.eventId, status: "ON_HAND" },
     "100005": {
       eventId: closed.eventId,
       estimateId: closed.estimateId,
-      status: "Closed",
+      status: "CLOSED",
       closedReason: closed.closedReason,
     },
     writtenAt: new Date().toISOString(),

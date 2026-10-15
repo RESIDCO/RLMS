@@ -283,7 +283,9 @@ export default function ShopEventLink() {
 
         {(actions.has("accept") || actions.has("reject")) && (
           <div className="space-y-3 border-t border-slate-300 pt-4">
-            <h2 className="font-semibold text-slate-900">Confirm bad order</h2>
+            <h2 className="font-semibold text-slate-900">
+              Awaiting shop acceptance
+            </h2>
             <div className="flex flex-wrap gap-2">
               {actions.has("accept") && (
                 <Button disabled={busy} onClick={() => post("accept", { email })}>

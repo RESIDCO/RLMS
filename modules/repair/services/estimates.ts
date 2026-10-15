@@ -600,24 +600,44 @@ async function transitionEstimate(opts: {
     via: "UI",
   });
 
-  // OWNER_UI §C: Estimate Approved → Bad Order Closed
-  if (opts.toCode === "APPROVED") {
-    await q(
-      `UPDATE repair.bad_orders
-       SET lifecycle_status = 'CLOSED'
-       WHERE event_id = $1 AND deleted_at IS NULL
-         AND lifecycle_status IN ('QUEUED','ACCEPTED_PENDING','ACCEPTED_WORKING')`,
-      [estimate.event_id],
-    ).catch(() => undefined);
-    await writeAudit({
-      tenantId,
-      entity: "event",
-      entityId: String(estimate.event_id),
-      action: "BO_CLOSED_ON_ESTIMATE_APPROVED",
-      after: { estimateId: opts.estimateId },
-      actor: opts.actor,
-      via: "UI",
-    }).catch(() => undefined);
+  // §G r5: approve/reject update stored bo.status — never auto-close on approve
+  {
+    const { setBoStatus } = await import("./bo-status");
+    const eventId = String(estimate.event_id);
+    if (opts.toCode === "APPROVED") {
+      await setBoStatus({
+        eventId,
+        to: "APPROVED",
+        actor: opts.actor,
+        actionName: "Owner approve estimate",
+        tenantId,
+        force: true,
+      });
+    } else if (
+      opts.toCode === "REVISION_REQUESTED" ||
+      opts.toCode === "ADJUSTMENT_FOR_APPROVAL"
+    ) {
+      await setBoStatus({
+        eventId,
+        to: "REJECTED",
+        actor: opts.actor,
+        actionName:
+          opts.toCode === "ADJUSTMENT_FOR_APPROVAL"
+            ? "Owner adjustment requested"
+            : "Owner reject estimate",
+        tenantId,
+        force: true,
+      });
+    } else if (opts.toCode === "AWAITING_APPROVAL") {
+      await setBoStatus({
+        eventId,
+        to: "UNDER_OWNER_REVIEW",
+        actor: opts.actor,
+        actionName: "Estimate submitted / under owner review",
+        tenantId,
+        force: true,
+      });
+    }
   }
 
   return { ok: true as const, ...packed };

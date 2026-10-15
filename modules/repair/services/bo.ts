@@ -217,12 +217,14 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     const bo = await client.query(
       `INSERT INTO repair.bad_orders
          (tenant_id, event_id, source, shopping_reason, bo_date, bo_city, bo_state,
-          dest_city, dest_state, lifecycle_status, created_by,
+          dest_city, dest_state, lifecycle_status, status, status_changed_at,
+          status_changed_by, created_by,
           bo_rule_code, bo_rule_other_text,
           reporting_road, dc_road, stcc, routing, last_contents, car_load,
           cleaned, travel_on_own_wheels, incident_date, comments,
           wreck_estimate, multi_car_group_id, arrival_date)
-       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6,$7,$8,$9,'QUEUED',$10,$11,$12,
+       VALUES ($1,$2,$3,$4,COALESCE($5::date, CURRENT_DATE),$6,$7,$8,$9,'QUEUED',
+               'ASSIGNED', now(), $10, $10, $11,$12,
                $13,$14,$15,$16,$17,$18,$19,$20,$21::date,$22,$23,$24,$25::date)
        RETURNING *`,
       [

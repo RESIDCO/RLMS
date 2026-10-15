@@ -2,7 +2,26 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §G  
 **Routes:** `/#/repair/shop` · `/#/repair/shop/events/:eventId` · `/#/repair/shop/estimates/:id` · `/#/repair/e/:token`  
-**Requires tip:** r3 tip (`cbff463`) for **r4**; r3 required `bb837ae` (§G r2)
+**Requires tip:** r4 tip (`0a577f0`) for **r5**; r4 required `cbff463` (§G r3)
+
+## §G r5 — One stored BO status, one state machine
+
+| Area | Behavior |
+|---|---|
+| **`bo.status`** | Single stored field on `repair.bad_orders`. Every screen (tiles, lists, timeline, BO page, owner pages) reads it. No per-screen derivation. |
+| **State machine** | Assigned → Accepted (awaiting arrival) → On Hand → Estimate Draft → Estimate Submitted → Under Owner Review → Rejected/Adjustment → Approved → In Repair → Completed → Invoice Submitted → Closed. Each step is its own dated action (who/when). Accept **never** marks on hand. |
+| **Accept bug** | Accept persists `bo.status=ACCEPTED`; reopening the shop link shows Accepted – awaiting arrival (only next action: Mark on hand). |
+| **Flags** | Attach to estimate revision only — never on Assigned/Accepted/On Hand without an estimate. Summary line (`12 flags: 10 missing CID, …`) + expandable list. |
+| **Timeline** | Compact: completed steps (with dates) + current + next only. Top status in plain words. |
+| **Inconsistent state** | Owner-only; never shown to shops. |
+| **Seed** | Real transitions. DEMO **100001** Assigned, **100002** Rejected w/ line comments, **100003** Approved w/ flags (not closed), **100004** On Hand + Missed POD, **100005** Closed. Tile counts = stored statuses. Seed does **not** dirty tracked files. |
+
+```powershell
+npm run repair:migrate:local
+npm run repair:typecheck-client-shop
+npm run repair:seed-shop-demo
+npm run repair:smoke-shop
+```
 
 ## §G r4 — Shop BO signed-link workflow + status tiles + invoice upload
 

@@ -287,6 +287,18 @@ export async function submitShopInvoice(opts: {
     ],
   );
 
+  {
+    const { setBoStatus } = await import("./bo-status");
+    await setBoStatus({
+      eventId,
+      to: "INVOICE_SUBMITTED",
+      actor: opts.actorEmail,
+      actionName: "Shop submit invoice",
+      tenantId,
+      force: true,
+    });
+  }
+
   await writeAudit({
     tenantId,
     entity: "invoice",

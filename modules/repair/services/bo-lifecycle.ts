@@ -9,35 +9,68 @@ import { getStatusByCode, assertTransitionAllowed } from "./status-machine";
 import { createBadOrder, type CreateBadOrderInput } from "./bo";
 import { requireVcfCar } from "./vcf";
 import { shopAccept, shopReject, shopOnHand } from "./shop-actions";
+import { getBoStoredStatus, setBoStatus } from "./bo-status";
 
 export async function shopAcknowledge(rawToken: string, actorEmail: string) {
   const resolved = await resolveActiveLink(rawToken, "SHOP");
   if (!resolved) return { ok: false as const, status: 401, error: "Invalid or revoked link" };
+  const eventId = String(resolved.event.id);
+  const tenantId = String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID);
+
+  // Idempotent reopen: already accepted → return current step (never re-mark on hand)
+  const stored = await getBoStoredStatus({ eventId, tenantId });
+  if (stored && stored.status !== "ASSIGNED" && stored.status !== "DECLINED") {
+    await q(
+      `UPDATE repair.events
+       SET acknowledged_at = coalesce(acknowledged_at, now()),
+           acknowledged_by = coalesce(acknowledged_by, $1)
+       WHERE id = $2`,
+      [actorEmail, eventId],
+    );
+    return {
+      ok: true as const,
+      event: resolved.event,
+      status: stored.status,
+      alreadyAccepted: true as const,
+    };
+  }
+
   const result = await shopAccept(rawToken, actorEmail);
   if (!result.ok) return result;
+
   await q(
     `UPDATE repair.events
      SET acknowledged_at = now(), acknowledged_by = $1
      WHERE id = $2`,
-    [actorEmail, resolved.event.id],
+    [actorEmail, eventId],
   );
-  await q(
-    `UPDATE repair.bad_orders
-     SET lifecycle_status = 'ACCEPTED_PENDING'
-     WHERE event_id = $1 AND deleted_at IS NULL
-       AND lifecycle_status = 'QUEUED'`,
-    [resolved.event.id],
-  ).catch(() => undefined);
+
+  // Persist bo.status — must not silently fail (DEMO 100004 accept bug)
+  const statusSet = await setBoStatus({
+    eventId,
+    to: "ACCEPTED",
+    actor: actorEmail,
+    actionName: "Shop accept",
+    tenantId,
+  });
+  if (!statusSet.ok) {
+    return {
+      ok: false as const,
+      status: statusSet.status,
+      error: statusSet.error,
+    };
+  }
+
   await writeAudit({
-    tenantId: String(resolved.event.tenant_id ?? DEFAULT_TENANT_ID),
+    tenantId,
     entity: "event",
-    entityId: String(resolved.event.id),
+    entityId: eventId,
     action: "BO_ACKNOWLEDGED",
-    after: { email: actorEmail },
+    after: { email: actorEmail, boStatus: "ACCEPTED" },
     actor: actorEmail,
     via: "event_link",
   });
-  return result;
+  return { ...result, status: "ACCEPTED" as const };
 }
 
 export async function shopDeclineWork(
@@ -60,12 +93,15 @@ export async function shopDeclineWork(
      WHERE id = $3`,
     [actorEmail, text, resolved.event.id],
   );
-  await q(
-    `UPDATE repair.bad_orders
-     SET lifecycle_status = 'DECLINED'
-     WHERE event_id = $1 AND deleted_at IS NULL`,
-    [resolved.event.id],
-  ).catch(() => undefined);
+  await setBoStatus({
+    eventId: String(resolved.event.id),
+    to: "DECLINED",
+    actor: actorEmail,
+    actionName: "Shop decline",
+    note: text,
+    tenantId,
+    force: true,
+  });
   await writeAudit({
     tenantId,
     entity: "event",
@@ -109,16 +145,26 @@ export async function shopArrivalDate(
     return { ok: false as const, status: 400, error: "Invalid arrival date" };
   }
 
-  // Mark on hand if still ACCEPTED
+  // Accept NEVER marks on hand — only this action does, with arrival date.
+  const stored = await getBoStoredStatus({
+    eventId: String(resolved.event.id),
+    tenantId,
+  });
+  const boStatus = stored?.status ?? String(resolved.event.status_code);
   const code = String(resolved.event.status_code);
-  if (code === "ACCEPTED") {
+  if (boStatus === "ACCEPTED" || code === "ACCEPTED") {
     const onHand = await shopOnHand(rawToken, actorEmail);
     if (!onHand.ok) return onHand;
-  } else if (code !== "ON_HAND" && code !== "IN_REPAIR") {
+  } else if (
+    boStatus !== "ON_HAND" &&
+    boStatus !== "IN_REPAIR" &&
+    code !== "ON_HAND" &&
+    code !== "IN_REPAIR"
+  ) {
     return {
       ok: false as const,
       status: 409,
-      error: `Cannot set arrival from status ${code}`,
+      error: `Cannot set arrival from status ${boStatus}`,
     };
   }
 
@@ -130,6 +176,24 @@ export async function shopArrivalDate(
      WHERE id = $3`,
     [d.toISOString(), actorEmail, resolved.event.id, note],
   );
+  await q(
+    `UPDATE repair.bad_orders
+     SET arrival_date = coalesce(arrival_date, $1::date)
+     WHERE event_id = $2 AND deleted_at IS NULL`,
+    [d.toISOString().slice(0, 10), resolved.event.id],
+  );
+  const statusSet = await setBoStatus({
+    eventId: String(resolved.event.id),
+    to: "ON_HAND",
+    actor: actorEmail,
+    actionName: "Mark on hand",
+    note,
+    tenantId,
+    occurredAt: d.toISOString(),
+  });
+  if (!statusSet.ok) {
+    return { ok: false as const, status: statusSet.status, error: statusSet.error };
+  }
   await writeAudit({
     tenantId,
     entity: "event",
@@ -139,6 +203,7 @@ export async function shopArrivalDate(
       arrivalDate: d.toISOString(),
       email: actorEmail,
       yardTrackNote: note,
+      boStatus: "ON_HAND",
     },
     actor: actorEmail,
     via: "event_link",
@@ -147,6 +212,7 @@ export async function shopArrivalDate(
     ok: true as const,
     yardArrivedAt: d.toISOString(),
     yardTrackNote: note,
+    status: "ON_HAND" as const,
   };
 }
 

@@ -202,5 +202,5 @@ export function parseCarListText(text: string): ParsedCarToken[] {
 export function isOnRentOlRider(rider: string | null | undefined): boolean {
   const s = String(rider ?? "").trim().toUpperCase();
   if (!s) return false;
-  return s.startsWith("OL") && !s.startsWith("XOL");
+  return /^(OL|FL)[0-9]/.test(s) && !/^X(OL|FL)/.test(s);
 }

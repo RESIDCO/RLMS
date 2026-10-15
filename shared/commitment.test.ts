@@ -53,6 +53,7 @@ ok(
 ok(isOnOl({ hasAssignment: true, rider: "OL2513", lesseeName: "Alpek Polyester (xTrinity)" }), "xTrinity in name is not x-lessee prefix");
 ok(!isOnOl({ hasAssignment: true, rider: "OL1917", lesseeName: "xKBX" }), "x-lessee is not on_ol");
 ok(isOnRentOlRider("OL1917") && !isOnRentOlRider("EA2435"), "OL vs EA");
+ok(isOnRentOlRider("FL1201") && !isOnRentOlRider("XFL1201") && isOnOl({ hasAssignment: true, rider: "FL1201", rentStartEnforced: false }), "FL is on-rent like OL");
 ok(isOnRent({ hasAssignment: true, rider: "OL1917", rentStartDate: "2026-10-15", asOf: "2026-10-15" }), "today counts as on rent");
 
 ok(derivedFleetStatus({ sold: true, offRent: true, hasOpenCommitment: true }) === "Sold", "Sold never overwritten");

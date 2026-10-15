@@ -1,5 +1,6 @@
 -- Per-car rent_start_date. Safe to re-run. Does NOT write rent dates (preview views only).
 -- Apply after 20261016_car_commitments_derived_status.sql.
+-- Never re-run 20261016 after 20261017.
 
 ALTER TABLE public.railcar_assignments
   ADD COLUMN IF NOT EXISTS rent_start_date date,
@@ -39,8 +40,8 @@ IMMUTABLE
 AS $$
   SELECT
     coalesce(has_assignment, false) IS TRUE
-    AND upper(btrim(coalesce(link_rider, ''))) ~ '^OL'
-    AND upper(btrim(coalesce(link_rider, ''))) !~ '^XOL'
+    AND upper(btrim(coalesce(link_rider, ''))) ~ '^(OL|FL)[0-9]'
+    AND upper(btrim(coalesce(link_rider, ''))) !~ '^X(OL|FL)'
     AND btrim(coalesce(lessee_name, '')) !~ '^[(]?x[A-Z(]'
     AND btrim(coalesce(assignment_label, '')) !~ '^[(]?x[A-Z(]';
 $$;
@@ -109,6 +110,16 @@ AS $$
     ELSE 'Unassigned'
   END;
 $$;
+
+DROP VIEW IF EXISTS
+  public.v_kpi_preview_retag,
+  public.v_kpi_preview_idle_on_ol,
+  public.v_kpi_preview_seed_off_rent,
+  public.v_kpi_preview_rent_start_default,
+  public.v_kpi_preview_rent_start_idle_on_ol,
+  public.v_rlms_car_kpi;
+
+DROP FUNCTION IF EXISTS public.rlms_kpi_excluded_rider(text);
 
 CREATE OR REPLACE VIEW public.v_rlms_car_kpi AS
 SELECT
@@ -499,7 +510,7 @@ WITH op AS (
     rc.lessee_name,
     rc.lease_end_date,
     CASE
-      WHEN upper(btrim(coalesce(rc.rider_external_id, ''))) ~ '^OL[0-9]'
+      WHEN upper(btrim(coalesce(rc.rider_external_id, ''))) ~ '^(OL|FL)[0-9]'
         THEN upper(btrim(rc.rider_external_id))
       ELSE NULL
     END AS ol_code,

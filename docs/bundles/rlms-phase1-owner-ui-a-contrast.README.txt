@@ -1,0 +1,79 @@
+RLMS repair — Owner UI §A contrast + sticky module nav
+================================================================
+Requires tip: bd049dcca9d2ca50157ea1230d400393497102b4
+(Estimates History landing — prior owner-ui-a-estimates tip)
+
+Bundle tip (after apply): 3dada1673e66abbc320f9d5909b2ddd1a642afbe
+Bundle size: 10906 bytes
+SHA-256: fe1142034cf91d55ed30a593459a1368e2b520127ab53e5944a7d7954944730c
+
+What this adds
+----------------------------------------------------------------
+  client/src/pages/repair/RepairModuleNav.tsx
+    - Sticky repairSMART-style module nav (Bad Orders, Estimates,
+      Outbound Dispos, Invoices, Assignments, Reference, Admin, Help)
+
+  client/src/pages/repair/RepairOwnerShell.tsx
+    - Shared shell: nav + optional light theme scope
+
+  client/src/pages/repair/RepairComingSoon.tsx
+    - Unbuilt /#/repair* routes → "coming soon" (not 404)
+
+  client/src/pages/repair/RepairHome.tsx
+    - WCAG AA+ light contrast (shot 01): dark text, white inputs,
+      status cell fills, bold right-aligned totals, banded rows
+
+  client/src/pages/repair/EstimateReview.tsx
+    - Module nav only (estimate content unchanged)
+
+  client/src/App.tsx
+    - Coming-soon routes for unbuilt module links
+
+  client/src/index.css
+    - .repair-owner-ui light token remaps + portaled select contrast
+
+  modules/repair/services/ops-grid.ts
+    - Shop display "Name – City, ST" (en dash)
+
+  docs/repair/OWNER_UI_A_ESTIMATES_HISTORY.md
+    - Contrast / nav notes
+
+  docs/repair/HANDOFF.md
+    - Contrast bundle as current tip
+
+  docs/bundles/rlms-phase1-owner-ui-a-contrast.README.txt
+    - companion README (store copy authoritative for tip/size/hash)
+
+Files outside modules/repair (and why)
+----------------------------------------------------------------
+  client/src/pages/repair/*
+    Owner UI pages + shared nav/shell
+  client/src/App.tsx
+    Routes for placeholders + existing repair pages
+  client/src/index.css
+    Scoped light theme for Estimates History
+  docs/repair/*
+    sub-spec note, handoff, bundle README
+
+Estimate Review content / shop / BO rebuild — NO CHANGES beyond nav shell.
+Shop master / BO rebuild — NOT started (await sign-off).
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect bd049dc
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-a-contrast.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-a-contrast.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:seed:estimates-history
+  npm run repair:dev:local
+  # http://127.0.0.1:5000/#/repair
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

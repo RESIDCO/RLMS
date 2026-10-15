@@ -1,0 +1,10 @@
+resp_code,description,source,rule,pdf_page,residco_label
+1,Owner responsibility,AAR,FM Rule 83.18,697,Owners
+2,Handling line responsibility,AAR,FM Rule 83.18,697,Handling Line
+3,Defect Card or Joint Inspection Certificate authority,AAR,FM Rule 83.18,697,
+4,Capital Program,RESIDCO,RESIDCO internal,,Capital Program
+5,Lease Return,RESIDCO,RESIDCO internal,,Lease Return
+6,Rebill,RESIDCO,RESIDCO internal,,Rebill
+7,No Rebill,RESIDCO,RESIDCO internal,,No Rebill
+8,Preventive Maintenance,RESIDCO,RESIDCO internal,,Preventive Maintenance
+9,HM216,RESIDCO,RESIDCO internal,,HM216

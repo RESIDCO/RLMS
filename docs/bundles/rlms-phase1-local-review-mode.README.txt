@@ -1,0 +1,79 @@
+RLMS repair — Windows local review mode (no Supabase)
+=======================================================
+Requires tip: a3a17a652f8d6a94592cd830a378c65a7ce9d2ff
+(cents demo clean — step [4] = 36732.04 on draft PR #2)
+
+Bundle tip (after apply): c241197c691cafa7236cfe2d3cae95bd8977fb0a
+Bundle size: 16341 bytes
+SHA-256: 630b987bd2ed2d653417240e121a9f4d636997aea9d2a03ff3b5850a344e9bd8
+
+What this adds
+----------------------------------------------------------------
+  Windows boot
+    - package.json uses cross-env so `npm run dev` works on cmd/PowerShell
+    - npm run repair:dev:local — preferred UI review start (sets flags)
+
+  LOCAL REVIEW MODE (REPAIR_LOCAL_DB=1 + REPAIR_DEV_BYPASS_AUTH=1)
+    - Boots without SUPABASE_URL / SUPABASE_ANON_KEY
+    - Stubs Supabase; registers repair routes only; other /api → 503
+    - Banner: "LOCAL REVIEW MODE, no Supabase"
+    - Client AuthGate allows /#/repair* without login
+
+  Docs
+    - docs/repair/PHASE1_UI_REVIEW_RUN.md (full Windows runbook)
+    - docs/repair/HANDOFF.md
+
+Files outside modules/repair (and why)
+----------------------------------------------------------------
+  package.json / package-lock.json
+    cross-env + repair:dev:local / Windows-safe NODE_ENV scripts
+  server/supabase.ts
+    guarded stub when both REPAIR_* flags set
+  server/routes.ts
+    repair-only registration in local review; 503 other host APIs
+  server/index.ts
+    banner + VITE_REPAIR_LOCAL_REVIEW for the Vite client
+  client/src/lib/supabase.ts
+    client stub so SPA loads without VITE_SUPABASE_*
+  client/src/App.tsx
+    AuthGate bypass for /repair* in local review
+  client/src/lib/AuthContext.tsx
+    skip Supabase auth bootstrap in local review
+  docs/repair/PHASE1_UI_REVIEW_RUN.md
+    Windows commands + confirmed URLs
+  docs/repair/HANDOFF.md
+    next tip / apply steps
+  docs/bundles/rlms-phase1-local-review-mode.README.txt
+    this file
+
+Inside modules/repair
+----------------------------------------------------------------
+  modules/repair/dev/dev-local-server.ts — repair:dev:local entry
+
+If you already applied docs-only tip 60e380b
+----------------------------------------------------------------
+  Still apply this bundle (or reset to a3a17a6 and apply only this).
+  This commit includes the full UI runbook content.
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect a3a17a6
+  git bundle verify PATH\TO\rlms-phase1-local-review-mode.bundle
+  git pull PATH\TO\rlms-phase1-local-review-mode.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+Quick start after apply
+-----------------------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:demo:local
+  npm run repair:dev:local
+  # Banner: LOCAL REVIEW MODE, no Supabase
+  # App: http://127.0.0.1:5000
+  # /#/repair  |  shop /#/repair/e/<token>  |  lessee /#/repair/lessee/<token>
+  # estimate /#/repair/estimates/<id>
+  # Tokens: modules\repair\dev\demo-output\step-log.json
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

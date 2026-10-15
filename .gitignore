@@ -23,3 +23,12 @@ script/_census2020/
 supabase/.temp/
 schema/*.apply-errors.json
 
+# Repair module local storage / backups / CRB exports
+data/repair-storage/
+backups/
+modules/repair/dev/exports/
+modules/repair/dev/demo-output/
+modules/repair/dev/email-outbox/
+# §G r3 seed writes demo event/estimate IDs here (never commit)
+modules/repair/dev/shop-demo-ids.local.json
+

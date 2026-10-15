@@ -1,0 +1,73 @@
+RLMS repair — Owner UI sub-section 1: Estimates History (/#/repair)
+================================================================
+Requires tip: 3d1dd73159f481e761dbe33f46eeb94b75b7ca2d
+(Owner UI Spec Step 1 — docs map A–H)
+
+Bundle tip (after apply): e17389fb5b787206693ffd79c522e318ab2c7446
+Bundle size: 226057 bytes
+SHA-256: ef0a5745f05c6208e7ad874637115d1967f07d01f7e34b3b366fa37c7b236c0e
+
+What this adds
+----------------------------------------------------------------
+  docs/repair/OWNER_UI_A_ESTIMATES_HISTORY.md
+    - Scoped sub-spec for §A only; points at OWNER_UI_SPEC.md
+
+  docs/repair/screenshots/01-estimates-history.png
+    - Reference screenshot for this sub-section
+
+  client/src/pages/repair/RepairHome.tsx
+    - Estimates History landing matching shot 01
+    - Search / Apply to Checked / Summary / paging / Export Grid
+    - Saved views (localStorage), sort, group-by, Create Filter
+    - Columns per shot; Estimate link → existing estimate page
+
+  modules/repair/services/ops-grid.ts
+    - Default actionable statuses; richer grid columns; cents summary
+    - bulkApproveEstimates + exportBrcDetail
+
+  modules/repair/routes.ts
+    - Grid query params (dateField/sort); bulk-approve; BRC; bulk-validate
+
+  modules/repair/dev/seed-estimates-history.ts
+    - ~15 demo estimates across statuses for local review
+
+  package.json
+    - repair:seed:estimates-history
+
+  docs/repair/HANDOFF.md
+    - Sub-section 1 delivered; next = Shop master after Bruce sign-off
+
+  docs/bundles/rlms-phase1-owner-ui-a-estimates.README.txt
+    - companion README (store copy authoritative for tip/size/hash)
+
+Files outside modules/repair (and why)
+----------------------------------------------------------------
+  client/src/pages/repair/RepairHome.tsx
+    Owner landing page (allowed client repair pages)
+  package.json
+    seed script
+  docs/repair/*
+    sub-spec, handoff, screenshot 01, bundle README
+
+Estimate Review / shop link / lessee — NO CHANGES.
+Shop master / BO rebuild — NOT started (await sign-off).
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect 3d1dd73
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-a-estimates.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-a-estimates.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:seed:estimates-history
+  npm run repair:dev:local
+  # http://127.0.0.1:5000/#/repair
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

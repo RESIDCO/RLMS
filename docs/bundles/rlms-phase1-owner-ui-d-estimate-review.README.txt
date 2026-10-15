@@ -1,0 +1,102 @@
+RLMS repair — Owner UI §D Estimate Review (owner)
+====================================================================
+Requires tip: 468a9db8034b56570710bdd0182425dcfc364c83
+(§C Bad Orders signed off — template fields + attach carry)
+
+Bundle tip (after apply): 7e809b8f1a88f47d7d550544e02f29748d769d9e
+Bundle size: 37K
+SHA-256: 397940399dab4a4e7bc72f2e5db6ee362134a4ff9a900343ec1bbc7167a3ffeb
+
+What this delivers
+----------------------------------------------------------------
+  1) Compact Estimate Review header (shot 02):
+     Shop (MARK) – City, ST; car; Estimate ID; status; SPLC;
+     assignment/lessee; entity; road/DC road; car type; kind of car;
+     created/account/approval reqd/approved; repair/yard/target/outbound
+     (display only); bad order reason link; billing category (+ save).
+     Full 500-byte header groups in collapsible "More header detail".
+     Pencil editor kept (reason required, audited, Adjustment after approval).
+
+  2) RS line grid: Item, Loc, Qnty, C, AJOB, QA, Description, WM, RJOB,
+     QR, R, Labor, Material, Amount, Component Id, 500 (raw), PM,
+     per-line comment/issue icon, totals row. Loc/Qnty/RJOB/Desc/PM
+     from raw_line App. G slices when columns empty. Integer cents.
+
+  3) Owner actions ONLY:
+     Approve · Reject/Request Revision · Send Lessee Responsibility ·
+     Update Responsibilities · Rollback · Issues/comments ·
+     Export (BRC Excel/PDF / 500) · Review & Compare ·
+     "N Document(s) found" → viewer new window.
+     NO Submit for approval. NO completed/outbound date entry.
+
+  4) Update Responsibilities (shots 04/05) at
+     /#/repair/estimates/:id/responsibilities —
+     codes 1/2/4/5/6 Rebill/7 No Rebill/8/9; set checked lines;
+     restore from revision; split by %; R (Cur)/R (New); Reset/Submit;
+     summary by code + Recalculate. Append-only revision.
+
+  5) Review & Compare — pick any two revisions; added/removed/changed
+     + totals delta (cents).
+
+  6) Documents viewer /#/repair/estimates/:id/documents (new window,
+     shot 03 layout). Soft-delete → VOIDED.
+
+  7) Light/dark + sticky nav unchanged. Shop link + §C intact.
+
+Files
+----------------------------------------------------------------
+  modules/repair/services/estimate-review.ts          (new)
+  modules/repair/migrations/20261014_repair_owner_ui_d.sql (new)
+  modules/repair/dev/smoke-estimate-review-d.ts       (new)
+  modules/repair/dev/migrate-local.ts
+  modules/repair/routes.ts
+  client/src/pages/repair/EstimateReview.tsx
+  client/src/pages/repair/EstimateDataFile.tsx
+  client/src/pages/repair/UpdateResponsibilities.tsx  (new)
+  client/src/pages/repair/EstimateDocuments.tsx       (new)
+  client/src/App.tsx
+  package.json
+  docs/repair/OWNER_UI_D_ESTIMATE_REVIEW.md
+  docs/repair/HANDOFF.md
+
+Files outside modules/repair
+----------------------------------------------------------------
+  client/src/App.tsx
+  client/src/pages/repair/EstimateReview.tsx
+  client/src/pages/repair/EstimateDataFile.tsx
+  client/src/pages/repair/UpdateResponsibilities.tsx
+  client/src/pages/repair/EstimateDocuments.tsx
+  package.json
+  docs/repair/OWNER_UI_D_ESTIMATE_REVIEW.md
+  docs/repair/HANDOFF.md
+  docs/bundles/rlms-phase1-owner-ui-d-estimate-review.README.txt
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect 468a9db…
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-d-estimate-review.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-d-estimate-review.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:smoke-estimate-review
+  npm run repair:smoke-bad-orders
+  npm run repair:smoke-shop-entity
+  npm run repair:dev:local
+  # http://127.0.0.1:5000/#/repair
+  # open Awaiting Approval estimate → Estimate Review
+
+Verified (agent local Postgres)
+-------------------------------
+  repair:smoke-estimate-review PASS (twice)
+  repair:smoke-bad-orders PASS (§C intact)
+  repair:smoke-shop-entity PASS
+  git bundle verify + pull onto 468a9db → lands 7e809b8f1a88f47d7d550544e02f29748d769d9e
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

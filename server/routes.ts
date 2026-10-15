@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { ZodError } from "zod";
 import type { Server } from "http";
 import multer from "multer";
-import { supabase, supabaseAdmin } from "./supabase";
+import { supabase, supabaseAdmin, isRepairLocalReviewMode } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { pointCurrentAssignmentAt } from "./current-assignment";
@@ -111,6 +111,10 @@ import {
   isValidRole,
   type AppRole,
 } from "./auth";
+import {
+  registerRepairPublicRoutes,
+  registerRepairAuthedRoutes,
+} from "../modules/repair";
 import {
   insertMasterLeaseSchema,
   insertRiderSchema,
@@ -360,9 +364,29 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Dev-only: REPAIR_LOCAL_DB=1 + REPAIR_DEV_BYPASS_AUTH=1 → repair module only, no Supabase.
+  if (isRepairLocalReviewMode()) {
+    registerRepairPublicRoutes(app);
+    registerRepairAuthedRoutes(app);
+    app.use("/api", (req, res, next) => {
+      const p = (req.path || req.url || "").split("?")[0];
+      if (p === "/repair" || p.startsWith("/repair/")) return next();
+      return res.status(503).json({
+        error: "LOCAL REVIEW MODE: RLMS host routes disabled (no Supabase)",
+      });
+    });
+    return httpServer;
+  }
+
+  // Repair module public routes (shop/lessee links) — before API auth gate.
+  registerRepairPublicRoutes(app, { requireUser });
+
   // Gate every /api route: valid Supabase session (Bearer JWT) required.
   // Writes still use requireWrite / requireAdmin for role checks on top of this.
   app.use("/api", requireApiAuth);
+
+  // Repair module authenticated routes (BO create, review, status admin reads).
+  registerRepairAuthedRoutes(app, { requireUser });
 
   await recoverStaleExportJobs();
 

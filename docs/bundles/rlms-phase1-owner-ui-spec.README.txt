@@ -1,0 +1,46 @@
+RLMS repair — Phase 1 Owner UI Spec (Step 1 — docs only)
+============================================================
+Requires tip: f4e65cc1fe96aa2cb1349229b2fe0462176f7463
+(UI review feedback — BO rules, header pencil, lessee layout)
+
+Docs content tip: ffd1867cf7fa14d929ef0fb2c2302335ec31829f
+Bundle size: SEE_STORE_README
+SHA-256: SEE_STORE_README
+
+What this adds
+----------------------------------------------------------------
+  docs/repair/OWNER_UI_SPEC.md
+    - Step 1 Owner UI RESET spec for Bruce approval (NO product code)
+    - End-to-end flows: Owner/reviewer, Shop, Lessee
+    - Screens A–H wireframes + field maps:
+        A Estimates History landing /#/repair (action queue)
+        B Shop master (empty until created; billing roads separate)
+        C Bad Order three-part page (search + New BO + History)
+           incl. addendum matching shot 06-bad-orders
+        D Owner Estimate Review (owner actions only)
+        E Document/photo viewer (VOIDED on delete)
+        F Lessee (read-only except own-line approve/dispute)
+        G Railinc 500-byte validation (per-field errors; keep rejects)
+        H Owner role lands on A first
+    - Screenshot 01–06: awaiting attachment; map from Manual_Gap_Review
+    - Do not invent unmarked AAR Bad Order Reason lists
+
+  docs/repair/HANDOFF.md
+    - Step 1 awaiting Bruce approval; Step 2 blocked until approved
+    - awaiting screenshot attachment note
+
+  docs/bundles/rlms-phase1-owner-ui-spec.README.txt
+    - this file
+
+No product / feature code. Step 2 blocked until Bruce approves the spec.
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect f4e65cc
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-spec.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-spec.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+Then open: docs\repair\OWNER_UI_SPEC.md
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

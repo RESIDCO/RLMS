@@ -115,6 +115,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    // Local UI review: no Supabase — skip auth bootstrap so /#/repair* loads.
+    if (import.meta.env.VITE_REPAIR_LOCAL_REVIEW === "1") {
+      setSession(null);
+      setRole("admin");
+      setLoading(false);
+      return;
+    }
+
     // Re-check hash in case it arrived after module load
     captureAuthHashType();
     if (sessionStorage.getItem(NEEDS_PW_KEY)) {

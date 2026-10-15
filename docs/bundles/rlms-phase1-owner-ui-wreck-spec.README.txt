@@ -1,0 +1,42 @@
+RLMS repair — Owner UI wreck dual-track SPEC (docs only)
+====================================================================
+Requires tip: c8a713855a5017d35ce369578a5199f4dd769776
+(prior folded wreck-spec)
+
+Canonical Bundle tip / size / SHA-256: see Project store copy
+  docs/bundles/rlms-phase1-owner-ui-wreck-spec.README.txt
+(next to the .bundle file Bruce receives).
+
+What this delivers
+----------------------------------------------------------------
+  Docs only — NO wreck UI, load APIs, or validation code.
+
+  1) docs/repair/OWNER_UI_WRECK.md
+     - Bruce's six corrections WIN (one event; two shop files —
+       NO mixed-file auto-split; Resp 3 HARD REJECT vs flag;
+       quarterly rates; owner-only Rule 107 DV; JIC clocks from
+       shop arrival)
+     - Folded WRECK_DUAL_TRACK.md + Bruce §11 answers (2026-10-15):
+         JIC shop→owner→RR; files after endorse; owner CRB rebill;
+         over-DV warn/flag; no Resp 3 taxes; 1–7% FE out of scope;
+         Resp 3 purity; no Send Lessee on wreck; Price Master
+         AAR/Railinc quarterly; flag clear owner/MP; calendar days
+     - Remaining OPEN: #1 (manual entry for now), #4, #10
+
+  2) docs/owner-ui-wreck.md — short top-level pointer
+
+  3) docs/repair/HANDOFF.md — §11 tip; build after §D r5
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect c8a7138… (prior fold)
+  # If still on 0c0be23 / 9935a0f, pull the prior fold wreck-spec first
+  # If still on f911faa, pull §D r5 then prior fold first
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-wreck-spec.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-wreck-spec.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+Then open: docs\repair\OWNER_UI_WRECK.md
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.
+No wreck feature build until §D r5 sign-off + Bruce accepts this spec.

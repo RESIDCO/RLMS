@@ -35,6 +35,25 @@ import AcceptInvite from "@/pages/AcceptInvite";
 import DvNewCalculation from "@/pages/DvCalculator/NewCalculation";
 import DvHistory from "@/pages/DvCalculator/History";
 import DvReference from "@/pages/DvCalculator/Reference";
+import RepairHome from "@/pages/repair/RepairHome";
+import ShopEventLink from "@/pages/repair/ShopEventLink";
+import EstimateReview from "@/pages/repair/EstimateReview";
+import SendLessee from "@/pages/repair/SendLessee";
+import UpdateResponsibilities from "@/pages/repair/UpdateResponsibilities";
+import EstimateDocuments from "@/pages/repair/EstimateDocuments";
+import LesseeApproval from "@/pages/repair/LesseeApproval";
+import LesseeDocuments from "@/pages/repair/LesseeDocuments";
+import RepairComingSoon from "@/pages/repair/RepairComingSoon";
+import BadOrders from "@/pages/repair/BadOrders";
+import BoReasons from "@/pages/repair/BoReasons";
+import ShopMaster from "@/pages/repair/ShopMaster";
+import ShopProfile from "@/pages/repair/ShopProfile";
+import RepairAdmin from "@/pages/repair/RepairAdmin";
+import ReferenceData from "@/pages/repair/ReferenceData";
+import WreckEvent from "@/pages/repair/WreckEvent";
+import ShopPortal from "@/pages/repair/ShopPortal";
+import ShopBoDetail from "@/pages/repair/ShopBoDetail";
+import ShopEstimateDetail from "@/pages/repair/ShopEstimateDetail";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -108,6 +127,35 @@ function AppRouter() {
       <Route path="/dv/history" component={DvHistory} />
       <Route path="/dv/history/:id" component={DvHistory} />
       <Route path="/dv/reference" component={DvReference} />
+      <Route path="/repair/e/:token" component={ShopEventLink} />
+      <Route path="/repair/lessee/:token/documents" component={LesseeDocuments} />
+      <Route path="/repair/lessee/:token" component={LesseeApproval} />
+      {/* §G Shop portal — own shop mark */}
+      <Route path="/repair/shop/events/:eventId" component={ShopBoDetail} />
+      <Route path="/repair/shop/estimates/:id" component={ShopEstimateDetail} />
+      <Route path="/repair/shop" component={ShopPortal} />
+      {/* Owner module placeholders — before /repair/estimates/:id so "brc" is not treated as an id */}
+      <Route path="/repair/estimates/brc" component={RepairComingSoon} />
+      <Route path="/repair/bad-orders" component={BadOrders} />
+      <Route path="/repair/outbound-dispos" component={RepairComingSoon} />
+      <Route path="/repair/invoices" component={RepairComingSoon} />
+      <Route path="/repair/assignments" component={RepairComingSoon} />
+      <Route path="/repair/shops/:id" component={ShopProfile} />
+      <Route path="/repair/shops" component={ShopMaster} />
+      <Route path="/repair/bo-reasons" component={BoReasons} />
+      <Route path="/repair/billing-roads" component={RepairComingSoon} />
+      <Route path="/repair/admin" component={RepairAdmin} />
+      <Route path="/repair/reference-data" component={ReferenceData} />
+      <Route path="/repair/help" component={RepairComingSoon} />
+      {/* §D Estimate Review sub-routes before :id */}
+      <Route path="/repair/wreck/:eventId/documents" component={EstimateDocuments} />
+      <Route path="/repair/wreck/:eventId" component={WreckEvent} />
+      <Route path="/repair/events/:id/documents" component={EstimateDocuments} />
+      <Route path="/repair/estimates/:id/responsibilities" component={UpdateResponsibilities} />
+      <Route path="/repair/estimates/:id/documents" component={EstimateDocuments} />
+      <Route path="/repair/estimates/:id/send-lessee" component={SendLessee} />
+      <Route path="/repair/estimates/:id" component={EstimateReview} />
+      <Route path="/repair" component={RepairHome} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -120,6 +168,22 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   // Invite acceptance is public (token_hash in query) — no session yet
   if (loc.startsWith("/accept-invite")) {
     return <AcceptInvite />;
+  }
+
+  // Shop / lessee event links — no login (repair module)
+  if (loc.startsWith("/repair/e/")) {
+    return <ShopEventLink />;
+  }
+  if (loc.startsWith("/repair/lessee/")) {
+    if (/\/documents\/?$/.test(loc.split("?")[0] ?? "")) {
+      return <LesseeDocuments />;
+    }
+    return <LesseeApproval />;
+  }
+
+  // Local review mode (no Supabase): allow all repair screens against local Postgres.
+  if (import.meta.env.VITE_REPAIR_LOCAL_REVIEW === "1" && loc.startsWith("/repair")) {
+    return <>{children}</>;
   }
 
   if (loading) {

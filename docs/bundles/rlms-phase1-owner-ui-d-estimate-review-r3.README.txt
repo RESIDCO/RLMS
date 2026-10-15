@@ -1,0 +1,60 @@
+RLMS repair — Owner UI §D Estimate Review r3
+====================================================================
+Requires tip: 2d987c92399ddb5a446de5554b068d9c8aeffb4e
+(§D Estimate Review r2)
+
+Bundle tip (after apply): 7080b6e52eebdfe3020fcaa2e9086b3947ade7b2
+Bundle size: 20K
+SHA-256: 41464e5141a5591cdce0e2d0fddc4e20ef2fcdcb04efd1f7dbcb0661fb824dca
+
+What this delivers
+----------------------------------------------------------------
+  1) Hover tooltips: mouseleave/blur close; only one open; Esc closes.
+
+  2) Car initial + number read-only (lock icon + why tooltip). API 409
+     on change. Wrong car → void + shop resubmit (audited).
+
+  3) Money thousands separators everywhere (e.g. $36,732.04) with
+     integer cents underneath. Inputs still plain numbers.
+
+  4) Send Lessee: /#/repair/estimates/<id>/send-lessee preview —
+     editable recipients/subject/body, lessee-view lines, PDF +
+     500-byte/CRB preview, gallery select all/none, total size,
+     Back/Cancel, Send+confirm. Local mode → repair.email_outbox
+     "Logged (not sent – local mode)". Send history on estimate.
+
+  5) Smoke: car edit 409; comma format; send-lessee → outbox, no real send.
+
+Files (highlights)
+----------------------------------------------------------------
+  modules/repair/migrations/20261014_repair_owner_ui_d_r3.sql
+  modules/repair/services/send-lessee.ts
+  modules/repair/services/{money,header-edits,lessee-approval}.ts
+  client/src/pages/repair/{SendLessee,EstimateDataFile,EstimateReview,
+    UpdateResponsibilities,codeHoverBus}.tsx/.ts
+  client/src/App.tsx
+  docs/repair/{OWNER_UI_D_ESTIMATE_REVIEW,HANDOFF}.md
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect 2d987c9…
+  git bundle verify PATH\TO\rlms-phase1-owner-ui-d-estimate-review-r3.bundle
+  git pull PATH\TO\rlms-phase1-owner-ui-d-estimate-review-r3.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+After apply
+-----------
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  $env:REPAIR_DEV_BYPASS_AUTH = "1"
+  npm install
+  npm run repair:migrate:local
+  npm run repair:smoke-estimate-review
+  npm run repair:dev:local
+
+Verified (agent local Postgres)
+-------------------------------
+  repair:smoke-estimate-review PASS (car 409; $36,732.04; send-lessee outbox)
+  git bundle verify + pull onto 2d987c9 → lands 7080b6e52eebdfe3020fcaa2e9086b3947ade7b2
+
+Draft PR #2 — do not merge/deploy. No GitHub MCP push. No Supabase. No paid.

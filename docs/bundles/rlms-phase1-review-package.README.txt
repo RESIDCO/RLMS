@@ -1,0 +1,34 @@
+RLMS repair — Phase 1 review package
+================================================================
+Requires tip: 496362844483cea5242dcdf368dece2860e72ecb
+(lifecycle-06 / MG1–MG4 — already on draft PR #2)
+
+Bundle tip (after apply): 9d39bd1dad1ae99fca221e36b485473aff4244d2
+Bundle size: 19142 bytes
+SHA-256: 28ca2dea6a13ac391247ad25cb2387de1f1a20ee9d87356d7b1edbdbf3f64c4b
+
+What this adds (docs + local demo only — no new product features)
+----------------------------------------------------------------
+  docs/repair/PHASE1_WALKTHROUGH.md
+  docs/repair/PHASE1_DEMO_WINDOWS.md
+  docs/repair/PHASE1_REVIEW_CHECKLIST.md
+  modules/repair/dev/demo-local.ts
+  npm run repair:demo:local
+  .gitignore entry for modules/repair/dev/demo-output/
+
+Apply on Bruce's PC (C:\Users\BruceHarbridge\rlms-push)
+-------------------------------------------------------
+  git rev-parse HEAD   # expect 4963628
+  git bundle verify PATH\TO\rlms-phase1-review-package.bundle
+  git pull PATH\TO\rlms-phase1-review-package.bundle HEAD
+  git push -u origin cursor/repair-module-phase1-4199
+
+Then run the demo (local Postgres):
+  $env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5432/rlms_repair_dev"
+  $env:REPAIR_LOCAL_DB = "1"
+  npm install
+  npm run repair:demo:local
+
+See docs/repair/PHASE1_DEMO_WINDOWS.md for full Windows steps.
+
+Draft PR #2 — do not merge/deploy. No PAT. No Supabase branch. No paid.

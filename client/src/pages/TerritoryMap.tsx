@@ -63,7 +63,8 @@ const VIEW_KEY = "rlms-territory-map-view";
 const UNASSIGNED = "#9CA3AF";
 const W = 960;
 const H = 580;
-const COUNTY_ZOOM = 1.65;
+/** County borders stay off until a state fills a good share of the map (~two +/- clicks). */
+const COUNTY_LINE_ZOOM_THRESHOLD = 1.8;
 
 /** Okabe–Ito + a few extras: distinct on a filled map, colorblind-safer than a free picker. */
 const REP_PALETTE = [
@@ -266,37 +267,12 @@ export default function TerritoryMapPage() {
       .map(([f]) => f);
   }
 
-  const zoomedIn = mapScale >= COUNTY_ZOOM;
+  const zoomedIn = mapScale >= COUNTY_LINE_ZOOM_THRESHOLD;
   const showAllCountyLines = view === "contacts" || zoomedIn || (editOn && (tool === "county" || tool === "split"));
 
   const pendingFips = Object.keys(pending);
-  const pendingStates = useMemo(() => {
-    const s = new Set<string>();
-    for (const f of pendingFips) {
-      const st = mapQ.data?.countyMeta[f]?.state;
-      if (st) s.add(st);
-    }
-    return s.size;
-  }, [pendingFips, mapQ.data?.countyMeta]);
-
   const hasDraft = pendingFips.length > 0 || (tool === "split" && splitPreview.size > 0 && splitPts.length >= 2);
   const canApply = !applyBusy && hasDraft && (tool === "split" || !!paintOwner);
-
-  const statusLine = (() => {
-    if (tool === "split") {
-      if (!splitState) return "Split a state: click two points across a state, then click counties to flip sides.";
-      if (splitPts.length < 2) return `Split ${splitState}: click the second point.`;
-      return `Split ${splitState} — ${splitOwners[0]} / ${splitOwners[1]}`;
-    }
-    if (!paintOwner) return "Pick a rep, then click the map.";
-    if (!pendingFips.length) return "Nothing selected yet";
-    if (tool === "state") {
-      const n = pendingStates;
-      return `Painting ${paintOwner} — ${n} state${n === 1 ? "" : "s"} selected`;
-    }
-    const n = pendingFips.length;
-    return `Painting ${paintOwner} — ${n} count${n === 1 ? "y" : "ies"} selected`;
-  })();
 
   function onCountyClick(fips: string, ev?: React.MouseEvent) {
     if (view === "contacts") {
@@ -559,12 +535,11 @@ export default function TerritoryMapPage() {
                 <Button size="sm" disabled={!canApply} onClick={applyPending}>Apply</Button>
                 <Button size="sm" variant="ghost" onClick={() => { setPending({}); setSplitPts([]); setSplitState(null); }}>Clear draft</Button>
               </div>
-              <div className="text-xs text-muted-foreground">{statusLine}</div>
             </div>
           )}
 
           {editOn && view === "sales" && (
-            <div className="text-sm font-medium mb-1.5 min-h-[1.25rem]">
+            <div className="text-sm font-medium mb-1.5">
               {paintOwner ? `Painting with ${paintOwner}` : "Pick a rep, then click the map."}
             </div>
           )}
@@ -601,18 +576,20 @@ export default function TerritoryMapPage() {
                       fill = splitPreview.get(fips) === "a" ? colorOf(splitOwners[0]) : colorOf(splitOwners[1]);
                     }
                     const d = pathGen(f as GeoPermissibleObjects) || "";
-                    const countyStroke = showAllCountyLines || split;
+                    const showCountyBorder = showAllCountyLines || split;
                     return (
                       <path
                         key={fips}
                         d={d}
                         fill={fill}
-                        stroke={countyStroke ? "rgba(15,23,42,0.35)" : "none"}
-                        strokeWidth={countyStroke ? (split ? 0.6 : 0.3) : 0}
+                        stroke={showCountyBorder ? "rgba(15,23,42,0.35)" : fill}
+                        strokeWidth={showCountyBorder ? (split ? 0.6 : 0.3) : 1.4}
+                        strokeLinejoin="round"
+                        shapeRendering="geometricPrecision"
                         onMouseEnter={() => setHover(fips)}
                         onMouseLeave={() => setHover((h) => (h === fips ? null : h))}
                         onClick={(e) => onCountyClick(fips, e)}
-                        className="cursor-pointer hover:opacity-90"
+                        className="cursor-pointer"
                       />
                     );
                   })}

@@ -182,6 +182,41 @@ export default function EstimateReview() {
     Array<{ id: string; body: string; author: string; created_at: string; line_id?: string }>
   >([]);
   const [pencilOpen, setPencilOpen] = useState(false);
+  const [lesseePanel, setLesseePanel] = useState<{
+    ownerStatus: string;
+    overdue: boolean;
+    current: {
+      responseDueAtEt?: string | null;
+      sendVersion?: number | null;
+      decision?: string | null;
+    } | null;
+    history: Array<{
+      id: string;
+      decision: string;
+      channel: string;
+      decidedAt: string;
+      comment?: string | null;
+      respondentName?: string | null;
+      respondentEmail?: string | null;
+      sendVersion?: number | null;
+    }>;
+  } | null>(null);
+  const [manualNote, setManualNote] = useState("");
+  const [showManual, setShowManual] = useState(false);
+
+  async function loadLesseePanel() {
+    if (!estimateId) return;
+    try {
+      const res = await apiRequest(
+        "GET",
+        `/api/repair/estimates/${estimateId}/lessee-status`,
+      );
+      const data = await res.json();
+      if (res.ok) setLesseePanel(data);
+    } catch {
+      /* non-fatal */
+    }
+  }
 
   async function load(fromRev?: number, toRev?: number) {
     setError("");
@@ -210,9 +245,31 @@ export default function EstimateReview() {
         setCmpFrom(Number(data.revisions[data.revisions.length - 2].revision.rev_no));
         setCmpTo(Number(data.revisions[data.revisions.length - 1].revision.rev_no));
       }
+      void loadLesseePanel();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load review");
     }
+  }
+
+  async function recordManual(decision: "APPROVE" | "REJECT") {
+    if (!manualNote.trim()) {
+      setError("Note is required to record phone/email approval");
+      return;
+    }
+    const res = await apiRequest(
+      "POST",
+      `/api/repair/estimates/${estimateId}/lessee-manual`,
+      { decision, note: manualNote.trim(), actor: "owner" },
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || "Manual record failed");
+      return;
+    }
+    setMsg(`Lessee ${decision === "APPROVE" ? "accepted" : "rejected"} recorded manually.`);
+    setShowManual(false);
+    setManualNote("");
+    void loadLesseePanel();
   }
 
   useEffect(() => {
@@ -541,6 +598,107 @@ export default function EstimateReview() {
               </Button>
             </div>
           </div>
+
+          {/* §F Lessee status / due / history */}
+          {lesseePanel && lesseePanel.ownerStatus !== "None" && (
+            <section
+              className={cn(
+                "border rounded-md px-3 py-2 text-sm space-y-2",
+                lesseePanel.overdue
+                  ? "border-amber-500/60 bg-amber-50 dark:bg-amber-950/30"
+                  : "border-border bg-muted/20",
+              )}
+            >
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span>
+                  Lessee:{" "}
+                  <strong
+                    className={
+                      lesseePanel.overdue ? "text-amber-800 dark:text-amber-200" : ""
+                    }
+                  >
+                    {lesseePanel.overdue
+                      ? "Lessee response overdue"
+                      : lesseePanel.ownerStatus}
+                  </strong>
+                </span>
+                {lesseePanel.current?.responseDueAtEt ? (
+                  <span className="text-xs text-muted-foreground">
+                    Due {lesseePanel.current.responseDueAtEt}
+                  </span>
+                ) : null}
+                {lesseePanel.current?.sendVersion != null ? (
+                  <span className="text-xs text-muted-foreground">
+                    Send #{lesseePanel.current.sendVersion}
+                  </span>
+                ) : null}
+                <Link
+                  href={`#/repair/estimates/${estimateId}/send-lessee`}
+                  className="text-xs underline text-sky-700"
+                >
+                  Resend
+                </Link>
+                <button
+                  type="button"
+                  className="text-xs underline text-sky-700"
+                  onClick={() => setShowManual((v) => !v)}
+                >
+                  Record phone/email approval
+                </button>
+              </div>
+              {showManual && (
+                <div className="flex flex-wrap gap-2 items-end">
+                  <Textarea
+                    className="text-xs min-h-[2.5rem] flex-1"
+                    placeholder="Required note (who / when / how)"
+                    value={manualNote}
+                    onChange={(e) => setManualNote(e.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => void recordManual("APPROVE")}
+                  >
+                    Record Accept
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void recordManual("REJECT")}
+                  >
+                    Record Reject
+                  </Button>
+                </div>
+              )}
+              {lesseePanel.history.length > 0 && (
+                <div className="text-xs space-y-1 border-t border-border/60 pt-2">
+                  <div className="font-medium text-muted-foreground">
+                    Response history
+                  </div>
+                  {lesseePanel.history.slice(0, 5).map((h) => (
+                    <div key={h.id} className="flex flex-wrap gap-x-2">
+                      <span className="font-medium">{h.decision}</span>
+                      <span>via {h.channel}</span>
+                      {h.sendVersion != null ? <span>send #{h.sendVersion}</span> : null}
+                      <span className="text-muted-foreground">
+                        {h.decidedAt
+                          ? new Date(h.decidedAt).toLocaleString()
+                          : ""}
+                      </span>
+                      {h.respondentName ? (
+                        <span>
+                          {h.respondentName}
+                          {h.respondentEmail ? ` <${h.respondentEmail}>` : ""}
+                        </span>
+                      ) : null}
+                      {h.comment ? (
+                        <span className="text-muted-foreground">— {h.comment}</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Compact header — no absolute pencil over car # */}
           {ctx && (

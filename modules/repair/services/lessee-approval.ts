@@ -15,8 +15,21 @@ import { resolveLesseeAttachments } from "./lessee-attachments";
 import { notify, resolveRecipients } from "./notifications";
 import { computeLesseeTotals } from "./lessee-totals";
 import { formatCentsAsMoney } from "./money";
+import {
+  computeLinkExpiresAt,
+  computeResponseDueAt,
+  formatDueEt,
+  loadLesseeWindowConfig,
+} from "./lessee-window";
 
-const LESSEE_LINK_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+/** Owner-facing status labels (brief §F). */
+export type LesseeOwnerStatus =
+  | "Sent"
+  | "Viewed"
+  | "Accepted"
+  | "Rejected"
+  | "Overdue"
+  | "None";
 
 async function resp6AmountCents(revisionId: string): Promise<number> {
   const { rows } = await q(
@@ -85,20 +98,25 @@ async function insertDecision(opts: {
   revisionId: string;
   lesseeEmail: string;
   decision: "APPROVED" | "REJECTED";
-  channel: "url" | "email_reply";
+  channel: "url" | "email_reply" | "manual";
   amountPresentedCents: number | null;
   comment?: string;
   inboundEmailId?: string;
   confirmedByReviewer?: string;
   confirmedAt?: string | null;
   actor: string;
+  respondentName?: string;
+  respondentEmail?: string;
+  respondentIp?: string;
+  sendVersion?: number | null;
 }) {
   const { rows } = await q(
     `INSERT INTO repair.lessee_approval_decisions
        (tenant_id, approval_id, event_id, revision_id, lessee_email, decision,
         channel, amount_presented_cents, comment, inbound_email_id,
-        confirmed_by_reviewer, confirmed_at, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        confirmed_by_reviewer, confirmed_at, created_by,
+        respondent_name, respondent_email, respondent_ip, send_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [
       opts.tenantId,
@@ -114,9 +132,48 @@ async function insertDecision(opts: {
       opts.confirmedByReviewer ?? null,
       opts.confirmedAt ?? null,
       opts.actor,
+      opts.respondentName ?? null,
+      opts.respondentEmail ?? null,
+      opts.respondentIp ?? null,
+      opts.sendVersion ?? null,
     ],
   );
   return rows[0];
+}
+
+export function mapApprovalToOwnerStatus(row: {
+  status?: string | null;
+  viewed_at?: string | null;
+  response_due_at?: string | null;
+  decision?: string | null;
+  overdue_flagged_at?: string | null;
+}): LesseeOwnerStatus {
+  const st = String(row.status ?? "");
+  if (
+    st === "APPROVED_VIA_LINK" ||
+    st === "REPLY_CONFIRMED" ||
+    st === "MANUAL_APPROVED"
+  ) {
+    return "Accepted";
+  }
+  if (
+    st === "REJECTED_VIA_LINK" ||
+    st === "REPLY_REJECTED" ||
+    st === "MANUAL_REJECTED"
+  ) {
+    return "Rejected";
+  }
+  if (st === "SUPERSEDED" || st === "EXPIRED" || !st) return "None";
+
+  const pastDue =
+    !!row.response_due_at &&
+    new Date(String(row.response_due_at)).getTime() < Date.now();
+  if (st === "OVERDUE" || row.overdue_flagged_at || pastDue) {
+    return "Overdue";
+  }
+  if (st === "VIEWED" || row.viewed_at) return "Viewed";
+  if (st === "PENDING" || st === "REPLY_RECEIVED") return "Sent";
+  return "None";
 }
 
 export async function sendLesseeApprovalRequest(opts: {
@@ -184,14 +241,48 @@ export async function sendLesseeApprovalRequest(opts: {
     tenantId,
   });
 
-  const expiresAt = new Date(Date.now() + LESSEE_LINK_TTL_MS).toISOString();
+  // Mark prior open approvals SUPERSEDED (newer send voids older links)
+  await q(
+    `UPDATE repair.lessee_approvals
+     SET status = 'SUPERSEDED'
+     WHERE estimate_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+       AND status IN ('PENDING', 'VIEWED', 'OVERDUE', 'REPLY_RECEIVED')`,
+    [opts.estimateId, tenantId],
+  );
+  // Clear estimate overdue flag on fresh send (new window starts)
+  await q(
+    `UPDATE repair.estimates
+     SET lessee_response_overdue = false, lessee_response_overdue_at = NULL
+     WHERE id = $1 AND tenant_id = $2`,
+    [opts.estimateId, tenantId],
+  );
+
+  const entityCode =
+    est[0].entity_code != null ? String(est[0].entity_code) : null;
+  const windowCfg = await loadLesseeWindowConfig({ tenantId, entityCode });
+  const sentAt = new Date();
+  const responseDueAt = computeResponseDueAt(
+    sentAt,
+    windowCfg.businessDays,
+    windowCfg.minHours,
+    windowCfg.holidays,
+  );
+  const linkExpiresAt = computeLinkExpiresAt(responseDueAt);
+
+  const { rows: verRows } = await q(
+    `SELECT COALESCE(MAX(send_version), 0) + 1 AS next
+     FROM repair.lessee_approvals WHERE estimate_id = $1`,
+    [opts.estimateId],
+  );
+  const sendVersion = Number(verRows[0]?.next ?? 1);
+
   const issued = await issueEventLink({
     eventId: opts.eventId,
     scope: "LESSEE",
     partyRef: opts.lesseeEmail?.trim().toLowerCase() || "lessee",
     actor: opts.actor,
     tenantId,
-    expiresAt,
+    expiresAt: linkExpiresAt.toISOString(),
     estimateId: opts.estimateId,
     revisionId: opts.revisionId,
     grantedDocumentIds: resolved.documentIds,
@@ -287,8 +378,11 @@ export async function sendLesseeApprovalRequest(opts: {
     `INSERT INTO repair.lessee_approvals
        (tenant_id, event_id, estimate_id, revision_id, lessee_email, status,
         channel, amount_presented_cents, amount_presented, document_ids,
-        outbound_email_id, link_id, created_by)
-     VALUES ($1,$2,$3,$4,$5,'PENDING','url',$6,$7,$8,$9,$10,$11)
+        outbound_email_id, link_id, created_by,
+        response_due_at, response_window_business_days, link_expires_at,
+        send_version, entity_code)
+     VALUES ($1,$2,$3,$4,$5,'PENDING','url',$6,$7,$8,$9,$10,$11,
+             $12,$13,$14,$15,$16)
      RETURNING *`,
     [
       tenantId,
@@ -302,6 +396,11 @@ export async function sendLesseeApprovalRequest(opts: {
       send.providerMessageId,
       issued.link.id,
       opts.actor,
+      responseDueAt.toISOString(),
+      windowCfg.businessDays,
+      linkExpiresAt.toISOString(),
+      sendVersion,
+      entityCode,
     ],
   );
 
@@ -340,6 +439,9 @@ export async function sendLesseeApprovalRequest(opts: {
     lesseeUrlPath: linkPath,
     recipients: recipients.to,
     email: send,
+    responseDueAt: responseDueAt.toISOString(),
+    linkExpiresAt: linkExpiresAt.toISOString(),
+    sendVersion,
     attachments: {
       shopOriginalCount: resolved.shopOriginalCount,
       usedGeneratedPdf: resolved.usedGeneratedPdf,
@@ -353,11 +455,14 @@ export async function approveViaLesseeLink(opts: {
   rawToken: string;
   decision: "APPROVE" | "REJECT";
   comment?: string;
+  respondentName?: string;
+  respondentEmail?: string;
+  respondentIp?: string;
 }) {
   const { resolveActiveLink } = await import("./event-links");
   const resolved = await resolveActiveLink(opts.rawToken, "LESSEE");
   if (!resolved) {
-    return { ok: false as const, status: 401, error: "Invalid or revoked link" };
+    return { ok: false as const, status: 401, error: "Invalid, expired, or superseded link" };
   }
   const { rows } = await q(
     `SELECT * FROM repair.lessee_approvals
@@ -369,20 +474,67 @@ export async function approveViaLesseeLink(opts: {
   if (!approval) {
     return { ok: false as const, status: 404, error: "No pending lessee approval" };
   }
-  if (approval.status !== "PENDING" && approval.status !== "REPLY_RECEIVED") {
-    return { ok: false as const, status: 409, error: `Already ${approval.status}` };
+  if (approval.status === "SUPERSEDED") {
+    return { ok: false as const, status: 410, error: "This link was superseded by a newer send" };
+  }
+  if (
+    !["PENDING", "VIEWED", "OVERDUE", "REPLY_RECEIVED"].includes(
+      String(approval.status),
+    )
+  ) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: `Already ${approval.status} — link is read-only`,
+    };
+  }
+
+  const name = (opts.respondentName ?? "").trim();
+  const email = (opts.respondentEmail ?? "").trim().toLowerCase();
+  if (!name || !email.includes("@")) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Name and email are required",
+    };
   }
 
   const decision = opts.decision === "APPROVE" ? "APPROVED" : "REJECTED";
+  const comment = (opts.comment ?? "").trim();
+  if (decision === "REJECTED" && !comment) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Reject requires a comment",
+    };
+  }
+
   const status = decision === "APPROVED" ? "APPROVED_VIA_LINK" : "REJECTED_VIA_LINK";
 
   const { rows: updated } = await q(
     `UPDATE repair.lessee_approvals
      SET status = $2, decision = $3, channel = 'url', decided_at = now(),
-         comment = COALESCE($4, comment)
+         comment = COALESCE($4, comment),
+         respondent_name = $5, respondent_email = $6, respondent_ip = $7
      WHERE id = $1
      RETURNING *`,
-    [approval.id, status, decision, opts.comment ?? null],
+    [
+      approval.id,
+      status,
+      decision,
+      comment || null,
+      name,
+      email,
+      opts.respondentIp ?? null,
+    ],
+  );
+
+  // Clear overdue flag on response (decision recorded; never auto-approved)
+  await q(
+    `UPDATE repair.estimates
+     SET lessee_response_overdue = false
+     WHERE id = $1`,
+    [approval.estimate_id],
   );
 
   await insertDecision({
@@ -390,14 +542,18 @@ export async function approveViaLesseeLink(opts: {
     approvalId: approval.id,
     eventId: approval.event_id,
     revisionId: approval.revision_id,
-    lesseeEmail: approval.lessee_email,
+    lesseeEmail: email || approval.lessee_email,
     decision,
     channel: "url",
     amountPresentedCents: approval.amount_presented_cents
       ? Number(approval.amount_presented_cents)
       : null,
-    comment: opts.comment,
-    actor: approval.lessee_email,
+    comment: comment || undefined,
+    actor: email || approval.lessee_email,
+    respondentName: name,
+    respondentEmail: email,
+    respondentIp: opts.respondentIp,
+    sendVersion: approval.send_version != null ? Number(approval.send_version) : null,
   });
 
   await writeLesseeRevision({
@@ -405,12 +561,12 @@ export async function approveViaLesseeLink(opts: {
     estimateId: approval.estimate_id,
     action:
       decision === "APPROVED"
-        ? "Responsibility 6 Approved via link"
+        ? "Responsibility 6 Accepted via link"
         : "Responsibility 6 Rejected via link",
-    actor: approval.lessee_email,
-    actorEmail: approval.lessee_email,
+    actor: name,
+    actorEmail: email,
     amountCents: Number(approval.amount_presented_cents ?? 0),
-    comment: opts.comment,
+    comment: comment || undefined,
   });
 
   await writeAudit({
@@ -418,9 +574,25 @@ export async function approveViaLesseeLink(opts: {
     entity: "lessee_approval",
     entityId: approval.id,
     action:
-      decision === "APPROVED" ? "LESSEE_APPROVE_VIA_LINK" : "LESSEE_REJECT_VIA_LINK",
-    actor: approval.lessee_email,
+      decision === "APPROVED" ? "LESSEE_ACCEPT_VIA_LINK" : "LESSEE_REJECT_VIA_LINK",
+    after: {
+      respondentName: name,
+      respondentEmail: email,
+      respondentIp: opts.respondentIp ?? null,
+      sendVersion: approval.send_version,
+      decidedAt: updated[0]?.decided_at,
+    },
+    actor: email,
     via: "event_link",
+  });
+
+  await notify({
+    tenantId: approval.tenant_id,
+    eventId: approval.event_id,
+    type: "LESSEE_DECISION_RECEIVED",
+    bodyText: `Lessee ${decision === "APPROVED" ? "accepted" : "rejected"} Resp 6 via link (send #${approval.send_version ?? "?"}).`,
+    actor: email,
+    forceExclude: ["shop", "shop_contact"],
   });
 
   return {
@@ -429,6 +601,7 @@ export async function approveViaLesseeLink(opts: {
     approval: updated[0],
     decision,
     channel: "url" as const,
+    readOnly: true,
   };
 }
 
@@ -583,12 +756,14 @@ export async function confirmLesseeReply(opts: {
 
 /**
  * Lessee login-free view — ONLY what the email included:
- * scoped estimate + revision, Resp 6 lines, totals, granted attachments.
+ * scoped estimate + revision, Resp 6 lines (BRC columns), totals, granted attachments.
  * No owner lines, resp 7/internal, other lessees, comments, or app nav.
+ * After respond: still readable (read-only). Superseded / expired → null.
  */
 export async function getLesseeViewForToken(rawToken: string) {
   const { resolveActiveLink } = await import("./event-links");
   const { DATA_FILE_HEADER_FIELDS } = await import("./header-edits");
+  const { brcAttachmentBaseName } = await import("./brc-pdf");
   const resolved = await resolveActiveLink(rawToken, "LESSEE");
   if (!resolved) return null;
 
@@ -598,6 +773,7 @@ export async function getLesseeViewForToken(rawToken: string) {
     revision_id?: string | null;
     granted_document_ids?: string[];
     party_ref?: string | null;
+    expires_at?: string | null;
   };
 
   const { rows: appr } = await q(
@@ -606,7 +782,11 @@ export async function getLesseeViewForToken(rawToken: string) {
      ORDER BY created_at DESC LIMIT 1`,
     [link.id],
   );
-  const approval = appr[0];
+  let approval = appr[0];
+  if (approval && String(approval.status) === "SUPERSEDED") {
+    return null;
+  }
+
   const estimateId = String(
     link.estimate_id ?? approval?.estimate_id ?? "",
   );
@@ -618,11 +798,50 @@ export async function getLesseeViewForToken(rawToken: string) {
   }
 
   // Token must still match current approval revision (new revision invalidates)
+  if (approval && String(approval.revision_id) !== revisionId) {
+    return null;
+  }
+
+  // Mark Viewed on first open (never auto-approve)
   if (
     approval &&
-    String(approval.revision_id) !== revisionId
+    ["PENDING", "OVERDUE"].includes(String(approval.status)) &&
+    !approval.viewed_at
   ) {
-    return null;
+    const { rows: viewed } = await q(
+      `UPDATE repair.lessee_approvals
+       SET viewed_at = COALESCE(viewed_at, now()),
+           status = CASE
+             WHEN status = 'PENDING' THEN 'VIEWED'
+             ELSE status
+           END
+       WHERE id = $1
+       RETURNING *`,
+      [approval.id],
+    );
+    approval = viewed[0] ?? approval;
+    await writeAudit({
+      tenantId: approval.tenant_id,
+      entity: "lessee_approval",
+      entityId: approval.id,
+      action: "LESSEE_LINK_VIEWED",
+      after: { sendVersion: approval.send_version },
+      actor: approval.lessee_email,
+      via: "event_link",
+    });
+  }
+
+  // Soft overdue check on view (flag only — never auto-approve)
+  if (approval) {
+    await flagLesseeOverdueIfNeeded({
+      estimateId,
+      tenantId: approval.tenant_id,
+    });
+    const { rows: refreshed } = await q(
+      `SELECT * FROM repair.lessee_approvals WHERE id = $1`,
+      [approval.id],
+    );
+    approval = refreshed[0] ?? approval;
   }
 
   const totals = await computeLesseeTotals({
@@ -632,10 +851,21 @@ export async function getLesseeViewForToken(rawToken: string) {
   if (!totals.ok) return null;
   const bundle = totals.bundle;
 
-  // Refuse if token's estimate/event don't match
   if (bundle.eventId !== String(resolved.event.id)) {
     return null;
   }
+
+  const { rows: shopMeta } = await q(
+    `SELECT s.name AS shop_name, s.city, s.state, s.shop_mark,
+            e.entity_code, e.car_mark, e.car_number
+     FROM repair.events e
+     LEFT JOIN repair.shops s ON s.id = e.shop_id AND s.deleted_at IS NULL
+     WHERE e.id = $1`,
+    [resolved.event.id],
+  );
+  const shop = shopMeta[0] ?? {};
+  const shopCityState = [shop.city, shop.state].filter(Boolean).join(", ");
+  const shopDisplay = [shop.shop_name, shopCityState].filter(Boolean).join(" – ");
 
   const grantedIds: string[] = Array.isArray(link.granted_document_ids)
     ? link.granted_document_ids.map(String)
@@ -674,8 +904,30 @@ export async function getLesseeViewForToken(rawToken: string) {
     Object.prototype.hasOwnProperty.call(headerPublic, f.key),
   );
 
-  // Dollars for legacy UI that still reads amountPresented as dollars
   const amountPresentedDollars = bundle.totalCents / 100;
+  const decided =
+    approval &&
+    [
+      "APPROVED_VIA_LINK",
+      "REJECTED_VIA_LINK",
+      "REPLY_CONFIRMED",
+      "REPLY_REJECTED",
+      "MANUAL_APPROVED",
+      "MANUAL_REJECTED",
+    ].includes(String(approval.status));
+  const canDecide = !decided;
+  const ownerStatus = approval
+    ? mapApprovalToOwnerStatus(approval)
+    : ("None" as LesseeOwnerStatus);
+
+  const estimateNo = estimateId.replace(/-/g, "").slice(0, 8).toUpperCase();
+  const carInitial = String(
+    headerPublic.carInitial ?? resolved.event.car_mark ?? "",
+  );
+  const carNumber = String(
+    headerPublic.carNumber ?? resolved.event.car_number ?? "",
+  );
+  const base = brcAttachmentBaseName(carInitial, carNumber, estimateNo);
 
   return {
     link: {
@@ -683,7 +935,11 @@ export async function getLesseeViewForToken(rawToken: string) {
       scope: "LESSEE",
       estimate_id: estimateId,
       revision_id: revisionId,
-      expires_at: (resolved.link as { expires_at?: string }).expires_at ?? null,
+      expires_at:
+        approval?.link_expires_at ??
+        link.expires_at ??
+        (resolved.link as { expires_at?: string }).expires_at ??
+        null,
       party_ref: link.party_ref ?? null,
     },
     event: {
@@ -693,7 +949,11 @@ export async function getLesseeViewForToken(rawToken: string) {
     },
     estimate: { id: estimateId },
     revisionId,
-    /** Resp 6 only — never owner / resp 7 / other lessees */
+    workspaceTitle: "RESIDCO",
+    shopDisplay,
+    shopName: shop.shop_name ? String(shop.shop_name) : null,
+    shopCityState: shopCityState || null,
+    /** Resp 6 only — BRC columns via enrichLineFromRaw in lessee-totals */
     lines: bundle.lines.map((l) => ({
       ...l,
       labor: l.labor_cents / 100,
@@ -704,22 +964,49 @@ export async function getLesseeViewForToken(rawToken: string) {
       material_cents_label: String(l.material_cents),
       amount_cents_label: String(l.amount_cents),
     })),
-    /** Intentionally omitted: allLines (no owner / internal lines) */
     allLines: undefined,
     header: headerPublic,
     headerFields,
     documents,
+    documentsViewerPath: `/repair/lessee/${rawToken}/documents`,
+    downloads: {
+      pdf: {
+        filename: `${base}_Resp6.pdf`,
+        url: `/api/repair/lessee/${rawToken}/downloads/resp6-pdf`,
+      },
+      data500: {
+        filename: `${base}_Resp6Byte500.txt`,
+        url: `/api/repair/lessee/${rawToken}/downloads/resp6-data`,
+      },
+    },
     ownRespCodes: ["6"],
     amountPresented: amountPresentedDollars,
     amountPresentedCents: bundle.totalCents,
     amountMoney: bundle.amountMoney,
-    /** Hide pencil / admin / nav */
+    approval: approval
+      ? {
+          id: approval.id,
+          status: approval.status,
+          ownerStatus,
+          decision: approval.decision ?? null,
+          responseDueAt: approval.response_due_at ?? null,
+          responseDueAtEt: formatDueEt(approval.response_due_at),
+          viewedAt: approval.viewed_at ?? null,
+          decidedAt: approval.decided_at ?? null,
+          sendVersion: approval.send_version != null
+            ? Number(approval.send_version)
+            : null,
+          respondentName: approval.respondent_name ?? null,
+          respondentEmail: approval.respondent_email ?? null,
+        }
+      : null,
     readOnly: true,
+    canDecide,
     canPencilEdit: false,
     hideAppNav: true,
-    note:
-      "Login-free lessee view: your Resp 6 lines, totals, and the attachments from the email only. " +
-      "Approve or reject with a comment. No access to other estimates, owner lines, or internal notes.",
+    note: canDecide
+      ? "Login-free lessee view: Resp 6 lines exactly as granted, matching totals, and attachments from this send only. Accept or Reject the whole estimate (Reject requires a comment)."
+      : "You have already responded. This link is read-only.",
   };
 }
 
@@ -776,4 +1063,317 @@ export async function assertLesseeTokenEstimateAccess(opts: {
     };
   }
   return { ok: true };
+}
+
+/**
+ * When response window passes: flag "Lessee response overdue" on estimate +
+ * approval. Never auto-approves.
+ */
+export async function flagLesseeOverdueIfNeeded(opts: {
+  estimateId: string;
+  tenantId?: string;
+}): Promise<{ flagged: boolean; approvalId?: string }> {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { rows } = await q(
+    `SELECT * FROM repair.lessee_approvals
+     WHERE estimate_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+       AND status IN ('PENDING', 'VIEWED', 'OVERDUE', 'REPLY_RECEIVED')
+       AND response_due_at IS NOT NULL
+       AND response_due_at < now()
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [opts.estimateId, tenantId],
+  );
+  if (!rows[0]) return { flagged: false };
+  const a = rows[0];
+  if (!a.overdue_flagged_at || a.status !== "OVERDUE") {
+    await q(
+      `UPDATE repair.lessee_approvals
+       SET status = CASE
+             WHEN status IN ('PENDING', 'VIEWED') THEN 'OVERDUE'
+             ELSE status
+           END,
+           overdue_flagged_at = COALESCE(overdue_flagged_at, now())
+       WHERE id = $1`,
+      [a.id],
+    );
+    await q(
+      `UPDATE repair.estimates
+       SET lessee_response_overdue = true,
+           lessee_response_overdue_at = COALESCE(lessee_response_overdue_at, now())
+       WHERE id = $1 AND tenant_id = $2`,
+      [opts.estimateId, tenantId],
+    );
+    await writeAudit({
+      tenantId,
+      entity: "lessee_approval",
+      entityId: a.id,
+      action: "LESSEE_RESPONSE_OVERDUE",
+      after: {
+        responseDueAt: a.response_due_at,
+        note: "Flag only — never auto-approve",
+      },
+      actor: "system",
+      via: "job",
+    });
+  }
+  return { flagged: true, approvalId: a.id };
+}
+
+/** Owner Estimate Review: current lessee status + response history. */
+export async function getOwnerLesseePanel(opts: {
+  estimateId: string;
+  tenantId?: string;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  await flagLesseeOverdueIfNeeded(opts);
+
+  const { rows: approvals } = await q(
+    `SELECT *
+     FROM repair.lessee_approvals
+     WHERE estimate_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+     ORDER BY created_at DESC`,
+    [opts.estimateId, tenantId],
+  );
+  const current = approvals[0] ?? null;
+  const ownerStatus = current
+    ? mapApprovalToOwnerStatus(current)
+    : ("None" as LesseeOwnerStatus);
+
+  const { rows: history } = await q(
+    `SELECT d.*, a.send_version
+     FROM repair.lessee_approval_decisions d
+     JOIN repair.lessee_approvals a ON a.id = d.approval_id
+     WHERE a.estimate_id = $1 AND a.tenant_id = $2
+     ORDER BY d.decided_at DESC, d.created_at DESC`,
+    [opts.estimateId, tenantId],
+  );
+
+  const { rows: est } = await q(
+    `SELECT lessee_response_overdue, lessee_response_overdue_at
+     FROM repair.estimates WHERE id = $1 AND tenant_id = $2`,
+    [opts.estimateId, tenantId],
+  );
+
+  return {
+    ownerStatus,
+    overdue: Boolean(est[0]?.lessee_response_overdue) || ownerStatus === "Overdue",
+    overdueAt: est[0]?.lessee_response_overdue_at ?? null,
+    current: current
+      ? {
+          id: current.id,
+          status: current.status,
+          ownerStatus,
+          responseDueAt: current.response_due_at ?? null,
+          responseDueAtEt: formatDueEt(current.response_due_at),
+          viewedAt: current.viewed_at ?? null,
+          decidedAt: current.decided_at ?? null,
+          sendVersion:
+            current.send_version != null ? Number(current.send_version) : null,
+          amountPresentedCents: current.amount_presented_cents
+            ? Number(current.amount_presented_cents)
+            : null,
+          decision: current.decision ?? null,
+          comment: current.comment ?? null,
+          respondentName: current.respondent_name ?? null,
+          respondentEmail: current.respondent_email ?? null,
+          lesseeEmail: current.lessee_email,
+        }
+      : null,
+    sends: approvals.map((a) => ({
+      id: a.id,
+      status: a.status,
+      ownerStatus: mapApprovalToOwnerStatus(a),
+      sendVersion: a.send_version != null ? Number(a.send_version) : null,
+      createdAt: a.created_at,
+      responseDueAt: a.response_due_at,
+      responseDueAtEt: formatDueEt(a.response_due_at),
+      decidedAt: a.decided_at,
+      viewedAt: a.viewed_at,
+    })),
+    history: history.map((h) => ({
+      id: h.id,
+      decision: h.decision,
+      channel: h.channel,
+      decidedAt: h.decided_at,
+      comment: h.comment,
+      respondentName: h.respondent_name,
+      respondentEmail: h.respondent_email,
+      respondentIp: h.respondent_ip,
+      sendVersion: h.send_version != null ? Number(h.send_version) : null,
+      confirmedByReviewer: h.confirmed_by_reviewer,
+    })),
+  };
+}
+
+/**
+ * Owner records phone/email approval manually with a note.
+ * Used when window passed or lessee responded off-link. Never silent.
+ */
+export async function recordManualLesseeDecision(opts: {
+  estimateId: string;
+  decision: "APPROVE" | "REJECT";
+  note: string;
+  actor: string;
+  lesseeEmail?: string;
+  tenantId?: string;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const note = opts.note.trim();
+  if (!note) {
+    return { ok: false as const, status: 400, error: "Note is required for manual recording" };
+  }
+  const decision = opts.decision === "APPROVE" ? "APPROVED" : "REJECTED";
+  const status =
+    decision === "APPROVED" ? "MANUAL_APPROVED" : "MANUAL_REJECTED";
+
+  const { rows: open } = await q(
+    `SELECT * FROM repair.lessee_approvals
+     WHERE estimate_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+       AND status IN ('PENDING', 'VIEWED', 'OVERDUE', 'REPLY_RECEIVED')
+     ORDER BY created_at DESC LIMIT 1`,
+    [opts.estimateId, tenantId],
+  );
+
+  let approval = open[0];
+  if (!approval) {
+    // Create a shell approval if none open (owner documenting off-system response)
+    const { rows: est } = await q(
+      `SELECT e.id AS estimate_id, e.event_id, e.entity_code,
+              (SELECT id FROM repair.estimate_revisions
+               WHERE estimate_id = e.id ORDER BY rev_no DESC LIMIT 1) AS revision_id
+       FROM repair.estimates e
+       WHERE e.id = $1 AND e.tenant_id = $2 AND e.deleted_at IS NULL`,
+      [opts.estimateId, tenantId],
+    );
+    if (!est[0]?.revision_id) {
+      return { ok: false as const, status: 404, error: "Estimate not found" };
+    }
+    const amountCents = await resp6AmountCents(String(est[0].revision_id));
+    const { rows: created } = await q(
+      `INSERT INTO repair.lessee_approvals
+         (tenant_id, event_id, estimate_id, revision_id, lessee_email, status,
+          channel, amount_presented_cents, amount_presented, decision, comment,
+          decided_at, manual_note, manual_recorded_by, created_by, send_version)
+       VALUES ($1,$2,$3,$4,$5,$6,'manual',$7,$8,$9,$10,now(),$10,$11,$11,
+               COALESCE((SELECT MAX(send_version) FROM repair.lessee_approvals WHERE estimate_id=$3),0))
+       RETURNING *`,
+      [
+        tenantId,
+        est[0].event_id,
+        opts.estimateId,
+        est[0].revision_id,
+        (opts.lesseeEmail ?? "manual@recorded").trim().toLowerCase(),
+        status,
+        amountCents,
+        amountCents / 100,
+        decision,
+        note,
+        opts.actor,
+      ],
+    );
+    approval = created[0];
+  } else {
+    const { rows: updated } = await q(
+      `UPDATE repair.lessee_approvals
+       SET status = $2, decision = $3, channel = 'manual', decided_at = now(),
+           comment = $4, manual_note = $4, manual_recorded_by = $5
+       WHERE id = $1
+       RETURNING *`,
+      [approval.id, status, decision, note, opts.actor],
+    );
+    approval = updated[0];
+  }
+
+  await q(
+    `UPDATE repair.estimates
+     SET lessee_response_overdue = false
+     WHERE id = $1`,
+    [opts.estimateId],
+  );
+
+  await insertDecision({
+    tenantId,
+    approvalId: approval.id,
+    eventId: approval.event_id,
+    revisionId: approval.revision_id,
+    lesseeEmail: approval.lessee_email,
+    decision,
+    channel: "manual",
+    amountPresentedCents: approval.amount_presented_cents
+      ? Number(approval.amount_presented_cents)
+      : null,
+    comment: note,
+    confirmedByReviewer: opts.actor,
+    confirmedAt: new Date().toISOString(),
+    actor: opts.actor,
+    sendVersion:
+      approval.send_version != null ? Number(approval.send_version) : null,
+  });
+
+  await writeLesseeRevision({
+    tenantId,
+    estimateId: opts.estimateId,
+    action:
+      decision === "APPROVED"
+        ? "Responsibility 6 Accepted (manual / phone-email)"
+        : "Responsibility 6 Rejected (manual / phone-email)",
+    actor: opts.actor,
+    amountCents: Number(approval.amount_presented_cents ?? 0),
+    comment: note,
+  });
+
+  await writeAudit({
+    tenantId,
+    entity: "lessee_approval",
+    entityId: approval.id,
+    action: "LESSEE_MANUAL_DECISION",
+    after: { decision, note },
+    actor: opts.actor,
+    via: "UI",
+  });
+
+  return { ok: true as const, approval, decision, channel: "manual" as const };
+}
+
+/** Lessee download of Resp6 PDF / 500-byte for this send only. */
+export async function getLesseeDownloadForToken(opts: {
+  rawToken: string;
+  kind: "resp6-pdf" | "resp6-data";
+}) {
+  const view = await getLesseeViewForToken(opts.rawToken);
+  if (!view) {
+    return { ok: false as const, status: 401, error: "Invalid or expired lessee link" };
+  }
+  const { resolveLesseeAttachments } = await import("./lessee-attachments");
+  const resolved = await resolveLesseeAttachments({
+    eventId: String(view.event.id),
+    revisionId: String(view.revisionId),
+    estimateId: String(view.estimate.id),
+    tenantId: DEFAULT_TENANT_ID,
+    actor: "lessee-link",
+    carLabel: `${view.event.car_mark} ${view.event.car_number}`.trim(),
+    documentIds: (view.documents as Array<{ id: string }>).map((d) => d.id),
+    lesseeOnly: true,
+  });
+  if (opts.kind === "resp6-pdf") {
+    if (!resolved.pdfBytes) {
+      return { ok: false as const, status: 404, error: "Resp6 PDF not available" };
+    }
+    return {
+      ok: true as const,
+      filename: resolved.pdfFilename || view.downloads.pdf.filename,
+      mime: "application/pdf",
+      bytes: resolved.pdfBytes,
+    };
+  }
+  if (!resolved.dataBytes) {
+    return { ok: false as const, status: 404, error: "Resp6 data file not available" };
+  }
+  return {
+    ok: true as const,
+    filename: resolved.dataFilename || view.downloads.data500.filename,
+    mime: "text/plain",
+    bytes: resolved.dataBytes,
+  };
 }

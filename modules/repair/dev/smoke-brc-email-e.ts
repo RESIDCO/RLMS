@@ -302,10 +302,11 @@ async function main() {
     bad("email description", table.description.slice(0, 80));
   }
   if (
+    !table.description.includes("business day") &&
     !table.description.includes("48 hours") &&
     !table.description.includes(`${preview.responseHours} hours`)
   ) {
-    bad("email hours", table.description);
+    bad("email response window", table.description);
   }
   ok("email table has Category/Equipment/Dollar Amount/Client/User/Description");
 

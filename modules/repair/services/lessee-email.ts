@@ -15,6 +15,10 @@ import {
 } from "./brc-pdf";
 import { formatCentsWithCommas } from "./money";
 import { workspaceTitle } from "./entity";
+import {
+  loadLesseeWindowConfig,
+  responseWindowPhrase,
+} from "./lessee-window";
 
 export type LesseeEmailDraft = {
   subject: string;
@@ -38,21 +42,24 @@ export type LesseeEmailDraft = {
     pdf: string;
     data500: string;
   };
+  /** @deprecated Prefer responseBusinessDays — kept for preview compatibility */
   responseHours: number;
+  responseBusinessDays: number;
+  responseWindowPhrase: string;
   approveUrlPath: string | null;
   carLabel: string;
   shopDisplay: string;
 };
 
-export async function loadLesseeEmailSettings(tenantId = DEFAULT_TENANT_ID) {
+export async function loadLesseeEmailSettings(
+  tenantId = DEFAULT_TENANT_ID,
+  entityCode?: string | null,
+) {
   const { rows } = await q(`SELECT settings FROM repair.tenants WHERE id = $1`, [
     tenantId,
   ]);
   const settings = (rows[0]?.settings as Record<string, unknown>) ?? {};
-  const responseHours = Math.max(
-    1,
-    Number(settings.lesseeResponseHours ?? 48) || 48,
-  );
+  const window = await loadLesseeWindowConfig({ tenantId, entityCode });
   const from =
     String(settings.systemFromEmail ?? "noreply@repair.local").trim() ||
     "noreply@repair.local";
@@ -62,7 +69,16 @@ export async function loadLesseeEmailSettings(tenantId = DEFAULT_TENANT_ID) {
   const outboxDir =
     String(settings.emailOutboxDir ?? "modules/repair/dev/email-outbox").trim() ||
     "modules/repair/dev/email-outbox";
-  return { responseHours, from, fromName, outboxDir, settings };
+  return {
+    responseHours: window.minHours, // legacy field — no longer used in Description
+    responseBusinessDays: window.businessDays,
+    responseWindowPhrase: responseWindowPhrase(window.businessDays),
+    window,
+    from,
+    fromName,
+    outboxDir,
+    settings,
+  };
 }
 
 /** Resolve To (lessee) + CC (owner sender + shop) for customary RESP6 email. */
@@ -189,13 +205,17 @@ export async function buildLesseeResponsibilityEmail(opts: {
   entityCode?: string | null;
   estimateNo: string;
   approveUrlPath?: string | null;
+  /** @deprecated Ignored — Description uses business days */
   responseHours?: number;
+  responseBusinessDays?: number;
   extraTo?: string[];
   tenantId?: string;
 }): Promise<LesseeEmailDraft> {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
-  const settings = await loadLesseeEmailSettings(tenantId);
-  const responseHours = opts.responseHours ?? settings.responseHours;
+  const settings = await loadLesseeEmailSettings(tenantId, opts.entityCode);
+  const businessDays =
+    opts.responseBusinessDays ?? settings.responseBusinessDays;
+  const windowPhrase = responseWindowPhrase(businessDays);
   const parties = await resolveLesseeEmailParties({
     eventId: opts.eventId,
     actor: opts.actor,
@@ -221,7 +241,7 @@ export async function buildLesseeResponsibilityEmail(opts: {
     `${carLabelFull} is currently at ${shopLoc || "the repair shop"} for repairs. ` +
     `The attached items have been identified as lessee responsibility items per the terms of the contract. ` +
     `Please review and advise your approval at your earliest convenience. ` +
-    `${client} requests a response within ${responseHours} hours of receipt of this notification. Thank you`;
+    `${client} requests a response within ${windowPhrase} of receipt of this notification. Thank you`;
 
   const dollarAmount = formatCentsWithCommas(opts.amountCents);
   const base = brcAttachmentBaseName(
@@ -296,7 +316,9 @@ export async function buildLesseeResponsibilityEmail(opts: {
     bodyHtml,
     table,
     attachmentNames,
-    responseHours,
+    responseHours: settings.responseHours,
+    responseBusinessDays: businessDays,
+    responseWindowPhrase: windowPhrase,
     approveUrlPath: approvePath,
     carLabel: carLabelFull,
     shopDisplay: shopLoc,

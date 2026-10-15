@@ -197,6 +197,10 @@ import {
   confirmLesseeReply,
   getLesseeViewForToken,
   getLesseeAttachmentForToken,
+  getLesseeDownloadForToken,
+  getOwnerLesseePanel,
+  flagLesseeOverdueIfNeeded,
+  recordManualLesseeDecision,
   assertLesseeTokenEstimateAccess,
 } from "./services/lessee-approval";
 import {
@@ -492,16 +496,77 @@ export function registerRepairPublicRoutes(app: Express, _deps: RepairRouteDeps 
     try {
       const decision =
         String(req.body?.decision ?? "").toUpperCase() === "REJECT" ? "REJECT" : "APPROVE";
+      const forwarded = String(req.headers["x-forwarded-for"] ?? "");
+      const ip =
+        forwarded.split(",")[0]?.trim() ||
+        req.socket?.remoteAddress ||
+        undefined;
       const result = await approveViaLesseeLink({
         rawToken: String(req.params.token),
         decision,
         comment: req.body?.comment ? String(req.body.comment) : undefined,
+        respondentName: req.body?.name ? String(req.body.name) : undefined,
+        respondentEmail: req.body?.email ? String(req.body.email) : undefined,
+        respondentIp: ip,
       });
       if (!result.ok) return res.status(result.status).json({ error: result.error });
       return res.json(result);
     } catch (err) {
       console.error("[repair/lessee/:token/decide]", err);
       return res.status(500).json({ error: "Lessee decision failed" });
+    }
+  });
+
+  /** §E Document Viewer in lessee mode — granted docs only (login-free). */
+  app.get("/api/repair/lessee/:token/documents-viewer", async (req, res) => {
+    try {
+      const view = await getLesseeViewForToken(String(req.params.token));
+      if (!view) {
+        return res.status(401).json({ error: "Invalid, expired, or superseded link" });
+      }
+      const granted = ((view.documents as Array<{ id: string }>) ?? []).map((d) =>
+        String(d.id),
+      );
+      const { listViewerDocuments } = await import("./services/documents-viewer");
+      const result = await listViewerDocuments({
+        estimateId: String(view.estimate.id),
+        eventId: String(view.event.id),
+        actorRole: "lessee",
+        grantedDocumentIds: granted,
+        categoryCode: req.query.category ? String(req.query.category) : undefined,
+        search: req.query.q ? String(req.query.q) : undefined,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json({
+        ...result,
+        lesseeMode: true,
+        token: req.params.token,
+        canDecide: view.canDecide,
+      });
+    } catch (err) {
+      console.error("[repair/lessee/:token/documents-viewer]", err);
+      return res.status(500).json({ error: "Lessee document viewer failed" });
+    }
+  });
+
+  app.get("/api/repair/lessee/:token/downloads/:kind", async (req, res) => {
+    try {
+      const kind =
+        String(req.params.kind) === "resp6-data" ? "resp6-data" : "resp6-pdf";
+      const result = await getLesseeDownloadForToken({
+        rawToken: String(req.params.token),
+        kind,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      res.setHeader("content-type", result.mime);
+      res.setHeader(
+        "content-disposition",
+        `attachment; filename="${result.filename}"`,
+      );
+      return res.send(result.bytes);
+    } catch (err) {
+      console.error("[repair/lessee/:token/downloads]", err);
+      return res.status(500).json({ error: "Download failed" });
     }
   });
 
@@ -2112,6 +2177,57 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
     return res.send(result.bytes);
+  });
+
+  /** §F Owner: lessee status / due / history on Estimate Review. */
+  app.get("/api/repair/estimates/:id/lessee-status", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const panel = await getOwnerLesseePanel({
+        estimateId: String(req.params.id),
+      });
+      return res.json(panel);
+    } catch (err) {
+      console.error("[repair/estimates/:id/lessee-status]", err);
+      return res.status(500).json({ error: "Failed to load lessee status" });
+    }
+  });
+
+  app.post("/api/repair/estimates/:id/lessee-manual", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const body = req.body ?? {};
+      const decision =
+        String(body.decision ?? "").toUpperCase() === "REJECT" ? "REJECT" : "APPROVE";
+      const result = await recordManualLesseeDecision({
+        estimateId: String(req.params.id),
+        decision,
+        note: String(body.note ?? ""),
+        actor: String(body.actor ?? uid),
+        lesseeEmail: body.lesseeEmail ? String(body.lesseeEmail) : undefined,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      return res.json(result);
+    } catch (err) {
+      console.error("[repair/estimates/:id/lessee-manual]", err);
+      return res.status(500).json({ error: "Manual lessee decision failed" });
+    }
+  });
+
+  app.post("/api/repair/estimates/:id/lessee-flag-overdue", async (req, res) => {
+    try {
+      const uid = await maybeRequireUser(deps, req, res);
+      if (!uid) return;
+      const result = await flagLesseeOverdueIfNeeded({
+        estimateId: String(req.params.id),
+      });
+      return res.json(result);
+    } catch (err) {
+      console.error("[repair/estimates/:id/lessee-flag-overdue]", err);
+      return res.status(500).json({ error: "Overdue flag failed" });
+    }
   });
 
   app.get("/api/repair/estimates/:id/send-lessee/history", async (req, res) => {

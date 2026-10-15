@@ -42,6 +42,7 @@ import SendLessee from "@/pages/repair/SendLessee";
 import UpdateResponsibilities from "@/pages/repair/UpdateResponsibilities";
 import EstimateDocuments from "@/pages/repair/EstimateDocuments";
 import LesseeApproval from "@/pages/repair/LesseeApproval";
+import LesseeDocuments from "@/pages/repair/LesseeDocuments";
 import RepairComingSoon from "@/pages/repair/RepairComingSoon";
 import BadOrders from "@/pages/repair/BadOrders";
 import BoReasons from "@/pages/repair/BoReasons";
@@ -124,6 +125,7 @@ function AppRouter() {
       <Route path="/dv/history/:id" component={DvHistory} />
       <Route path="/dv/reference" component={DvReference} />
       <Route path="/repair/e/:token" component={ShopEventLink} />
+      <Route path="/repair/lessee/:token/documents" component={LesseeDocuments} />
       <Route path="/repair/lessee/:token" component={LesseeApproval} />
       {/* Owner module placeholders — before /repair/estimates/:id so "brc" is not treated as an id */}
       <Route path="/repair/estimates/brc" component={RepairComingSoon} />
@@ -166,6 +168,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return <ShopEventLink />;
   }
   if (loc.startsWith("/repair/lessee/")) {
+    if (/\/documents\/?$/.test(loc.split("?")[0] ?? "")) {
+      return <LesseeDocuments />;
+    }
     return <LesseeApproval />;
   }
 

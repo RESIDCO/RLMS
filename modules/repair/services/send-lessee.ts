@@ -191,6 +191,8 @@ export async function buildSendLesseePreview(opts: {
     emailTable: draft.table,
     attachmentNames,
     responseHours: draft.responseHours,
+    responseBusinessDays: draft.responseBusinessDays,
+    responseWindowPhrase: draft.responseWindowPhrase,
     header: headerPublic,
     headerFields: DATA_FILE_HEADER_FIELDS.filter((f) =>
       [
@@ -530,6 +532,8 @@ export async function sendLesseeFromPreview(opts: {
       table: preview.emailTable,
       attachmentNames: preview.attachmentNames,
       responseHours: preview.responseHours,
+      responseBusinessDays: preview.responseBusinessDays,
+      responseWindowPhrase: preview.responseWindowPhrase,
       approveUrlPath: sent.lesseeUrlPath ?? null,
       carLabel: preview.carLabel,
       shopDisplay: preview.shopDisplay,

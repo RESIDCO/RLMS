@@ -10,6 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
+| **§F Lessee screen** | Apply `rlms-phase1-owner-ui-f-lessee.bundle` on tip **`81034cc`** (§E r2). Login-free signed link; Accept/Reject whole estimate; 3 business days (≥72h); overdue flag never auto-approves; owner status/history; email "within 3 business days". Smoke: `npm run repair:smoke-lessee`. Typecheck: `npm run repair:typecheck-client-lessee`. |
 | **§E r2 BRC PDF + Lessee email** | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on tip **`73b9e3d`** (§E Document Viewer). Billing Repair Card PDF (owner/lessee/shop filters); customary Resp6 email (subject/To/CC/body table/attachments); local `.eml` outbox. Smoke: `npm run repair:smoke-brc-email`. Typecheck: `npm run repair:typecheck-client-brc-email`. |
 | **§E Document Viewer** | Prior: `rlms-phase1-owner-ui-e-document-viewer.bundle` on tip **`ba5dc51`** → **`73b9e3d`**. File Attachments own-window from Estimate / BO / Wreck; left category list + right preview (image/PDF/500-byte/Office); filters; shop view-all non-voided + add-only; lessee granted-only; `owner_only` never to shop/lessee; bulk zip + Attach Send Lessee; required-docs checklist. Smoke: `npm run repair:smoke-documents`. Typecheck: `npm run repair:typecheck-client-documents`. |
 | **Wreck DV / settlement panel** | Prior: `rlms-phase1-owner-ui-wreck-dv.bundle` on tip **`cfd1028`** → **`ba5dc51`**. Dollars money inputs ($ / commas → cents); gauge copy + bar; labor-rate citation. Smoke: `npm run repair:smoke-wreck`. |
@@ -50,9 +51,9 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | **4** | Estimate Review `/#/repair/estimates/:id` (spec §D) | **r5 tip** (awaiting Bruce sign-off) |
 | **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **BUILD + hotfix + DV panel** (`ba5dc51`) |
 | **5 / §E** | Document Viewer (shot 03) + BRC PDF / Lessee email — [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on **`73b9e3d`** |
-| 6+ | Lessee polish, etc. | Parked |
+| **6 / §F** | Lessee screen — [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) | Apply `rlms-phase1-owner-ui-f-lessee.bundle` on **`81034cc`** |
 
-**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md)  
+**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) · [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md)  
 **Overall map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)
 
 ---
@@ -76,7 +77,33 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+21 | `rlms-phase1-owner-ui-wreck-hotfix.bundle` (blank Chrome / WorkspaceTitle) | **`dc704f1`** | → **`cfd1028`** |
 | N+22 | **`rlms-phase1-owner-ui-wreck-dv.bundle`** (DV panel dollars / gauge / contrast / labor citation) | **`cfd1028`** | → **`ba5dc51`** |
 | N+23 | **`rlms-phase1-owner-ui-e-document-viewer.bundle`** (§E File Attachments) | **`ba5dc51`** | → **`73b9e3d`** |
-| N+24 | **`rlms-phase1-owner-ui-e-brc-email.bundle`** (§E r2 BRC PDF + Lessee email) | **`73b9e3d`** | → **(see README)** |
+| N+24 | **`rlms-phase1-owner-ui-e-brc-email.bundle`** (§E r2 BRC PDF + Lessee email) | **`73b9e3d`** | → **`81034cc`** |
+| N+25 | **`rlms-phase1-owner-ui-f-lessee.bundle`** (§F Lessee screen) | **`81034cc`** | → **(see README)** |
+
+---
+
+## Apply §F Lessee screen (on tip `81034cc`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect 81034cc…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-f-lessee.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-f-lessee.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
+Then:
+
+```powershell
+$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+$env:REPAIR_LOCAL_DB = "1"
+$env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
+npm run repair:migrate:local
+npm run repair:typecheck-client-lessee
+npm run repair:smoke-lessee
+npm run repair:dev:local
+```
 
 ---
 

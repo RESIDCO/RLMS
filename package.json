@@ -30,6 +30,8 @@
     "repair:typecheck-client-documents": "tsx modules/repair/dev/typecheck-client-documents.ts",
     "repair:smoke-brc-email": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/smoke-brc-email-e.ts",
     "repair:typecheck-client-brc-email": "tsx modules/repair/dev/typecheck-client-brc-email.ts",
+    "repair:smoke-lessee": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/smoke-lessee-f.ts",
+    "repair:typecheck-client-lessee": "tsx modules/repair/dev/typecheck-client-lessee.ts",
     "repair:import-ref-data": "tsx modules/repair/dev/import-ref-data.ts",
     "repair:demo:local": "tsx modules/repair/dev/demo-local.ts",
     "repair:seed:estimates-history": "tsx modules/repair/dev/seed-estimates-history.ts"

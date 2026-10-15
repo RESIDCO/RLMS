@@ -10,8 +10,8 @@ import {
   vcfCarKeyFromDb,
   railcarPayloadFromCurrent,
   assignmentHistoryPayloadFromPeriod,
-  carNumberHistoryNaturalKey,
   carNumberHistoryPayloadFromPeriod,
+  remarkOldIdentityKey,
   type VcfExistingCar,
 } from "@shared/vcf-import";
 import {
@@ -76,9 +76,11 @@ export type VcfCommitResult = {
 };
 
 function asStr(v: unknown): string {
-  if (v == null) return "";
-  if (typeof v === "boolean") return v ? "true" : "false";
-  return String(v).trim();
+  if (v == null || v === "") return "";
+  if (typeof v === "boolean") return v ? "1" : "0";
+  const s = String(v).trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return iso ? iso[1] : s;
 }
 
 function payloadChanged(next: Record<string, unknown>, existing: Record<string, unknown>): boolean {
@@ -190,22 +192,11 @@ export async function runVcfCommit(opts: {
         db
           .from("car_number_history")
           .select("id, railcar_id, old_car_initial, old_car_number, new_car_initial, new_car_number, changed_at, changed_by, reason")
-          .eq("changed_by", "vcf-import")
           .order("id", { ascending: true })
           .range(from, to)
       );
       for (const r of cnhRows) {
-        cnhByKey.set(
-          carNumberHistoryNaturalKey({
-            railcarId: r.railcar_id,
-            old_car_initial: r.old_car_initial,
-            old_car_number: r.old_car_number,
-            new_car_initial: r.new_car_initial,
-            new_car_number: r.new_car_number,
-            changed_at: r.changed_at,
-          }),
-          r
-        );
+        cnhByKey.set(remarkOldIdentityKey(Number(r.railcar_id), r.old_car_initial, r.old_car_number), r);
       }
     }
 
@@ -289,9 +280,10 @@ export async function runVcfCommit(opts: {
         assertRailcarImporterPatch(insertPayload);
       }
 
+      const incomingActive = payload.active === true;
       const skipHistory = skipVcfAssignmentWrites({
         active_source: existingId ? (existingCar?.active_source as string | null) : "auto",
-        active: existingId ? (existingCar?.active as boolean | null) : true,
+        active: incomingActive,
       });
       let actions: ReturnType<typeof planVcfAssignmentCloseout> = [];
       if (!skipHistory && (existingId || insertPayload)) {
@@ -332,96 +324,116 @@ export async function runVcfCommit(opts: {
     await insertChunks(db, "vcf_load_assignment_backup", [...ahBackups.values()]);
 
     stage = "write_cars";
-    const BATCH = 100;
     let assignmentSkipped = 0;
     let assignmentUnchanged = 0;
     let remarkUnchanged = 0;
     const railcarInserts: Record<string, unknown>[] = [];
     const ahInserts: Record<string, unknown>[] = [];
     const cnhInserts: Record<string, unknown>[] = [];
+    const ahInsertPayloads: Record<string, unknown>[] = [];
+    const cnhInsertPayloads: Record<string, unknown>[] = [];
 
-    for (let i = 0; i < planned.length; i += BATCH) {
-      const slice = planned.slice(i, i + BATCH);
-      progress(`Writing cars (${Math.min(i + BATCH, planned.length)} of ${planned.length})`);
-      for (const item of slice) {
-        const { car } = item;
-        let railcarId = item.existingId;
-        if (item.existingId) {
-          if (item.updatePayload) {
-            const { error } = await db.from("railcars").update(item.updatePayload).eq("id", item.existingId);
-            if (error) fail(error.message);
-            written.updated += 1;
-          } else {
-            written.unchanged += 1;
-          }
-        } else if (item.insertPayload) {
-          const { data: ins, error } = await db.from("railcars").insert(item.insertPayload).select("id").single();
-          if (error) fail(error.message);
-          railcarId = ins!.id;
-          keyToId.set(car.carKey, railcarId);
-          railcarInserts.push({ load_id: loadId, railcar_id: railcarId });
-          written.inserted += 1;
-        }
+    const newCars = planned.filter((p) => p.insertPayload);
+    for (let i = 0; i < newCars.length; i += 50) {
+      const slice = newCars.slice(i, i + 50);
+      progress(`Inserting new cars (${Math.min(i + 50, newCars.length)} of ${newCars.length})`);
+      const { data: ins, error } = await db
+        .from("railcars")
+        .insert(slice.map((p) => p.insertPayload))
+        .select("id, car_initial, car_number");
+      if (error) fail(error.message);
+      for (const row of ins ?? []) {
+        const k = vcfCarKeyFromDb(row as any);
+        keyToId.set(k, row.id);
+        railcarInserts.push({ load_id: loadId, railcar_id: row.id });
+        written.inserted += 1;
+      }
+    }
 
-        if (item.skipHistory) {
-          assignmentSkipped += car.periods.length;
-        } else {
-          const incoming = car.periods.map((p) => assignmentHistoryPayloadFromPeriod(railcarId!, p, movedAt));
-          const actions =
-            item.existingId && item.actions.length
-              ? item.actions
-              : planVcfAssignmentCloseout({
-                  existingRows: ahByRailcar.get(railcarId!) ?? [],
-                  incoming,
-                });
-          const plannedStats = closeoutStats(actions);
-          for (const action of actions) {
-            if (action.op === "unchanged") continue;
-            if (action.op === "update") {
-              const { error } = await db.from("assignment_history").update(action.payload).eq("id", action.existingId);
-              if (error) fail(error.message);
-              written.assignmentUpdated += 1;
-            } else if (action.op === "insert") {
-              const { data: ins, error } = await db.from("assignment_history").insert(action.payload).select("id").single();
-              if (error) fail(error.message);
-              const next = ahByRailcar.get(railcarId!) ?? [];
-              next.push({ id: ins!.id, ...action.payload });
-              ahByRailcar.set(railcarId!, next);
-              ahInserts.push({ load_id: loadId, assignment_history_id: ins!.id });
-              written.assignmentInserted += 1;
-            } else if (action.op === "close") {
-              const { error } = await db
-                .from("assignment_history")
-                .update(closeoutClosePatch(action, movedAt))
-                .eq("id", action.existingId);
-              if (error) fail(error.message);
-              written.assignmentClosed += 1;
-            }
-          }
-          assignmentUnchanged += plannedStats.unchanged;
-        }
+    const patches = planned
+      .filter((p) => p.existingId && p.updatePayload)
+      .map((p) => ({ id: p.existingId, patch: p.updatePayload }));
+    written.unchanged = planned.filter((p) => p.existingId && !p.updatePayload).length;
+    const PATCH = 800;
+    for (let i = 0; i < patches.length; i += PATCH) {
+      const slice = patches.slice(i, i + PATCH);
+      progress(`Patching cars (${Math.min(i + PATCH, patches.length)} of ${patches.length})`);
+      const { data, error } = await db.rpc("vcf_patch_railcars", { p_rows: slice });
+      if (error) fail(error.message);
+      written.updated += Number(data ?? slice.length);
+    }
 
-        for (const p of car.periods) {
-          const remark = carNumberHistoryPayloadFromPeriod(railcarId!, p, movedAt);
-          if (!remark) continue;
-          const key = carNumberHistoryNaturalKey({
-            railcarId: remark.railcar_id,
-            old_car_initial: remark.old_car_initial,
-            old_car_number: remark.old_car_number,
-            new_car_initial: remark.new_car_initial,
-            new_car_number: remark.new_car_number,
-            changed_at: remark.changed_at,
-          });
-          if (cnhByKey.get(key)) {
-            remarkUnchanged += 1;
-            continue;
+    stage = "write_history";
+    const ahClosePayloads: { id: number; patch: Record<string, unknown> }[] = [];
+    const ahUpdatePayloads: { id: number; payload: Record<string, unknown> }[] = [];
+    for (const item of planned) {
+      const { car } = item;
+      const railcarId = item.existingId ?? keyToId.get(car.carKey);
+      if (!railcarId) fail(`No railcar id for ${car.carKey}`);
+      if (item.skipHistory) {
+        assignmentSkipped += car.periods.length;
+      } else {
+        const incoming = car.periods.map((p) => assignmentHistoryPayloadFromPeriod(railcarId, p, movedAt));
+        const actions =
+          item.existingId && item.actions.length
+            ? item.actions
+            : planVcfAssignmentCloseout({
+                existingRows: ahByRailcar.get(railcarId) ?? [],
+                incoming,
+              });
+        const plannedStats = closeoutStats(actions);
+        for (const action of actions) {
+          if (action.op === "unchanged") continue;
+          if (action.op === "update") {
+            ahUpdatePayloads.push({ id: action.existingId, payload: action.payload as Record<string, unknown> });
+          } else if (action.op === "insert") {
+            ahInsertPayloads.push(action.payload as Record<string, unknown>);
+          } else if (action.op === "close") {
+            ahClosePayloads.push({ id: action.existingId, patch: closeoutClosePatch(action, movedAt) });
           }
-          const { data: ins, error } = await db.from("car_number_history").insert(remark).select("id").single();
-          if (error) fail(error.message);
-          cnhByKey.set(key, { id: ins!.id, ...remark });
-          cnhInserts.push({ load_id: loadId, car_number_history_id: ins!.id });
-          written.remarkInserted += 1;
         }
+        assignmentUnchanged += plannedStats.unchanged;
+      }
+      for (const p of car.periods) {
+        const remark = carNumberHistoryPayloadFromPeriod(railcarId, p, movedAt);
+        if (!remark) continue;
+        const key = remarkOldIdentityKey(remark.railcar_id, remark.old_car_initial, remark.old_car_number);
+        if (cnhByKey.get(key)) {
+          remarkUnchanged += 1;
+          continue;
+        }
+        cnhByKey.set(key, remark);
+        cnhInsertPayloads.push(remark);
+      }
+    }
+
+    progress(`Writing assignment history (${ahUpdatePayloads.length} updates, ${ahClosePayloads.length} closes, ${ahInsertPayloads.length} inserts)`);
+    for (const u of ahUpdatePayloads) {
+      const { error } = await db.from("assignment_history").update(u.payload).eq("id", u.id);
+      if (error) fail(error.message);
+      written.assignmentUpdated += 1;
+    }
+    for (const c of ahClosePayloads) {
+      const { error } = await db.from("assignment_history").update(c.patch).eq("id", c.id);
+      if (error) fail(error.message);
+      written.assignmentClosed += 1;
+    }
+    for (let i = 0; i < ahInsertPayloads.length; i += 200) {
+      const slice = ahInsertPayloads.slice(i, i + 200);
+      const { data, error } = await db.from("assignment_history").insert(slice).select("id");
+      if (error) fail(error.message);
+      for (const row of data ?? []) {
+        ahInserts.push({ load_id: loadId, assignment_history_id: row.id });
+        written.assignmentInserted += 1;
+      }
+    }
+    for (let i = 0; i < cnhInsertPayloads.length; i += 200) {
+      const slice = cnhInsertPayloads.slice(i, i + 200);
+      const { data, error } = await db.from("car_number_history").insert(slice).select("id");
+      if (error) fail(error.message);
+      for (const row of data ?? []) {
+        cnhInserts.push({ load_id: loadId, car_number_history_id: row.id });
+        written.remarkInserted += 1;
       }
     }
 

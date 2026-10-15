@@ -314,6 +314,42 @@ function carNumStr(v: unknown): string {
   return n.ok ? n.car_number : s;
 }
 
+/** True for blank, 0, or all-zero OLD_CAR_NUMBER (not a real prior identity). */
+export function isAbsentOldCarNumber(v: unknown): boolean {
+  if (v == null || v === "") return true;
+  const s = typeof v === "number" ? String(Math.trunc(v)) : String(v).trim();
+  if (!s) return true;
+  if (s === "0" || /^0+$/.test(s)) return true;
+  const padded = carNumStr(s);
+  return !padded || /^0+$/.test(padded);
+}
+
+/** Strip leading zeros so 8352 and 008352 compare equal. Empty/zero → "". */
+export function normalizeRemarkCarNumber(v: unknown): string {
+  if (isAbsentOldCarNumber(v)) return "";
+  const s = typeof v === "number" ? String(Math.trunc(v)) : String(v).trim();
+  return s.replace(/^0+/, "") || "";
+}
+
+export function remarkOldIdentityKey(
+  railcarId: number,
+  oldInitial: string | null | undefined,
+  oldNumber: unknown
+): string {
+  return `${railcarId}|${String(oldInitial ?? "").trim().toUpperCase()}|${normalizeRemarkCarNumber(oldNumber)}`;
+}
+
+export function remarkIdentityUnchanged(
+  oldInitial: string | null | undefined,
+  oldNumber: unknown,
+  newInitial: string | null | undefined,
+  newNumber: unknown
+): boolean {
+  const oi = String(oldInitial ?? "").trim().toUpperCase();
+  const ni = String(newInitial ?? "").trim().toUpperCase();
+  return oi === ni && normalizeRemarkCarNumber(oldNumber) === normalizeRemarkCarNumber(newNumber);
+}
+
 export function parseVcfRow(raw: VcfRawRow, sourceRow: number): VcfParsedRow | null {
   const n = normalizeVcfHeaderRow(raw);
   const car_initial = (str(n.car_initial) ?? "").toUpperCase();
@@ -346,7 +382,7 @@ export function parseVcfRow(raw: VcfRawRow, sourceRow: number): VcfParsedRow | n
     lessee_name: str(n.lessee_name),
     rider_external_id: str(n.rider_external_id),
     old_car_initial: str(n.old_car_initial)?.toUpperCase() ?? null,
-    old_car_number: n.old_car_number == null || n.old_car_number === "" ? null : carNumStr(n.old_car_number),
+    old_car_number: isAbsentOldCarNumber(n.old_car_number) ? null : carNumStr(n.old_car_number),
     dot_code: str(n.dot_code),
     lease_type: str(n.lease_type),
     managed: str(n.managed),
@@ -686,19 +722,23 @@ export type CarNumberHistoryPayload = {
   reason: string;
 };
 
-/** Build car_number_history row when OLD_CAR_* is present. */
+/** Build car_number_history row when OLD_CAR_* is a real prior identity that differs. */
 export function carNumberHistoryPayloadFromPeriod(
   railcarId: number,
   p: VcfParsedRow,
   fallbackIso: string
 ): CarNumberHistoryPayload | null {
-  if (!p.old_car_initial && !p.old_car_number) return null;
+  const oldInitial = String(p.old_car_initial ?? "").trim();
+  if (!oldInitial || isAbsentOldCarNumber(p.old_car_number)) return null;
+  if (remarkIdentityUnchanged(oldInitial, p.old_car_number, p.car_initial, p.car_number)) {
+    return null;
+  }
   const changed_at =
     p.start_date && !p.start_date_unknown ? `${p.start_date}T00:00:00.000Z` : fallbackIso;
   return {
     railcar_id: railcarId,
-    old_car_initial: p.old_car_initial,
-    old_car_number: p.old_car_number || p.car_number,
+    old_car_initial: oldInitial.toUpperCase(),
+    old_car_number: carNumStr(p.old_car_number),
     new_car_initial: p.car_initial,
     new_car_number: p.car_number,
     changed_at,

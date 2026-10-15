@@ -45,7 +45,17 @@ import {
   type SummaryRowForRefresh,
   type FinancialParsedRow,
 } from "../shared/financial-import";
-import { buildVcfReview, compactVcfRowsFromMatrix, looksLikeVcf } from "../shared/vcf-import";
+import {
+  buildVcfReview,
+  carNumberHistoryPayloadFromPeriod,
+  compactVcfRowsFromMatrix,
+  isAbsentOldCarNumber,
+  looksLikeVcf,
+  normalizeRemarkCarNumber,
+  parseVcfRow,
+  remarkIdentityUnchanged,
+  remarkOldIdentityKey,
+} from "../shared/vcf-import";
 import {
   buildGapWarning,
   buildLoadChangeReport,
@@ -724,6 +734,52 @@ eq(
   eq(review.skippedManualCars[0]?.car_number, "999011", "manual car listed");
   eq(review.notInFileCount, 1, "TEST 999012 not in file");
   eq(review.projectedTotalCars, 5, "projected total = existing + new");
+}
+
+eq(isAbsentOldCarNumber(0), true, "OLD_CAR_NUMBER 0 is absent");
+eq(isAbsentOldCarNumber("000000"), true, "OLD_CAR_NUMBER 000000 is absent");
+eq(isAbsentOldCarNumber(""), true, "blank OLD_CAR_NUMBER is absent");
+eq(isAbsentOldCarNumber("8352"), false, "real OLD_CAR_NUMBER is present");
+eq(normalizeRemarkCarNumber("008352"), "8352", "remark number strips zeros");
+eq(normalizeRemarkCarNumber("8352"), "8352", "unpadded remark number");
+eq(
+  remarkOldIdentityKey(34713, "ACRX", "008352"),
+  remarkOldIdentityKey(34713, "ACRX", "8352"),
+  "remark dedupe ignores padding"
+);
+eq(remarkIdentityUnchanged("OFOX", "040040", "OFOX", "040040"), true, "same identity is not a remark");
+{
+  const junk = parseVcfRow(
+    { CAR_INITIAL: "ABCX", CAR_NUMBER: "123456", ACTIVE: "-1", ASSIGNMENT_ID: "1", OLD_CAR_NUMBER: 0 },
+    2
+  );
+  eq(carNumberHistoryPayloadFromPeriod(1, junk!, "2026-01-01T00:00:00.000Z"), null, "zero old number skips remark");
+  const same = parseVcfRow(
+    {
+      CAR_INITIAL: "OFOX",
+      CAR_NUMBER: "040040",
+      ACTIVE: "-1",
+      ASSIGNMENT_ID: "1",
+      OLD_CAR_INITIAL: "OFOX",
+      OLD_CAR_NUMBER: "040040",
+    },
+    3
+  );
+  eq(carNumberHistoryPayloadFromPeriod(1, same!, "2026-01-01T00:00:00.000Z"), null, "same identity skips remark");
+  const real = parseVcfRow(
+    {
+      CAR_INITIAL: "OFOX",
+      CAR_NUMBER: "040040",
+      ACTIVE: "-1",
+      ASSIGNMENT_ID: "1",
+      OLD_CAR_INITIAL: "AOKX",
+      OLD_CAR_NUMBER: "040040",
+    },
+    4
+  );
+  const payload = carNumberHistoryPayloadFromPeriod(38361, real!, "2026-01-01T00:00:00.000Z");
+  eq(payload?.old_car_initial, "AOKX", "real remark keeps old initial");
+  eq(payload?.old_car_number, "040040", "real remark keeps old number");
 }
 
 {

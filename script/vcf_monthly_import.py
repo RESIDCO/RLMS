@@ -63,16 +63,23 @@ def ah_key(railcar_id, assignment_id_ext, start_date, end_date=None) -> str:
     )
 
 
+def _absent_old_number(v) -> bool:
+    s = str(v if v is not None else "").strip()
+    return (not s) or s in ("0", "000000") or set(s) <= {"0"}
+
+
+def _norm_old_number(v) -> str:
+    if _absent_old_number(v):
+        return ""
+    return str(v).strip().lstrip("0") or ""
+
+
 def cnh_key(row) -> str:
-    day = str(row.get("changed_at") or "")[:10]
     return "|".join(
         [
             str(row["railcar_id"]),
             str(row.get("old_car_initial") or "").strip().upper(),
-            str(row.get("old_car_number") or "").strip(),
-            str(row.get("new_car_initial") or "").strip().upper(),
-            str(row.get("new_car_number") or "").strip(),
-            day,
+            _norm_old_number(row.get("old_car_number")),
         ]
     )
 
@@ -446,12 +453,14 @@ def main():
         if rid is None:
             continue
 
-        # Phase 1 close-out. Skip assignment_history for remark-retired / inactive
-        # using the car's state *before* this run (do not revive a just-inactivated row).
-        skip_history = (
-            skip_vcf_assignment_writes(existing_row)
-            if existing_id
-            else False
+        # Skip assignment_history for manual holds or cars that remain inactive
+        # *after* this run. Reactivations must write the incoming open period.
+        incoming_active = payload.get("active") is True
+        skip_history = skip_vcf_assignment_writes(
+            {
+                "active_source": (existing_row.get("active_source") if existing_id else "auto"),
+                "active": incoming_active,
+            }
         )
         if skip_history:
             stats["ah_skipped"] += len(c["periods"])
@@ -520,6 +529,14 @@ def main():
             ah_by_railcar[rid] = list(by_id.values())
 
         for p in c["periods"]:
+            old_i = str(p.get("old_car_initial") or "").strip()
+            if not old_i or _absent_old_number(p.get("old_car_number")):
+                continue
+            if (
+                old_i.upper() == str(p.get("car_initial") or "").strip().upper()
+                and _norm_old_number(p.get("old_car_number")) == _norm_old_number(p.get("car_number"))
+            ):
+                continue
             if p.get("old_car_initial") or p.get("old_car_number"):
                 changed = (
                     f"{p['start_date']}T00:00:00.000Z"
@@ -528,8 +545,8 @@ def main():
                 )
                 remark = {
                     "railcar_id": rid,
-                    "old_car_initial": p.get("old_car_initial"),
-                    "old_car_number": p.get("old_car_number") or p["car_number"],
+                    "old_car_initial": old_i.upper(),
+                    "old_car_number": p.get("old_car_number"),
                     "new_car_initial": p["car_initial"],
                     "new_car_number": p["car_number"],
                     "changed_at": changed,

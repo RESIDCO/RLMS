@@ -6,6 +6,7 @@ import {
   endDateMatchKey,
   openPeriodMatchKey,
   planVcfAssignmentCloseout,
+  applyVcfLeaseDateGuard,
   skipVcfAssignmentWrites,
   skipVcfRailcarPatch,
   stripManualProtectedRailcarFields,
@@ -59,6 +60,31 @@ ok(stripped.active === undefined, "strip drops active");
 ok(stripped.status === undefined, "strip drops status");
 ok(skipVcfRailcarPatch({ active_source: "manual" }), "manual skips all car patches");
 ok(!skipVcfRailcarPatch({ active_source: "auto" }), "auto allows car patches");
+
+{
+  const payload = {
+    lease_start_date: "2006-08-06",
+    lease_end_date: null,
+    lease_expiry: null,
+    managed_category: "ALF Marks",
+  };
+  const asset = applyVcfLeaseDateGuard(payload, {
+    lease_date_source: "asset_report",
+    lease_end_date: "2029-01-31",
+    lease_expiry: "2029-01-31",
+  });
+  ok(!("lease_start_date" in asset) && !("lease_end_date" in asset) && !("lease_expiry" in asset), "asset_report strips lease dates");
+  ok(asset.managed_category === "ALF Marks", "asset_report keeps managed_category");
+  const multi = applyVcfLeaseDateGuard(payload, { lease_date_source: "asset_report_multi_term" });
+  ok(!("lease_start_date" in multi), "multi-term strips lease start");
+  const records = applyVcfLeaseDateGuard(payload, {
+    lease_date_source: "car_records",
+    lease_end_date: "2029-09-30",
+    lease_expiry: "2029-09-30",
+  });
+  ok(!("lease_end_date" in records) && !("lease_expiry" in records), "never clear populated end/expiry");
+  ok(records.lease_start_date === "2006-08-06", "car_records may still write start");
+}
 
 ok(
   openPeriodMatchKey(1, "EA1739", "2026-07-21") ===

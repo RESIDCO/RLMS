@@ -48,6 +48,40 @@ export function skipVcfRailcarPatch(car: { active_source?: string | null }): boo
   return String(car.active_source ?? "").trim() === "manual";
 }
 
+export const VCF_ASSET_REPORT_LEASE_SOURCES = new Set(["asset_report", "asset_report_multi_term"]);
+export const VCF_LEASE_DATE_FIELDS = ["lease_start_date", "lease_end_date", "lease_expiry"] as const;
+
+function isBlankLeaseDate(v: unknown): boolean {
+  return v == null || String(v).trim() === "";
+}
+
+/**
+ * On existing cars: never overwrite Asset Report lease dates, and never clear a
+ * populated lease_end_date / lease_expiry. Period dates stay on assignment_history.
+ */
+export function applyVcfLeaseDateGuard(
+  payload: Record<string, unknown>,
+  existing: {
+    lease_date_source?: string | null;
+    lease_end_date?: unknown;
+    lease_expiry?: unknown;
+  },
+): Record<string, unknown> {
+  const out = { ...payload };
+  const src = String(existing.lease_date_source ?? "").trim();
+  if (VCF_ASSET_REPORT_LEASE_SOURCES.has(src)) {
+    for (const field of VCF_LEASE_DATE_FIELDS) delete out[field];
+    return out;
+  }
+  if (!isBlankLeaseDate(existing.lease_end_date) && isBlankLeaseDate(out.lease_end_date)) {
+    delete out.lease_end_date;
+  }
+  if (!isBlankLeaseDate(existing.lease_expiry) && isBlankLeaseDate(out.lease_expiry)) {
+    delete out.lease_expiry;
+  }
+  return out;
+}
+
 /** Fields VCF must not write when active_source = manual. */
 export const VCF_MANUAL_PROTECTED_RAILCAR_FIELDS = [
   "active",

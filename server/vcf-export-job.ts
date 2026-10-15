@@ -2,13 +2,9 @@ import { randomUUID } from "crypto";
 import { readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
+import { writeVcfExportWorkbook } from "./vcf-export-workbook";
 import {
-  V_VALID_EXPORT_COLUMN_WIDTHS,
-  V_VALID_EXPORT_HEADERS,
-  excelNumFmtForHeader,
-  exportRowToValues,
   sortVValidExportRows,
   viewRowToExport,
   type VValidViewRow,
@@ -156,22 +152,6 @@ async function uploadWorkbook(jobId: string, tmpPath: string): Promise<string> {
   return storagePath;
 }
 
-function applyExportSheetLayout(sheet: ExcelJS.Worksheet, dataRows: number) {
-  sheet.getRow(1).font = { bold: true };
-  sheet.views = [{ state: "frozen", ySplit: 1, activeCell: "A2" }];
-  const last = Math.max(1, dataRows + 1);
-  sheet.autoFilter = {
-    from: { row: 1, column: 1 },
-    to: { row: last, column: V_VALID_EXPORT_HEADERS.length },
-  };
-  V_VALID_EXPORT_HEADERS.forEach((h, i) => {
-    const col = sheet.getColumn(i + 1);
-    col.width = V_VALID_EXPORT_COLUMN_WIDTHS[i] ?? 12;
-    const fmt = excelNumFmtForHeader(h);
-    if (fmt) col.numFmt = fmt;
-  });
-}
-
 async function runJob(jobId: string) {
   const tmpPath = join(tmpdir(), `vcf-export-${jobId}.xlsx`);
   logMem(jobId, "start");
@@ -191,20 +171,7 @@ async function runJob(jobId: string) {
     }
 
     const rows = sortVValidExportRows(collected);
-    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
-      filename: tmpPath,
-      useStyles: true,
-      useSharedStrings: false,
-    });
-    const sheet = workbook.addWorksheet("V_VALID_CARS");
-    applyExportSheetLayout(sheet, rows.length);
-    sheet.addRow([...V_VALID_EXPORT_HEADERS]).commit();
-    for (const row of rows) {
-      sheet.addRow(exportRowToValues(row)).commit();
-    }
-
-    await workbook.commit();
-    const rowCount = rows.length;
+    const rowCount = await writeVcfExportWorkbook(tmpPath, rows);
     logMem(jobId, "workbook-committed", { rowCount });
 
     const storagePath = await uploadWorkbook(jobId, tmpPath);

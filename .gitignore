@@ -29,4 +29,6 @@ backups/
 modules/repair/dev/exports/
 modules/repair/dev/demo-output/
 modules/repair/dev/email-outbox/
+# §G r3 seed writes demo event/estimate IDs here (never commit)
+modules/repair/dev/shop-demo-ids.local.json
 

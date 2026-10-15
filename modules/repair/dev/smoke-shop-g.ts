@@ -1,5 +1,5 @@
 /**
- * Smoke: OWNER_UI §G — Shop portal + Railinc-style validation (+ r2 clarity)
+ * Smoke: OWNER_UI §G — Shop portal + Railinc-style validation (+ r2/r3)
  *
  * 1. Good file loads
  * 2. Each hard-reject
@@ -9,8 +9,9 @@
  * 6. Cross-shop 403
  * 7. Totals reconcile (integer cents)
  * 8. §G r2: AA contrast tokens, returnTo source, POD reason+history,
- *    missed POD, timeline, line comments, resubmit commentDiff+resolve,
- *    role switcher shop 403s
+ *    missed POD, timeline, line comments, resubmit commentDiff+resolve
+ * 9. §G r3: white input AA + placeholders; closed reason + inconsistent;
+ *    smoke hidden; owner/MP read-only; DEV banner production-gated
  *
  * Run: npm run repair:smoke-shop
  */
@@ -234,6 +235,9 @@ async function main() {
   });
   if (!shopA.ok) bad("shopA", shopA.error);
   const markA = String(shopA.shop!.shop_mark || shopA.shop!.reporting_mark);
+  await q(`UPDATE repair.shops SET is_smoke = true WHERE id = $1`, [
+    shopA.shop!.id,
+  ]);
 
   const shopB = await createShop({
     legalName: `§G Shop B ${RUN}`,
@@ -245,6 +249,9 @@ async function main() {
   });
   if (!shopB.ok) bad("shopB", shopB.error);
   const markB = String(shopB.shop!.shop_mark || shopB.shop!.reporting_mark);
+  await q(`UPDATE repair.shops SET is_smoke = true WHERE id = $1`, [
+    shopB.shop!.id,
+  ]);
 
   await q(
     `UPDATE repair.shops
@@ -278,6 +285,7 @@ async function main() {
   });
   if (!bo.ok) bad("bo", JSON.stringify(bo));
   const eventId = String(bo.event.id);
+  // is_smoke tagged later (after home-list asserts) so residue-hide can be verified
 
   const link = await issueEventLink({
     eventId,
@@ -674,8 +682,8 @@ async function main() {
     if (homeJson.kpis == null) bad("kpis", "shop home missing kpis");
     ok("HTTP shop home 200 + KPIs");
 
-    // Role switcher: owner hitting shop → 403
-    const owner403 = await fetch(
+    // §G r3: owner/MP → read-only shop view (200 + readOnly); other shop still 403
+    const ownerRo = await fetch(
       `http://127.0.0.1:${port}/api/repair/shop/home`,
       {
         headers: {
@@ -685,12 +693,15 @@ async function main() {
         },
       },
     );
-    if (owner403.status !== 403) {
-      bad("role-owner-403", `expected 403 got ${owner403.status}`);
+    if (!ownerRo.ok) bad("role-owner-ro", `expected 200 got ${ownerRo.status}`);
+    const ownerJson = await ownerRo.json();
+    if (!ownerJson.readOnly) bad("role-owner-ro-flag", "expected readOnly");
+    if (ownerJson.viewingAsShopMark !== markA) {
+      bad("role-owner-viewing", String(ownerJson.viewingAsShopMark));
     }
-    ok("DEV role switcher: owner → shop home 403");
+    ok("owner → shop home read-only (viewing as shop)");
 
-    const mp403 = await fetch(
+    const mpRo = await fetch(
       `http://127.0.0.1:${port}/api/repair/shop/events/${eventId}`,
       {
         headers: {
@@ -700,22 +711,47 @@ async function main() {
         },
       },
     );
-    if (mp403.status !== 403) {
-      bad("role-mp-403", `expected 403 got ${mp403.status}`);
+    if (!mpRo.ok) bad("role-mp-ro", `expected 200 got ${mpRo.status}`);
+    const mpJson = await mpRo.json();
+    if (!mpJson.readOnly) bad("role-mp-ro-flag", "expected readOnly");
+    ok("managing_partner → shop event read-only");
+
+    const ownerWrite = await fetch(
+      `http://127.0.0.1:${port}/api/repair/shop/events/${eventId}/lifecycle`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-repair-role": "owner",
+          "x-repair-shop-mark": markA,
+          "x-repair-actor": "owner-dev",
+        },
+        body: JSON.stringify({ arrival: "2026-10-03" }),
+      },
+    );
+    if (ownerWrite.status !== 403) {
+      bad("role-owner-write", `expected 403 got ${ownerWrite.status}`);
     }
-    ok("DEV role switcher: managing_partner → shop event 403");
+    ok("owner shop write blocked (403 read-only)");
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }
 
-  // ── §G r2 clarity ──────────────────────────────────────────────────
+  // ── §G r2/r3 clarity ───────────────────────────────────────────────
   const aaValue = contrastRatio(SHOP_AA_TOKENS.value, SHOP_AA_TOKENS.surface);
   const aaLabel = contrastRatio(SHOP_AA_TOKENS.label, SHOP_AA_TOKENS.surface);
+  const aaPh = contrastRatio(
+    SHOP_AA_TOKENS.placeholder,
+    SHOP_AA_TOKENS.inputBg,
+  );
   if (aaValue < 4.5) bad("aa-value", `value contrast ${aaValue}`);
   if (aaLabel < 4.5) bad("aa-label", `label contrast ${aaLabel}`);
-  ok(`AA contrast tokens value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)}`);
+  if (aaPh < 4.5) bad("aa-placeholder", `placeholder contrast ${aaPh}`);
+  ok(
+    `AA contrast tokens value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)} placeholder=${aaPh.toFixed(2)}`,
+  );
 
-  // axe-equivalent: scan shop pages for pale-on-light classes
+  // axe-equivalent: pale labels + dark input fills forbidden; white inputs required
   const shopPages = [
     "client/src/pages/repair/ShopPortal.tsx",
     "client/src/pages/repair/ShopBoDetail.tsx",
@@ -726,8 +762,21 @@ async function main() {
     if (src.includes("text-slate-400") || src.includes("text-slate-500")) {
       bad("axe-pale", `${rel} still uses pale slate-400/500`);
     }
+    if (!src.includes("shopAa.input") && !src.includes("bg-white")) {
+      bad("axe-input-white", `${rel} missing white input styling (shopAa.input)`);
+    }
+    if (/\bbg-background\b/.test(src) && !src.includes("shopAa.input")) {
+      bad("axe-input-dark", `${rel} uses bg-background without shopAa.input override`);
+    }
   }
-  ok("axe smoke: no pale slate-400/500 on shop routes");
+  const navSrcAa = readFsSync(
+    pathJoin(process.cwd(), "client/src/pages/repair/RepairNavChrome.tsx"),
+    "utf8",
+  );
+  if (!navSrcAa.includes("placeholder:text-slate-600") || !navSrcAa.includes("bg-white")) {
+    bad("axe-input-token", "shopAa.input must be white bg + slate-600 placeholder");
+  }
+  ok("axe smoke: inputs+placeholders empty/filled AA; no pale labels");
 
   // returnTo helper present in nav chrome
   const navSrc = readFsSync(
@@ -910,7 +959,7 @@ async function main() {
     ok("resubmit diff includes commented-lines change set + resolve path");
   }
 
-  // Seed script exists
+  // Seed script exists + hard-fail asserts
   const seedSrc = readFsSync(
     pathJoin(process.cwd(), "modules/repair/dev/seed-shop-demo.ts"),
     "utf8",
@@ -918,7 +967,149 @@ async function main() {
   if (!seedSrc.includes("DS01") || !seedSrc.includes("shop-samples")) {
     bad("seed", "seed-shop-demo missing DS01 / shop-samples");
   }
-  ok("seed-shop-demo script present (DS01 + samples)");
+  if (
+    !seedSrc.includes("shop-demo-ids.local.json") ||
+    !seedSrc.includes("assertDemoStates") ||
+    !seedSrc.includes("100005")
+  ) {
+    bad("seed-r3", "seed-shop-demo must hard-fail assert DEMO 100001–100005 + gitignored IDs");
+  }
+  ok("seed-shop-demo script present (DS01 + samples + hard-fail asserts)");
+
+  // Closed reason + inconsistent state helpers
+  const {
+    formatClosedReasonLine,
+    detectClosedInconsistency,
+    assertCloseRequirements,
+    markBadOrderClosed,
+  } = await import("../services/shop-clarity");
+  const line = formatClosedReasonLine({
+    completed: "2026-10-14",
+    invoiceNo: "INV9999",
+    invoicedAt: "2026-10-15",
+  });
+  if (!line.includes("Closed:") || !line.includes("10/14") || !line.includes("INV9999")) {
+    bad("closed-line", line);
+  }
+  const cancelLine = formatClosedReasonLine({
+    cancelled: true,
+    cancelReason: "duplicate BO",
+  });
+  if (!cancelLine.includes("cancelled by owner")) bad("closed-cancel", cancelLine);
+  const badState = detectClosedInconsistency({
+    isClosed: true,
+    completed: null,
+    hasInvoice: false,
+    openBlockingFlags: 2,
+  });
+  if (!badState.inconsistent || badState.reasons.length < 2) {
+    bad("inconsistent", JSON.stringify(badState));
+  }
+  ok("closed reason one-liner + inconsistent-state detector");
+
+  // Drive a proper close on the smoke event (completed + invoice, no flags)
+  await updateBoLifecycleDates({
+    eventId,
+    actor: "shop-a",
+    actorRole: "shop",
+    completed: "2026-10-14",
+  });
+  // Clear blocking flags so close can succeed
+  await q(
+    `UPDATE repair.estimate_validation_findings f
+     SET cleared_at = now(), cleared_by = 'smoke-g'
+     FROM repair.estimate_validation_runs r
+     WHERE f.run_id = r.id AND r.estimate_id = $1 AND f.cleared_at IS NULL`,
+    [estimateId],
+  ).catch(() => undefined);
+  await q(
+    `INSERT INTO repair.invoices
+       (tenant_id, event_id, shop_id, invoice_no, total, match_status, created_by)
+     SELECT $1, $2, $3, $4, 100.00, 'APPROVED', 'smoke-g'
+     WHERE NOT EXISTS (
+       SELECT 1 FROM repair.invoices WHERE event_id = $2 AND deleted_at IS NULL
+     )`,
+    [DEFAULT_TENANT_ID, eventId, shopA.shop!.id, `INV-SMOKE-${RUN}`],
+  );
+  const gateOk = await assertCloseRequirements({ eventId });
+  if (!gateOk.ok) bad("close-gate", gateOk.error);
+  const marked = await markBadOrderClosed({
+    eventId,
+    actor: "smoke-g",
+    invoiceNo: `INV-SMOKE-${RUN}`,
+    invoicedAt: "2026-10-15",
+  });
+  if (!marked.ok) bad("mark-closed", marked.error);
+  const lifeClosed = await getBoLifecycleBundle({ eventId });
+  if (!lifeClosed.closedReasonLine?.includes("Closed:")) {
+    bad("closed-ui", String(lifeClosed.closedReasonLine));
+  }
+  if (lifeClosed.inconsistentClosed) {
+    bad("closed-inconsistent", lifeClosed.inconsistentClosedReasons.join("; "));
+  }
+  ok(`closed BO reason on detail: ${lifeClosed.closedReasonLine}`);
+
+  // Inconsistent: closed without completed (synthetic)
+  const synth = detectClosedInconsistency({
+    isClosed: true,
+    completed: null,
+    hasInvoice: true,
+    openBlockingFlags: 0,
+  });
+  if (!synth.inconsistent) bad("synth-inconsistent", "expected missing completed");
+  ok("inconsistent state when Closed missing completed");
+
+  // Smoke residue: tag then hide from normal lists
+  await q(`UPDATE repair.events SET is_smoke = true WHERE id = $1`, [eventId]);
+  await q(`UPDATE repair.bad_orders SET is_smoke = true WHERE event_id = $1`, [
+    eventId,
+  ]);
+  const homeHidden = await shopPortalHome({
+    role: "shop",
+    shopMark: markA,
+    actor: "shop-a",
+  });
+  if (!homeHidden.ok) bad("home-hidden", homeHidden.error);
+  const smokeVisible = (homeHidden.badOrders || []).some(
+    (b: { event_id?: string }) => String(b.event_id) === eventId,
+  );
+  if (smokeVisible) bad("smoke-hide", "smoke BO should be hidden from shop home");
+  process.env.REPAIR_SHOW_SMOKE = "1";
+  const homeShow = await shopPortalHome({
+    role: "shop",
+    shopMark: markA,
+    actor: "shop-a",
+  });
+  delete process.env.REPAIR_SHOW_SMOKE;
+  if (!homeShow.ok) bad("home-show", homeShow.error);
+  const shown = (homeShow.badOrders || []).some(
+    (b: { event_id?: string }) => String(b.event_id) === eventId,
+  );
+  if (!shown) bad("smoke-show", "REPAIR_SHOW_SMOKE=1 should reveal smoke BOs");
+  ok("smoke-tagged BOs hidden from normal lists (REPAIR_SHOW_SMOKE reveals)");
+
+  // DEV banner production-gated
+  const roleSrc = readFsSync(
+    pathJoin(process.cwd(), "client/src/pages/repair/DevRoleSwitcher.tsx"),
+    "utf8",
+  );
+  if (!roleSrc.includes("import.meta.env.PROD") || !roleSrc.includes("return false")) {
+    bad("dev-banner-prod", "isDevBypassUi must return false when PROD");
+  }
+  if (!roleSrc.includes("isDevBypassUi")) {
+    bad("dev-banner", "DevRoleSwitcher missing isDevBypassUi gate");
+  }
+  ok("DEV role banner production-gated (PROD → no switcher)");
+
+  // clean-smoke-data script present
+  const cleanSrc = readFsSync(
+    pathJoin(process.cwd(), "modules/repair/dev/clean-smoke-data.ts"),
+    "utf8",
+  );
+  if (!cleanSrc.includes("REPAIR_LOCAL_DB") || !cleanSrc.includes("is_smoke")) {
+    bad("clean-smoke", "clean-smoke-data missing local-only + is_smoke");
+  }
+  ok("repair:clean-smoke-data script present");
 
   console.log("=== repair:smoke-shop PASS ===");
 }

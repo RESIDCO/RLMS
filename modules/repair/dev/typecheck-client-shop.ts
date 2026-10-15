@@ -1,5 +1,5 @@
 /**
- * Client typecheck gate for §G Shop portal (+ r2 clarity).
+ * Client typecheck gate for §G Shop portal (+ r2/r3 clarity).
  * Run: npm run repair:typecheck-client-shop
  */
 import { readFileSync } from "fs";
@@ -56,7 +56,16 @@ export function assertShopClientTypecheck(): void {
       bad("contrast", "ShopPortal must not use pale slate-400/500 labels");
     }
   }
-  ok("ShopPortal brand + status + car search + KPIs + AA labels");
+  if (!portal.includes("shopAa.input") || !portal.includes("closedReasonLine")) {
+    bad("r3-inputs-closed", "ShopPortal must use shopAa.input + show closedReasonLine");
+  }
+  if (!portal.includes("viewing as shop") && !portal.includes("Viewing as shop")) {
+    bad("readonly-banner", "ShopPortal must show Viewing as shop read-only banner");
+  }
+  if (!portal.includes("Inconsistent state")) {
+    bad("inconsistent", "ShopPortal must show Inconsistent state for bad Closed rows");
+  }
+  ok("ShopPortal brand + status + car search + KPIs + AA labels + r3");
 
   if (!bo.includes("Owner instructions") || !bo.includes("JIC")) {
     bad("bo", "ShopBoDetail must show owner instructions + JIC clock");
@@ -79,7 +88,13 @@ export function assertShopClientTypecheck(): void {
   if (!bo.includes("RepairBreadcrumbs") && !bo.includes("Shop home")) {
     bad("crumbs", "ShopBoDetail must breadcrumb Shop home > Bad Order");
   }
-  ok("ShopBoDetail instructions, JIC, upload+hand, docs, timeline, POD, flags");
+  if (!bo.includes("shopAa.input") || !bo.includes("closedReasonLine")) {
+    bad("r3-bo", "ShopBoDetail must use white shopAa.input + closedReasonLine");
+  }
+  if (!bo.includes("Inconsistent state") || !bo.includes("readOnly")) {
+    bad("r3-bo-ro", "ShopBoDetail must handle Inconsistent state + readOnly");
+  }
+  ok("ShopBoDetail instructions, JIC, upload+hand, docs, timeline, POD, flags, r3");
 
   if (!est.includes("Withdraw") || !est.includes("Resubmit")) {
     bad("actions", "ShopEstimateDetail must offer withdraw + resubmit");
@@ -109,7 +124,13 @@ export function assertShopClientTypecheck(): void {
   if (!role.includes("DEV ROLE") || !role.includes("managing_partner")) {
     bad("dev-role", "DevRoleSwitcher must show DEV ROLE banner + roles");
   }
-  ok("Nav chrome + DEV role switcher");
+  if (!role.includes("import.meta.env.PROD") || !role.includes("return false")) {
+    bad("dev-role-prod", "DevRoleSwitcher must gate on PROD (no banner in production)");
+  }
+  if (!nav.includes("placeholder:text-slate-600") || !nav.includes("bg-white")) {
+    bad("nav-input", "RepairNavChrome shopAa.input must be white + visible placeholder");
+  }
+  ok("Nav chrome + DEV role switcher (production-gated)");
 
   const app = readFileSync(join(ROOT, "client/src/App.tsx"), "utf8");
   if (!app.includes("ShopPortal") || !app.includes("/repair/shop")) {

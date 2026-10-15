@@ -11,6 +11,13 @@ export const shopAa = {
   value: "text-sm font-semibold text-slate-900",
   crumb: "text-sm text-slate-700 hover:underline",
   crumbCurrent: "text-sm font-semibold text-slate-900",
+  /** White fills, near-black text, ≥4.5:1 placeholders — never dark/black input fills. */
+  input:
+    "border border-slate-400 bg-white text-slate-900 placeholder:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 focus-visible:ring-offset-2 [color-scheme:light]",
+  select:
+    "mt-1 h-9 w-full rounded-md border border-slate-400 bg-white px-2 text-sm text-slate-900 [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-slate-700",
+  textarea:
+    "border border-slate-400 bg-white text-slate-900 placeholder:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 focus-visible:ring-offset-2 [color-scheme:light]",
 } as const;
 
 export type Crumb = { label: string; href?: string };

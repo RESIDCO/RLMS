@@ -1,6 +1,7 @@
 /**
  * §G Shop portal home — own shop mark only.
  * §G r2: AA contrast, KPIs, DEV role switcher.
+ * §G r3: white inputs, closed-BO reason, owner/MP read-only view.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
@@ -16,6 +17,8 @@ import { RepairBreadcrumbs, shopAa } from "./RepairNavChrome";
 
 type HomePayload = {
   shop: { id: string; shopMark: string; name: string };
+  readOnly?: boolean;
+  viewingAsShopMark?: string;
   byStatus: Record<string, number>;
   badOrders: Array<{
     event_id: string;
@@ -26,6 +29,9 @@ type HomePayload = {
     owner_instructions?: string;
     yard_arrived_at?: string;
     is_wreck?: boolean;
+    closedReasonLine?: string | null;
+    inconsistentClosed?: boolean;
+    inconsistentClosedReasons?: string[];
   }>;
   estimates: Array<{
     estimate_id: string;
@@ -115,6 +121,15 @@ export default function ShopPortal() {
   return (
     <div className={shopAa.page}>
       <DevRoleSwitcher shopMark={shopMark || undefined} />
+      {data?.readOnly && (
+        <div
+          className="border-b border-slate-400 bg-slate-100 px-4 py-2 text-sm text-slate-900"
+          data-testid="shop-readonly-banner"
+        >
+          Viewing as shop {data.viewingAsShopMark || shopMark || "????"} ·
+          read-only (owner / managing partner)
+        </div>
+      )}
       <header className="border-b border-slate-300 bg-white px-4 py-4 sm:px-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -136,10 +151,11 @@ export default function ShopPortal() {
               </Label>
               <Input
                 id="shopMark"
-                className="w-28 border-slate-400 font-mono uppercase text-slate-900"
+                className={cn("w-28 font-mono uppercase", shopAa.input)}
                 value={shopMark}
                 onChange={(e) => setShopMark(e.target.value.toUpperCase())}
                 maxLength={4}
+                placeholder="DS01"
               />
             </div>
             <Button onClick={() => void load()} disabled={busy}>
@@ -180,13 +196,13 @@ export default function ShopPortal() {
           <div className="flex flex-wrap gap-2">
             <Input
               placeholder="Initial"
-              className="w-24 border-slate-400 font-mono uppercase text-slate-900"
+              className={cn("w-24 font-mono uppercase", shopAa.input)}
               value={carInitial}
               onChange={(e) => setCarInitial(e.target.value.toUpperCase())}
             />
             <Input
               placeholder="Number"
-              className="w-32 border-slate-400 font-mono text-slate-900"
+              className={cn("w-32 font-mono", shopAa.input)}
               value={carNumber}
               onChange={(e) => setCarNumber(e.target.value)}
             />
@@ -248,6 +264,19 @@ export default function ShopPortal() {
                           {bo.lifecycle_status || "—"}
                           {bo.is_wreck ? " · Wreck" : ""}
                         </span>
+                        {bo.closedReasonLine && (
+                          <p className="mt-1 text-sm font-medium text-slate-900">
+                            {bo.closedReasonLine}
+                          </p>
+                        )}
+                        {bo.inconsistentClosed && (
+                          <p className="mt-1 rounded border border-red-700 bg-red-50 px-2 py-1 text-sm font-semibold text-red-900">
+                            Inconsistent state
+                            {bo.inconsistentClosedReasons?.length
+                              ? `: ${bo.inconsistentClosedReasons.join("; ")}`
+                              : ""}
+                          </p>
+                        )}
                         {bo.shopping_reason && (
                           <p className="text-sm text-slate-700">
                             {bo.shopping_reason}

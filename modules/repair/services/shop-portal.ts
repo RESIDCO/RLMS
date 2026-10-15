@@ -86,16 +86,50 @@ function normalizeMark(v: string): string {
     .toUpperCase();
 }
 
+const SHOP_WRITE_ROLES = new Set(["shop", "shop_user", "shop_link", "dev-bypass"]);
+const SHOP_READONLY_ROLES = new Set(["owner", "managing_partner"]);
+
+/** Owner/MP may view shop pages read-only; only shop roles may mutate. */
+export function isShopReadOnlyRole(role: string): boolean {
+  return SHOP_READONLY_ROLES.has(String(role ?? "").toLowerCase());
+}
+
+export function assertShopWriteRole(
+  role: string,
+): { ok: true } | { ok: false; status: 403; error: string } {
+  const r = String(role ?? "").toLowerCase();
+  if (SHOP_WRITE_ROLES.has(r)) return { ok: true };
+  if (SHOP_READONLY_ROLES.has(r)) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Read-only shop view (owner/managing partner)",
+    };
+  }
+  return { ok: false, status: 403, error: "Shop portal write requires shop role" };
+}
+
 /** Resolve shop row for actor; 403 if mark mismatch / missing. */
 export async function resolveShopContext(opts: ShopActor): Promise<
-  | { ok: true; shop: Record<string, unknown>; tenantId: string }
+  | {
+      ok: true;
+      shop: Record<string, unknown>;
+      tenantId: string;
+      readOnly: boolean;
+      viewingAsShopMark: string;
+    }
   | { ok: false; status: number; error: string }
 > {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const role = String(opts.role ?? "").toLowerCase();
-  if (role && role !== "shop" && role !== "dev-bypass" && role !== "shop_user") {
-    // Owners hitting shop routes get 403 (shop portal only)
-    if (["owner", "reviewer", "admin", "lessee", "managing_partner"].includes(role)) {
+  const readOnly = isShopReadOnlyRole(role);
+  if (
+    role &&
+    !SHOP_WRITE_ROLES.has(role) &&
+    !SHOP_READONLY_ROLES.has(role)
+  ) {
+    // Lessee / unrelated roles stay blocked
+    if (["reviewer", "admin", "lessee"].includes(role)) {
       return { ok: false, status: 403, error: "Shop portal only" };
     }
   }
@@ -133,7 +167,13 @@ export async function resolveShopContext(opts: ShopActor): Promise<
   if (shopMark !== mark && normalizeMark(String(shop.reporting_mark ?? "")) !== mark) {
     return { ok: false, status: 403, error: "Cross-shop access denied" };
   }
-  return { ok: true, shop, tenantId };
+  return {
+    ok: true,
+    shop,
+    tenantId,
+    readOnly,
+    viewingAsShopMark: shopMark || mark,
+  };
 }
 
 async function assertEventOwnedByShop(
@@ -205,21 +245,25 @@ export async function shopPortalHome(opts: ShopActor & {
     ? String(opts.carNumber).trim().replace(/^0+(?=\d)/, "")
     : null;
 
+  const showSmoke = process.env.REPAIR_SHOW_SMOKE === "1";
   const { rows: bos } = await q(
     `SELECT e.id AS event_id, e.car_mark, e.car_number, e.rule, e.is_wreck,
             e.yard_arrived_at, e.acknowledged_at, s.code AS event_status,
             bo.id AS bad_order_id, bo.lifecycle_status, bo.shopping_reason,
             bo.bo_date, bo.bo_city, bo.bo_state, bo.comments AS owner_instructions,
-            bo.arrival_date
+            bo.arrival_date, bo.closed_at, bo.closed_reason,
+            coalesce(e.is_smoke, false) OR coalesce(bo.is_smoke, false) AS is_smoke
      FROM repair.events e
      JOIN repair.statuses s ON s.id = e.status_id
      LEFT JOIN repair.bad_orders bo ON bo.event_id = e.id AND bo.deleted_at IS NULL
      WHERE e.tenant_id = $1 AND e.shop_id = $2 AND e.deleted_at IS NULL
        AND ($3::text IS NULL OR upper(e.car_mark) = $3)
        AND ($4::text IS NULL OR e.car_number = $4)
+       AND ($5::boolean OR (coalesce(e.is_smoke,false) = false
+            AND coalesce(bo.is_smoke,false) = false))
      ORDER BY e.created_at DESC
      LIMIT 200`,
-    [tenantId, shopId, carInitial, carNumber],
+    [tenantId, shopId, carInitial, carNumber, showSmoke],
   );
 
   const { rows: estimates } = await q(
@@ -236,9 +280,10 @@ export async function shopPortalHome(opts: ShopActor & {
        AND e.deleted_at IS NULL
        AND ($3::text IS NULL OR upper(e.car_mark) = $3)
        AND ($4::text IS NULL OR e.car_number = $4)
+       AND ($5::boolean OR coalesce(e.is_smoke,false) = false)
      ORDER BY est.created_at DESC
      LIMIT 200`,
-    [tenantId, shopId, carInitial, carNumber],
+    [tenantId, shopId, carInitial, carNumber, showSmoke],
   );
 
   const byStatus: Record<string, number> = {};
@@ -264,36 +309,129 @@ export async function shopPortalHome(opts: ShopActor & {
 
   const kpisEarly = await shopKpis({ shopId, tenantId: ctx.tenantId });
 
-  if (opts.status) {
-    const want = opts.status.toLowerCase();
-    return {
-      ok: true as const,
-      shop: {
-        id: shopId,
-        shopMark: ctx.shop.shop_mark ?? ctx.shop.reporting_mark,
-        name: ctx.shop.name,
-      },
-      byStatus,
-      badOrders: bos,
-      estimates: estimateRows.filter(
-        (e) => String(e.statusLabel).toLowerCase() === want ||
-          String(e.status_code).toLowerCase() === want,
-      ),
-      kpis: kpisEarly,
-    };
+  const { formatClosedReasonLine, detectClosedInconsistency } = await import(
+    "./shop-clarity"
+  );
+  const closedIds = bos
+    .filter(
+      (bo) =>
+        bo.closed_at || String(bo.lifecycle_status ?? "") === "CLOSED",
+    )
+    .map((bo) => String(bo.event_id));
+  const invByEvent = new Map<
+    string,
+    { invoice_no: string | null; created_at: string | null; completed: string | null }
+  >();
+  if (closedIds.length) {
+    const { rows: invRows } = await q(
+      `SELECT DISTINCT ON (i.event_id)
+          i.event_id, i.invoice_no, i.created_at::text AS created_at,
+          bo.completed_date::text AS completed
+       FROM repair.invoices i
+       LEFT JOIN repair.bad_orders bo
+         ON bo.event_id = i.event_id AND bo.deleted_at IS NULL
+       WHERE i.event_id = ANY($1::uuid[]) AND i.deleted_at IS NULL
+       ORDER BY i.event_id, i.created_at DESC`,
+      [closedIds],
+    ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
+    for (const r of invRows) {
+      invByEvent.set(String(r.event_id), {
+        invoice_no: r.invoice_no ? String(r.invoice_no) : null,
+        created_at: r.created_at ? String(r.created_at).slice(0, 10) : null,
+        completed: r.completed ? String(r.completed).slice(0, 10) : null,
+      });
+    }
+    // completed may exist without invoice
+    const { rows: boDone } = await q(
+      `SELECT event_id, completed_date::text AS completed, closed_reason
+       FROM repair.bad_orders
+       WHERE event_id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+      [closedIds],
+    ).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
+    for (const r of boDone) {
+      const id = String(r.event_id);
+      const cur = invByEvent.get(id) ?? {
+        invoice_no: null,
+        created_at: null,
+        completed: null,
+      };
+      if (!cur.completed && r.completed) {
+        cur.completed = String(r.completed).slice(0, 10);
+      }
+      invByEvent.set(id, cur);
+    }
   }
 
-  return {
+  const badOrders = bos.map((bo) => {
+    const isClosed =
+      Boolean(bo.closed_at) || String(bo.lifecycle_status ?? "") === "CLOSED";
+    if (!isClosed) {
+      return {
+        ...bo,
+        closedReasonLine: null as string | null,
+        inconsistentClosed: false,
+        inconsistentClosedReasons: [] as string[],
+      };
+    }
+    const meta = invByEvent.get(String(bo.event_id));
+    const cancelled = /cancell?ed/i.test(String(bo.closed_reason ?? ""));
+    const closedReasonLine =
+      (bo.closed_reason && String(bo.closed_reason).startsWith("Closed:")
+        ? String(bo.closed_reason)
+        : null) ||
+      formatClosedReasonLine({
+        completed: meta?.completed ?? null,
+        invoiceNo: meta?.invoice_no ?? null,
+        invoicedAt: meta?.created_at ?? null,
+        closedReason: bo.closed_reason ? String(bo.closed_reason) : null,
+        cancelled,
+      });
+    const inconsistency = detectClosedInconsistency({
+      isClosed: true,
+      completed: meta?.completed ?? null,
+      hasInvoice: Boolean(meta?.invoice_no),
+      openBlockingFlags: 0, // detail page computes flags; home shows invoice/completed gaps
+      cancelled,
+    });
+    return {
+      ...bo,
+      lifecycle_status: "CLOSED",
+      closedReasonLine,
+      inconsistentClosed: inconsistency.inconsistent,
+      inconsistentClosedReasons: inconsistency.reasons,
+    };
+  });
+
+  const base = {
     ok: true as const,
     shop: {
       id: shopId,
       shopMark: ctx.shop.shop_mark ?? ctx.shop.reporting_mark,
       name: ctx.shop.name,
     },
+    readOnly: ctx.readOnly,
+    viewingAsShopMark: ctx.viewingAsShopMark,
     byStatus,
-    badOrders: bos,
-    estimates: estimateRows,
     kpis: kpisEarly,
+  };
+
+  if (opts.status) {
+    const want = opts.status.toLowerCase();
+    return {
+      ...base,
+      badOrders,
+      estimates: estimateRows.filter(
+        (e) =>
+          String(e.statusLabel).toLowerCase() === want ||
+          String(e.status_code).toLowerCase() === want,
+      ),
+    };
+  }
+
+  return {
+    ...base,
+    badOrders,
+    estimates: estimateRows,
   };
 }
 
@@ -397,15 +535,19 @@ export async function shopBoDetail(opts: ShopActor & { eventId: string }) {
       statusLabel: mapStatusLabel(String(e.status_code)),
     })),
     documents: {
-      permissions: docOk?.permissions ?? {
-        role: "shop",
-        canAdd: true,
-        canVoid: false,
-      },
+      permissions: ctx.readOnly
+        ? { role: "owner", canAdd: false, canVoid: false }
+        : docOk?.permissions ?? {
+            role: "shop",
+            canAdd: true,
+            canVoid: false,
+          },
       count: docOk?.documents?.length ?? 0,
     },
     /** §G r2 clarity: dates, POD history, timeline, flags */
     lifecycle: clarity,
+    readOnly: ctx.readOnly,
+    viewingAsShopMark: ctx.viewingAsShopMark,
   };
 }
 
@@ -518,6 +660,8 @@ export async function shopValidatePreview(opts: ShopActor & {
     }
   | { ok: false; status: number; error: string; validation?: ValidateResult }
 > {
+  const write = assertShopWriteRole(opts.role);
+  if (!write.ok) return write;
   const ctx = await resolveShopContext(opts);
   if (!ctx.ok) return ctx;
 
@@ -656,6 +800,8 @@ export async function shopSubmitEstimate(opts: ShopActor & {
   comment?: string;
   forceAcceptFlags?: boolean;
 }) {
+  const write = assertShopWriteRole(opts.role);
+  if (!write.ok) return write;
   const ctx = await resolveShopContext(opts);
   if (!ctx.ok) return ctx;
   const shopId = String(ctx.shop.id);
@@ -891,6 +1037,8 @@ export async function shopWithdrawEstimate(opts: ShopActor & {
   estimateId: string;
   reason?: string;
 }) {
+  const write = assertShopWriteRole(opts.role);
+  if (!write.ok) return write;
   const ctx = await resolveShopContext(opts);
   if (!ctx.ok) return ctx;
   const owned = await assertEstimateOwnedByShop(
@@ -977,6 +1125,8 @@ export async function shopResubmitEstimate(opts: ShopActor & {
   filename: string;
   comment?: string;
 }) {
+  const write = assertShopWriteRole(opts.role);
+  if (!write.ok) return write;
   const ctx = await resolveShopContext(opts);
   if (!ctx.ok) return ctx;
   const owned = await assertEstimateOwnedByShop(
@@ -1136,11 +1286,13 @@ export async function shopEstimateDetail(opts: ShopActor & { estimateId: string 
     },
     revisions: revs,
     validationRuns: valRuns,
-    canWithdraw: statusCode === "AWAITING_APPROVAL",
+    canWithdraw: !ctx.readOnly && statusCode === "AWAITING_APPROVAL",
     decisionComments: showDecisionComments
       ? decisionComments
       : { estimateLevel: [], lineLevel: [], all: [] },
     showDecisionComments,
+    readOnly: ctx.readOnly,
+    viewingAsShopMark: ctx.viewingAsShopMark,
   };
 }
 

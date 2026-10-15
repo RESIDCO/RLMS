@@ -2,77 +2,65 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md) §G  
 **Routes:** `/#/repair/shop` · `/#/repair/shop/events/:eventId` · `/#/repair/shop/estimates/:id`  
-**Requires tip:** `85199a7` (§G initial) for **r2**; prior initial required `9296477` (§F r3)
+**Requires tip:** `bb837ae` (§G r2) for **r3**; prior r2 required `85199a7`
 
-## §G r2 — Shop clarity + review aids
+## §G r3 — Inputs contrast, closed-BO clarity, seed fix
 
 | Area | Behavior |
 |---|---|
-| **AA contrast** | Shop portal / BO / estimate / documents / admin labels ≥4.5:1 (`slate-700`+); values near-black. Smoke checks tokens + forbids pale `slate-400/500` on shop pages. |
-| **Navigation** | Breadcrumbs `Shop home > Bad Order <car> > Estimate rev N > Documents`. Documents + drill-ins: `← Back to <source>` via `returnTo` / `returnLabel` (fallback: browser history). |
-| **BO lifecycle dates** | Arrival, Inspected, Estimate submitted, Owner approval, Repair start, POD, Completed, Released/Outbound. Shop edits: arrival, POD (reason on change), missed POD reason, completed/outbound. Owner edits all. Audited. |
-| **POD history** | Append-only: old → new, reason code + note, who, when. Missed POD reason **required** when today > POD and not released. Codes in Reference Data (`missed_pod_reasons`). |
-| **Status timeline** | Open → Estimate Pending → Under Owner Review → Rejected/Adjustment → Approved → In Repair → Completed → Closed (Invoiced). Each step: meaning + who acts next. Closed only after completed + invoice. |
-| **Flags panel** | What / line / blocks completion? / who clears. Approved + open blocking flags: “Approved – N flags block completion/invoicing”. |
-| **Shop KPIs** | Missed POD count; Avg days arrival → approval. |
-| **Owner comments** | Per-line + estimate-level on reject/adjust. Shop sees inline under lines (line#+code); empty → “no change requested”. Outbox lists by line; shop BRC PDF comments by line#. Resubmit `commentDiff` + owner resolve. |
-| **Dev aids** | `npm run repair:seed-shop-demo` — Demo Shop **DS01**, OPEN BO, samples under `modules/repair/dev/shop-samples/`, Rejected/Approved+flags/Missed POD/Closed. DEV role switcher banner (Owner / MP / Shop / Lessee) when local review. |
+| **Form inputs AA** | Every input/select/date/textarea in shop portal: **white** bg, near-black text, placeholder ≥4.5:1 (`slate-600` on white), gray border, clear focus ring. No dark/black input fills (`shopAa.input` / `select` / `textarea`). Date pickers `color-scheme: light`. Smoke: placeholder contrast + axe forbids pale labels / dark fills. |
+| **Closed BO clarity** | Shop home + BO detail: status timeline position + one-line reason e.g. `Closed: repair completed 10/14 and invoiced INV#### on 10/15` or `Closed: cancelled by owner (reason)`. Closed with open flags / missing completed / missing invoice → red **Inconsistent state**. State machine: `closeEvent` / `markBadOrderClosed` require completed + invoice + no blocking flags. |
+| **Smoke residue** | Smoke shops/BOs tagged `is_smoke`; hidden from normal lists (unless `REPAIR_SHOW_SMOKE=1`). `npm run repair:clean-smoke-data` (local DB only). |
+| **Seed hard-fail** | `repair:seed-shop-demo` drives real transitions; **exit 1** unless DEMO **100001** Open, **100002** Rejected w/ line comments, **100003** Approved w/ flags, **100004** Missed POD, **100005** Closed (completed+invoiced). IDs written to gitignored `modules/repair/dev/shop-demo-ids.local.json`. |
+| **Owner/MP shop view** | Owner and managing partner open shop pages **read-only** (“Viewing as shop DS01”); mutations 403. Other shops / lessee still 403. |
+| **DEV role banner** | Only when non-production (`!import.meta.env.PROD`) and local-review/dev. Production builds have no role switcher. |
 
 ```powershell
 npm run repair:seed-shop-demo
 npm run repair:typecheck-client-shop
 npm run repair:smoke-shop
+npm run repair:clean-smoke-data   # optional; local only
 ```
+
+## §G r2 — Shop clarity + review aids
+
+| Area | Behavior |
+|---|---|
+| **AA contrast** | Shop portal / BO / estimate / documents / admin labels ≥4.5:1 (`slate-700`+); values near-black. |
+| **Navigation** | Breadcrumbs `Shop home > Bad Order <car> > Estimate rev N > Documents`. `← Back to <source>` via `returnTo` / `returnLabel`. |
+| **BO lifecycle dates** | Arrival, Inspected, Estimate submitted, Owner approval, Repair start, POD, Completed, Released/Outbound. |
+| **POD history** | Append-only: old → new, reason code + note, who, when. Missed POD reason **required** when today > POD and not released. |
+| **Status timeline** | Open → … → Closed (Invoiced). Each step: meaning + who acts next. |
+| **Flags panel** | What / line / blocks completion? / who clears. |
+| **Shop KPIs** | Missed POD count; Avg days arrival → approval. |
+| **Owner comments** | Per-line + estimate-level on reject/adjust. Resubmit `commentDiff` + owner resolve. |
+| **Dev aids** | `npm run repair:seed-shop-demo` — Demo Shop **DS01**. DEV role switcher when local review (r3: production-gated). |
 
 ## Shop portal (shop role, own shop mark)
 
-Scoped by `x-repair-shop-mark` (and optional `x-repair-shop-id`). Cross-shop → **403**.
+Scoped by `x-repair-shop-mark` (and optional `x-repair-shop-id`). Cross-shop → **403**. Owner/MP → **read-only** (r3).
 
 | Surface | Behavior |
 |---|---|
-| Home | BOs assigned to shop; estimates by status (Draft, Submitted, Rejected, Adjustment for Approval, Approved, Completed); search car initial/number |
-| BO detail | Car; **lessee hidden**; owner instructions; arrival date; JIC clock for wrecks; §E viewer **shop mode** (view+add, never void) |
-| Submit estimate | **Upload 500-byte** or **hand-entry grid** (open-Q default **b: BOTH**); parse preview (header+lines); validate; submit |
-| Withdraw | Allowed while Submitted (**AWAITING_APPROVAL**) until owner review starts (open-Q default **a**) |
-| Revisions | Resubmit after reject/adjustment → new revision + **diff** vs prior |
-| Downloads | Shop BRC PDF (no DV/internal) + own data file |
+| Home | BOs assigned to shop (smoke hidden); estimates by status; search car; closed reason / inconsistent |
+| BO detail | Car; **lessee hidden**; owner instructions; arrival; JIC; §E shop mode; lifecycle + closed clarity |
+| Submit estimate | **Upload 500-byte** or **hand-entry** (shop write only) |
+| Withdraw | While Submitted until owner review starts |
+| Revisions | Resubmit after reject/adjustment → new revision + **diff** |
+| Downloads | Shop BRC PDF + own data file (read-only roles may download) |
 
 ## Validation engine (stub Railinc)
 
 Interface: `RailincValidator` in `modules/repair/services/railinc-validator.ts`.  
-Default: **`StubRailincValidator`** — **no live Railinc calls**. Swap later via `getRailincValidator()` / `REPAIR_RAILINC_VALIDATOR=live` when a Live client exists.
+Default: **`StubRailincValidator`** — **no live Railinc calls**.
 
-### Hard reject (file not loaded) {#hard-reject}
+### Hard reject / Accept + flag
 
-| Code | Rule |
-|---|---|
-| `BAD_SOURCE_CODE` | Invalid/missing Detail Source |
-| `UNPARSEABLE` | Bad parse / length ≠ 500 |
-| `MISSING_CRITICAL_HEADER` | Car initial/number, billing party, or shop mark blank |
-| `PRICE_NOT_CURRENT` | Job pricing not current for account-date quarter (when price master row exists) |
-| `CAR_NOT_IN_VCF` | Car not in VCF |
-| `MIXED_WRECK` | Mixed Resp 3 / non-3 file |
-
-### Accept + flag {#accept-flag}
-
-| Code | Rule |
-|---|---|
-| `MISSING_CID` | Missing CID — blocks completed date / invoicing; owner/MP clear only |
-| `UNKNOWN_QUALIFIER` | Unknown qualifier/code (when ref table populated) |
-| `QTY_PRICE_OFF_TABLE` | Qty/price off table |
-| `MISSING_INVOICE_NO` | Flag on estimate; **HARD REJECT** on final invoice |
-| `UNPRICED_LABOR_RATE` | Unpriced not at quarterly AAR labor rate |
-
-Every rule: `code`, `message`, `severity`, `ref_link` — catalog in `repair.validation_rules` (Reference Data admin). Results stored per revision (`estimate_validation_runs` / `estimate_validation_findings`); shown to shop on submit and owner in Estimate Review / `GET …/validation`.
-
-## Notifications (local outbox only)
-
-Types: `ESTIMATE_RECEIVED`, `ESTIMATE_REJECTED` (with reasons), `ESTIMATE_ADJUSTMENT_REQUESTED`, `ESTIMATE_APPROVED`.  
-Shop recipients = **email LIST** (`shops.portal_notify_emails` + shop contacts + default inbox) — open-Q default **c**. Writes `repair.email_outbox` + `notifications_log` (never real SMTP).
+See r2 tables in prior HANDOFF; unchanged. Catalog in `repair.validation_rules`.
 
 ## Permissions
 
-Shop never sees other shop’s data, lessee info, DV/settlement docs. Cross-shop and foreign estimate → **403**.
+Shop never sees other shop’s data, lessee info, DV/settlement docs. Cross-shop → **403**. Owner/MP → read-only shop view for a chosen mark.
 
 ## Smoke / typecheck
 
@@ -81,14 +69,6 @@ npm run repair:typecheck-client-shop
 npm run repair:smoke-shop
 ```
 
-Covers: good file load; each hard-reject; each flag class; mixed wreck rejected; resubmit → rev 2 + diff; cross-shop 403; totals reconcile (integer cents); **r2** AA/axe, returnTo, POD reason+history, missed POD, timeline, line comments, commentDiff+resolve, role-switcher 403s.
-
-## Open Q defaults (until Bruce answers)
-
-| Q | Default |
-|---|---|
-| a) Shop withdraw submitted? | **YES** until owner review starts |
-| b) Hand entry OR upload? | **BOTH** |
-| c) Shop email recipients? | **LIST** (not single contact) |
+Covers prior §G/r2 plus **r3**: input AA + placeholders, closed reason + inconsistent gate, smoke hide, owner/MP read-only, DEV banner PROD gate, seed hard-fail script checks.
 
 Integer cents. Append-only findings. Repair schema only.

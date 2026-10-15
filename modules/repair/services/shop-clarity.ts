@@ -196,10 +196,11 @@ export async function getBoLifecycleBundle(opts: {
   const podDate = ymd(latest.POD?.date_value);
 
   const { rows: inv } = await q(
-    `SELECT 1 FROM repair.invoices
-     WHERE event_id = $1 AND deleted_at IS NULL LIMIT 1`,
+    `SELECT invoice_no, created_at FROM repair.invoices
+     WHERE event_id = $1 AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
     [opts.eventId],
-  ).catch(() => ({ rows: [] as unknown[] }));
+  ).catch(() => ({ rows: [] as Array<{ invoice_no?: string; created_at?: string }> }));
 
   const completed =
     Boolean(ymd(bo?.completed_date)) ||
@@ -229,6 +230,25 @@ export async function getBoLifecycleBundle(opts: {
     missedPodRequired,
   };
 
+  const isClosed = Boolean(bo?.closed_at) || String(bo?.lifecycle_status ?? "") === "CLOSED";
+  const invoiceNo = inv[0]?.invoice_no ? String(inv[0].invoice_no) : null;
+  const invoicedAt = ymd(inv[0]?.created_at);
+  const cancelled =
+    Boolean(bo?.closed_reason) &&
+    /cancell?ed/i.test(String(bo?.closed_reason ?? ""));
+  const storedReason = bo?.closed_reason ? String(bo.closed_reason) : null;
+  const closedReasonLine = isClosed
+    ? storedReason && storedReason.startsWith("Closed:")
+      ? storedReason
+      : formatClosedReasonLine({
+          completed: dates.completed,
+          invoiceNo,
+          invoicedAt,
+          closedReason: storedReason,
+          cancelled,
+        })
+    : null;
+
   const timelineCode = mapBoTimelineCode({
     eventStatus: event?.status_code ? String(event.status_code) : undefined,
     estimateStatus: est?.status_code ? String(est.status_code) : null,
@@ -240,7 +260,7 @@ export async function getBoLifecycleBundle(opts: {
 
   const timeline = buildStatusTimeline({
     currentCode: timelineCode,
-    closedReason: bo?.closed_reason ? String(bo.closed_reason) : null,
+    closedReason: closedReasonLine,
     closedAt: bo?.closed_at ? String(bo.closed_at) : null,
   });
 
@@ -287,8 +307,17 @@ export async function getBoLifecycleBundle(opts: {
     });
   }
 
+  const openFlagCount = flags.filter((f) => f.blocksCompletion).length;
   const approvedWithFlags =
     timelineCode === "APPROVED" && flags.some((f) => f.blocksCompletion);
+
+  const inconsistency = detectClosedInconsistency({
+    isClosed,
+    completed: dates.completed,
+    hasInvoice: Boolean(inv[0]),
+    openBlockingFlags: openFlagCount,
+    cancelled,
+  });
 
   const podHistory = podHist
     .filter((r) => r.kind === "POD")
@@ -308,11 +337,17 @@ export async function getBoLifecycleBundle(opts: {
     timelineCode,
     flags,
     approvedWithFlags,
-    openFlagCount: flags.filter((f) => f.blocksCompletion).length,
+    openFlagCount,
     podHistory,
     missedPodReasons: await listMissedPodReasonCodes(tenantId),
     estimateId: est?.id ? String(est.id) : null,
     estimateStatus: est?.status_code ? String(est.status_code) : null,
+    isClosed,
+    closedReasonLine,
+    closedAt: bo?.closed_at ? String(bo.closed_at) : null,
+    invoiceNo,
+    inconsistentClosed: inconsistency.inconsistent,
+    inconsistentClosedReasons: inconsistency.reasons,
   };
 }
 
@@ -759,5 +794,164 @@ export const SHOP_AA_TOKENS = {
   value: "#0f172a", // slate-900
   label: "#334155", // slate-700 — ≥4.5:1 on white
   mutedOk: "#475569", // slate-600
-  border: "#cbd5e1", // slate-300
+  border: "#94a3b8", // slate-400 — input border
+  placeholder: "#475569", // slate-600 — ≥4.5:1 on white
+  inputBg: "#ffffff",
+  focusRing: "#334155", // slate-700
 } as const;
+
+function fmtMdY(ymd: string | null | undefined): string {
+  if (!ymd) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd));
+  if (!m) return String(ymd).slice(0, 10);
+  return `${Number(m[2])}/${Number(m[3])}/${m[1]!.slice(2)}`;
+}
+
+/**
+ * One-line closed reason for shop home + BO detail timeline.
+ * e.g. "Closed: repair completed 10/14 and invoiced INV#### on 10/15"
+ * or "Closed: cancelled by owner (reason)".
+ */
+export function formatClosedReasonLine(opts: {
+  completed?: string | null;
+  invoiceNo?: string | null;
+  invoicedAt?: string | null;
+  closedReason?: string | null;
+  cancelled?: boolean;
+  cancelReason?: string | null;
+}): string {
+  if (opts.cancelled) {
+    const why = (opts.cancelReason || opts.closedReason || "no reason").trim();
+    return `Closed: cancelled by owner (${why})`;
+  }
+  const completed = fmtMdY(opts.completed);
+  const inv = (opts.invoiceNo || "").trim() || "invoice";
+  const invDate = fmtMdY(opts.invoicedAt);
+  if (completed && invDate) {
+    return `Closed: repair completed ${completed} and invoiced ${inv} on ${invDate}`;
+  }
+  if (completed) {
+    return `Closed: repair completed ${completed} and invoiced ${inv}`;
+  }
+  if (opts.closedReason && String(opts.closedReason).trim()) {
+    const r = String(opts.closedReason).trim();
+    return r.startsWith("Closed:") ? r : `Closed: ${r}`;
+  }
+  return "Closed: repair completed and invoiced";
+}
+
+/** Closed with open flags / missing completed / missing invoice → inconsistent. */
+export function detectClosedInconsistency(opts: {
+  isClosed: boolean;
+  completed?: string | null;
+  hasInvoice: boolean;
+  openBlockingFlags: number;
+  cancelled?: boolean;
+}): { inconsistent: boolean; reasons: string[] } {
+  if (!opts.isClosed) return { inconsistent: false, reasons: [] };
+  if (opts.cancelled) return { inconsistent: false, reasons: [] };
+  const reasons: string[] = [];
+  if (!opts.completed) reasons.push("missing completed date");
+  if (!opts.hasInvoice) reasons.push("missing invoice");
+  if (opts.openBlockingFlags > 0) {
+    reasons.push(`${opts.openBlockingFlags} open blocking flag(s)`);
+  }
+  return { inconsistent: reasons.length > 0, reasons };
+}
+
+/**
+ * Gate close transitions: completed + invoice + no blocking flags.
+ * Used by closeEvent / seed / any path that sets Closed.
+ */
+export async function assertCloseRequirements(opts: {
+  eventId: string;
+  tenantId?: string;
+}): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const bundle = await getBoLifecycleBundle({
+    eventId: opts.eventId,
+    tenantId,
+  });
+  const completed = bundle.dates.completed;
+  const { rows: inv } = await q(
+    `SELECT invoice_no, created_at FROM repair.invoices
+     WHERE event_id = $1 AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [opts.eventId],
+  ).catch(() => ({ rows: [] as Array<{ invoice_no?: string }> }));
+  const blocking = bundle.openFlagCount;
+  if (!completed) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Cannot close: completed date required",
+    };
+  }
+  if (!inv[0]) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Cannot close: invoice required",
+    };
+  }
+  if (blocking > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: `Cannot close: ${blocking} open blocking flag(s)`,
+    };
+  }
+  return { ok: true };
+}
+
+/** Persist Closed on bad_orders with a clear one-line reason (after assertCloseRequirements). */
+export async function markBadOrderClosed(opts: {
+  eventId: string;
+  actor: string;
+  tenantId?: string;
+  invoiceNo?: string | null;
+  invoicedAt?: string | null;
+  cancelled?: boolean;
+  cancelReason?: string | null;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  if (!opts.cancelled) {
+    const gate = await assertCloseRequirements({
+      eventId: opts.eventId,
+      tenantId,
+    });
+    if (!gate.ok) return gate;
+  }
+  const bundle = await getBoLifecycleBundle({ eventId: opts.eventId, tenantId });
+  const { rows: inv } = await q(
+    `SELECT invoice_no, created_at FROM repair.invoices
+     WHERE event_id = $1 AND deleted_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [opts.eventId],
+  ).catch(() => ({ rows: [] as Array<{ invoice_no?: string; created_at?: unknown }> }));
+  const reason = formatClosedReasonLine({
+    completed: bundle.dates.completed,
+    invoiceNo: opts.invoiceNo ?? (inv[0]?.invoice_no ? String(inv[0].invoice_no) : null),
+    invoicedAt: opts.invoicedAt ?? ymd(inv[0]?.created_at),
+    cancelled: opts.cancelled,
+    cancelReason: opts.cancelReason,
+  });
+  await q(
+    `UPDATE repair.bad_orders
+     SET closed_at = coalesce(closed_at, now()),
+         closed_reason = $2,
+         lifecycle_status = 'CLOSED'
+     WHERE event_id = $1 AND deleted_at IS NULL`,
+    [opts.eventId, reason],
+  );
+  await writeAudit({
+    tenantId,
+    entity: "bad_order",
+    entityId: opts.eventId,
+    action: "BO_MARKED_CLOSED",
+    after: { closedReason: reason, cancelled: Boolean(opts.cancelled) },
+    actor: opts.actor,
+    via: "UI",
+  });
+  return { ok: true as const, closedReason: reason };
+}

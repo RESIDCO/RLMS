@@ -1,6 +1,7 @@
 /**
- * §G r2 — DEV-ONLY role switcher (REPAIR_DEV_BYPASS / local review).
- * Never shown when VITE_REPAIR_LOCAL_REVIEW is unset/false in production builds.
+ * §G r2/r3 — DEV-ONLY role switcher.
+ * Shown only when non-production AND local-review/dev (REPAIR_DEV_BYPASS path).
+ * Production builds (`import.meta.env.PROD`) never show the banner.
  * Sets localStorage + custom event so fetch headers use the real role on API.
  */
 import { useEffect, useState } from "react";
@@ -31,8 +32,13 @@ export function readDevRole(): DevRepairRole {
   return "shop";
 }
 
+/**
+ * Production-gated: never true when `import.meta.env.PROD`.
+ * Dev/local-review only (matches REPAIR_DEV_BYPASS_AUTH=1 non-production builds).
+ */
 export function isDevBypassUi(): boolean {
   try {
+    if (import.meta.env.PROD) return false;
     return (
       import.meta.env.VITE_REPAIR_LOCAL_REVIEW === "1" ||
       import.meta.env.DEV === true

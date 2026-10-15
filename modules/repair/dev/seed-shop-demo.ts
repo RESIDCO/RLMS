@@ -1,7 +1,8 @@
 /**
- * §G r2 — Idempotent shop demo seed (dev-bypass only).
- * Demo Shop DS01; OPEN BO with arrival+POD; sample 500-byte files;
- * statuses: Rejected w/ line comments, Approved w/ flags, Missed POD, Closed.
+ * §G r2/r3 — Idempotent shop demo seed (dev-bypass only).
+ * Demo Shop DS01; drives real transitions for DEMO 100001–100005.
+ * Hard-fails (exit 1) unless all five land in required states.
+ * Writes event/estimate IDs to gitignored shop-demo-ids.local.json.
  *
  * Run: npm run repair:seed-shop-demo
  */
@@ -12,25 +13,36 @@ import { DEFAULT_TENANT_ID, q } from "../db";
 import { createShop } from "../services/shops";
 import { createBadOrder } from "../services/bo";
 import { shopSubmitEstimate } from "../services/shop-portal";
-import { requestRevision, approveEstimate, submitForApproval } from "../services/estimates";
+import {
+  requestRevision,
+  approveEstimate,
+  submitForApproval,
+} from "../services/estimates";
 import {
   saveDecisionComments,
   updateBoLifecycleDates,
+  getBoLifecycleBundle,
+  markBadOrderClosed,
+  listDecisionComments,
 } from "../services/shop-clarity";
 import { enterPodErd } from "../services/pod";
 import { parseAarFile } from "../services/aar-parser";
 import { migrateLocal } from "./migrate-local";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, "../../..");
 const SAMPLES = join(__dirname, "shop-samples");
 const SAMPLE_SRC = join(__dirname, "reference/Sample_Shop_500byte_OFOX2609.txt");
+const IDS_FILE = join(__dirname, "shop-demo-ids.local.json");
 
 const DEMO_SHOP_MARK = "DS01";
 const DEMO_SHOP_ID_KEY = "demo-shop-ds01";
 
 function ok(m: string) {
   console.log(`  OK  ${m}`);
+}
+
+function fail(m: string): never {
+  throw new Error(m);
 }
 
 async function seedCar(mark: string, number: string) {
@@ -67,7 +79,6 @@ function withCar(bytes: Buffer, mark: string, number: string): Buffer {
   return Buffer.from(lines.join(ending), "latin1");
 }
 
-/** Set repairing party (cols 72-75) to shop mark. */
 function withShopMark(bytes: Buffer, shopMark: string): Buffer {
   const parsed = parseAarFile(bytes);
   const ending = parsed.lineEnding === "CRLF" ? "\r\n" : "\n";
@@ -111,8 +122,7 @@ function ensureSamples(base: Buffer) {
     ],
   ];
   for (const [name, buf] of files) {
-    const path = join(SAMPLES, name);
-    writeFileSync(path, buf);
+    writeFileSync(join(SAMPLES, name), buf);
     ok(`sample ${name} (${buf.length} bytes)`);
   }
 }
@@ -126,6 +136,10 @@ async function ensureShop() {
     [DEFAULT_TENANT_ID, DEMO_SHOP_MARK],
   );
   if (rows[0]) {
+    await q(
+      `UPDATE repair.shops SET is_smoke = false WHERE id = $1`,
+      [rows[0].id],
+    ).catch(() => undefined);
     ok(`shop ${DEMO_SHOP_MARK} exists (${rows[0].id})`);
     return rows[0];
   }
@@ -142,18 +156,78 @@ async function ensureShop() {
   return created.shop;
 }
 
+async function findDemoEvent(shopId: string, carNumber: string) {
+  const { rows } = await q(
+    `SELECT e.id AS event_id, est.id AS estimate_id, st.code AS estimate_status
+     FROM repair.events e
+     LEFT JOIN repair.estimates est
+       ON est.event_id = e.id AND est.deleted_at IS NULL
+     LEFT JOIN repair.statuses st ON st.id = est.status_id
+     WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
+       AND e.car_mark = 'DEMO' AND e.car_number = $2 AND e.shop_id = $3
+     ORDER BY e.created_at DESC LIMIT 1`,
+    [DEFAULT_TENANT_ID, carNumber, shopId],
+  );
+  return rows[0] as
+    | { event_id: string; estimate_id?: string; estimate_status?: string }
+    | undefined;
+}
+
+async function estimateStatus(estimateId: string): Promise<string> {
+  const { rows } = await q(
+    `SELECT s.code FROM repair.estimates e
+     JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
+    [estimateId],
+  );
+  return String(rows[0]?.code ?? "");
+}
+
+/** Move QUEUED/DRAFT → AWAITING_APPROVAL via real transition. */
+async function ensureAwaitingApproval(estimateId: string, eventId: string) {
+  let code = await estimateStatus(estimateId);
+  if (code === "AWAITING_APPROVAL") return;
+  if (code === "QUEUED" || code === "DRAFT") {
+    // Yard arrival is required before leaving Queued (timestamptz column)
+    const { rowCount } = await q(
+      `UPDATE repair.events
+       SET yard_arrived_at = coalesce(yard_arrived_at, $2::timestamptz)
+       WHERE id = $1::uuid`,
+      [eventId, "2026-09-15T12:00:00Z"],
+    );
+    if (!rowCount) {
+      fail(`ensureAwaitingApproval: event ${eventId} not updated`);
+    }
+    await q(
+      `UPDATE repair.bad_orders
+       SET arrival_date = coalesce(arrival_date, $2::date)
+       WHERE event_id = $1::uuid AND deleted_at IS NULL`,
+      [eventId, "2026-09-15"],
+    );
+    const { rows: chk } = await q(
+      `SELECT yard_arrived_at FROM repair.events WHERE id = $1::uuid`,
+      [eventId],
+    );
+    if (!chk[0]?.yard_arrived_at) {
+      fail(`ensureAwaitingApproval: yard_arrived_at still null on ${eventId}`);
+    }
+    const subm = await submitForApproval({
+      estimateId,
+      actor: "seed-shop-demo",
+    });
+    if (!subm.ok) fail(`submitForApproval failed: ${JSON.stringify(subm)}`);
+    code = await estimateStatus(estimateId);
+  }
+  if (code !== "AWAITING_APPROVAL") {
+    fail(`expected AWAITING_APPROVAL, got ${code}`);
+  }
+}
+
 async function ensureOpenBo(shopId: string, base: Buffer) {
   const carMark = "DEMO";
   const carNumber = "100001";
-  const { rows: existing } = await q(
-    `SELECT e.id FROM repair.events e
-     WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
-       AND e.car_mark = $2 AND e.car_number = $3 AND e.shop_id = $4
-     LIMIT 1`,
-    [DEFAULT_TENANT_ID, carMark, carNumber, shopId],
-  );
-  let eventId = existing[0]?.id ? String(existing[0].id) : "";
+  let row = await findDemoEvent(shopId, carNumber);
   await seedCar(carMark, carNumber);
+  let eventId = row?.event_id ? String(row.event_id) : "";
   if (!eventId) {
     const bo = await createBadOrder({
       carMark,
@@ -202,19 +276,9 @@ async function ensureOpenBo(shopId: string, base: Buffer) {
 async function seedRejected(shopId: string, base: Buffer) {
   const carMark = "DEMO";
   const carNumber = "100002";
-  const { rows: existing } = await q(
-    `SELECT e.id, est.id AS estimate_id
-     FROM repair.events e
-     LEFT JOIN repair.estimates est ON est.event_id = e.id AND est.deleted_at IS NULL
-     WHERE e.car_mark = $1 AND e.car_number = $2 AND e.shop_id = $3
-       AND e.deleted_at IS NULL
-     LIMIT 1`,
-    [carMark, carNumber, shopId],
-  );
-  let eventId = existing[0]?.id ? String(existing[0].id) : "";
-  let estimateId = existing[0]?.estimate_id
-    ? String(existing[0].estimate_id)
-    : "";
+  let row = await findDemoEvent(shopId, carNumber);
+  let eventId = row?.event_id ? String(row.event_id) : "";
+  let estimateId = row?.estimate_id ? String(row.estimate_id) : "";
 
   await seedCar(carMark, carNumber);
   if (!eventId) {
@@ -244,20 +308,22 @@ async function seedRejected(shopId: string, base: Buffer) {
       bytes,
       filename: "demo-rejected.txt",
     });
-    if (!sub.ok) throw new Error(JSON.stringify(sub).slice(0, 300));
+    if (!sub.ok) fail(`100002 submit failed: ${JSON.stringify(sub).slice(0, 300)}`);
     estimateId = String(sub.estimateId);
-    const { rows: st } = await q(
-      `SELECT s.code FROM repair.estimates e JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
-      [estimateId],
-    );
-    if (st[0]?.code === "QUEUED") {
-      await submitForApproval({ estimateId, actor: "seed-shop-demo" });
-    }
-    await requestRevision({
+  }
+
+  let code = await estimateStatus(estimateId);
+  if (code !== "REVISION_REQUESTED") {
+    await ensureAwaitingApproval(estimateId, eventId);
+    const rev = await requestRevision({
       estimateId,
       actor: "owner@demo",
       comment: "Revise labor on line 1",
     });
+    if (!rev.ok) fail(`100002 requestRevision failed: ${JSON.stringify(rev)}`);
+  }
+  const comments = await listDecisionComments({ estimateId });
+  if (comments.lineLevel.length < 2) {
     await saveDecisionComments({
       eventId,
       estimateId,
@@ -269,65 +335,60 @@ async function seedRejected(shopId: string, base: Buffer) {
       ],
       author: "owner@demo",
     });
-    ok(`Rejected estimate with line comments (${estimateId.slice(0, 8)})`);
-  } else {
-    ok(`Rejected demo already seeded`);
   }
+  ok(`Rejected estimate with line comments (${estimateId.slice(0, 8)})`);
   return { eventId, estimateId };
 }
 
 async function seedApprovedFlags(shopId: string, base: Buffer) {
   const carMark = "DEMO";
   const carNumber = "100003";
-  const { rows: existing } = await q(
-    `SELECT e.id FROM repair.events e
-     WHERE e.car_mark = $1 AND e.car_number = $2 AND e.shop_id = $3
-       AND e.deleted_at IS NULL LIMIT 1`,
-    [carMark, carNumber, shopId],
-  );
-  if (existing[0]) {
-    ok("Approved+flags demo already seeded");
-    return;
-  }
+  let row = await findDemoEvent(shopId, carNumber);
   await seedCar(carMark, carNumber);
-  const bo = await createBadOrder({
-    carMark,
-    carNumber,
-    shopId,
-    shoppingReason: "Demo Approved flags",
-    actor: "seed-shop-demo",
-    arrivalDate: "2026-09-01",
-    boRuleCode: "OTHER",
-    boRuleOtherText: "Demo Flags",
-    boDate: "2026-09-01",
-    allowDuplicates: true,
-  });
-  if (!bo.ok) throw new Error(JSON.stringify(bo));
-  const eventId = String(bo.event.id);
-  const bytes = blankCid(
-    withShopMark(withCar(base, carMark, carNumber), DEMO_SHOP_MARK),
-  );
-  const sub = await shopSubmitEstimate({
-    role: "shop",
-    shopMark: DEMO_SHOP_MARK,
-    actor: "seed-shop-demo",
-    eventId,
-    bytes,
-    filename: "demo-flagged.txt",
-  });
-  if (!sub.ok) {
-    ok(`Approved+flags submit soft-fail: ${JSON.stringify(sub).slice(0, 120)}`);
-    return;
+  let eventId = row?.event_id ? String(row.event_id) : "";
+  let estimateId = row?.estimate_id ? String(row.estimate_id) : "";
+
+  if (!eventId) {
+    const bo = await createBadOrder({
+      carMark,
+      carNumber,
+      shopId,
+      shoppingReason: "Demo Approved flags",
+      actor: "seed-shop-demo",
+      arrivalDate: "2026-09-01",
+      boRuleCode: "OTHER",
+      boRuleOtherText: "Demo Flags",
+      boDate: "2026-09-01",
+      allowDuplicates: true,
+    });
+    if (!bo.ok) throw new Error(JSON.stringify(bo));
+    eventId = String(bo.event.id);
   }
-  const estimateId = String(sub.estimateId);
-  const { rows: st } = await q(
-    `SELECT s.code FROM repair.estimates e JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
-    [estimateId],
-  );
-  if (st[0]?.code === "QUEUED") {
-    await submitForApproval({ estimateId, actor: "seed-shop-demo" });
+
+  if (!estimateId) {
+    const bytes = blankCid(
+      withShopMark(withCar(base, carMark, carNumber), DEMO_SHOP_MARK),
+    );
+    const sub = await shopSubmitEstimate({
+      role: "shop",
+      shopMark: DEMO_SHOP_MARK,
+      actor: "seed-shop-demo",
+      eventId,
+      bytes,
+      filename: "demo-flagged.txt",
+    });
+    if (!sub.ok) {
+      fail(`100003 submit failed: ${JSON.stringify(sub).slice(0, 300)}`);
+    }
+    estimateId = String(sub.estimateId);
   }
-  const ap = await approveEstimate({ estimateId, actor: "owner@demo" });
+
+  let code = await estimateStatus(estimateId);
+  if (code !== "APPROVED") {
+    await ensureAwaitingApproval(estimateId, eventId);
+    const ap = await approveEstimate({ estimateId, actor: "owner@demo" });
+    if (!ap.ok) fail(`100003 approve failed: ${JSON.stringify(ap)}`);
+  }
   await updateBoLifecycleDates({
     eventId,
     actor: "owner@demo",
@@ -335,21 +396,15 @@ async function seedApprovedFlags(shopId: string, base: Buffer) {
     arrival: "2026-09-01",
     ownerApproval: "2026-09-10",
   });
-  ok(
-    `Approved+flags ${estimateId.slice(0, 8)} (${ap.ok ? "approved" : ap.error})`,
-  );
+  ok(`Approved+flags ${estimateId.slice(0, 8)}`);
+  return { eventId, estimateId };
 }
 
 async function seedMissedPod(shopId: string) {
   const carMark = "DEMO";
   const carNumber = "100004";
-  const { rows: existing } = await q(
-    `SELECT e.id FROM repair.events e
-     WHERE e.car_mark = $1 AND e.car_number = $2 AND e.shop_id = $3
-       AND e.deleted_at IS NULL LIMIT 1`,
-    [carMark, carNumber, shopId],
-  );
-  let eventId = existing[0]?.id ? String(existing[0].id) : "";
+  let row = await findDemoEvent(shopId, carNumber);
+  let eventId = row?.event_id ? String(row.event_id) : "";
   await seedCar(carMark, carNumber);
   if (!eventId) {
     const bo = await createBadOrder({
@@ -383,46 +438,76 @@ async function seedMissedPod(shopId: string) {
     missedPodReasonNote: "Axle on order",
   });
   ok(`Missed POD BO ${carMark} ${carNumber}`);
+  return { eventId };
 }
 
 async function seedClosed(shopId: string, base: Buffer) {
   const carMark = "DEMO";
   const carNumber = "100005";
-  const { rows: existing } = await q(
-    `SELECT e.id FROM repair.events e
-     WHERE e.car_mark = $1 AND e.car_number = $2 AND e.shop_id = $3
-       AND e.deleted_at IS NULL LIMIT 1`,
-    [carMark, carNumber, shopId],
-  );
-  if (existing[0]) {
-    ok("Closed demo already seeded");
-    return;
-  }
+  let row = await findDemoEvent(shopId, carNumber);
   await seedCar(carMark, carNumber);
-  const bo = await createBadOrder({
-    carMark,
-    carNumber,
-    shopId,
-    shoppingReason: "Demo Closed",
+  let eventId = row?.event_id ? String(row.event_id) : "";
+  let estimateId = row?.estimate_id ? String(row.estimate_id) : "";
+
+  if (!eventId) {
+    const bo = await createBadOrder({
+      carMark,
+      carNumber,
+      shopId,
+      shoppingReason: "Demo Closed",
+      actor: "seed-shop-demo",
+      arrivalDate: "2026-07-01",
+      boRuleCode: "OTHER",
+      boRuleOtherText: "Demo Closed",
+      boDate: "2026-07-01",
+      allowDuplicates: true,
+    });
+    if (!bo.ok) throw new Error(JSON.stringify(bo));
+    eventId = String(bo.event.id);
+  }
+
+  // Real transitions: submit → approve → completed → invoice → mark closed
+  if (!estimateId) {
+    const bytes = withShopMark(withCar(base, carMark, carNumber), DEMO_SHOP_MARK);
+    const sub = await shopSubmitEstimate({
+      role: "shop",
+      shopMark: DEMO_SHOP_MARK,
+      actor: "seed-shop-demo",
+      eventId,
+      bytes,
+      filename: "demo-closed.txt",
+    });
+    if (!sub.ok) fail(`100005 submit failed: ${JSON.stringify(sub).slice(0, 300)}`);
+    estimateId = String(sub.estimateId);
+  }
+  {
+    const code = await estimateStatus(estimateId);
+    if (code !== "APPROVED") {
+      await ensureAwaitingApproval(estimateId, eventId);
+      const ap = await approveEstimate({ estimateId, actor: "owner@demo" });
+      if (!ap.ok) fail(`100005 approve failed: ${JSON.stringify(ap)}`);
+    }
+  }
+
+  const lifePatch = await updateBoLifecycleDates({
+    eventId,
     actor: "seed-shop-demo",
-    arrivalDate: "2026-07-01",
-    boRuleCode: "OTHER",
-    boRuleOtherText: "Demo Closed",
-    boDate: "2026-07-01",
-    allowDuplicates: true,
+    actorRole: "shop",
+    arrival: "2026-07-01",
+    completed: "2026-07-20",
+    released: "2026-07-21",
   });
-  if (!bo.ok) throw new Error(JSON.stringify(bo));
-  const eventId = String(bo.event.id);
+  if (!lifePatch.ok) fail(`100005 completed date: ${lifePatch.error}`);
+
+  // Owner clears blocking flags before close (real gate: no open blocking flags)
   await q(
-    `UPDATE repair.bad_orders
-     SET completed_date = '2026-07-20',
-         released_at = '2026-07-21',
-         closed_at = now(),
-         closed_reason = 'Invoiced 2026-07-22 — demo close'
-     WHERE event_id = $1 AND deleted_at IS NULL`,
-    [eventId],
+    `UPDATE repair.estimate_validation_findings f
+     SET cleared_at = coalesce(cleared_at, now()), cleared_by = 'owner@demo'
+     FROM repair.estimate_validation_runs r
+     WHERE f.run_id = r.id AND r.estimate_id = $1 AND f.cleared_at IS NULL`,
+    [estimateId],
   );
-  // Ensure an invoice row so timeline sees Closed
+
   await q(
     `INSERT INTO repair.invoices
        (tenant_id, event_id, shop_id, invoice_no, total, match_status, created_by)
@@ -431,8 +516,114 @@ async function seedClosed(shopId: string, base: Buffer) {
        SELECT 1 FROM repair.invoices WHERE event_id = $2 AND deleted_at IS NULL
      )`,
     [DEFAULT_TENANT_ID, eventId, shopId],
-  ).catch(() => undefined);
-  ok(`Closed BO ${carMark} ${carNumber}`);
+  );
+
+  const closed = await markBadOrderClosed({
+    eventId,
+    actor: "seed-shop-demo",
+    tenantId: DEFAULT_TENANT_ID,
+    invoiceNo: "DEMO-INV-100005",
+    invoicedAt: "2026-07-22",
+  });
+  if (!closed.ok) fail(`100005 close failed: ${closed.error}`);
+  ok(`Closed BO ${carMark} ${carNumber} — ${closed.closedReason}`);
+  return { eventId, estimateId, closedReason: closed.closedReason };
+}
+
+async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
+  // 100001 Open
+  {
+    const life = await getBoLifecycleBundle({
+      eventId: String((ids["100001"] as { eventId: string }).eventId),
+    });
+    if (life.isClosed || life.timelineCode === "CLOSED") {
+      fail("DEMO 100001 must be Open (not Closed)");
+    }
+    if (!["OPEN", "ESTIMATE_PENDING"].includes(life.timelineCode)) {
+      fail(`DEMO 100001 expected Open/Estimate Pending, got ${life.timelineCode}`);
+    }
+    ok("assert 100001 Open");
+  }
+  // 100002 Rejected w/ line comments
+  {
+    const estId = String((ids["100002"] as { estimateId: string }).estimateId);
+    const { rows: st } = await q(
+      `SELECT s.code FROM repair.estimates e JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
+      [estId],
+    );
+    const code = String(st[0]?.code ?? "");
+    if (code !== "REVISION_REQUESTED") {
+      fail(`DEMO 100002 expected Rejected (REVISION_REQUESTED), got ${code}`);
+    }
+    const comments = await listDecisionComments({ estimateId: estId });
+    if (comments.lineLevel.length < 2) {
+      fail(`DEMO 100002 expected ≥2 line comments, got ${comments.lineLevel.length}`);
+    }
+    ok("assert 100002 Rejected w/ line comments");
+  }
+  // 100003 Approved w/ flags
+  {
+    const estId = String((ids["100003"] as { estimateId: string }).estimateId);
+    const eventId = String((ids["100003"] as { eventId: string }).eventId);
+    const { rows: st } = await q(
+      `SELECT s.code FROM repair.estimates e JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
+      [estId],
+    );
+    if (String(st[0]?.code) !== "APPROVED") {
+      fail(`DEMO 100003 expected APPROVED, got ${st[0]?.code}`);
+    }
+    const life = await getBoLifecycleBundle({ eventId });
+    if (life.openFlagCount < 1 && !life.approvedWithFlags) {
+      // Missing CID should produce a flag — soft check via findings
+      const { rows: flags } = await q(
+        `SELECT count(*)::int AS n
+         FROM repair.estimate_validation_findings f
+         JOIN repair.estimate_validation_runs r ON r.id = f.run_id
+         WHERE r.estimate_id = $1 AND f.cleared_at IS NULL AND f.severity = 'FLAG'`,
+        [estId],
+      );
+      if (Number(flags[0]?.n ?? 0) < 1) {
+        fail("DEMO 100003 expected open flags (e.g. MISSING_CID)");
+      }
+    }
+    ok("assert 100003 Approved w/ flags");
+  }
+  // 100004 Missed POD
+  {
+    const eventId = String((ids["100004"] as { eventId: string }).eventId);
+    const life = await getBoLifecycleBundle({ eventId });
+    if (!life.dates.missedPodRequired && !life.dates.missedPodReasonCode) {
+      fail("DEMO 100004 expected Missed POD reason / required");
+    }
+    if (life.dates.missedPodReasonCode !== "AWAITING_PARTS") {
+      fail(
+        `DEMO 100004 expected missedPodReasonCode AWAITING_PARTS, got ${life.dates.missedPodReasonCode}`,
+      );
+    }
+    ok("assert 100004 Missed POD");
+  }
+  // 100005 Closed completed+invoiced
+  {
+    const eventId = String((ids["100005"] as { eventId: string }).eventId);
+    const life = await getBoLifecycleBundle({ eventId });
+    if (!life.isClosed || life.timelineCode !== "CLOSED") {
+      fail(`DEMO 100005 expected Closed, got ${life.timelineCode}`);
+    }
+    if (!life.dates.completed) fail("DEMO 100005 missing completed date");
+    if (!life.invoiceNo) fail("DEMO 100005 missing invoice");
+    if (life.inconsistentClosed) {
+      fail(
+        `DEMO 100005 inconsistent: ${life.inconsistentClosedReasons.join("; ")}`,
+      );
+    }
+    if (!life.closedReasonLine?.startsWith("Closed:")) {
+      fail(`DEMO 100005 closed reason missing: ${life.closedReasonLine}`);
+    }
+    ok(`assert 100005 Closed — ${life.closedReasonLine}`);
+  }
+
+  // Ensure shop exists
+  void shopId;
 }
 
 async function main() {
@@ -461,15 +652,45 @@ async function main() {
     `Demo Shop ${DEMO_SHOP_MARK} samples\nshopId=${shopId}\nkey=${DEMO_SHOP_ID_KEY}\n`,
   );
 
-  await ensureOpenBo(shopId, base);
-  await seedRejected(shopId, base);
-  await seedApprovedFlags(shopId, base);
-  await seedMissedPod(shopId);
-  await seedClosed(shopId, base);
+  const open = await ensureOpenBo(shopId, base);
+  const rejected = await seedRejected(shopId, base);
+  const approved = await seedApprovedFlags(shopId, base);
+  const missed = await seedMissedPod(shopId);
+  const closed = await seedClosed(shopId, base);
+
+  const ids = {
+    shopMark: DEMO_SHOP_MARK,
+    shopId,
+    "100001": { eventId: open.eventId, status: "Open" },
+    "100002": {
+      eventId: rejected.eventId,
+      estimateId: rejected.estimateId,
+      status: "Rejected",
+    },
+    "100003": {
+      eventId: approved.eventId,
+      estimateId: approved.estimateId,
+      status: "Approved+flags",
+    },
+    "100004": { eventId: missed.eventId, status: "MissedPOD" },
+    "100005": {
+      eventId: closed.eventId,
+      estimateId: closed.estimateId,
+      status: "Closed",
+      closedReason: closed.closedReason,
+    },
+    writtenAt: new Date().toISOString(),
+  };
+
+  writeFileSync(IDS_FILE, JSON.stringify(ids, null, 2) + "\n");
+  ok(`wrote gitignored IDs → ${IDS_FILE}`);
+
+  await assertDemoStates(shopId, ids);
 
   console.log("=== repair:seed-shop-demo PASS ===");
   console.log(`Shop mark: ${DEMO_SHOP_MARK}`);
   console.log(`Samples: ${SAMPLES}`);
+  console.log(`IDs: ${IDS_FILE}`);
 }
 
 main().catch((e) => {

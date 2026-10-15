@@ -2,6 +2,7 @@
  * §G Shop BO detail — car, owner instructions, arrival, JIC clock (wrecks),
  * §E viewer shop mode (view+add, never void).
  * §G r2: lifecycle dates, POD history, timeline, flags, breadcrumbs, AA.
+ * §G r3: white inputs, closed reason + inconsistent block, owner/MP read-only.
  */
 import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import DevRoleSwitcher, { repairDevHeaders } from "./DevRoleSwitcher";
 import {
   RepairBackLink,
@@ -58,6 +60,10 @@ type Lifecycle = {
     when: string | null;
   }>;
   missedPodReasons: Array<{ code: string; label: string }>;
+  isClosed?: boolean;
+  closedReasonLine?: string | null;
+  inconsistentClosed?: boolean;
+  inconsistentClosedReasons?: string[];
 };
 
 type Detail = {
@@ -85,6 +91,8 @@ type Detail = {
   }>;
   documents: { permissions: { canAdd: boolean; canVoid: boolean }; count: number };
   lifecycle?: Lifecycle;
+  readOnly?: boolean;
+  viewingAsShopMark?: string;
 };
 
 type Finding = {
@@ -256,9 +264,20 @@ export default function ShopBoDetail() {
       )}&role=shop`
     : "#";
 
+  const readOnly = Boolean(data?.readOnly);
+
   return (
     <div className={shopAa.page}>
       <DevRoleSwitcher />
+      {readOnly && (
+        <div
+          className="border-b border-slate-400 bg-slate-100 px-4 py-2 text-sm text-slate-900"
+          data-testid="shop-readonly-banner"
+        >
+          Viewing as shop {data?.viewingAsShopMark || "????"} · read-only
+          (owner / managing partner)
+        </div>
+      )}
       <header className="border-b border-slate-300 bg-white px-4 py-4 sm:px-8">
         <div className="mx-auto max-w-5xl space-y-2">
           <RepairBreadcrumbs
@@ -301,6 +320,19 @@ export default function ShopBoDetail() {
               <>
                 <section className="rounded border border-slate-300 bg-white p-4">
                   <h2 className="font-semibold text-slate-900">Status timeline</h2>
+                  {life.closedReasonLine && (
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {life.closedReasonLine}
+                    </p>
+                  )}
+                  {life.inconsistentClosed && (
+                    <p className="mt-2 rounded border border-red-700 bg-red-50 px-2 py-1 text-sm font-semibold text-red-900">
+                      Inconsistent state
+                      {life.inconsistentClosedReasons?.length
+                        ? `: ${life.inconsistentClosedReasons.join("; ")}`
+                        : ""}
+                    </p>
+                  )}
                   {life.approvedWithFlags && (
                     <p className="mt-2 rounded border border-amber-700 bg-amber-50 px-2 py-1 text-sm text-slate-900">
                       Approved – {life.openFlagCount} flags block completion/invoicing
@@ -358,26 +390,31 @@ export default function ShopBoDetail() {
                       <Label className={shopAa.label}>Arrival (shop edit)</Label>
                       <Input
                         type="date"
-                        className="border-slate-400 text-slate-900"
+                        className={shopAa.input}
                         value={arrival}
                         onChange={(e) => setArrival(e.target.value)}
+                        disabled={readOnly}
+                        placeholder="mm/dd/yyyy"
                       />
                     </div>
                     <div>
                       <Label className={shopAa.label}>POD</Label>
                       <Input
                         type="date"
-                        className="border-slate-400 text-slate-900"
+                        className={shopAa.input}
                         value={pod}
                         onChange={(e) => setPod(e.target.value)}
+                        disabled={readOnly}
+                        placeholder="mm/dd/yyyy"
                       />
                     </div>
                     <div>
                       <Label className={shopAa.label}>POD change reason</Label>
                       <select
-                        className="mt-1 h-9 w-full rounded border border-slate-400 bg-white px-2 text-sm text-slate-900"
+                        className={shopAa.select}
                         value={podReason}
                         onChange={(e) => setPodReason(e.target.value)}
+                        disabled={readOnly}
                       >
                         <option value="">—</option>
                         {(life.missedPodReasons || []).map((r) => (
@@ -387,10 +424,11 @@ export default function ShopBoDetail() {
                         ))}
                       </select>
                       <Input
-                        className="mt-1 border-slate-400 text-slate-900"
+                        className={cn("mt-1", shopAa.input)}
                         placeholder="POD reason note"
                         value={podNote}
                         onChange={(e) => setPodNote(e.target.value)}
+                        disabled={readOnly}
                       />
                     </div>
                     <div>
@@ -399,9 +437,10 @@ export default function ShopBoDetail() {
                         {life.dates.missedPodRequired ? " (required)" : ""}
                       </Label>
                       <select
-                        className="mt-1 h-9 w-full rounded border border-slate-400 bg-white px-2 text-sm text-slate-900"
+                        className={shopAa.select}
                         value={missedCode}
                         onChange={(e) => setMissedCode(e.target.value)}
+                        disabled={readOnly}
                       >
                         <option value="">—</option>
                         {(life.missedPodReasons || []).map((r) => (
@@ -411,48 +450,55 @@ export default function ShopBoDetail() {
                         ))}
                       </select>
                       <Input
-                        className="mt-1 border-slate-400 text-slate-900"
+                        className={cn("mt-1", shopAa.input)}
                         placeholder="Missed POD note"
                         value={missedNote}
                         onChange={(e) => setMissedNote(e.target.value)}
+                        disabled={readOnly}
                       />
                     </div>
                     <div>
                       <Label className={shopAa.label}>Completed</Label>
                       <Input
                         type="date"
-                        className="border-slate-400 text-slate-900"
+                        className={shopAa.input}
                         value={completed}
                         onChange={(e) => setCompleted(e.target.value)}
+                        disabled={readOnly}
+                        placeholder="mm/dd/yyyy"
                       />
                     </div>
                     <div>
                       <Label className={shopAa.label}>Released / Outbound</Label>
                       <Input
                         type="date"
-                        className="border-slate-400 text-slate-900"
+                        className={shopAa.input}
                         value={released}
                         onChange={(e) => setReleased(e.target.value)}
+                        disabled={readOnly}
+                        placeholder="mm/dd/yyyy"
                       />
                     </div>
                   </div>
-                  <Button
-                    disabled={busy}
-                    onClick={() =>
-                      void saveLifecycle({
-                        arrival: arrival || null,
-                        pod: pod || null,
-                        podReasonCode: podReason || null,
-                        podReasonNote: podNote || null,
-                        missedPodReasonCode: missedCode || null,
-                        missedPodReasonNote: missedNote || null,
-                        completed: completed || null,
-                        released: released || null,
-                      })
-                    }
-                  >
-                    Save shop dates
-                  </Button>
+                  {!readOnly && (
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        void saveLifecycle({
+                          arrival: arrival || null,
+                          pod: pod || null,
+                          podReasonCode: podReason || null,
+                          podReasonNote: podNote || null,
+                          missedPodReasonCode: missedCode || null,
+                          missedPodReasonNote: missedNote || null,
+                          completed: completed || null,
+                          released: released || null,
+                        })
+                      }
+                    >
+                      Save shop dates
+                    </Button>
+                  )}
                 </section>
 
                 <section className="rounded border border-slate-300 bg-white p-4">
@@ -555,11 +601,17 @@ export default function ShopBoDetail() {
 
             <section className="space-y-4 rounded border border-slate-300 bg-white p-4">
               <h2 className="font-semibold text-slate-900">Submit estimate</h2>
+              {readOnly ? (
+                <p className={shopAa.muted}>
+                  Read-only — submit / validate disabled while viewing as shop.
+                </p>
+              ) : null}
               <div className="flex gap-2">
                 <Button
                   size="sm"
                   variant={mode === "upload" ? "default" : "outline"}
                   onClick={() => setMode("upload")}
+                  disabled={readOnly}
                 >
                   Upload 500-byte
                 </Button>
@@ -567,6 +619,7 @@ export default function ShopBoDetail() {
                   size="sm"
                   variant={mode === "hand" ? "default" : "outline"}
                   onClick={() => setMode("hand")}
+                  disabled={readOnly}
                 >
                   Hand entry
                 </Button>
@@ -580,8 +633,9 @@ export default function ShopBoDetail() {
                     id="file"
                     type="file"
                     accept=".txt,.dat,.500"
-                    className="border-slate-400"
+                    className={shopAa.input}
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    disabled={readOnly}
                   />
                 </div>
               ) : (
@@ -592,18 +646,26 @@ export default function ShopBoDetail() {
                   <Textarea
                     id="hand"
                     rows={6}
-                    className="border-slate-400 font-mono text-xs text-slate-900"
+                    className={cn("font-mono text-xs", shopAa.textarea)}
                     value={handJson}
                     onChange={(e) => setHandJson(e.target.value)}
                     placeholder='[{"aarJobCode":"1001","laborCents":15000,"respCode":"1","aarComponentId":"CID123"}]'
+                    disabled={readOnly}
                   />
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" disabled={busy} onClick={() => void runValidate()}>
+                <Button
+                  variant="secondary"
+                  disabled={busy || readOnly}
+                  onClick={() => void runValidate()}
+                >
                   Parse / validate preview
                 </Button>
-                <Button disabled={busy} onClick={() => void submitEstimate()}>
+                <Button
+                  disabled={busy || readOnly}
+                  onClick={() => void submitEstimate()}
+                >
                   Submit estimate
                 </Button>
               </div>

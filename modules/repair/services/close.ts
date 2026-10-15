@@ -7,6 +7,10 @@ import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
 import { notify } from "./notifications";
 import { getStatusByCode, assertTransitionAllowed } from "./status-machine";
+import {
+  assertCloseRequirements,
+  markBadOrderClosed,
+} from "./shop-clarity";
 
 const CLOSE_ROLES = new Set([
   "reviewer",
@@ -172,6 +176,13 @@ export async function closeEvent(opts: {
     };
   }
 
+  // §G r3 — close requires completed + invoice + no blocking flags
+  const closeGate = await assertCloseRequirements({
+    eventId: opts.eventId,
+    tenantId,
+  });
+  if (!closeGate.ok) return closeGate;
+
   const to = await getStatusByCode(tenantId, "EVENT", "CLOSED");
   if (!to) return { ok: false as const, status: 500, error: "CLOSED status missing" };
 
@@ -192,13 +203,24 @@ export async function closeEvent(opts: {
     tenantId,
   ]);
 
+  const boClose = await markBadOrderClosed({
+    eventId: opts.eventId,
+    actor: opts.actor,
+    tenantId,
+  });
+  if (!boClose.ok) return boClose;
+
   await writeAudit({
     tenantId,
     entity: "event",
     entityId: opts.eventId,
     action: "EVENT_CLOSED",
     before: { status: "READY_TO_CLOSE" },
-    after: { status: "CLOSED", comment: opts.comment ?? null },
+    after: {
+      status: "CLOSED",
+      comment: opts.comment ?? null,
+      closedReason: boClose.closedReason,
+    },
     actor: opts.actor,
     via: "UI",
   });
@@ -211,5 +233,9 @@ export async function closeEvent(opts: {
     actor: opts.actor,
   });
 
-  return { ok: true as const, status: "CLOSED" as const };
+  return {
+    ok: true as const,
+    status: "CLOSED" as const,
+    closedReason: boClose.closedReason,
+  };
 }

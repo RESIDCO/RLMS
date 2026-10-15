@@ -4562,12 +4562,15 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     return res.send(Buffer.from(result.content, "latin1"));
   });
 
-  // §G r2 — BO lifecycle dates (shop / owner)
+  // §G r2/r3 — BO lifecycle dates (shop write; owner/MP use owner route)
   app.patch("/api/repair/shop/events/:eventId/lifecycle", async (req, res) => {
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     const actor = shopActorFrom(req);
-    // Shop mark ownership gate (owners use owner routes / role switcher still hits shop APIs with shop mark)
+    const { assertShopWriteRole } = await import("./services/shop-portal");
+    const write = assertShopWriteRole(actor.role);
+    if (!write.ok) return res.status(write.status).json({ error: write.error });
+    // Shop mark ownership gate
     const gate = await shopBoDetail({
       ...actor,
       eventId: String(req.params.eventId),

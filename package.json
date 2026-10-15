@@ -35,6 +35,7 @@
     "repair:smoke-shop": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/smoke-shop-g.ts",
     "repair:typecheck-client-shop": "tsx modules/repair/dev/typecheck-client-shop.ts",
     "repair:seed-shop-demo": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/seed-shop-demo.ts",
+    "repair:clean-smoke-data": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/clean-smoke-data.ts",
     "repair:import-ref-data": "tsx modules/repair/dev/import-ref-data.ts",
     "repair:demo:local": "tsx modules/repair/dev/demo-local.ts",
     "repair:seed:estimates-history": "tsx modules/repair/dev/seed-estimates-history.ts"

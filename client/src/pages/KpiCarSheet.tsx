@@ -17,6 +17,7 @@ import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { kpiBucketTitle } from "@shared/kpi-buckets";
+import { formatCarId } from "@shared/residco-import";
 import { carPath } from "@/lib/browse-nav";
 
 function KpiDeltaBlock({ delta }: { delta: any[] | undefined }) {
@@ -136,7 +137,7 @@ export function KpiCarSheet({
     <Sheet open={carId != null} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{row?.car ?? "Car"}</SheetTitle>
+          <SheetTitle className="font-mono whitespace-nowrap">{row ? formatCarId(row) : "Car"}</SheetTitle>
         </SheetHeader>
         {isLoading ? (
           <p className="text-sm text-muted-foreground mt-4">Loading…</p>

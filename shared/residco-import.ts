@@ -258,6 +258,39 @@ export function isOlNumberToken(raw: unknown): boolean {
 /** Stored `railcars.car_number` width — uniformly zero-padded fleet-wide. */
 export const CAR_NUMBER_WIDTH = 6;
 
+export type CarIdInput = {
+  reporting_marks?: string | null;
+  car_number?: string | null;
+  car?: string | null;
+  car_initial?: string | null;
+};
+
+/**
+ * Display car ID as "MARK NNNNNN" (one space, number zero-padded to 6).
+ * Display only — does not write the database.
+ */
+export function formatCarId(input: CarIdInput | string | null | undefined): string {
+  if (input == null) return "";
+  if (typeof input === "string") {
+    const n = normalizeMarkAndNumber(input);
+    if (n.ok) return n.reporting_marks ? `${n.reporting_marks} ${n.car_number}` : n.car_number;
+    return String(input).trim().replace(/\s+/g, " ");
+  }
+  const mark = String(input.reporting_marks ?? input.car_initial ?? "").trim().toUpperCase();
+  const num = String(input.car_number ?? "").trim();
+  const combined =
+    mark && num
+      ? num.toUpperCase().replace(/\s+/g, "").startsWith(mark)
+        ? num
+        : `${mark} ${num}`
+      : mark || num || String(input.car ?? "").trim();
+  if (!combined) return "";
+  const n = normalizeMarkAndNumber(combined);
+  if (n.ok) return n.reporting_marks ? `${n.reporting_marks} ${n.car_number}` : n.car_number;
+  if (input.car) return formatCarId(input.car);
+  return combined.replace(/\s+/g, " ");
+}
+
 /**
  * Pattern for the number half of an explicit mark+number search.
  * Short digit strings are padded so they cannot substring-match other 6-digit numbers.

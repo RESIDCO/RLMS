@@ -1,3 +1,4 @@
+import { formatCarId } from "@shared/residco-import";
 import { supabaseAdmin } from "./supabase";
 import {
   kpiBucketTitle,
@@ -103,7 +104,7 @@ export async function annotateKpiDelta(
     const afterPrimary = primaryKpiBucket(after, preferredBucket);
     return {
       railcar_id: row.railcar_id,
-      car: row.car,
+      car: formatCarId(row),
       before,
       after,
       before_primary: beforePrimary,
@@ -128,7 +129,7 @@ export async function loadKpiCarRow(id: number) {
   if (data.active !== true) throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
   const buckets = kpiBucketsForRow(data);
   return {
-    row: data,
+    row: { ...data, car: formatCarId(data) },
     buckets,
     primary: primaryKpiBucket(buckets),
     titles: buckets.map(kpiBucketTitle),

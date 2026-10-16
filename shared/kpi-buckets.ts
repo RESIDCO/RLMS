@@ -55,6 +55,22 @@ export const KPI_SORT_COLS = [
   "reason",
 ] as const;
 
+/** Same order/widths on every KPI list. Long text truncates; car stays one line. */
+export const KPI_COL_LAYOUT: Record<(typeof KPI_SORT_COLS)[number], { minWidth: string; truncate?: boolean }> = {
+  car: { minWidth: "9.5rem" },
+  entity: { minWidth: "5.5rem" },
+  status_tag: { minWidth: "4.5rem" },
+  derived_status: { minWidth: "5.5rem" },
+  current_lease: { minWidth: "8rem", truncate: true },
+  lessee: { minWidth: "9rem", truncate: true },
+  legal_owner: { minWidth: "7rem" },
+  buyer: { minWidth: "6rem" },
+  commitment: { minWidth: "10rem", truncate: true },
+  rent_start_date: { minWidth: "6.5rem" },
+  last_ol: { minWidth: "5.5rem" },
+  reason: { minWidth: "8rem" },
+};
+
 export const KPI_GROUP_COLS = ["current_lease", "lessee", "entity", "reason"] as const;
 
 export const KPI_PRIMARY_ORDER: KpiBucket[] = [

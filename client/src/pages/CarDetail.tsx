@@ -1,6 +1,7 @@
 import { Link, useRoute, useLocation } from "wouter";
 import { useHashSearch } from "@/lib/hash-location";
 import { KPI_TITLES } from "@shared/kpi-buckets";
+import { formatCarId } from "@shared/residco-import";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -81,7 +82,7 @@ export default function CarDetailPage() {
   });
 
   const r = data?.railcar;
-  const mark = r ? [r.reporting_marks, r.car_number].filter(Boolean).join(" ") : "Car";
+  const mark = r ? formatCarId(r) || "Car" : "Car";
   const ol =
     r?.rider_external_id ||
     (olP?.ol ? decodeURIComponent(olP.ol) : null) ||

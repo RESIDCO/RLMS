@@ -63,7 +63,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { displayLeaseNumber, normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
+import { displayLeaseNumber, formatCarId, normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
 import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
 import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate, todayIsoDateOnly } from "@shared/lease-authority";
 import { leaseExpirationSourceLabel } from "@shared/lease-governance";
@@ -2026,7 +2026,7 @@ export function CarDetail({
             <span className="font-eyebrow">Railcar Detail</span>
             <EntityBadge entity={(r as any).entity} size="lg" />
           </div>
-          <SheetTitle className="font-mono-num">{[r.reporting_marks, r.car_number].filter(Boolean).join(" ")}</SheetTitle>
+          <SheetTitle className="font-mono-num whitespace-nowrap">{formatCarId(r)}</SheetTitle>
           <SheetDescription>
             {r.car_type ?? "—"}
             {(r as any).equipment_type_code ? ` · ${(r as any).equipment_type_code}` : ""}

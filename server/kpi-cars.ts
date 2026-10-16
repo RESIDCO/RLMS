@@ -3,10 +3,15 @@ import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { KPI_BUCKETS, KPI_GROUP_COLS, KPI_SORT_COLS, KPI_TITLES, type KpiBucket } from "@shared/kpi-buckets";
+import { formatCarId } from "@shared/residco-import";
 import { loadKpiCarRow } from "./kpi-delta";
 
 const ROW_COLS =
   "railcar_id, active, car, reporting_marks, car_number, entity, status_tag, derived_status, current_lease, lessee, legal_owner, buyer, commitment, rent_start_date, last_ol, reason, sale_class, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, lease_status, master_lease_id, rider_id";
+
+function withFormattedCar<T extends { car?: string | null; reporting_marks?: string | null; car_number?: string | null }>(row: T): T {
+  return { ...row, car: formatCarId(row) };
+}
 
 function isBucket(v: string): v is KpiBucket {
   return (KPI_BUCKETS as readonly string[]).includes(v);
@@ -118,7 +123,7 @@ export async function listKpiCarsPaged(req: Request) {
       .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
   }
   return {
-    rows: data ?? [],
+    rows: (data ?? []).map((r: any) => withFormattedCar(r)),
     total: count ?? 0,
     page: opts.page,
     page_size: opts.pageSize,
@@ -173,7 +178,10 @@ export async function exportKpiCars(req: Request, res: Response) {
   if (format === "csv") {
     const lines = [
       EXPORT_HEADERS.join(","),
-      ...rows.map((r: any) => EXPORT_HEADERS.map((h) => csvEscape(r[h])).join(",")),
+      ...rows.map((r: any) => {
+        const row = withFormattedCar(r);
+        return EXPORT_HEADERS.map((h) => csvEscape(h === "car" ? row.car : r[h])).join(",");
+      }),
     ];
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${name}.csv"`);
@@ -183,7 +191,10 @@ export async function exportKpiCars(req: Request, res: Response) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(opts.bucket.slice(0, 31));
   ws.addRow(EXPORT_HEADERS);
-  for (const r of rows) ws.addRow(EXPORT_HEADERS.map((h) => (r as any)[h] ?? ""));
+  for (const r of rows) {
+    const row = withFormattedCar(r as any);
+    ws.addRow(EXPORT_HEADERS.map((h) => (h === "car" ? row.car : (r as any)[h]) ?? ""));
+  }
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${name}.xlsx"`);
   await wb.xlsx.write(res);

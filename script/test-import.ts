@@ -20,6 +20,13 @@ import {
   deriveLeaseKey,
   synthesizeLeaseNumber,
 } from "../shared/residco-import";
+import {
+  assignmentLabelFromOl,
+  canonicalLesseeFromOl,
+  compactOlKey,
+  findRiderByOlLabel,
+  isSoldOl,
+} from "../shared/ol-identity";
 import { carBuildYear, turning50ByYear } from "../shared/build-year";
 import {
   padCarNumber,
@@ -219,6 +226,41 @@ eq(isOlNumberToken("OL1248"), true, "isOlNumberToken OL1248");
 eq(isOlNumberToken("xOL1248"), true, "isOlNumberToken xOL1248");
 eq(isOlNumberToken("TFOX12345"), false, "isOlNumberToken car mark is not an OL");
 eq(isOlNumberToken("OL"), false, "isOlNumberToken OL without digits");
+
+eq(compactOlKey("OL 2021"), "ol2021", "compactOlKey strips spaces");
+eq(compactOlKey("ol2021"), compactOlKey("OL2021"), "compactOlKey is case-insensitive");
+eq(isSoldOl("SOLD"), true, "isSoldOl SOLD");
+eq(isSoldOl("sold"), true, "isSoldOl sold");
+{
+  const riders = [
+    { id: 425, rider_name: "OL2021", schedule_number: "OL2021" },
+    { id: 301, rider_name: "OL2513", schedule_number: "OL2513" },
+  ];
+  eq(findRiderByOlLabel(riders, "ol2021")?.id, 425, "findRiderByOlLabel ol2021");
+  eq(findRiderByOlLabel(riders, "OL 2021")?.id, 425, "findRiderByOlLabel OL 2021");
+  eq(findRiderByOlLabel(riders, "OL9999"), undefined, "findRiderByOlLabel unknown");
+}
+eq(assignmentLabelFromOl("Dicaperl", "OL2021"), "Dicaperl - OL2021", "assignment_label format");
+{
+  const alpek = canonicalLesseeFromOl({
+    isSold: false,
+    isAdHoc: false,
+    masterLessee: "Alpek Polyester (xTrinity)",
+    carLesseeCounts: [
+      { lessee: "Alpek Polyester", n: 40 },
+      { lessee: "Alpek Polyester (xTrinity)", n: 10 },
+    ],
+  });
+  eq(alpek.lessee, "Alpek Polyester (xTrinity)", "canonical lessee prefers master lease over car counts");
+  eq(alpek.source, "master_lease", "canonical source is master_lease");
+  const sold = canonicalLesseeFromOl({
+    isSold: true,
+    isAdHoc: false,
+    masterLessee: "DTE",
+    carLesseeCounts: [{ lessee: "DTE", n: 5 }],
+  });
+  eq(sold.lessee, null, "SOLD does not take master-lease lessee");
+}
 
 {
   // Importer must never attach via a global rider_name map.

@@ -6,6 +6,8 @@ import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { pointCurrentAssignmentAt } from "./current-assignment";
+import { loadOlIdentity, matchRiderByCompactLabel, railcarIdentityPatch } from "./ol-identity";
+import { AD_HOC_LEASE_NUMBER } from "@shared/ol-identity";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
@@ -2060,7 +2062,7 @@ export async function registerRoutes(
       const [ridersRes, countByRider] = await Promise.all([
         supabaseAdmin
           .from("riders")
-          .select("*, master_lease:master_leases(id, lease_number)")
+          .select("*, master_lease:master_leases(id, lease_number, lessee, lease_type, account_id, sold_to)")
           .order("rider_name", { ascending: true }),
         countActiveCarsByRiderId(),
       ]);
@@ -2071,6 +2073,21 @@ export async function registerRoutes(
         active_car_count: countByRider.get(r.id) ?? 0,
       }));
       res.json(out);
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/riders/:id/identity", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const riderId = Number(req.params.id);
+      if (!Number.isFinite(riderId) || riderId <= 0) {
+        return res.status(400).json({ message: "Invalid rider" });
+      }
+      const identity = await loadOlIdentity(riderId);
+      if (!identity) return res.status(404).json({ message: "Rider not found" });
+      res.json(identity);
     } catch (err) {
       errHandler(res, err);
     }
@@ -2091,22 +2108,16 @@ export async function registerRoutes(
           .order("id", { ascending: true })
           .range(from, to)
       );
-      const upper = raw.toUpperCase();
       const asId = Number(raw);
       const match =
         (Number.isFinite(asId) && asId > 0
           ? riders.find((r: any) => r.id === asId)
-          : undefined) ??
-        riders.find(
-          (r: any) =>
-            String(r.rider_name ?? "").trim().toUpperCase() === upper ||
-            String(r.schedule_number ?? "").trim().toUpperCase() === upper
-        );
+          : undefined) ?? matchRiderByCompactLabel(riders as any[], raw);
       if (match) {
         return res.json({ id: match.id, rider_name: match.rider_name, created: false });
       }
 
-      const AD_HOC_LEASE = "AD-HOC-OL";
+      const AD_HOC_LEASE = AD_HOC_LEASE_NUMBER;
       let { data: mla } = await supabase
         .from("master_leases")
         .select("id")
@@ -2234,18 +2245,24 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const input = moveCarsSchema.parse(req.body);
-      const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date, rent_start_date } = input;
+      const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date, rent_start_date, lessee_override } = input;
       const dateSupplied = typeof rent_start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rent_start_date);
 
-      // verify destination rider exists
-      const { data: toRider, error: rErr } = await supabase
-        .from("riders")
-        .select("id, rider_name")
-        .eq("id", to_rider_id)
-        .single();
-      if (rErr) throw rErr;
-      if (!toRider)
-        return res.status(400).json({ message: "Destination rider not found" });
+      const identity = await loadOlIdentity(to_rider_id);
+      if (!identity) return res.status(400).json({ message: "Destination rider not found" });
+
+      const typedLessee = String(new_fleet_name ?? "").trim() || null;
+      if (lessee_override) {
+        if (!String(reason ?? "").trim()) {
+          return res.status(400).json({ message: "Reason is required when overriding the OL lessee" });
+        }
+        if (!typedLessee) {
+          return res.status(400).json({ message: "Lessee is required when overriding the OL lessee" });
+        }
+      }
+
+      const deriveOlLessee = !identity.is_sold && !identity.is_adhoc && !lessee_override && Boolean(identity.canonical_lessee);
+      const olLessee = deriveOlLessee ? identity.canonical_lessee : null;
 
       // fetch current assignments for each car
       const { data: currentAssigns, error: caErr } = await supabase
@@ -2263,7 +2280,7 @@ export async function registerRoutes(
         const prev = currentByCar.get(carId);
         const fromRiderId = prev?.rider_id ?? null;
         const fromFleet = prev?.fleet_name ?? null;
-        const targetFleet = new_fleet_name ?? fromFleet;
+        const targetFleet = olLessee ?? typedLessee ?? fromFleet;
         const rent = assignmentRentStartOnMove({
           fromRiderId,
           toRiderId: to_rider_id,
@@ -2310,6 +2327,10 @@ export async function registerRoutes(
           if (iErr) throw iErr;
           await pointCurrentAssignmentAt(supabase, ins ? [ins] : []);
         }
+
+        const carPatch = railcarIdentityPatch(identity, targetFleet);
+        const { error: carErr } = await supabase.from("railcars").update(carPatch).eq("id", carId);
+        if (carErr) throw carErr;
 
         historyRows.push({
           railcar_id: carId,

@@ -6,9 +6,11 @@ import {
   CAR_NUMBER_WIDTH,
   defaultRemarkReason,
   describeCarNumberConflict,
+  formatCarId,
   normalizeMarkAndNumber,
   normalizeStoredCarNumber,
 } from "./residco-import";
+import { KPI_BUCKETS, KPI_COL_LAYOUT, KPI_SORT_COLS } from "./kpi-buckets";
 
 let passed = 0;
 let failed = 0;
@@ -58,6 +60,23 @@ ok(
     }).startsWith("OFOX 032115 already exists"),
   "conflict names the other record",
 );
+
+ok(formatCarId({ reporting_marks: "ELTX", car_number: "3105" }) === "ELTX 003105", "ELTX 3105 → ELTX 003105");
+ok(formatCarId({ reporting_marks: "ELTX", car_number: "003105" }) === "ELTX 003105", "already padded");
+ok(formatCarId({ reporting_marks: "AOKX", car_number: "495931" }) === "AOKX 495931", "AOKX 495931");
+ok(formatCarId("CKIX 1750") === "CKIX 001750", "combined string pads");
+ok(formatCarId("CKIX  001750") === "CKIX 001750", "collapses spaces");
+ok(!/\s{2,}/.test(formatCarId("ELTX 3105")), "single space");
+ok(!/\n/.test(formatCarId("ELTX 3105")), "one line");
+ok(/^[A-Z]+ \d{6}$/.test(formatCarId({ reporting_marks: "OCCX", car_number: "123" })), "MARK NNNNNN");
+ok(KPI_SORT_COLS[0] === "car", "car is first column");
+ok(
+  KPI_SORT_COLS.every((c) => KPI_COL_LAYOUT[c]?.minWidth),
+  "every KPI column has a width",
+);
+for (const bucket of KPI_BUCKETS) {
+  ok(KPI_SORT_COLS[0] === "car" && formatCarId("ELTX 3105") === "ELTX 003105", `${bucket} same car format`);
+}
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

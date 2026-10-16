@@ -16,6 +16,7 @@ import {
 import { fetchAllRows } from "./fetch-all";
 import { logActivity } from "./activity-log";
 import { annotateKpiDelta } from "./kpi-delta";
+import { formatCarId } from "@shared/residco-import";
 
 const RECOMPUTE_STATUS = process.env.RLMS_RECOMPUTE_FLEET_STATUS === "1";
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
@@ -1317,7 +1318,7 @@ export function registerCommitmentRoutes(
             [
               r.kind,
               r.id,
-              r.label ?? `${r.reporting_marks ?? ""} ${r.car_number ?? ""}`.trim(),
+              r.kind === "railcar" ? formatCarId(r) : (r.label ?? ""),
               r.entity ?? "",
               r.legal_owner ?? "",
               r.old_value ?? "",
@@ -1354,7 +1355,7 @@ export function registerCommitmentRoutes(
           headers.join(","),
           ...rows.map((r: any) =>
             headers
-              .map((h) => `"${String(r[h] ?? "").replace(/"/g, '""')}"`)
+              .map((h) => `"${String(h === "car" ? formatCarId(r) : (r[h] ?? "")).replace(/"/g, '""')}"`)
               .join(","),
           ),
         ];

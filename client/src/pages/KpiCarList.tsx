@@ -19,7 +19,8 @@ import { apiGet, apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
-import { KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
+import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
+import { formatCarId } from "@shared/residco-import";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { KpiCarSheet } from "@/pages/KpiCarSheet";
 
@@ -42,6 +43,18 @@ type Row = {
 function qsFrom(sp: URLSearchParams) {
   const q = sp.toString();
   return q ? `?${q}` : "";
+}
+
+function kpiThClass(col: (typeof KPI_SORT_COLS)[number]) {
+  const sticky = col === "car" ? "sticky left-8 z-20 bg-card" : "";
+  return `py-1.5 pr-3 ${sticky}`;
+}
+
+function kpiTdClass(col: (typeof KPI_SORT_COLS)[number]) {
+  const layout = KPI_COL_LAYOUT[col];
+  const sticky = col === "car" ? "sticky left-8 z-10 bg-card" : "";
+  const wrap = col === "car" ? "whitespace-nowrap font-mono" : layout.truncate ? "max-w-[12rem] truncate" : "";
+  return `py-1.5 pr-3 ${sticky} ${wrap}`.trim();
 }
 
 export function KpiCarListPage() {
@@ -371,7 +384,7 @@ export function KpiCarListPage() {
             ))}
             {(preview.kpi_delta ?? []).slice(0, 8).map((d: any) => (
               <div key={d.railcar_id}>
-                {d.car}: {d.before_title} → {d.after_title}
+                {formatCarId(d)}: {d.before_title} → {d.after_title}
                 {d.leaves_current ? " (leaves this list)" : ""}
               </div>
             ))}
@@ -390,10 +403,10 @@ export function KpiCarListPage() {
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm border-separate border-spacing-0">
               <thead>
                 <tr className="text-left text-muted-foreground text-xs">
-                  <th className="w-8">
+                  <th className="w-8 min-w-8 sticky left-0 z-20 bg-card">
                     <Checkbox
                       checked={allPageSelected}
                       onCheckedChange={(v) => {
@@ -406,7 +419,7 @@ export function KpiCarListPage() {
                     />
                   </th>
                   {KPI_SORT_COLS.map((col) => (
-                    <th key={col}>
+                    <th key={col} className={kpiThClass(col)} style={{ minWidth: KPI_COL_LAYOUT[col].minWidth }}>
                       <button type="button" className="hover:underline" onClick={() => toggleSort(col)}>
                         {col}{sort === col ? (dir === "asc" ? " ↑" : " ↓") : ""}
                       </button>
@@ -441,7 +454,7 @@ export function KpiCarListPage() {
                       {!hide &&
                         g.rows.map((r) => (
                           <tr key={r.railcar_id} className="border-t border-border/40">
-                            <td>
+                            <td className="sticky left-0 z-10 bg-card">
                               <Checkbox
                                 checked={selectAllMatching || selected.has(r.railcar_id)}
                                 onCheckedChange={(v) => {
@@ -453,28 +466,29 @@ export function KpiCarListPage() {
                                 }}
                               />
                             </td>
-                            <td className="py-1.5 font-mono">
+                            <td className={kpiTdClass("car")} style={{ minWidth: KPI_COL_LAYOUT.car.minWidth }}>
                               <button
                                 type="button"
-                                className="underline"
+                                className="underline whitespace-nowrap"
                                 onClick={() => {
                                   sessionStorage.setItem(`rlms:kpi-scroll:${listPathWithoutCar}`, String(window.scrollY));
                                   sheetPushedRef.current = true;
                                   setParams({ car: String(r.railcar_id) }, false);
                                 }}
                               >
-                                {r.car}
+                                {formatCarId(r)}
                               </button>
                             </td>
-                            <td>{r.entity ?? "—"}</td>
-                            <td>{r.status_tag ?? "—"}</td>
-                            <td>{r.derived_status ?? "—"}</td>
-                            <td>
+                            <td className={kpiTdClass("entity")} style={{ minWidth: KPI_COL_LAYOUT.entity.minWidth }}>{r.entity ?? "—"}</td>
+                            <td className={kpiTdClass("status_tag")} style={{ minWidth: KPI_COL_LAYOUT.status_tag.minWidth }}>{r.status_tag ?? "—"}</td>
+                            <td className={kpiTdClass("derived_status")} style={{ minWidth: KPI_COL_LAYOUT.derived_status.minWidth }}>{r.derived_status ?? "—"}</td>
+                            <td className={kpiTdClass("current_lease")} style={{ minWidth: KPI_COL_LAYOUT.current_lease.minWidth }} title={r.current_lease ?? undefined}>
                               {r.current_lease ? (
-                                <span className="inline-flex items-center gap-1">
+                                <span className="inline-flex items-center gap-1 max-w-full">
                                   <button
                                     type="button"
-                                    className="underline"
+                                    className="underline truncate"
+                                    title={r.current_lease}
                                     onClick={() => setParams({ lease: r.current_lease })}
                                   >
                                     {r.current_lease}
@@ -482,20 +496,20 @@ export function KpiCarListPage() {
                                   <Link
                                     href={olPath(r.current_lease)}
                                     title="Open in Browse"
-                                    className="text-muted-foreground hover:text-primary"
+                                    className="text-muted-foreground hover:text-primary shrink-0"
                                   >
                                     <ExternalLink className="h-3.5 w-3.5" />
                                   </Link>
                                 </span>
                               ) : "—"}
                             </td>
-                            <td>{r.lessee ?? "—"}</td>
-                            <td>{r.legal_owner ?? "—"}</td>
-                            <td>{r.buyer ?? "—"}</td>
-                            <td>{r.commitment ?? "—"}</td>
-                            <td>{r.rent_start_date ?? "—"}</td>
-                            <td>{r.last_ol ?? "—"}</td>
-                            <td>{r.reason ?? "—"}</td>
+                            <td className={kpiTdClass("lessee")} style={{ minWidth: KPI_COL_LAYOUT.lessee.minWidth }} title={r.lessee ?? undefined}>{r.lessee ?? "—"}</td>
+                            <td className={kpiTdClass("legal_owner")} style={{ minWidth: KPI_COL_LAYOUT.legal_owner.minWidth }}>{r.legal_owner ?? "—"}</td>
+                            <td className={kpiTdClass("buyer")} style={{ minWidth: KPI_COL_LAYOUT.buyer.minWidth }}>{r.buyer ?? "—"}</td>
+                            <td className={kpiTdClass("commitment")} style={{ minWidth: KPI_COL_LAYOUT.commitment.minWidth }} title={r.commitment ?? undefined}>{r.commitment ?? "—"}</td>
+                            <td className={kpiTdClass("rent_start_date")} style={{ minWidth: KPI_COL_LAYOUT.rent_start_date.minWidth }}>{r.rent_start_date ?? "—"}</td>
+                            <td className={kpiTdClass("last_ol")} style={{ minWidth: KPI_COL_LAYOUT.last_ol.minWidth }}>{r.last_ol ?? "—"}</td>
+                            <td className={kpiTdClass("reason")} style={{ minWidth: KPI_COL_LAYOUT.reason.minWidth }}>{r.reason ?? "—"}</td>
                           </tr>
                         ))}
                     </Fragment>

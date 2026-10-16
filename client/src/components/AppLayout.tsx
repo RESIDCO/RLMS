@@ -77,6 +77,7 @@ const mainNav: { href: string; label: string; icon: React.ElementType; aliases?:
 
 const adminNav = [
   { href: "/users", label: "Users", icon: Users },
+  { href: "/admin/sale-class", label: "Sale classification", icon: Building2 },
 ];
 
 function isNavActive(href: string, location: string, aliases: string[] = []) {

@@ -97,6 +97,7 @@ import {
 import { assignmentRentStartOnMove } from "@shared/commitment";
 import { registerCommitmentRoutes, ensureProgramCommitment, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
 import { registerRentStartRoutes } from "./rent-start";
+import { registerKpiCarRoutes } from "./kpi-cars";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
@@ -372,6 +373,7 @@ export async function registerRoutes(
   await recoverStaleExportJobs();
   registerCommitmentRoutes(app, requireWrite);
   registerRentStartRoutes(app, requireWrite);
+  registerKpiCarRoutes(app);
 
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
@@ -1062,6 +1064,10 @@ export async function registerRoutes(
               shop_conflict: Number(sqlKpis.shop_conflict) || 0,
               future_rent_start: Number(sqlKpis.future_rent_start) || 0,
               lease_ended_watch: Number(sqlKpis.lease_ended_watch) || 0,
+              sold_needs_tag: Number(sqlKpis.sold_needs_tag) || 0,
+              sale_unclear: Number(sqlKpis.sale_unclear) || 0,
+              sold_tag_suspect: Number(sqlKpis.sold_tag_suspect) || 0,
+              sold_missing_buyer: Number(sqlKpis.sold_missing_buyer) || 0,
             }
           : {
           total_fleet: railcars.length,

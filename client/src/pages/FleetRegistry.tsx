@@ -2225,7 +2225,7 @@ export function CarDetail({
         );
       })()}
 
-      <div className="mt-6 border-t border-border pt-5">
+      <div id="assignment" className="mt-6 border-t border-border pt-5">
         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
           Current Assignment
         </div>

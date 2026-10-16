@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§H r8 Test fixes (theme input + ref tabs)** | Apply `rlms-phase1-owner-ui-h-invoice-r8.bundle` on tip **`834ee37`** (§H r7). Typecheck/smoke only: nav-input validates `--repair-*` white input + AA placeholder; ref-data tabs expect **12** (incl. Missed POD reasons). No UI/theme revert. Smoke: `npm run repair:smoke-shop` + `repair:smoke-estimate-review` + `repair:smoke-invoice`. Spec: [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md). |
+| **§H r9 Stale smoke-bad-orders status** | Apply `rlms-phase1-owner-ui-h-invoice-r9.bundle` on tip **`5ca6d17`** (§H r8). **Stale smoke (not a status bug):** `repair:smoke-bad-orders` expected approve → `CLOSED`; canonical §G r5 flow is ASSIGNED → ACCEPTED → ON_HAND → APPROVED (lifecycle bridge `ACCEPTED_WORKING` until explicit CLOSED). Smoke updated; no status-logic change. Spec: [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md). |
+| **§H r8 Test fixes (theme input + ref tabs)** | Prior: `rlms-phase1-owner-ui-h-invoice-r8.bundle` on tip **`834ee37`** → **`5ca6d17`**. Typecheck/smoke only: nav-input AA + 12 ref tabs. |
 | **§H r7 Global contrast theme** | Prior: `rlms-phase1-owner-ui-h-invoice-r7.bundle` on tip **`11b7496`** → **`834ee37`**. Shared `--repair-*` tokens; light-only owner UI; disabled batch + checkboxes AA; `repair:lint-colors` + axe on every repair route. |
 | **§H r6 Invoice queue contrast + months cleanup** | Prior: `rlms-phase1-owner-ui-h-invoice-r6.bundle` on tip **`61d6ce7`** → **`11b7496`**. Queue/payments/months AA; plain status; months cleanup. |
 | **§H r5 Invoice review simplify + demo cleanup** | Prior: `rlms-phase1-owner-ui-h-invoice-r5.bundle` on tip **`ea48201`** → **`61d6ce7`**. BRC line grid + Exceptions toggle; multi-car; SHORT $36,732.04 / $747.50; open 2026-10. |
@@ -105,7 +106,27 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+33 | **`rlms-phase1-owner-ui-h-invoice.bundle`** (§H invoice review + payment) | **`c5bad2a`** | → **`ebf9400`** |
 | N+34 | **`rlms-phase1-owner-ui-h-invoice-r2.bundle`** (§H r2 line-match + payments UI) | **`ebf9400`** | → **(see README)** |
 | N+39 | **`rlms-phase1-owner-ui-h-invoice-r7.bundle`** (§H r7 global contrast theme) | **`11b7496`** | → **`834ee37`** |
-| N+40 | **`rlms-phase1-owner-ui-h-invoice-r8.bundle`** (§H r8 test fixes) | **`834ee37`** | → **(see README)** |
+| N+40 | **`rlms-phase1-owner-ui-h-invoice-r8.bundle`** (§H r8 test fixes) | **`834ee37`** | → **`5ca6d17`** |
+| N+41 | **`rlms-phase1-owner-ui-h-invoice-r9.bundle`** (§H r9 stale smoke-bad-orders) | **`5ca6d17`** | → **(see README)** |
+
+---
+
+## Apply §H r9 Stale smoke-bad-orders (on tip `5ca6d17`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect 5ca6d17…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-h-invoice-r9.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-h-invoice-r9.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+npm run repair:lint-colors
+npm run repair:typecheck-client-shop
+npm run repair:typecheck-client-invoice
+npm run repair:smoke-bad-orders
+npm run repair:smoke-shop
+npm run repair:smoke-estimate-review
+npm run repair:smoke-invoice
+```
 
 ---
 

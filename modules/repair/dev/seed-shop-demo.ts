@@ -147,14 +147,26 @@ async function ensureShop() {
     `SELECT * FROM repair.shops
      WHERE tenant_id = $1 AND deleted_at IS NULL
        AND (upper(shop_mark) = $2 OR upper(reporting_mark) = $2)
+     ORDER BY created_at ASC
      LIMIT 1`,
     [DEFAULT_TENANT_ID, DEMO_SHOP_MARK],
   );
   if (rows[0]) {
     await q(
-      `UPDATE repair.shops SET is_smoke = false WHERE id = $1`,
+      `UPDATE repair.shops SET is_smoke = false, active = true WHERE id = $1`,
       [rows[0].id],
     ).catch(() => undefined);
+    // Soft-delete duplicate DS01 rows from older seed/sim runs
+    await q(
+      `UPDATE repair.shops
+       SET deleted_at = coalesce(deleted_at, now()),
+           deleted_by = 'seed-shop-demo',
+           active = false
+       WHERE tenant_id = $1 AND deleted_at IS NULL
+         AND (upper(shop_mark) = $2 OR upper(reporting_mark) = $2)
+         AND id <> $3`,
+      [DEFAULT_TENANT_ID, DEMO_SHOP_MARK, rows[0].id],
+    );
     ok(`shop ${DEMO_SHOP_MARK} exists (${rows[0].id})`);
     return rows[0];
   }
@@ -171,21 +183,72 @@ async function ensureShop() {
   return created.shop;
 }
 
+/**
+ * Reuse exactly one DEMO event per car (never create duplicates).
+ * Prefers current shop; otherwise adopts an older-shop event and re-points
+ * shop_id. Soft-deletes any extra DEMO events for the same car.
+ */
 async function findDemoEvent(shopId: string, carNumber: string) {
   const { rows } = await q(
-    `SELECT e.id AS event_id, est.id AS estimate_id, st.code AS estimate_status
+    `SELECT e.id AS event_id, est.id AS estimate_id, st.code AS estimate_status,
+            e.shop_id
      FROM repair.events e
      LEFT JOIN repair.estimates est
        ON est.event_id = e.id AND est.deleted_at IS NULL
      LEFT JOIN repair.statuses st ON st.id = est.status_id
      WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
-       AND e.car_mark = 'DEMO' AND e.car_number = $2 AND e.shop_id = $3
-     ORDER BY e.created_at DESC LIMIT 1`,
+       AND e.car_mark = 'DEMO' AND e.car_number = $2
+     ORDER BY CASE WHEN e.shop_id = $3::uuid THEN 0 ELSE 1 END,
+              e.created_at ASC
+     LIMIT 1`,
     [DEFAULT_TENANT_ID, carNumber, shopId],
   );
-  return rows[0] as
-    | { event_id: string; estimate_id?: string; estimate_status?: string }
+  const row = rows[0] as
+    | {
+        event_id: string;
+        estimate_id?: string;
+        estimate_status?: string;
+        shop_id?: string;
+      }
     | undefined;
+  if (!row) return undefined;
+
+  // Soft-delete stray duplicates from older seed runs
+  await q(
+    `UPDATE repair.events
+     SET deleted_at = coalesce(deleted_at, now()),
+         deleted_by = 'seed-shop-demo'
+     WHERE tenant_id = $1 AND deleted_at IS NULL
+       AND car_mark = 'DEMO' AND car_number = $2
+       AND id <> $3::uuid`,
+    [DEFAULT_TENANT_ID, carNumber, row.event_id],
+  );
+  await q(
+    `UPDATE repair.bad_orders
+     SET deleted_at = coalesce(deleted_at, now()),
+         deleted_by = 'seed-shop-demo'
+     WHERE deleted_at IS NULL
+       AND event_id IN (
+         SELECT id FROM repair.events
+         WHERE tenant_id = $1 AND car_mark = 'DEMO' AND car_number = $2
+           AND id <> $3::uuid AND deleted_at IS NOT NULL
+       )`,
+    [DEFAULT_TENANT_ID, carNumber, row.event_id],
+  ).catch(() => undefined);
+
+  // Re-point to the current DS01 shop when the keeper was on an old shop row
+  if (row.shop_id && String(row.shop_id) !== shopId) {
+    await q(`UPDATE repair.events SET shop_id = $2 WHERE id = $1`, [
+      row.event_id,
+      shopId,
+    ]);
+    await q(
+      `UPDATE repair.bad_orders SET shop_id = $2
+       WHERE event_id = $1 AND deleted_at IS NULL`,
+      [row.event_id, shopId],
+    ).catch(() => undefined);
+  }
+  return row;
 }
 
 async function estimateStatus(estimateId: string): Promise<string> {
@@ -318,7 +381,7 @@ async function ensureOpenBo(shopId: string, base: Buffer) {
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Assigned",
       boDate: "2026-10-01",
-      allowDuplicates: true,
+      allowDuplicates: false,
     });
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
@@ -366,7 +429,7 @@ async function seedRejected(shopId: string, base: Buffer) {
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Rejected",
       boDate: "2026-09-15",
-      allowDuplicates: true,
+      allowDuplicates: false,
     });
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
@@ -434,7 +497,7 @@ async function seedApprovedFlags(shopId: string, base: Buffer) {
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Flags",
       boDate: "2026-09-01",
-      allowDuplicates: true,
+      allowDuplicates: false,
     });
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
@@ -511,7 +574,7 @@ async function seedMissedPod(shopId: string) {
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Missed POD",
       boDate: "2026-08-01",
-      allowDuplicates: true,
+      allowDuplicates: false,
     });
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
@@ -557,7 +620,7 @@ async function seedClosed(shopId: string, base: Buffer) {
       boRuleCode: "OTHER",
       boRuleOtherText: "Demo Closed",
       boDate: "2026-07-01",
-      allowDuplicates: true,
+      allowDuplicates: false,
     });
     if (!bo.ok) throw new Error(JSON.stringify(bo));
     eventId = String(bo.event.id);
@@ -621,19 +684,22 @@ async function seedClosed(shopId: string, base: Buffer) {
     fail(`100005 approved estimate total missing/zero (got ${estTotal})`);
   }
 
-  // Idempotent: exactly one DEMO-INV-100005 for this event (never duplicates).
+  // Idempotent: exactly one DEMO-INV-100005 keyed to the CURRENT event + shop.
+  // Root cause (r4): prior seeds found by invoice_no but never re-pointed
+  // event_id/shop_id, so the invoice stayed on an old DS01 shop/event and
+  // closing the current 100005 failed with "invoice required".
   const { rows: existingInv } = await q(
-    `SELECT id, total, invoice_no FROM repair.invoices
+    `SELECT id, total, invoice_no, event_id, shop_id FROM repair.invoices
      WHERE deleted_at IS NULL
        AND (
          event_id = $1
          OR invoice_no = 'DEMO-INV-100005'
        )
-     ORDER BY created_at ASC`,
+     ORDER BY
+       CASE WHEN invoice_no = 'DEMO-INV-100005' THEN 0 ELSE 1 END,
+       CASE WHEN event_id = $1 THEN 0 ELSE 1 END,
+       created_at ASC`,
     [eventId],
-  );
-  const primary = existingInv.find(
-    (r) => String(r.invoice_no) === "DEMO-INV-100005" || String(r.id),
   );
   if (!existingInv.length) {
     await q(
@@ -666,19 +732,20 @@ async function seedClosed(shopId: string, base: Buffer) {
         [String(r.id)],
       );
     }
+    // Always re-point to the CURRENT event + shop (do not coalesce).
     await q(
       `UPDATE repair.invoices
        SET invoice_no = 'DEMO-INV-100005',
-           total = $2,
-           estimate_total = $2,
+           event_id = $2,
+           shop_id = $3,
+           total = $4,
+           estimate_total = $4,
            match_status = 'APPROVED',
-           workflow_status = coalesce(workflow_status, 'ACCEPTED'),
-           shop_id = coalesce(shop_id, $3)
+           workflow_status = coalesce(workflow_status, 'ACCEPTED')
        WHERE id = $1`,
-      [keepId, estTotal, shopId],
+      [keepId, eventId, shopId, estTotal],
     );
   }
-  void primary;
 
   const { rows: invCount } = await q(
     `SELECT count(*)::int AS n FROM repair.invoices
@@ -744,11 +811,23 @@ async function seedClosed(shopId: string, base: Buffer) {
 }
 
 
-/** §H r3 — idempotent 5-car unit-train multi-car invoice + one month batch. */
-async function seedUnitTrainAndMonth(shopId: string, base: Buffer) {
+/**
+ * §H r4 — idempotent 5-car multi-car invoice (DEMO-INV-MULTI) + one month batch.
+ * Demo uses 5 cars; product allows any number ≥ 2 (no cap).
+ */
+async function seedMultiCarAndMonth(shopId: string, base: Buffer) {
+  // Hide legacy r3 name so queue stays DEMO-only with the new number
+  await q(
+    `UPDATE repair.invoices
+     SET deleted_at = coalesce(deleted_at, now()),
+         deleted_by = 'seed-shop-demo',
+         delete_reason = 'renamed to DEMO-INV-MULTI'
+     WHERE invoice_no = 'DEMO-INV-UNIT5' AND deleted_at IS NULL`,
+  );
+
   const { rows: existing } = await q(
-    `SELECT id FROM repair.invoices
-     WHERE invoice_no = 'DEMO-INV-UNIT5' AND deleted_at IS NULL LIMIT 1`,
+    `SELECT id, shop_id FROM repair.invoices
+     WHERE invoice_no = 'DEMO-INV-MULTI' AND deleted_at IS NULL LIMIT 1`,
   );
   const carNumbers = ["91001", "91002", "91003", "91004", "91005"];
   const eventIds: string[] = [];
@@ -762,17 +841,17 @@ async function seedUnitTrainAndMonth(shopId: string, base: Buffer) {
         carMark: "DEMO",
         carNumber,
         shopId,
-        shoppingReason: "Unit train demo",
+        shoppingReason: "Multi-car invoice demo",
         actor: "seed-shop-demo",
         boRuleCode: "OTHER",
-        boRuleOtherText: "Unit train",
+        boRuleOtherText: "Multi-car",
         boDate: "2026-09-01",
-        allowDuplicates: true,
+        allowDuplicates: false,
       });
       if (!bo.ok) fail(JSON.stringify(bo));
       eventId = String(bo.event.id);
     }
-    await driveToOnHand(eventId, "2026-09-01T12:00:00.000Z", "Unit track");
+    await driveToOnHand(eventId, "2026-09-01T12:00:00.000Z", "Multi-car track");
     if (!estimateId) {
       const bytes = withShopMark(withCar(base, "DEMO", carNumber), DEMO_SHOP_MARK);
       const sub = await shopSubmitEstimate({
@@ -781,9 +860,9 @@ async function seedUnitTrainAndMonth(shopId: string, base: Buffer) {
         actor: "seed-shop-demo",
         eventId,
         bytes,
-        filename: `unit-${carNumber}.txt`,
+        filename: `multi-${carNumber}.txt`,
       });
-      if (!sub.ok) fail(`unit ${carNumber} submit: ${JSON.stringify(sub).slice(0, 200)}`);
+      if (!sub.ok) fail(`multi ${carNumber} submit: ${JSON.stringify(sub).slice(0, 200)}`);
       estimateId = String(sub.estimateId);
     }
     {
@@ -791,7 +870,7 @@ async function seedUnitTrainAndMonth(shopId: string, base: Buffer) {
       if (code !== "APPROVED" && code !== "COMPLETED") {
         await ensureAwaitingApproval(estimateId, eventId);
         const ap = await approveEstimate({ estimateId, actor: "owner@demo" });
-        if (!ap.ok) fail(`unit ${carNumber} approve: ${JSON.stringify(ap)}`);
+        if (!ap.ok) fail(`multi ${carNumber} approve: ${JSON.stringify(ap)}`);
       }
     }
     await updateBoLifecycleDates({
@@ -814,7 +893,7 @@ async function seedUnitTrainAndMonth(shopId: string, base: Buffer) {
       `UPDATE repair.invoices
        SET deleted_at = coalesce(deleted_at, now()), deleted_by = 'seed-shop-demo'
        WHERE event_id = $1 AND deleted_at IS NULL
-         AND invoice_no <> 'DEMO-INV-UNIT5'
+         AND invoice_no <> 'DEMO-INV-MULTI'
          AND coalesce(is_multi_car,false) = false`,
       [eventId],
     );
@@ -824,29 +903,37 @@ async function seedUnitTrainAndMonth(shopId: string, base: Buffer) {
   if (!existing[0]) {
     await q(
       `UPDATE repair.invoice_cars
-       SET line_status = 'REJECTED', reject_reason = 'seed unit train reset'
+       SET line_status = 'REJECTED', reject_reason = 'seed multi-car reset'
        WHERE event_id = ANY($1::uuid[]) AND line_status = 'ACTIVE'`,
       [eventIds],
     );
-    const pdf = Buffer.from("%PDF-1.4 DEMO unit train");
+    const pdf = Buffer.from("%PDF-1.4 DEMO multi-car invoice");
     const created = await createMultiCarInvoice({
       shopId,
       eventIds,
-      invoiceNo: "DEMO-INV-UNIT5",
+      invoiceNo: "DEMO-INV-MULTI",
       actor: "seed-shop-demo",
-      file: { filename: "unit5.pdf", mime: "application/pdf", bytes: pdf },
-      aarFile: { filename: "unit5.txt", mime: "text/plain", bytes: base },
+      file: { filename: "multi.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "multi.txt", mime: "text/plain", bytes: base },
     });
-    if (!created.ok) fail(`unit5 create: ${created.error}`);
+    if (!created.ok) fail(`multi-car create: ${created.error}`);
     const appr = await approveOwnerInvoice({
       invoiceId: created.invoiceId,
       actor: "owner@demo",
-      overToleranceReason: "Unit train seed — totals may differ per-car AAR split",
+      overToleranceReason:
+        "Multi-car seed — totals may differ per-car AAR split",
     });
-    if (!appr.ok) fail(`unit5 approve: ${appr.error}`);
-    ok(`DEMO-INV-UNIT5 5-car unit train (${created.carCount} cars)`);
+    if (!appr.ok) fail(`multi-car approve: ${appr.error}`);
+    ok(`DEMO-INV-MULTI 5-car multi-car invoice (${created.carCount} cars)`);
   } else {
-    ok("DEMO-INV-UNIT5 already present (idempotent)");
+    // Re-point existing MULTI to current shop + keep cars active on current events
+    await q(
+      `UPDATE repair.invoices
+       SET shop_id = $2
+       WHERE id = $1`,
+      [String(existing[0].id), shopId],
+    );
+    ok("DEMO-INV-MULTI already present (idempotent; shop re-pointed)");
   }
 
   // One open month with approved invoices; close once for batch seed if needed
@@ -1087,9 +1174,30 @@ async function main() {
   await seedInvoiceExamples(shopId);
   ok("§H invoice examples seeded on DS01");
 
-  // §H r3 — 5-car unit train + accounting month batch
-  await seedUnitTrainAndMonth(shopId, base);
-  ok("§H r3 unit train + month seed");
+  // §H r4 — 5-car multi-car invoice + accounting month batch
+  await seedMultiCarAndMonth(shopId, base);
+  ok("§H r4 multi-car + month seed");
+
+  // Assert: exactly one live DEMO 100005 event (no stray duplicates)
+  {
+    const { rows: n100005 } = await q(
+      `SELECT count(*)::int AS n FROM repair.events
+       WHERE deleted_at IS NULL AND car_mark = 'DEMO' AND car_number = '100005'`,
+    );
+    if (Number(n100005[0]?.n ?? 0) !== 1) {
+      fail(`expected exactly 1 DEMO 100005 event, got ${n100005[0]?.n}`);
+    }
+    const { rows: invLink } = await q(
+      `SELECT i.event_id, e.id AS e_id
+       FROM repair.invoices i
+       JOIN repair.events e ON e.id = i.event_id AND e.deleted_at IS NULL
+       WHERE i.invoice_no = 'DEMO-INV-100005' AND i.deleted_at IS NULL`,
+    );
+    if (!invLink[0] || String(invLink[0].event_id) !== String(invLink[0].e_id)) {
+      fail("DEMO-INV-100005 must point at the live DEMO 100005 event");
+    }
+    ok("assert DEMO 100005 single event + invoice re-pointed");
+  }
 
   console.log("=== repair:seed-shop-demo PASS ===");
   console.log(`Shop mark: ${DEMO_SHOP_MARK}`);

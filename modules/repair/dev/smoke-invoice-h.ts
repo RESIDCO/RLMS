@@ -1,7 +1,8 @@
 /**
- * §H / §H r3 Owner invoice review + monthly close + multi-car smoke.
+ * §H / §H r3 / §H r4 Owner invoice review + monthly close + multi-car smoke.
  * match/diff, contrast AA, tolerance, reject, short-pay (shortfall+net),
- * approve→open month→close→AP→paid, 5-car multi-car, duplicate car reject.
+ * approve→open month→close→AP→paid, 5-car + 12-car multi-car, duplicate car
+ * reject, seed naming/idempotency (DEMO-INV-MULTI, SHORT $747.50), DEMO-only queue.
  * Seed does not dirty tracked files.
  *
  * Run: npm run repair:smoke-invoice
@@ -882,7 +883,7 @@ async function main() {
     }
   }
 
-  // ── §H r3 multi-car 5-car unit train + duplicate reject ─────────────
+  // ── §H r3/r4 multi-car 5-car + per-car totals = header + duplicate reject ─
   {
     const cars = ["91001", "91002", "91003", "91004", "91005"];
     const eventIds: string[] = [];
@@ -906,12 +907,13 @@ async function main() {
     if (pick.length < 5) bad("mc-cand", `expected 5 got ${pick.length}`);
     const aar = readFileSync(SAMPLE);
     const pdf = Buffer.from("%PDF-1.4 smoke multi-car");
+    const headerTotal = pick.reduce((s, c) => s + c.estimateCents, 0) / 100;
     const created = await createMultiCarInvoice({
       shopId,
       eventIds: pick.map((c) => c.eventId),
       invoiceNo: `INV-H-MC5-${RUN}`,
       actor: "smoke-h",
-      total: pick.reduce((s, c) => s + c.estimateCents, 0) / 100,
+      total: headerTotal,
       file: { filename: "mc.pdf", mime: "application/pdf", bytes: pdf },
       aarFile: { filename: "mc.txt", mime: "text/plain", bytes: aar },
       tenantId: undefined,
@@ -923,7 +925,28 @@ async function main() {
     if (!bundle.cars || bundle.cars.length !== 5) {
       bad("mc-cars", String(bundle.cars?.length));
     }
-    ok(`5-car multi-car invoice ${created.invoiceNo} splits+reconciles`);
+    const carSum = (bundle.cars ?? []).reduce(
+      (s, c) => s + Number(c.invoicedCents ?? 0),
+      0,
+    );
+    if (carSum !== created.totalCents) {
+      bad(
+        "mc-header-sum",
+        `per-car ${carSum} ≠ header ${created.totalCents}`,
+      );
+    }
+    ok(`5-car multi-car invoice ${created.invoiceNo} splits+reconciles (per-car = header)`);
+
+    const one = await createMultiCarInvoice({
+      shopId,
+      eventIds: [pick[0]!.eventId],
+      invoiceNo: `INV-H-MC-ONE-${RUN}`,
+      actor: "smoke-h",
+      file: { filename: "one.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "one.txt", mime: "text/plain", bytes: aar },
+    });
+    if (one.ok) bad("mc-min2", "single car must reject for multi-car");
+    ok("multi-car requires ≥ 2 cars");
 
     const dup = await createMultiCarInvoice({
       shopId,
@@ -935,12 +958,141 @@ async function main() {
     });
     if (dup.ok) bad("mc-dup", "duplicate car should reject");
     if (!String(dup.error).toLowerCase().includes("already")) {
-      // hardRejects DUPLICATE_CAR also ok
       if (!(dup.hardRejects ?? []).includes("DUPLICATE_CAR")) {
         bad("mc-dup-msg", dup.error);
       }
     }
     ok("duplicate car on active invoice HARD REJECT");
+  }
+
+  // ── §H r4 12-car multi-car (no cap) ─────────────────────────────────
+  {
+    const cars = Array.from({ length: 12 }, (_, i) =>
+      `9${String(i).padStart(2, "0")}${RUN.slice(-3)}`.slice(0, 6),
+    );
+    const eventIds: string[] = [];
+    for (const num of cars) {
+      const d = await driveToInvoice({
+        shopId,
+        carNumber: num,
+        invoiceNo: `INV-H-MC12-SKIP-${num}-${RUN}`,
+        tag: `mc12-${num}`,
+      });
+      await q(
+        `UPDATE repair.invoices SET deleted_at = now(), deleted_by = 'smoke-h'
+         WHERE id = $1`,
+        [d.invoiceId],
+      );
+      eventIds.push(d.eventId);
+    }
+    const cand = await listMultiCarCandidates({ shopId });
+    const pick = cand.filter((c) => eventIds.includes(c.eventId));
+    if (pick.length < 12) bad("mc12-cand", `expected 12 got ${pick.length}`);
+    const aar = readFileSync(SAMPLE);
+    const pdf = Buffer.from("%PDF-1.4 smoke multi-car 12");
+    const created = await createMultiCarInvoice({
+      shopId,
+      eventIds: pick.map((c) => c.eventId),
+      invoiceNo: `INV-H-MC12-${RUN}`,
+      actor: "smoke-h",
+      total: pick.reduce((s, c) => s + c.estimateCents, 0) / 100,
+      file: { filename: "mc12.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "mc12.txt", mime: "text/plain", bytes: aar },
+    });
+    if (!created.ok) bad("mc12-create", created.error);
+    if (created.carCount !== 12) bad("mc12-count", String(created.carCount));
+    ok(`12-car multi-car invoice ${created.invoiceNo} (no cap)`);
+  }
+
+  // ── §H r4 naming: no "unit train"; seed helpers use multi-car ───────
+  {
+    const ui = readFileSync(
+      join(ROOT, "client/src/pages/repair/ShopMultiCarInvoice.tsx"),
+      "utf8",
+    );
+    const seed = readFileSync(
+      join(ROOT, "modules/repair/dev/seed-shop-demo.ts"),
+      "utf8",
+    );
+    if (/unit[\s-]?train/i.test(ui)) {
+      bad("naming-ui", "UI must call it multi-car invoice (no unit train)");
+    }
+    if (/unit[\s-]?train/i.test(seed)) {
+      bad("naming-seed", "seed must call it multi-car invoice (no unit train)");
+    }
+    if (!seed.includes("DEMO-INV-MULTI")) {
+      bad("seed-multi", "seed must create DEMO-INV-MULTI");
+    }
+    if (!/event_id\s*=\s*\$2/.test(seed)) {
+      bad("seed-repoint", "seed must SET event_id when upserting DEMO-INV-100005");
+    }
+    ok("multi-car naming + seed re-point present");
+  }
+
+  // ── §H r4 DEMO-INV-SHORT $747.50 via seed-invoice-examples rebuild ──
+  {
+    const { seedInvoiceExamples, DEMO_SHORT_PAY_SHORTFALL_CENTS } = await import(
+      "./seed-invoice-examples"
+    );
+    await seedInvoiceExamples(shopId);
+    const { rows } = await q(
+      `SELECT short_pay_cents, approved_amount_cents,
+              ROUND(COALESCE(total,0) * 100)::bigint AS total_cents
+       FROM repair.invoices
+       WHERE invoice_no = 'DEMO-INV-SHORT' AND deleted_at IS NULL
+       LIMIT 1`,
+    );
+    if (!rows[0]) bad("short-seed", "DEMO-INV-SHORT missing");
+    const sp = Number(rows[0].short_pay_cents);
+    const tot = Number(rows[0].total_cents);
+    const net = Number(rows[0].approved_amount_cents);
+    if (sp !== DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+      bad("short-747", `shortfall ${sp} want ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
+    }
+    if (net !== tot - DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+      bad("short-net", `net ${net} ≠ ${tot} − ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
+    }
+    ok(
+      `DEMO-INV-SHORT shortfall $${(DEMO_SHORT_PAY_SHORTFALL_CENTS / 100).toFixed(2)}; net = total − shortfall`,
+    );
+  }
+
+  // ── §H r4 queue is DEMO-only after clean (APA hidden) ───────────────
+  {
+    const { rows: liveApa } = await q(
+      `SELECT id FROM repair.invoices
+       WHERE invoice_no = 'APA-OFOX528313' AND deleted_at IS NULL LIMIT 1`,
+    );
+    if (!liveApa[0]) {
+      const { rows: anyEv } = await q(
+        `SELECT e.id AS event_id, e.shop_id, e.tenant_id
+         FROM repair.events e WHERE e.deleted_at IS NULL LIMIT 1`,
+      );
+      if (anyEv[0]) {
+        await q(
+          `INSERT INTO repair.invoices
+             (tenant_id, event_id, shop_id, invoice_no, total, estimate_total,
+              match_status, workflow_status, created_by)
+           VALUES ($1,$2,$3,'APA-OFOX528313',1,1,'MATCHED','UNDER_OWNER_REVIEW','smoke-h')`,
+          [anyEv[0].tenant_id, anyEv[0].event_id, anyEv[0].shop_id],
+        );
+      }
+    }
+    execSync("npm run repair:clean-smoke-data", {
+      cwd: ROOT,
+      env: { ...process.env, REPAIR_LOCAL_DB: "1", REPAIR_DEV_BYPASS_AUTH: "1" },
+      stdio: "pipe",
+    });
+    const { rows: apa } = await q(
+      `SELECT count(*)::int AS n FROM repair.invoices
+       WHERE invoice_no = 'APA-OFOX528313' AND deleted_at IS NULL`,
+    );
+    if (Number(apa[0]?.n ?? 0) !== 0) bad("apa-hidden", "APA-OFOX528313 still visible");
+    const queue = await listOwnerInvoiceQueue({ limit: 500 });
+    if (queue.some((r) => r.invoiceNo === "APA-OFOX528313")) {
+      bad("queue-apa", "APA still in owner queue");
+    }
+    ok("clean hides APA-OFOX528313; queue has no legacy APA");
   }
 
   console.log("=== repair:smoke-invoice PASS ===");

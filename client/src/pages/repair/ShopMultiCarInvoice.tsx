@@ -1,5 +1,5 @@
 /**
- * §H r3 — Shop multi-car / unit-train invoice create.
+ * §H r3/r4 — Shop multi-car invoice create (any number of cars ≥ 2; no cap).
  * Select several Completed estimates (same shop + entity); one invoice # + PDF + 500-byte.
  */
 import { useCallback, useEffect, useState } from "react";
@@ -127,7 +127,8 @@ export default function ShopMultiCarInvoice() {
             Create multi-car invoice
           </h1>
           <p className={shopAa.muted}>
-            Unit train / bulk — same shop &amp; billing entity. One invoice number.
+            Multi-car invoice — same shop &amp; billing entity; two or more
+            completed estimates. One invoice number. No cap on cars.
           </p>
         </div>
         <Link href="/repair/shop">

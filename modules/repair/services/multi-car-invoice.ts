@@ -1,5 +1,5 @@
 /**
- * §H r3 — Multi-car (unit train / bulk) shop invoices.
+ * §H r3/r4 — Multi-car shop invoices (any number of cars ≥ 2; no cap).
  * Select several Completed estimates (same shop, same billing party/entity);
  * one invoice number + one 500-byte + PDF; header total = sum of cars.
  * Split per car; match each car's lines to that car's approved estimate.
@@ -163,8 +163,12 @@ export async function createMultiCarInvoice(opts: {
   if (!invoiceNo) {
     return { ok: false, status: 400, error: "Invoice number required" };
   }
-  if (!opts.eventIds?.length) {
-    return { ok: false, status: 400, error: "Select at least one completed estimate" };
+  if (!opts.eventIds || opts.eventIds.length < 2) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Select at least two completed estimates for a multi-car invoice",
+    };
   }
   if (!opts.file?.bytes?.length || !opts.aarFile?.bytes?.length) {
     return { ok: false, status: 400, error: "Invoice PDF and 500-byte file required" };
@@ -263,7 +267,7 @@ export async function createMultiCarInvoice(opts: {
       ? dollarsToCents(opts.total)
       : sumInvoiced;
   if (Math.abs(headerTotal - sumInvoiced) > 0 && sumInvoiced > 0) {
-    // Unit-train seed often sends sum of estimates while AAR is single-car;
+    // Multi-car seed often sends sum of estimates while AAR is single-car;
     // hard-reject only when caller insisted on a mismatched explicit total
     // that also disagrees with estimate sum.
     if (

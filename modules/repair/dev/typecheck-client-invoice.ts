@@ -143,6 +143,12 @@ export function assertInvoiceClientTypecheck(): void {
   if (!multi.includes("multi-car") || !multi.includes("Create multi-car invoice")) {
     bad("multi", "ShopMultiCarInvoice required");
   }
+  if (/unit[\s-]?train/i.test(multi)) {
+    bad("multi-naming", "ShopMultiCarInvoice must not say unit train — call it multi-car invoice");
+  }
+  if (!multi.includes("No cap on cars") && !multi.includes("two or more")) {
+    bad("multi-cap", "UI must say multi-car (≥2, no cap)");
+  }
   if (!app.includes("ShopMultiCarInvoice")) {
     bad("multi-route", "App must route multi-car create");
   }

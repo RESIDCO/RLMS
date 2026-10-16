@@ -106,9 +106,13 @@ async function ensureDs01(): Promise<string> {
   return String(ds.shop!.id);
 }
 
+/** Target shortfall for DEMO-INV-SHORT (§H r3/r4 header short-pay). */
+export const DEMO_SHORT_PAY_SHORTFALL_CENTS = 74750; // $747.50
+
 async function findDemoInvoice(invoiceNo: string) {
   const { rows } = await q(
-    `SELECT id, event_id, workflow_status, payment_status, total
+    `SELECT id, event_id, shop_id, workflow_status, payment_status, total,
+            short_pay_cents, approved_amount_cents
      FROM repair.invoices
      WHERE invoice_no = $1 AND deleted_at IS NULL
      ORDER BY created_at ASC
@@ -126,6 +130,21 @@ async function driveToSubmitted(opts: {
 }) {
   const existing = await findDemoInvoice(opts.invoiceNo);
   if (existing) {
+    // Re-point to current shop (same root cause as DEMO-INV-100005)
+    await q(
+      `UPDATE repair.invoices
+       SET shop_id = $2
+       WHERE id = $1 AND (shop_id IS DISTINCT FROM $2)`,
+      [String(existing.id), opts.shopId],
+    );
+    if (existing.event_id) {
+      await q(
+        `UPDATE repair.events
+         SET shop_id = $2
+         WHERE id = $1 AND deleted_at IS NULL AND (shop_id IS DISTINCT FROM $2)`,
+        [String(existing.event_id), opts.shopId],
+      ).catch(() => undefined);
+    }
     return {
       invoiceId: String(existing.id),
       eventId: String(existing.event_id),
@@ -384,7 +403,7 @@ export async function seedInvoiceExamples(shopId?: string) {
     ok("DEMO-INV-ADDED has added line flag");
   }
 
-  // 4) Short-pay (processed → Payable with short_pay_cents)
+  // 4) Short-pay — r3/r4: header shortfall = $747.50; net payable = total − that
   {
     const d = await driveToSubmitted({
       shopId: sid,
@@ -392,68 +411,93 @@ export async function seedInvoiceExamples(shopId?: string) {
       invoiceNo: "DEMO-INV-SHORT",
     });
     const { rows: st } = await q(
-      `SELECT payment_status, short_pay_cents FROM repair.invoices WHERE id = $1`,
+      `SELECT payment_status, short_pay_cents, approved_amount_cents,
+              ROUND(COALESCE(total,0) * 100)::bigint AS total_cents
+       FROM repair.invoices WHERE id = $1`,
       [d.invoiceId],
     );
-    if (
-      !["APPROVED_IN_OPEN_MONTH", "PAYABLE", "MONTH_CLOSED"].includes(
-        String(st[0]?.payment_status ?? ""),
-      ) ||
-      st[0]?.short_pay_cents == null
-    ) {
-      const est = await loadApprovedEstimateLines({ eventId: d.eventId });
-      const lineShortPays = est.lines.slice(0, 2).map((l, i) => ({
-        lineNo: l.lineNo,
-        amountCents: i === 0 ? l.totalCents : Math.trunc(l.totalCents / 2),
-        reason: i === 0 ? "OK" : "Half labor dispute",
-      }));
-      if (!lineShortPays.length) {
-        await replaceInvoiceLinesManual({
-          invoiceId: d.invoiceId,
-          actor: "seed-invoice-examples",
-          lines: [
-            {
-              lineNo: 1,
-              jobCode: "1000",
-              qty: 1,
-              laborCents: 10000,
-              respCode: "1",
-            },
-            {
-              lineNo: 2,
-              jobCode: "2000",
-              qty: 1,
-              laborCents: 5000,
-              respCode: "6",
-            },
-          ],
-        });
-        await q(`UPDATE repair.invoices SET total = 150 WHERE id = $1`, [d.invoiceId]);
-        const shorted = await shortPayOwnerInvoice({
-          invoiceId: d.invoiceId,
-          actor: "owner@demo",
-          reason: "Labor rate dispute",
-          lineShortPays: [
-            { lineNo: 1, amountCents: 10000, reason: "OK" },
-            { lineNo: 2, amountCents: 2500, reason: "Half labor" },
-          ],
-        });
-        if (!shorted.ok) fail(shorted.error);
-      } else {
-        await q(
-          `UPDATE repair.invoices SET total = $2 WHERE id = $1`,
-          [d.invoiceId, est.totalCents / 100],
+    const curShort = st[0]?.short_pay_cents != null ? Number(st[0].short_pay_cents) : null;
+    const needsRebuild = curShort !== DEMO_SHORT_PAY_SHORTFALL_CENTS;
+    if (needsRebuild) {
+      // Deterministic lines so shortfall is exactly $747.50
+      const line1 = 100000; // $1,000.00
+      const line2 = 149500; // $1,495.00
+      const invTotalCents = line1 + line2; // $2,495.00
+      await replaceInvoiceLinesManual({
+        invoiceId: d.invoiceId,
+        actor: "seed-invoice-examples",
+        lines: [
+          {
+            lineNo: 1,
+            jobCode: "1000",
+            qty: 1,
+            laborCents: line1,
+            respCode: "1",
+          },
+          {
+            lineNo: 2,
+            jobCode: "2000",
+            qty: 1,
+            laborCents: line2,
+            respCode: "6",
+          },
+        ],
+      });
+      await q(
+        `UPDATE repair.invoices
+         SET total = $2,
+             estimate_total = $2,
+             workflow_status = 'UNDER_OWNER_REVIEW',
+             payment_status = NULL,
+             short_pay_cents = NULL,
+             approved_amount_cents = NULL,
+             short_pay_reason = NULL
+         WHERE id = $1`,
+        [d.invoiceId, invTotalCents / 100],
+      );
+      const shorted = await shortPayOwnerInvoice({
+        invoiceId: d.invoiceId,
+        actor: "owner@demo",
+        reason: "Labor rate dispute",
+        lineShortPays: [
+          { lineNo: 1, amountCents: line1, reason: "OK" },
+          {
+            lineNo: 2,
+            amountCents: line2 - DEMO_SHORT_PAY_SHORTFALL_CENTS,
+            reason: "Half labor dispute",
+          },
+        ],
+      });
+      if (!shorted.ok) fail(shorted.error);
+      if (shorted.shortPayCents !== DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+        fail(
+          `DEMO-INV-SHORT shortfall expected ${DEMO_SHORT_PAY_SHORTFALL_CENTS}, got ${shorted.shortPayCents}`,
         );
-        const shorted = await shortPayOwnerInvoice({
-          invoiceId: d.invoiceId,
-          actor: "owner@demo",
-          reason: "Labor rate dispute",
-          lineShortPays,
-        });
-        if (!shorted.ok) fail(shorted.error);
+      }
+      if (shorted.netPayableCents !== invTotalCents - DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+        fail(
+          `DEMO-INV-SHORT net expected ${invTotalCents - DEMO_SHORT_PAY_SHORTFALL_CENTS}, got ${shorted.netPayableCents}`,
+        );
       }
     }
-    ok("DEMO-INV-SHORT short-pay landed");
+    const { rows: verify } = await q(
+      `SELECT short_pay_cents, approved_amount_cents,
+              ROUND(COALESCE(total,0) * 100)::bigint AS total_cents
+       FROM repair.invoices WHERE id = $1`,
+      [d.invoiceId],
+    );
+    const sp = Number(verify[0]?.short_pay_cents ?? -1);
+    const tot = Number(verify[0]?.total_cents ?? 0);
+    const net = Number(verify[0]?.approved_amount_cents ?? -1);
+    if (sp !== DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+      fail(`DEMO-INV-SHORT short_pay_cents=${sp} want ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
+    }
+    if (net !== tot - DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+      fail(`DEMO-INV-SHORT net ${net} ≠ total ${tot} − ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
+    }
+    ok(
+      `DEMO-INV-SHORT short-pay $${(DEMO_SHORT_PAY_SHORTFALL_CENTS / 100).toFixed(2)} (net = total − shortfall)`,
+    );
   }
 
   // 5) Paid

@@ -1,4 +1,4 @@
-﻿-- View-only, re-runnable. No car-data writes. Do not set RLMS_RECOMPUTE_FLEET_STATUS.
+-- View-only, re-runnable. No car-data writes. Do not set RLMS_RECOMPUTE_FLEET_STATUS.
 -- sale_unclear excludes Sold cars whose buyer is non-internal (OL2144/RTEX).
 -- Same column list as v_rlms_car_kpi from 20261019.
 CREATE OR REPLACE VIEW public.v_rlms_car_kpi AS
@@ -176,7 +176,7 @@ FROM (
           a.rent_start_date,
           rc.fleet_status
         )
-        THEN btrim(coalesce(r.rider_name, '')) || ' â€“ ' || coalesce(nullif(btrim(rc.lessee_name), ''), 'lessee') || ' (awaiting rent start)'
+        THEN btrim(coalesce(r.rider_name, '')) || ' – ' || coalesce(nullif(btrim(rc.lessee_name), ''), 'lessee') || ' (awaiting rent start)'
         ELSE NULL
       END AS implicit_commitment,
       EXISTS (

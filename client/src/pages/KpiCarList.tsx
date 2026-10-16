@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useHashSearch } from "@/lib/hash-location";
 import { olPath } from "@/lib/browse-nav";
@@ -113,6 +113,7 @@ export function KpiCarListPage() {
   const [rentDate, setRentDate] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [qDraft, setQDraft] = useState(q);
+  const sheetPushedRef = useRef(false);
 
   const listPathWithoutCar = useMemo(() => {
     const next = new URLSearchParams(sp);
@@ -311,7 +312,7 @@ export function KpiCarListPage() {
           <Button size="sm" onClick={() => setParams({ q: qDraft })}>Apply filters</Button>
         </div>
 
-        {canEdit && (
+        {canEdit && bucket !== "leased_off_rent" && (
           <div className="flex flex-wrap gap-2 items-end border border-border rounded-md p-3">
             <div className="text-sm">{selectAllMatching ? `All ${total} matching` : `${selected.size} selected`}</div>
             <Button size="sm" variant="outline" onClick={() => setSelectAllMatching(true)}>Select all {total} matching</Button>
@@ -458,6 +459,7 @@ export function KpiCarListPage() {
                                 className="underline"
                                 onClick={() => {
                                   sessionStorage.setItem(`rlms:kpi-scroll:${listPathWithoutCar}`, String(window.scrollY));
+                                  sheetPushedRef.current = true;
                                   setParams({ car: String(r.railcar_id) }, false);
                                 }}
                               >
@@ -518,7 +520,15 @@ export function KpiCarListPage() {
         bucket={bucket}
         fromPath={listPathWithoutCar}
         onClose={() => {
-          if (carId) window.history.back();
+          if (!carId) return;
+          if (sheetPushedRef.current) {
+            sheetPushedRef.current = false;
+            window.history.back();
+            return;
+          }
+          const next = new URLSearchParams(sp);
+          next.delete("car");
+          navigate(`/kpi/cars${qsFrom(next)}`, { replace: true });
         }}
       />
     </div>

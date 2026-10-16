@@ -6,6 +6,7 @@ import { readFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { spawnSync } from "child_process";
+import { contrastRatio, SHOP_AA_TOKENS } from "../services/shop-clarity";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -150,8 +151,46 @@ export function assertShopClientTypecheck(): void {
   if (!role.includes("import.meta.env.PROD") || !role.includes("return false")) {
     bad("dev-role-prod", "DevRoleSwitcher must gate on PROD (no banner in production)");
   }
-  if (!nav.includes("placeholder:text-slate-600") || !nav.includes("bg-white")) {
-    bad("nav-input", "RepairNavChrome shopAa.input must be white + visible placeholder");
+  // §H r7+: shopAa.input → repairUi.input ("repair-input") + shared --repair-* tokens
+  if (!nav.includes("repairUi") || !nav.includes("input: repairUi.input")) {
+    bad("nav-input", "RepairNavChrome shopAa.input must bind repairUi.input theme token");
+  }
+  const tokensSrc = readFileSync(
+    join(ROOT, "client/src/pages/repair/repairTokens.ts"),
+    "utf8",
+  );
+  const cssSrc = readFileSync(join(ROOT, "client/src/index.css"), "utf8");
+  if (!tokensSrc.includes('input: "repair-input"')) {
+    bad("nav-input", "repairUi.input must be repair-input class");
+  }
+  if (
+    !tokensSrc.includes('inputBg: "#ffffff"') ||
+    !tokensSrc.includes('placeholder: "#475569"')
+  ) {
+    bad(
+      "nav-input",
+      "REPAIR_THEME_HEX must keep white inputBg + visible placeholder (#475569)",
+    );
+  }
+  if (
+    !cssSrc.includes("--repair-input-bg: #ffffff") ||
+    !cssSrc.includes("--repair-placeholder: #475569") ||
+    !cssSrc.includes(".repair-input")
+  ) {
+    bad(
+      "nav-input",
+      "index.css must define white --repair-input-bg + visible --repair-placeholder on .repair-input",
+    );
+  }
+  const phAa = contrastRatio(SHOP_AA_TOKENS.placeholder, SHOP_AA_TOKENS.inputBg);
+  if (
+    SHOP_AA_TOKENS.inputBg.toLowerCase() !== "#ffffff" ||
+    phAa < 4.5
+  ) {
+    bad(
+      "nav-input",
+      `SHOP_AA_TOKENS input must be white + placeholder AA ≥4.5 (got bg=${SHOP_AA_TOKENS.inputBg} ratio=${phAa.toFixed(2)})`,
+    );
   }
   ok("Nav chrome + DEV role switcher (production-gated)");
 

@@ -797,8 +797,34 @@ async function main() {
     pathJoin(process.cwd(), "client/src/pages/repair/RepairNavChrome.tsx"),
     "utf8",
   );
-  if (!navSrcAa.includes("placeholder:text-slate-600") || !navSrcAa.includes("bg-white")) {
-    bad("axe-input-token", "shopAa.input must be white bg + slate-600 placeholder");
+  const tokensSrcAa = readFsSync(
+    pathJoin(process.cwd(), "client/src/pages/repair/repairTokens.ts"),
+    "utf8",
+  );
+  const cssSrcAa = readFsSync(
+    pathJoin(process.cwd(), "client/src/index.css"),
+    "utf8",
+  );
+  // §H r7+: shopAa.input → repair-input + --repair-input-bg / --repair-placeholder
+  if (!navSrcAa.includes("input: repairUi.input") || !tokensSrcAa.includes('input: "repair-input"')) {
+    bad("axe-input-token", "shopAa.input must bind repairUi.input (repair-input)");
+  }
+  if (
+    !tokensSrcAa.includes('inputBg: "#ffffff"') ||
+    !tokensSrcAa.includes('placeholder: "#475569"') ||
+    !cssSrcAa.includes("--repair-input-bg: #ffffff") ||
+    !cssSrcAa.includes("--repair-placeholder: #475569")
+  ) {
+    bad(
+      "axe-input-token",
+      "theme tokens must keep white input bg + visible placeholder (#475569 / AA)",
+    );
+  }
+  if (SHOP_AA_TOKENS.inputBg.toLowerCase() !== "#ffffff" || aaPh < 4.5) {
+    bad(
+      "axe-input-token",
+      `SHOP_AA_TOKENS input white + placeholder AA (bg=${SHOP_AA_TOKENS.inputBg} ratio=${aaPh.toFixed(2)})`,
+    );
   }
   ok("axe smoke: inputs+placeholders empty/filled AA; no pale labels");
 

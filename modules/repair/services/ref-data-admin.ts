@@ -28,7 +28,8 @@ export type RefTableKey =
   | "responsibility"
   | "categories"
   | "component_id_rules"
-  | "job_code_prices";
+  | "job_code_prices"
+  | "missed_pod_reasons";
 
 type TableDef = {
   key: RefTableKey;

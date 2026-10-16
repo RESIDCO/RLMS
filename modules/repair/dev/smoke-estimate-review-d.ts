@@ -885,8 +885,29 @@ async function main() {
     bad("ref-admin ACL", "owner yes / shop no");
   }
   const tabs = listRefTableMeta();
-  if (tabs.length !== 11) bad("ref tabs", `expected 11 got ${tabs.length}`);
-  ok(`ref-data admin tabs=${tabs.map((t) => t.key).join(",")}`);
+  // §G r2+ / §H: 12 tabs including Missed POD reasons (reason codes)
+  const expectedRefTabs = [
+    "job_codes",
+    "qualifiers",
+    "qualifier_generic",
+    "qualifier_charts",
+    "why_made",
+    "condition",
+    "location",
+    "responsibility",
+    "categories",
+    "component_id_rules",
+    "job_code_prices",
+    "missed_pod_reasons",
+  ];
+  if (tabs.length !== expectedRefTabs.length) {
+    bad("ref tabs", `expected ${expectedRefTabs.length} got ${tabs.length}`);
+  }
+  const tabKeys = tabs.map((t) => t.key);
+  for (const key of expectedRefTabs) {
+    if (!tabKeys.includes(key)) bad("ref tabs", `missing tab ${key}`);
+  }
+  ok(`ref-data admin tabs=${tabKeys.join(",")}`);
 
   const smokeCode = `S${RUN.slice(-4)}`;
   const addRef = await upsertRefRow({

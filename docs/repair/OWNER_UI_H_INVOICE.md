@@ -2,7 +2,7 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)  
 **Routes:** `/#/repair/invoices` · `/#/repair/invoices/:id` · `/#/repair/payments` · `/#/repair/months` · `/#/repair/shop/multi-car-invoice`  
-**Requires tip:** `11b7496` (§H r6) → r7 FF
+**Requires tip:** `834ee37` (§H r7) → r8 FF (test fixes)
 
 ## Defaults (open Q)
 

@@ -2,7 +2,7 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)  
 **Routes:** `/#/repair/invoices` · `/#/repair/invoices/:id` · `/#/repair/payments` · `/#/repair/months` · `/#/repair/shop/multi-car-invoice`  
-**Requires tip:** `478319a` (§H r3) → r4 FF
+**Requires tip:** `ea48201` (§H r4) → r5 FF
 
 ## Defaults (open Q)
 
@@ -16,8 +16,9 @@
 ## Contrast (AA)
 
 Invoice review, queue, payments, months: **white panels**, near-black text (`slate-900` / `slate-700` labels).  
-Line table headers: **Line, Job, Match, Change, Est amount, Est qty, Inv amount, Resp**.  
-Money as `$36,732.04`. Statuses as plain words (e.g. “Under owner review”).
+Line table (BRC): **Line, Loc, Qty, C, AJOB, QA, Description, WM, RJOB, QR, Resp, Labor, Material, Amount** plus **Est amount** / **Inv amount**.  
+Money as `$36,732.04`. Statuses as plain words (e.g. “Under owner review”).  
+**Exceptions (N)** toggle — no long flag list; highlight only exception rows.
 
 ## Status flow (approval ≠ paid)
 
@@ -35,16 +36,17 @@ Shop sees: “Approved – scheduled with \<month\> close”, then “Paid \<dat
 
 ## Invoice review
 
-- Side-by-side **APPROVED** estimate revision vs invoice lines (line# then job+location+qualifier).
-- **Approve** / **Reject** / **Short-pay**.
-- Short-pay: line `short_pay_cents` = **shortfall** (not paid amount). Header shows **short-pay amount** and **net payable**.
-- Multi-car: per-car summary (car, estimate, invoiced, difference, flags) → drill-in; approve all or reject/short-pay at line or car level.
+- Summary cards (Invoice / Approved estimate / Difference / Status) + resp split, then BRC line grid.
+- Code reference hovers match Estimate Review. Amber/red/struck rows for exceptions; hover/expand shows reason.
+- **Exceptions (N)** filter: all lines or exceptions only. Cleared/overridden flags → small badge (who/when), not a list.
+- **Approve** / **Reject** / **Short-pay**. Line `short_pay_cents` = **shortfall** only when &gt; 0 (no $0 rows). Header shows short-pay + net payable.
+- Multi-car: per-car summary (Car, Estimate, Invoiced, Difference, Exceptions, plain status) → car picker shows **one car’s** BRC grid.
 
 ## Multi-car invoice
 
 Shop **Create multi-car invoice**: select **two or more** Completed estimates (same shop, same billing entity; **no cap** on cars); one 500-byte + PDF; one invoice number.  
-Split per car; match each car’s lines to that car’s approved estimate; header total = sum of cars.  
-Rules: car on only one active invoice; mix Resp-3 wreck with others **HARD REJECT**; total mismatch **HARD REJECT**.  
+500-byte split by each record’s car initial+number; each selected car must appear; unselected car in file or selected car missing → **HARD REJECT** naming the car.  
+Also: car on only one active invoice; mix Resp-3 wreck with others **HARD REJECT**; total mismatch **HARD REJECT**.  
 Payment pays invoice once; each car’s BO closes on approval.
 
 ## Shop payment `/#/repair/payments`
@@ -55,8 +57,8 @@ Payment pays invoice once; each car’s BO closes on approval.
 
 ## Clean + seed
 
-- `repair:clean-smoke-data` hides `GA*`, `INV-R4*`, `INV-H-*`, legacy **`APA-OFOX528313`**, renamed **`DEMO-INV-UNIT5`**, and **stale DEMO-*** invoices/events from older seed runs (wrong shop / duplicates).
-- `repair:seed-shop-demo` (idempotent ×2): DEMO 100005 closed via approved invoice **re-pointed to the current event/shop**; DS01 invoice examples including **DEMO-INV-SHORT** shortfall **$747.50**; **5-car multi-car** `DEMO-INV-MULTI`; one month/batch. Reuses one DEMO event per car (no stray duplicates).
+- `repair:clean-smoke-data` hides `GA*`, `INV-R4*`, `INV-H-*`, **`APA-%`** (prefix + APA shop), renamed **`DEMO-INV-UNIT5`**, and **stale DEMO-*** invoices/events.
+- `repair:seed-shop-demo` (idempotent ×2): DEMO 100005 closed via approved invoice; **DEMO-INV-SHORT** total **$36,732.04** with **$747.50** short across **2** lines (no $0 short-pay rows); **5-car multi-car** `DEMO-INV-MULTI` with varied amounts + one exception; open month **2026-10**; Paid in closed **2026-09**. Smokes/seeds never leave future months open.
 
 ## Smoke
 

@@ -1,36 +1,55 @@
 /**
- * §H Invoice review — side-by-side approved estimate vs invoice lines.
- * Approve / Reject (line comments) / Short-pay. Tolerance $/% gating.
+ * §H r5 Invoice review — quieter BRC-format line grid + Exceptions toggle.
+ * Summary cards → resp split → (multi-car picker) → BRC lines.
+ * Highlights only exceptions on the row; no long flag list.
  */
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
+import { AlertTriangle, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceTitle } from "./WorkspaceTitle";
+import { CodeHover, dash } from "./CodeHover";
 import { cn } from "@/lib/utils";
 import { shopAa } from "./RepairNavChrome";
+
+type BrcLine = {
+  lineNo: number;
+  jobCode: string;
+  location?: string | null;
+  qualifier?: string | null;
+  conditionCode?: string | null;
+  whyMade?: string | null;
+  removedJobCode?: string | null;
+  removedQualifier?: string | null;
+  description?: string | null;
+  qty: number | null;
+  laborCents: number;
+  materialCents: number;
+  totalCents: number;
+  respCode: string | null;
+  invoiceCarId?: string | null;
+  carMark?: string | null;
+  carNumber?: string | null;
+  shortPayCents?: number | null;
+  shortPayReason?: string | null;
+};
 
 type MatchedLine = {
   lineNo: number | null;
   jobCode: string;
   kind: string;
-  estimate?: {
-    lineNo: number;
-    jobCode: string;
-    qty: number | null;
-    totalCents: number;
-    respCode: string | null;
-  };
-  invoice?: {
-    lineNo: number;
-    jobCode: string;
-    qty: number | null;
-    totalCents: number;
-    respCode: string | null;
-  };
+  exceptionReason?: string | null;
+  clearedBadges?: Array<{
+    label: string;
+    by?: string | null;
+    at?: string | null;
+  }>;
+  estimate?: BrcLine;
+  invoice?: BrcLine;
 };
 
 type InvoiceCar = {
@@ -42,7 +61,9 @@ type InvoiceCar = {
   invoicedCents: number;
   differenceCents: number;
   flags: string;
+  exceptionsCount?: number;
   lineStatus: string;
+  statusPlain?: string;
 };
 
 type Bundle = {
@@ -105,6 +126,15 @@ function dollars(cents: number): string {
   });
 }
 
+function isException(m: MatchedLine): boolean {
+  return m.kind !== "MATCH";
+}
+
+function moneyOrDash(cents: number | null | undefined): string {
+  if (cents == null) return "—";
+  return dollars(cents);
+}
+
 export default function InvoiceReview() {
   const [, params] = useRoute("/repair/invoices/:id");
   const id = params?.id ?? "";
@@ -122,6 +152,9 @@ export default function InvoiceReview() {
   >({});
   const [paidAt, setPaidAt] = useState("");
   const [paidRef, setPaidRef] = useState("");
+  const [exceptionsOnly, setExceptionsOnly] = useState(false);
+  const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
+  const [expandedLine, setExpandedLine] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -134,11 +167,34 @@ export default function InvoiceReview() {
       return;
     }
     setBundle(json);
-  }, [id]);
+    if (json.cars?.length && !selectedCarId) {
+      setSelectedCarId(String(json.cars[0].id));
+    }
+  }, [id, selectedCarId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const carFiltered = useMemo(() => {
+    if (!bundle) return [];
+    if (!bundle.cars?.length || !selectedCarId) return bundle.matched;
+    return bundle.matched.filter((m) => {
+      const cid =
+        m.invoice?.invoiceCarId || m.estimate?.invoiceCarId || null;
+      return cid === selectedCarId;
+    });
+  }, [bundle, selectedCarId]);
+
+  const exceptionCount = useMemo(
+    () => carFiltered.filter(isException).length,
+    [carFiltered],
+  );
+
+  const visibleLines = useMemo(() => {
+    if (!exceptionsOnly) return carFiltered;
+    return carFiltered.filter(isException);
+  }, [carFiltered, exceptionsOnly]);
 
   async function approve() {
     setMsg("");
@@ -242,9 +298,11 @@ export default function InvoiceReview() {
     bundle.invoice.workflowStatus === "UNDER_OWNER_REVIEW" ||
     bundle.invoice.workflowStatus === "INVOICE_SUBMITTED";
 
+  const hardRejectCount = bundle.validation.hardRejects.length;
+
   return (
     <RepairOwnerShell>
-      <div className={cn(shopAa.page, "mx-auto max-w-6xl px-4 py-6 space-y-4")}>
+      <div className={cn(shopAa.page, "mx-auto max-w-[90rem] px-4 py-6 space-y-4")}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <WorkspaceTitle
             title={`Invoice ${bundle.invoice.invoiceNo}`}
@@ -288,7 +346,7 @@ export default function InvoiceReview() {
               ({(bundle.tolCheck.pctDeltaBp / 100).toFixed(2)}%)
             </p>
             <p className="text-xs text-slate-600">
-              Tolerance ${ (bundle.tolerance.toleranceCents / 100).toFixed(2) } /{" "}
+              Tolerance ${(bundle.tolerance.toleranceCents / 100).toFixed(2)} /{" "}
               {(bundle.tolerance.tolerancePctBp / 100).toFixed(2)}% · net{" "}
               {bundle.tolerance.paymentTermsDays}
             </p>
@@ -311,7 +369,9 @@ export default function InvoiceReview() {
             {(bundle.invoice.shortPayCents != null ||
               bundle.displays.shortPay) && (
               <p className="mt-1 text-xs font-semibold text-slate-900">
-                Short-pay {bundle.displays.shortPay ?? dollars(bundle.invoice.shortPayCents ?? 0)}
+                Short-pay{" "}
+                {bundle.displays.shortPay ??
+                  dollars(bundle.invoice.shortPayCents ?? 0)}
                 {" · "}
                 Net payable{" "}
                 {bundle.displays.netPayable ??
@@ -337,17 +397,11 @@ export default function InvoiceReview() {
           </p>
         </div>
 
-        {(bundle.validation.hardRejects.length > 0 ||
-          bundle.validation.flags.length > 0) && (
-          <div className="space-y-1 rounded border border-slate-300 bg-white p-3 text-sm">
+        {hardRejectCount > 0 && (
+          <div className="space-y-1 rounded border border-red-300 bg-white p-3 text-sm">
             {bundle.validation.hardRejects.map((f) => (
               <p key={f.code} className="font-medium text-red-800">
                 HARD: {f.message}
-              </p>
-            ))}
-            {bundle.validation.flags.map((f, i) => (
-              <p key={`${f.code}-${i}`} className="text-amber-900">
-                Flag: {f.message}
               </p>
             ))}
           </div>
@@ -356,7 +410,8 @@ export default function InvoiceReview() {
         {bundle.cars && bundle.cars.length > 0 && (
           <div className="overflow-x-auto rounded border border-slate-400 bg-white">
             <p className="border-b border-slate-300 px-3 py-2 text-sm font-semibold text-slate-900">
-              Per-car summary (shared invoice {bundle.invoice.invoiceNo})
+              Per-car summary (shared invoice {bundle.invoice.invoiceNo}) — click a
+              car to view its BRC lines
             </p>
             <table className="min-w-full text-sm text-slate-900">
               <thead className="bg-slate-100 text-left">
@@ -365,91 +420,281 @@ export default function InvoiceReview() {
                   <th className="px-2 py-2 text-right">Estimate</th>
                   <th className="px-2 py-2 text-right">Invoiced</th>
                   <th className="px-2 py-2 text-right">Difference</th>
-                  <th className="px-2 py-2">Flags</th>
+                  <th className="px-2 py-2 text-right">Exceptions</th>
                   <th className="px-2 py-2">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {bundle.cars.map((c) => (
-                  <tr key={c.id} className="border-t border-slate-200">
-                    <td className="px-2 py-1.5 font-mono font-semibold">
-                      {c.carMark} {c.carNumber}
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-mono">
-                      {dollars(c.estimateCents)}
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-mono">
-                      {dollars(c.invoicedCents)}
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-mono">
-                      {dollars(c.differenceCents)}
-                    </td>
-                    <td className="px-2 py-1.5 text-xs">{c.flags || "—"}</td>
-                    <td className="px-2 py-1.5 text-xs">{c.lineStatus}</td>
-                  </tr>
-                ))}
+                {bundle.cars.map((c) => {
+                  const selected = c.id === selectedCarId;
+                  const status =
+                    c.statusPlain ||
+                    (c.differenceCents === 0
+                      ? "Matches"
+                      : c.differenceCents > 0
+                        ? `Over $${(c.differenceCents / 100).toFixed(2)}`
+                        : `Under $${(Math.abs(c.differenceCents) / 100).toFixed(2)}`);
+                  return (
+                    <tr
+                      key={c.id}
+                      className={cn(
+                        "border-t border-slate-200 cursor-pointer",
+                        selected ? "bg-slate-100" : "hover:bg-slate-50",
+                      )}
+                      onClick={() => setSelectedCarId(c.id)}
+                    >
+                      <td className="px-2 py-1.5 font-mono font-semibold">
+                        {c.carMark} {c.carNumber}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        {dollars(c.estimateCents)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        {dollars(c.invoicedCents)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        {dollars(c.differenceCents)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        {c.exceptionsCount ??
+                          (c.flags ? c.flags.split(/[,;]/).filter(Boolean).length : 0)}
+                      </td>
+                      <td className="px-2 py-1.5 text-xs font-medium">{status}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            {selectedCarId && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-3 py-2 text-sm">
+                <span className="text-slate-700">Car picker</span>
+                <select
+                  className="h-8 rounded border border-slate-400 bg-white px-2 text-slate-900"
+                  value={selectedCarId}
+                  onChange={(e) => setSelectedCarId(e.target.value)}
+                  aria-label="Select car for BRC line grid"
+                >
+                  {bundle.cars.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.carMark} {c.carNumber}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         )}
 
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            className={cn(
+              "rounded border px-3 py-1.5 text-sm font-medium",
+              exceptionsOnly
+                ? "border-amber-700 bg-amber-50 text-amber-950"
+                : "border-slate-400 bg-white text-slate-900",
+            )}
+            onClick={() => setExceptionsOnly((v) => !v)}
+            aria-pressed={exceptionsOnly}
+          >
+            Exceptions ({exceptionCount})
+            {exceptionsOnly ? " — showing exceptions only" : " — show all lines"}
+          </button>
+          <p className="text-xs text-slate-700">
+            Billing Repair Card columns · invoice amount next to approved amount
+          </p>
+        </div>
+
         <div className="overflow-x-auto rounded border border-slate-400 bg-white">
-          <table className="min-w-full text-sm text-slate-900">
+          <table className="min-w-full text-xs text-slate-900">
             <thead className="bg-slate-100 text-left text-slate-900">
               <tr>
-                <th className="px-2 py-2 font-semibold">Line</th>
-                <th className="px-2 py-2 font-semibold">Job</th>
-                <th className="px-2 py-2 font-semibold">Match</th>
-                <th className="px-2 py-2 font-semibold">Change</th>
-                <th className="px-2 py-2 text-right font-semibold">Est amount</th>
-                <th className="px-2 py-2 text-right font-semibold">Est qty</th>
-                <th className="px-2 py-2 text-right font-semibold">Inv amount</th>
-                <th className="px-2 py-2 font-semibold">Resp</th>
+                <th className="px-1.5 py-2 w-6" title="Exception" />
+                <th className="px-1.5 py-2 font-semibold">Line</th>
+                <th className="px-1.5 py-2 font-semibold">Loc</th>
+                <th className="px-1.5 py-2 font-semibold">Qty</th>
+                <th className="px-1.5 py-2 font-semibold">C</th>
+                <th className="px-1.5 py-2 font-semibold">AJOB</th>
+                <th className="px-1.5 py-2 font-semibold">QA</th>
+                <th className="px-1.5 py-2 font-semibold min-w-[10rem]">Description</th>
+                <th className="px-1.5 py-2 font-semibold">WM</th>
+                <th className="px-1.5 py-2 font-semibold">RJOB</th>
+                <th className="px-1.5 py-2 font-semibold">QR</th>
+                <th className="px-1.5 py-2 font-semibold">Resp</th>
+                <th className="px-1.5 py-2 text-right font-semibold">Labor</th>
+                <th className="px-1.5 py-2 text-right font-semibold">Material</th>
+                <th className="px-1.5 py-2 text-right font-semibold">Amount</th>
+                <th className="px-1.5 py-2 text-right font-semibold">Est amount</th>
+                <th className="px-1.5 py-2 text-right font-semibold">Inv amount</th>
               </tr>
             </thead>
             <tbody>
-              {bundle.matched.map((m, i) => (
-                <tr
-                  key={i}
-                  className={cn(
-                    "border-t border-slate-200",
-                    m.kind === "ADDED" && "bg-amber-50",
-                    m.kind === "REMOVED" && "bg-slate-100",
-                    m.kind === "QTY_PRICE_CHANGED" && "bg-yellow-50",
-                  )}
-                >
-                  <td className="px-2 py-1.5 font-mono">{m.lineNo ?? "—"}</td>
-                  <td className="px-2 py-1.5 font-mono">
-                    {m.jobCode || m.estimate?.jobCode || "—"}
-                  </td>
-                  <td className="px-2 py-1.5 text-xs text-slate-900">
-                    {m.kind === "MATCH" ? "Match" : "—"}
-                  </td>
-                  <td className="px-2 py-1.5 text-xs text-slate-900">
-                    {m.kind === "MATCH"
-                      ? "—"
-                      : m.kind === "ADDED"
-                        ? "Added"
-                        : m.kind === "REMOVED"
-                          ? "Removed"
-                          : m.kind === "QTY_PRICE_CHANGED"
-                            ? "Qty/price changed"
-                            : "Not on approved estimate"}
-                  </td>
-                  <td className="px-2 py-1.5 text-right font-mono text-slate-900">
-                    {m.estimate ? dollars(m.estimate.totalCents) : "—"}
-                  </td>
-                  <td className="px-2 py-1.5 text-right font-mono text-slate-900">
-                    {m.estimate?.qty ?? "—"}
-                  </td>
-                  <td className="px-2 py-1.5 text-right font-mono text-slate-900">
-                    {m.invoice ? dollars(m.invoice.totalCents) : "—"}
-                  </td>
-                  <td className="px-2 py-1.5 font-mono text-slate-900">
-                    {m.invoice?.respCode || m.estimate?.respCode || "—"}
+              {visibleLines.map((m, i) => {
+                const src = m.invoice ?? m.estimate;
+                const hard =
+                  m.kind === "NOT_ON_APPROVED_ESTIMATE" ||
+                  (m.kind === "ADDED" && hardRejectCount > 0);
+                const amber =
+                  m.kind === "ADDED" || m.kind === "QTY_PRICE_CHANGED";
+                const removed = m.kind === "REMOVED";
+                const reason =
+                  m.exceptionReason ||
+                  (m.kind === "ADDED"
+                    ? "Added on invoice — not on the approved estimate"
+                    : m.kind === "REMOVED"
+                      ? "Removed vs the approved estimate"
+                      : m.kind === "QTY_PRICE_CHANGED"
+                        ? "Quantity or price changed vs the approved estimate"
+                        : null);
+                const lineKey = m.lineNo ?? i;
+                const open = expandedLine === lineKey;
+                return (
+                  <Fragment key={`${i}-${m.lineNo}-${m.kind}`}>
+                    <tr
+                      title={reason ?? undefined}
+                      className={cn(
+                        "border-t border-slate-200 cursor-default",
+                        amber && "bg-amber-50",
+                        hard && "bg-red-50",
+                        removed && "bg-slate-100 line-through text-slate-600",
+                      )}
+                      onClick={() =>
+                        setExpandedLine(open ? null : (lineKey as number))
+                      }
+                    >
+                      <td className="px-1.5 py-1 text-center">
+                        {amber && (
+                          <AlertTriangle
+                            className="inline h-3.5 w-3.5 text-amber-700"
+                            aria-label="Exception"
+                          />
+                        )}
+                        {hard && (
+                          <Ban
+                            className="inline h-3.5 w-3.5 text-red-700"
+                            aria-label="Hard issue"
+                          />
+                        )}
+                      </td>
+                      <td className="px-1.5 py-1 tabular-nums">
+                        {dash(src?.lineNo ?? m.lineNo)}
+                      </td>
+                      <td className="px-1.5 py-1">
+                        <CodeHover kind="location" code={src?.location}>
+                          {dash(src?.location)}
+                        </CodeHover>
+                      </td>
+                      <td className="px-1.5 py-1 tabular-nums">
+                        {dash(src?.qty)}
+                      </td>
+                      <td className="px-1.5 py-1">
+                        <CodeHover kind="condition" code={src?.conditionCode}>
+                          {dash(src?.conditionCode)}
+                        </CodeHover>
+                      </td>
+                      <td className="px-1.5 py-1 font-mono">
+                        <CodeHover
+                          kind="job"
+                          code={src?.jobCode || m.jobCode}
+                          qualifier={src?.qualifier}
+                        >
+                          {dash(src?.jobCode || m.jobCode)}
+                        </CodeHover>
+                      </td>
+                      <td className="px-1.5 py-1">
+                        <CodeHover
+                          kind="qualifier"
+                          code={src?.jobCode || m.jobCode}
+                          qualifier={src?.qualifier ?? ""}
+                        >
+                          {dash(src?.qualifier)}
+                        </CodeHover>
+                      </td>
+                      <td
+                        className="px-1.5 py-1 max-w-[18rem] whitespace-normal break-words uppercase"
+                        title={src?.description || undefined}
+                      >
+                        {dash(src?.description)}
+                      </td>
+                      <td className="px-1.5 py-1">
+                        <CodeHover kind="why_made" code={src?.whyMade}>
+                          {dash(src?.whyMade)}
+                        </CodeHover>
+                      </td>
+                      <td className="px-1.5 py-1 font-mono">
+                        <CodeHover kind="job" code={src?.removedJobCode}>
+                          {dash(src?.removedJobCode)}
+                        </CodeHover>
+                      </td>
+                      <td className="px-1.5 py-1">
+                        <CodeHover
+                          kind="removed_qualifier"
+                          code={src?.removedJobCode}
+                          qualifier={src?.removedQualifier ?? ""}
+                        >
+                          {dash(src?.removedQualifier)}
+                        </CodeHover>
+                      </td>
+                      <td className="px-1.5 py-1 font-semibold">
+                        <CodeHover kind="responsibility" code={src?.respCode}>
+                          {dash(src?.respCode)}
+                        </CodeHover>
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono">
+                        {moneyOrDash(src?.laborCents)}
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono">
+                        {moneyOrDash(src?.materialCents)}
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono font-semibold">
+                        {moneyOrDash(src?.totalCents)}
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono">
+                        {m.estimate ? dollars(m.estimate.totalCents) : "—"}
+                      </td>
+                      <td className="px-1.5 py-1 text-right font-mono">
+                        {m.invoice ? dollars(m.invoice.totalCents) : "—"}
+                      </td>
+                    </tr>
+                    {(open || (m.clearedBadges && m.clearedBadges.length > 0)) && (
+                      <tr className="border-t border-slate-100 bg-white">
+                        <td colSpan={17} className="px-3 py-1.5 text-xs text-slate-800">
+                          {reason && (
+                            <span className="mr-3 font-medium">{reason}</span>
+                          )}
+                          {m.clearedBadges?.map((b, bi) => (
+                            <span
+                              key={bi}
+                              className="mr-2 inline-flex items-center rounded border border-slate-400 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-800"
+                            >
+                              {b.label}
+                              {b.by ? ` · ${b.by}` : ""}
+                              {b.at ? ` · ${b.at}` : ""}
+                            </span>
+                          ))}
+                          {m.invoice?.shortPayReason && (
+                            <span className="mr-2 inline-flex items-center rounded border border-slate-400 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-800">
+                              Override: {m.invoice.shortPayReason}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {visibleLines.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={17}
+                    className="px-3 py-6 text-center text-sm text-slate-700"
+                  >
+                    {exceptionsOnly
+                      ? "No exceptions on this car."
+                      : "No lines to show."}
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>

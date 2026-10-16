@@ -45,6 +45,20 @@ function currentMonthLabel(d = new Date()): string {
   return `${y}-${m}`;
 }
 
+/** Compare YYYY-MM labels: -1 if a<b, 0 equal, 1 if a>b. */
+export function compareMonthLabels(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/** Refuse opening or closing months after the current calendar month. */
+export function isFutureMonthLabel(
+  monthLabel: string,
+  now = new Date(),
+): boolean {
+  return compareMonthLabels(monthLabel, currentMonthLabel(now)) > 0;
+}
+
 function mapMonth(r: Record<string, unknown>, invoiceCount = 0): AccountingMonthRow {
   return {
     id: String(r.id),
@@ -79,6 +93,11 @@ export async function ensureOpenAccountingMonth(opts?: {
     return mapMonth(open[0], count);
   }
   const label = opts?.monthLabel ?? currentMonthLabel();
+  if (isFutureMonthLabel(label)) {
+    throw new Error(
+      `Cannot open future accounting month ${label} (current is ${currentMonthLabel()})`,
+    );
+  }
   const actor = opts?.actor ?? "system";
   const { rows } = await q(
     `INSERT INTO repair.accounting_months
@@ -285,6 +304,13 @@ export async function closeAccountingMonth(opts: {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const preview = await previewMonthClose({ monthId: opts.monthId, tenantId });
   if (!preview.ok) return preview;
+  if (isFutureMonthLabel(preview.month.monthLabel)) {
+    return {
+      ok: false,
+      status: 422,
+      error: `Cannot close future accounting month ${preview.month.monthLabel}`,
+    };
+  }
   const { totals } = preview;
 
   const { rowCount } = await q(
@@ -312,7 +338,8 @@ export async function closeAccountingMonth(opts: {
     return { ok: false, status: 409, error: "Month not open or already closed" };
   }
 
-  // Next open month = following calendar month from closed label
+  // Next open month = following calendar month from closed label —
+  // but never open a future calendar month (stay with current if next would be future).
   const [yStr, mStr] = String(rows[0].month_label).split("-");
   let y = Number(yStr);
   let m = Number(mStr) + 1;
@@ -320,7 +347,42 @@ export async function closeAccountingMonth(opts: {
     m = 1;
     y += 1;
   }
-  const nextLabel = `${y}-${String(m).padStart(2, "0")}`;
+  let nextLabel = `${y}-${String(m).padStart(2, "0")}`;
+  if (isFutureMonthLabel(nextLabel)) {
+    nextLabel = currentMonthLabel();
+    // If we just closed the current month, there is no safe next open month yet —
+    // reopen current as a soft "pending" by creating/opening current only when
+    // the closed label is strictly before current; otherwise leave no OPEN and
+    // let ensureOpenAccountingMonth create current on next approve.
+    if (compareMonthLabels(String(rows[0].month_label), currentMonthLabel()) >= 0) {
+      // Closed current (or somehow future) — do not auto-open a future month.
+      await writeAudit({
+        tenantId,
+        entity: "accounting_month",
+        entityId: opts.monthId,
+        action: "ACCOUNTING_MONTH_CLOSED",
+        after: {
+          month_label: rows[0].month_label,
+          totals,
+          invoices_closed: rowCount ?? 0,
+          next_open: null,
+          deferred_future_open: true,
+        },
+        actor: opts.actor,
+        via: "UI",
+      });
+      // Synthetic nextOpen = closed month row for type stability; caller should
+      // treat deferred_future_open via ensureOpen on next use.
+      const placeholder = mapMonth(rows[0], totals.invoiceCount);
+      return {
+        ok: true,
+        month: placeholder,
+        totals,
+        nextOpen: placeholder,
+        invoicesClosed: rowCount ?? 0,
+      };
+    }
+  }
   const nextOpen = await ensureOpenAccountingMonth({
     tenantId,
     actor: opts.actor,
@@ -349,6 +411,98 @@ export async function closeAccountingMonth(opts: {
     nextOpen,
     invoicesClosed: rowCount ?? 0,
   };
+}
+
+/**
+ * Demo/seed helper: force Sep 2026 CLOSED + Oct 2026 OPEN.
+ * Soft-deletes any OPEN months after 2026-10; never leaves a future month open.
+ */
+export async function resetDemoAccountingMonths(opts?: {
+  tenantId?: string;
+  actor?: string;
+  openLabel?: string;
+  closedLabel?: string;
+}): Promise<{ open: AccountingMonthRow; closed: AccountingMonthRow }> {
+  const tenantId = opts?.tenantId ?? DEFAULT_TENANT_ID;
+  const actor = opts?.actor ?? "seed-shop-demo";
+  const openLabel = opts?.openLabel ?? "2026-10";
+  const closedLabel = opts?.closedLabel ?? "2026-09";
+  if (isFutureMonthLabel(openLabel)) {
+    throw new Error(`Demo open month ${openLabel} is in the future`);
+  }
+
+  // Close / hide any OPEN months that aren't the desired open label
+  await q(
+    `UPDATE repair.accounting_months
+     SET status = 'CLOSED',
+         closed_at = coalesce(closed_at, now()),
+         closed_by = coalesce(closed_by, $1),
+         deleted_at = CASE
+           WHEN month_label > $2 THEN coalesce(deleted_at, now())
+           ELSE deleted_at END,
+         deleted_by = CASE
+           WHEN month_label > $2 THEN coalesce(deleted_by, $1)
+           ELSE deleted_by END
+     WHERE tenant_id = $3 AND status = 'OPEN' AND deleted_at IS NULL
+       AND month_label IS DISTINCT FROM $2`,
+    [actor, openLabel, tenantId],
+  );
+
+  // Ensure closed Sep exists as CLOSED
+  await q(
+    `INSERT INTO repair.accounting_months
+       (tenant_id, month_label, status, opened_by, closed_by, closed_at, created_by)
+     VALUES ($1,$2,'CLOSED',$3,$3,now(),$3)
+     ON CONFLICT (tenant_id, month_label) DO UPDATE
+       SET status = 'CLOSED',
+           closed_at = coalesce(repair.accounting_months.closed_at, now()),
+           closed_by = coalesce(repair.accounting_months.closed_by, EXCLUDED.closed_by),
+           deleted_at = NULL`,
+    [tenantId, closedLabel, actor],
+  );
+
+  // Ensure Oct is OPEN
+  await q(
+    `INSERT INTO repair.accounting_months
+       (tenant_id, month_label, status, opened_by, created_by)
+     VALUES ($1,$2,'OPEN',$3,$3)
+     ON CONFLICT (tenant_id, month_label) DO UPDATE
+       SET status = 'OPEN',
+           opened_at = now(),
+           opened_by = EXCLUDED.opened_by,
+           closed_at = NULL,
+           closed_by = NULL,
+           deleted_at = NULL`,
+    [tenantId, openLabel, actor],
+  );
+
+  const open = await ensureOpenAccountingMonth({
+    tenantId,
+    actor,
+    monthLabel: openLabel,
+  });
+  const closed = (await getAccountingMonthByLabel({
+    monthLabel: closedLabel,
+    tenantId,
+  }))!;
+  return { open, closed };
+}
+
+async function getAccountingMonthByLabel(opts: {
+  monthLabel: string;
+  tenantId?: string;
+}): Promise<AccountingMonthRow | null> {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { rows } = await q(
+    `SELECT m.*,
+            (SELECT count(*)::int FROM repair.invoices i
+             WHERE i.accounting_month_id = m.id AND i.deleted_at IS NULL) AS invoice_count
+     FROM repair.accounting_months m
+     WHERE m.tenant_id = $1 AND m.month_label = $2 AND m.deleted_at IS NULL`,
+    [tenantId, opts.monthLabel],
+  );
+  if (!rows[0]) return null;
+  return mapMonth(rows[0], Number(rows[0].invoice_count ?? 0));
 }
 
 /** Owner-only reopen of a closed month (with reason). Closes any current OPEN first. */

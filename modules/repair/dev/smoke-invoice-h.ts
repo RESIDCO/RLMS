@@ -1,9 +1,10 @@
 /**
- * §H / §H r3 / §H r4 Owner invoice review + monthly close + multi-car smoke.
- * match/diff, contrast AA, tolerance, reject, short-pay (shortfall+net),
- * approve→open month→close→AP→paid, 5-car + 12-car multi-car, duplicate car
- * reject, seed naming/idempotency (DEMO-INV-MULTI, SHORT $747.50), DEMO-only queue.
- * Seed does not dirty tracked files.
+ * §H / §H r5 Owner invoice review + monthly close + multi-car smoke.
+ * BRC grid + Exceptions toggle, match/diff, contrast AA, tolerance, reject,
+ * short-pay (shortfall+net, no $0 rows), approve→month close→AP→paid (isolated
+ * month / rolled back), 5-car + 12-car multi-car with per-car AAR split,
+ * unselected/missing car HARD REJECT, DEMO-INV-MULTI / SHORT $36,732.04 /
+ * $747.50, DEMO-only queue after clean.
  *
  * Run: npm run repair:smoke-invoice
  */
@@ -38,6 +39,8 @@ import {
   ensureOpenAccountingMonth,
   closeAccountingMonth,
   invoiceStatusPlain,
+  resetDemoAccountingMonths,
+  isFutureMonthLabel,
 } from "../services/accounting-months";
 import {
   createMultiCarInvoice,
@@ -113,6 +116,23 @@ function withShopMark(bytes: Buffer, shopMark: string): Buffer {
     return line.rawLine.slice(0, 71) + m + line.rawLine.slice(75);
   });
   return Buffer.from(lines.join(ending), "latin1");
+}
+
+/** Build a multi-car 500-byte file: Format-1 lines for each selected car. */
+function buildMultiCarAar(
+  base: Buffer,
+  cars: Array<{ carMark: string; carNumber: string }>,
+  shopMark: string,
+): Buffer {
+  const parts: string[] = [];
+  for (const c of cars) {
+    const buf = withShopMark(withCar(base, c.carMark, c.carNumber), shopMark);
+    const parsed = parseAarFile(buf);
+    for (const line of parsed.lines) {
+      if (line.recordFormat === "1") parts.push(line.rawLine);
+    }
+  }
+  return Buffer.from(parts.join("\r\n") + "\r\n", "latin1");
 }
 
 async function ensureDs01(): Promise<string> {
@@ -685,7 +705,7 @@ async function main() {
     actor: "owner@smoke-h.test",
     reason: "Labor rate dispute on line 2",
     lineShortPays: [
-      { lineNo: 1, amountCents: 10000, reason: "OK" },
+      // Only the shorted line — no $0 short-pay rows on line 1
       { lineNo: 2, amountCents: 2500, reason: "Half labor" },
     ],
   });
@@ -702,21 +722,97 @@ async function main() {
     [sp.invoiceId],
   );
   const byNo = Object.fromEntries(
-    spLines.map((r) => [Number(r.line_no), Number(r.short_pay_cents)]),
+    spLines.map((r) => [
+      Number(r.line_no),
+      r.short_pay_cents == null ? null : Number(r.short_pay_cents),
+    ]),
   );
-  if (byNo[1] !== 0 || byNo[2] !== 2500) {
+  if (byNo[1] !== null || byNo[2] !== 2500) {
     bad("short-line-store", JSON.stringify(byNo));
   }
-  ok("short-pay reconciles (header shortfall + net payable; lines store shortfall)");
+  if (spLines.some((r) => r.short_pay_cents != null && Number(r.short_pay_cents) === 0)) {
+    bad("short-zero-row", "must not store $0 short-pay rows");
+  }
+  ok("short-pay reconciles (header shortfall + net payable; no $0 short-pay rows)");
 
-  // Monthly close replaces pay-cycle cutoff — close open month to free AP
-  const openMonth = await ensureOpenAccountingMonth({ actor: "owner@smoke-h.test" });
+  // Monthly close — use current open month, then reset so no future month stays open
+  await resetDemoAccountingMonths({ actor: "smoke-h" });
+  const openMonth = await ensureOpenAccountingMonth({
+    actor: "owner@smoke-h.test",
+  });
+  await q(
+    `UPDATE repair.invoices
+     SET accounting_month_id = $1,
+         workflow_status = 'APPROVED_IN_OPEN_MONTH',
+         payment_status = 'APPROVED_IN_OPEN_MONTH'
+     WHERE id = ANY($2::uuid[])`,
+    [openMonth.id, [within.invoiceId, over.invoiceId, sp.invoiceId]],
+  );
   const closed = await closeAccountingMonth({
     monthId: openMonth.id,
     actor: "owner@smoke-h.test",
     confirm: true,
   });
   if (!closed.ok) bad("month-close", closed.error);
+  // Guard: closing must not leave a future calendar month open
+  const { rows: futureOpen } = await q(
+    `SELECT month_label FROM repair.accounting_months
+     WHERE deleted_at IS NULL AND status = 'OPEN'
+       AND month_label > to_char(timezone('utc', now()), 'YYYY-MM')`,
+  );
+  if (futureOpen.length) {
+    bad("month-future", `future open: ${futureOpen.map((r) => r.month_label).join(",")}`);
+  }
+  // Roll back demo months so later seed/smoke see Oct 2026 open
+  await resetDemoAccountingMonths({ actor: "smoke-h" });
+  // Guard: refuse closing a future-labeled month
+  {
+    const { rows: fut } = await q(
+      `INSERT INTO repair.accounting_months
+         (tenant_id, month_label, status, opened_by, created_by)
+       VALUES (
+         (SELECT id FROM repair.tenants LIMIT 1),
+         '2099-01', 'OPEN', 'smoke-h', 'smoke-h'
+       )
+       ON CONFLICT (tenant_id, month_label) DO UPDATE
+         SET status = 'OPEN', deleted_at = NULL, closed_at = NULL
+       RETURNING id, month_label`,
+    ).catch(async () => {
+      // If unique conflict with different tenant shape, look up
+      const r = await q(
+        `SELECT id, month_label FROM repair.accounting_months
+         WHERE month_label = '2099-01' LIMIT 1`,
+      );
+      return r;
+    });
+    if (fut[0] && isFutureMonthLabel(String(fut[0].month_label))) {
+      // Close any other open first so preview targets 2099
+      await q(
+        `UPDATE repair.accounting_months
+         SET status = 'CLOSED', closed_at = now(), closed_by = 'smoke-h'
+         WHERE status = 'OPEN' AND month_label <> '2099-01' AND deleted_at IS NULL`,
+      );
+      await q(
+        `UPDATE repair.accounting_months
+         SET status = 'OPEN', closed_at = NULL, deleted_at = NULL
+         WHERE id = $1`,
+        [String(fut[0].id)],
+      );
+      const refuse = await closeAccountingMonth({
+        monthId: String(fut[0].id),
+        actor: "smoke-h",
+        confirm: true,
+      });
+      if (refuse.ok) bad("future-close", "must refuse closing future month");
+      await q(
+        `UPDATE repair.accounting_months
+         SET deleted_at = now(), deleted_by = 'smoke-h', status = 'CLOSED'
+         WHERE month_label = '2099-01'`,
+      );
+      await resetDemoAccountingMonths({ actor: "smoke-h" });
+      ok("future month close refused");
+    }
+  }
   {
     const { rows: st } = await q(
       `SELECT payment_status FROM repair.invoices WHERE id = $1`,
@@ -865,28 +961,43 @@ async function main() {
     const reviewSrc = readFileSync(join(ROOT, "client/src/pages/repair/InvoiceReview.tsx"), "utf8");
     for (const h of [
       "Line",
-      "Job",
-      "Match",
-      "Change",
-      "Est amount",
-      "Est qty",
-      "Inv amount",
+      "Loc",
+      "Qty",
+      "AJOB",
+      "Description",
+      "WM",
+      "RJOB",
       "Resp",
+      "Labor",
+      "Material",
+      "Amount",
+      "Est amount",
+      "Inv amount",
     ]) {
       if (!reviewSrc.includes(h)) bad("axe-header", `missing ${h}`);
     }
+    if (!reviewSrc.includes("Exceptions (")) {
+      bad("exceptions-toggle", "InvoiceReview must have Exceptions (N) filter toggle");
+    }
+    if (!reviewSrc.includes("CodeHover")) {
+      bad("brc-hover", "InvoiceReview must reuse CodeHover like Estimate Review");
+    }
+    if (reviewSrc.includes("Flag: {f.message}") || /validation\.flags\.map/.test(reviewSrc)) {
+      bad("flag-list", "InvoiceReview must not render a long flag list");
+    }
     ok(
-      `AA contrast axe on invoice/payments/months (value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)})`,
+      `AA contrast + BRC headers + Exceptions toggle (value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)})`,
     );
     if (invoiceStatusPlain({ workflowStatus: "UNDER_OWNER_REVIEW" }) !== "Under owner review") {
       bad("status-plain", "Under owner review");
     }
   }
 
-  // ── §H r3/r4 multi-car 5-car + per-car totals = header + duplicate reject ─
+  // ── §H r5 multi-car 5-car + per-car AAR split + unselected/missing reject ─
   {
     const cars = ["91001", "91002", "91003", "91004", "91005"];
     const eventIds: string[] = [];
+    const shopMark = "DS01";
     for (const num of cars) {
       const d = await driveToInvoice({
         shopId,
@@ -894,7 +1005,6 @@ async function main() {
         invoiceNo: `INV-H-MC-SKIP-${num}-${RUN}`,
         tag: `mc-${num}`,
       });
-      // Remove auto single invoice so car is free for multi-car
       await q(
         `UPDATE repair.invoices SET deleted_at = now(), deleted_by = 'smoke-h'
          WHERE id = $1`,
@@ -905,15 +1015,18 @@ async function main() {
     const cand = await listMultiCarCandidates({ shopId });
     const pick = cand.filter((c) => eventIds.includes(c.eventId));
     if (pick.length < 5) bad("mc-cand", `expected 5 got ${pick.length}`);
-    const aar = readFileSync(SAMPLE);
+    const baseAar = readFileSync(SAMPLE);
+    const aar = buildMultiCarAar(
+      baseAar,
+      pick.map((c) => ({ carMark: c.carMark, carNumber: c.carNumber })),
+      shopMark,
+    );
     const pdf = Buffer.from("%PDF-1.4 smoke multi-car");
-    const headerTotal = pick.reduce((s, c) => s + c.estimateCents, 0) / 100;
     const created = await createMultiCarInvoice({
       shopId,
       eventIds: pick.map((c) => c.eventId),
       invoiceNo: `INV-H-MC5-${RUN}`,
       actor: "smoke-h",
-      total: headerTotal,
       file: { filename: "mc.pdf", mime: "application/pdf", bytes: pdf },
       aarFile: { filename: "mc.txt", mime: "text/plain", bytes: aar },
       tenantId: undefined,
@@ -924,6 +1037,11 @@ async function main() {
     if (!bundle.ok) bad("mc-bundle", bundle.error);
     if (!bundle.cars || bundle.cars.length !== 5) {
       bad("mc-cars", String(bundle.cars?.length));
+    }
+    for (const c of bundle.cars ?? []) {
+      if (!c.statusPlain || c.statusPlain === "ACTIVE") {
+        bad("mc-status-plain", `car ${c.carMark} ${c.carNumber} status=${c.statusPlain}`);
+      }
     }
     const carSum = (bundle.cars ?? []).reduce(
       (s, c) => s + Number(c.invoicedCents ?? 0),
@@ -936,6 +1054,70 @@ async function main() {
       );
     }
     ok(`5-car multi-car invoice ${created.invoiceNo} splits+reconciles (per-car = header)`);
+
+    // Fresh cars for reject cases (not on the active 5-car invoice)
+    const rejectCars: Array<{ eventId: string; carMark: string; carNumber: string }> = [];
+    for (const num of [`8${RUN.slice(-5)}`.slice(0, 6), `7${RUN.slice(-5)}`.slice(0, 6)]) {
+      const d = await driveToInvoice({
+        shopId,
+        carNumber: num,
+        invoiceNo: `INV-H-MC-RJ-SKIP-${num}-${RUN}`,
+        tag: `mc-rj-${num}`,
+      });
+      await q(
+        `UPDATE repair.invoices SET deleted_at = now(), deleted_by = 'smoke-h'
+         WHERE id = $1`,
+        [d.invoiceId],
+      );
+      rejectCars.push({ eventId: d.eventId, carMark: MARK, carNumber: num });
+    }
+
+    // Unselected car in file → HARD REJECT
+    const aarExtra = buildMultiCarAar(
+      baseAar,
+      [
+        ...rejectCars.map((c) => ({ carMark: c.carMark, carNumber: c.carNumber })),
+        { carMark: MARK, carNumber: "99999" },
+      ],
+      shopMark,
+    );
+    const unsel = await createMultiCarInvoice({
+      shopId,
+      eventIds: rejectCars.map((c) => c.eventId),
+      invoiceNo: `INV-H-MC-UNSEL-${RUN}`,
+      actor: "smoke-h",
+      file: { filename: "unsel.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "unsel.txt", mime: "text/plain", bytes: aarExtra },
+    });
+    if (unsel.ok) bad("mc-unsel", "unselected car in file must HARD REJECT");
+    if (!(unsel.hardRejects ?? []).includes("UNSELECTED_CAR_IN_FILE")) {
+      bad("mc-unsel-code", unsel.error);
+    }
+    if (!/99999/.test(unsel.error)) bad("mc-unsel-name", unsel.error);
+    ok("unselected car in 500-byte HARD REJECT naming the car");
+
+    // Selected car missing from file → HARD REJECT
+    const aarMissing = buildMultiCarAar(
+      baseAar,
+      [rejectCars[0]!].map((c) => ({ carMark: c.carMark, carNumber: c.carNumber })),
+      shopMark,
+    );
+    const missing = await createMultiCarInvoice({
+      shopId,
+      eventIds: rejectCars.map((c) => c.eventId),
+      invoiceNo: `INV-H-MC-MISS-${RUN}`,
+      actor: "smoke-h",
+      file: { filename: "miss.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "miss.txt", mime: "text/plain", bytes: aarMissing },
+    });
+    if (missing.ok) bad("mc-miss", "selected car missing from file must HARD REJECT");
+    if (!(missing.hardRejects ?? []).includes("SELECTED_CAR_MISSING_FROM_FILE")) {
+      bad("mc-miss-code", missing.error);
+    }
+    if (!new RegExp(rejectCars[1]!.carNumber).test(missing.error)) {
+      bad("mc-miss-name", missing.error);
+    }
+    ok("selected car missing from 500-byte HARD REJECT naming the car");
 
     const one = await createMultiCarInvoice({
       shopId,
@@ -953,8 +1135,20 @@ async function main() {
       eventIds: [pick[0]!.eventId, pick[1]!.eventId],
       invoiceNo: `INV-H-MC-DUP-${RUN}`,
       actor: "smoke-h",
-      file: { filename: "dup.pdf", mime: "application/pdf", bytes: pdf },
-      aarFile: { filename: "dup.txt", mime: "text/plain", bytes: aar },
+      file: {
+        filename: "dup.pdf",
+        mime: "application/pdf",
+        bytes: pdf,
+      },
+      aarFile: {
+        filename: "dup.txt",
+        mime: "text/plain",
+        bytes: buildMultiCarAar(
+          baseAar,
+          pick.slice(0, 2).map((c) => ({ carMark: c.carMark, carNumber: c.carNumber })),
+          shopMark,
+        ),
+      },
     });
     if (dup.ok) bad("mc-dup", "duplicate car should reject");
     if (!String(dup.error).toLowerCase().includes("already")) {
@@ -965,7 +1159,7 @@ async function main() {
     ok("duplicate car on active invoice HARD REJECT");
   }
 
-  // ── §H r4 12-car multi-car (no cap) ─────────────────────────────────
+  // ── §H r5 12-car multi-car (no cap) ─────────────────────────────────
   {
     const cars = Array.from({ length: 12 }, (_, i) =>
       `9${String(i).padStart(2, "0")}${RUN.slice(-3)}`.slice(0, 6),
@@ -988,14 +1182,18 @@ async function main() {
     const cand = await listMultiCarCandidates({ shopId });
     const pick = cand.filter((c) => eventIds.includes(c.eventId));
     if (pick.length < 12) bad("mc12-cand", `expected 12 got ${pick.length}`);
-    const aar = readFileSync(SAMPLE);
+    const baseAar = readFileSync(SAMPLE);
+    const aar = buildMultiCarAar(
+      baseAar,
+      pick.map((c) => ({ carMark: c.carMark, carNumber: c.carNumber })),
+      "DS01",
+    );
     const pdf = Buffer.from("%PDF-1.4 smoke multi-car 12");
     const created = await createMultiCarInvoice({
       shopId,
       eventIds: pick.map((c) => c.eventId),
       invoiceNo: `INV-H-MC12-${RUN}`,
       actor: "smoke-h",
-      total: pick.reduce((s, c) => s + c.estimateCents, 0) / 100,
       file: { filename: "mc12.pdf", mime: "application/pdf", bytes: pdf },
       aarFile: { filename: "mc12.txt", mime: "text/plain", bytes: aar },
     });
@@ -1029,11 +1227,13 @@ async function main() {
     ok("multi-car naming + seed re-point present");
   }
 
-  // ── §H r4 DEMO-INV-SHORT $747.50 via seed-invoice-examples rebuild ──
+  // ── §H r5 DEMO-INV-SHORT $36,732.04 / $747.50 across 2 lines ──
   {
-    const { seedInvoiceExamples, DEMO_SHORT_PAY_SHORTFALL_CENTS } = await import(
-      "./seed-invoice-examples"
-    );
+    const {
+      seedInvoiceExamples,
+      DEMO_SHORT_PAY_SHORTFALL_CENTS,
+      DEMO_SHORT_INVOICE_TOTAL_CENTS,
+    } = await import("./seed-invoice-examples");
     await seedInvoiceExamples(shopId);
     const { rows } = await q(
       `SELECT short_pay_cents, approved_amount_cents,
@@ -1043,17 +1243,29 @@ async function main() {
        LIMIT 1`,
     );
     if (!rows[0]) bad("short-seed", "DEMO-INV-SHORT missing");
-    const sp = Number(rows[0].short_pay_cents);
+    const spAmt = Number(rows[0].short_pay_cents);
     const tot = Number(rows[0].total_cents);
     const net = Number(rows[0].approved_amount_cents);
-    if (sp !== DEMO_SHORT_PAY_SHORTFALL_CENTS) {
-      bad("short-747", `shortfall ${sp} want ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
+    if (tot !== DEMO_SHORT_INVOICE_TOTAL_CENTS) {
+      bad("short-total", `total ${tot} want ${DEMO_SHORT_INVOICE_TOTAL_CENTS}`);
+    }
+    if (spAmt !== DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+      bad("short-747", `shortfall ${spAmt} want ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
     }
     if (net !== tot - DEMO_SHORT_PAY_SHORTFALL_CENTS) {
       bad("short-net", `net ${net} ≠ ${tot} − ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
     }
+    const { rows: zeroRows } = await q(
+      `SELECT count(*)::int AS n FROM repair.invoice_lines il
+       JOIN repair.invoices i ON i.id = il.invoice_id
+       WHERE i.invoice_no = 'DEMO-INV-SHORT' AND i.deleted_at IS NULL
+         AND il.short_pay_cents = 0`,
+    );
+    if (Number(zeroRows[0]?.n ?? 0) > 0) {
+      bad("short-zero", "DEMO-INV-SHORT must not have $0 short-pay rows");
+    }
     ok(
-      `DEMO-INV-SHORT shortfall $${(DEMO_SHORT_PAY_SHORTFALL_CENTS / 100).toFixed(2)}; net = total − shortfall`,
+      `DEMO-INV-SHORT $${(DEMO_SHORT_INVOICE_TOTAL_CENTS / 100).toFixed(2)} shortfall $${(DEMO_SHORT_PAY_SHORTFALL_CENTS / 100).toFixed(2)}; net = total − shortfall`,
     );
   }
 

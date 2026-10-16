@@ -157,6 +157,18 @@ export function assertInvoiceClientTypecheck(): void {
   if (!review.includes("Est amount") || !review.includes("Inv amount")) {
     bad("headers", "InvoiceReview headers must include Est/Inv amount");
   }
+  for (const h of ["Loc", "AJOB", "Description", "WM", "RJOB", "Labor", "Material", "Amount"]) {
+    if (!review.includes(h)) bad("brc-headers", `InvoiceReview missing BRC column ${h}`);
+  }
+  if (!review.includes("Exceptions (")) {
+    bad("exceptions-toggle", "InvoiceReview must have Exceptions (N) filter toggle");
+  }
+  if (!review.includes("CodeHover")) {
+    bad("code-hover", "InvoiceReview must use CodeHover for BRC code columns");
+  }
+  if (/validation\.flags\.map/.test(review)) {
+    bad("flag-list", "InvoiceReview must not render a long flag list");
+  }
   if (!review.includes("Net payable") && !review.includes("net payable")) {
     bad("short-net", "InvoiceReview must show short-pay and net payable");
   }

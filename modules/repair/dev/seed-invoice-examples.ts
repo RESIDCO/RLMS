@@ -106,8 +106,10 @@ async function ensureDs01(): Promise<string> {
   return String(ds.shop!.id);
 }
 
-/** Target shortfall for DEMO-INV-SHORT (§H r3/r4 header short-pay). */
+/** Target shortfall for DEMO-INV-SHORT (§H r5 header short-pay). */
 export const DEMO_SHORT_PAY_SHORTFALL_CENTS = 74750; // $747.50
+/** Normal sample-shop total used by DEMO-INV-SHORT (not the old $2,495 stub). */
+export const DEMO_SHORT_INVOICE_TOTAL_CENTS = 3673204; // $36,732.04
 
 async function findDemoInvoice(invoiceNo: string) {
   const { rows } = await q(
@@ -403,7 +405,7 @@ export async function seedInvoiceExamples(shopId?: string) {
     ok("DEMO-INV-ADDED has added line flag");
   }
 
-  // 4) Short-pay — r3/r4: header shortfall = $747.50; net payable = total − that
+  // 4) Short-pay — r5: normal $36,732.04 total; $747.50 short across 2 lines; no $0 short-pay rows
   {
     const d = await driveToSubmitted({
       shopId: sid,
@@ -417,32 +419,32 @@ export async function seedInvoiceExamples(shopId?: string) {
       [d.invoiceId],
     );
     const curShort = st[0]?.short_pay_cents != null ? Number(st[0].short_pay_cents) : null;
-    const needsRebuild = curShort !== DEMO_SHORT_PAY_SHORTFALL_CENTS;
+    const curTot = Number(st[0]?.total_cents ?? 0);
+    const { rows: zeroShort } = await q(
+      `SELECT count(*)::int AS n FROM repair.invoice_lines
+       WHERE invoice_id = $1 AND short_pay_cents = 0`,
+      [d.invoiceId],
+    );
+    const { rows: shortRows } = await q(
+      `SELECT count(*)::int AS n FROM repair.invoice_lines
+       WHERE invoice_id = $1 AND coalesce(short_pay_cents,0) > 0`,
+      [d.invoiceId],
+    );
+    const needsRebuild =
+      curShort !== DEMO_SHORT_PAY_SHORTFALL_CENTS ||
+      curTot !== DEMO_SHORT_INVOICE_TOTAL_CENTS ||
+      Number(zeroShort[0]?.n ?? 0) > 0 ||
+      Number(shortRows[0]?.n ?? 0) !== 2;
     if (needsRebuild) {
-      // Deterministic lines so shortfall is exactly $747.50
-      const line1 = 100000; // $1,000.00
-      const line2 = 149500; // $1,495.00
-      const invTotalCents = line1 + line2; // $2,495.00
-      await replaceInvoiceLinesManual({
-        invoiceId: d.invoiceId,
-        actor: "seed-invoice-examples",
-        lines: [
-          {
-            lineNo: 1,
-            jobCode: "1000",
-            qty: 1,
-            laborCents: line1,
-            respCode: "1",
-          },
-          {
-            lineNo: 2,
-            jobCode: "2000",
-            qty: 1,
-            laborCents: line2,
-            respCode: "6",
-          },
-        ],
-      });
+      // Keep sample AAR lines (normal $36,732.04). Short two largest lines by $400 + $347.50.
+      const { rows: top } = await q(
+        `SELECT line_no, total_cents FROM repair.invoice_lines
+         WHERE invoice_id = $1 ORDER BY total_cents DESC, line_no ASC LIMIT 2`,
+        [d.invoiceId],
+      );
+      if (top.length < 2) fail("DEMO-INV-SHORT needs ≥2 invoice lines from sample AAR");
+      const shortA = 40000; // $400.00
+      const shortB = DEMO_SHORT_PAY_SHORTFALL_CENTS - shortA; // $347.50
       await q(
         `UPDATE repair.invoices
          SET total = $2,
@@ -453,20 +455,31 @@ export async function seedInvoiceExamples(shopId?: string) {
              approved_amount_cents = NULL,
              short_pay_reason = NULL
          WHERE id = $1`,
-        [d.invoiceId, invTotalCents / 100],
+        [d.invoiceId, DEMO_SHORT_INVOICE_TOTAL_CENTS / 100],
       );
+      await q(
+        `UPDATE repair.invoice_lines
+         SET short_pay_cents = NULL, short_pay_reason = NULL
+         WHERE invoice_id = $1`,
+        [d.invoiceId],
+      );
+      const lineShortPays = [
+        {
+          lineNo: Number(top[0].line_no),
+          amountCents: Number(top[0].total_cents) - shortA,
+          reason: "Labor rate dispute (part 1)",
+        },
+        {
+          lineNo: Number(top[1].line_no),
+          amountCents: Number(top[1].total_cents) - shortB,
+          reason: "Labor rate dispute (part 2)",
+        },
+      ];
       const shorted = await shortPayOwnerInvoice({
         invoiceId: d.invoiceId,
         actor: "owner@demo",
-        reason: "Labor rate dispute",
-        lineShortPays: [
-          { lineNo: 1, amountCents: line1, reason: "OK" },
-          {
-            lineNo: 2,
-            amountCents: line2 - DEMO_SHORT_PAY_SHORTFALL_CENTS,
-            reason: "Half labor dispute",
-          },
-        ],
+        reason: "Labor rate dispute across 2 lines",
+        lineShortPays,
       });
       if (!shorted.ok) fail(shorted.error);
       if (shorted.shortPayCents !== DEMO_SHORT_PAY_SHORTFALL_CENTS) {
@@ -474,9 +487,12 @@ export async function seedInvoiceExamples(shopId?: string) {
           `DEMO-INV-SHORT shortfall expected ${DEMO_SHORT_PAY_SHORTFALL_CENTS}, got ${shorted.shortPayCents}`,
         );
       }
-      if (shorted.netPayableCents !== invTotalCents - DEMO_SHORT_PAY_SHORTFALL_CENTS) {
+      if (
+        shorted.netPayableCents !==
+        DEMO_SHORT_INVOICE_TOTAL_CENTS - DEMO_SHORT_PAY_SHORTFALL_CENTS
+      ) {
         fail(
-          `DEMO-INV-SHORT net expected ${invTotalCents - DEMO_SHORT_PAY_SHORTFALL_CENTS}, got ${shorted.netPayableCents}`,
+          `DEMO-INV-SHORT net expected ${DEMO_SHORT_INVOICE_TOTAL_CENTS - DEMO_SHORT_PAY_SHORTFALL_CENTS}, got ${shorted.netPayableCents}`,
         );
       }
     }
@@ -489,18 +505,37 @@ export async function seedInvoiceExamples(shopId?: string) {
     const sp = Number(verify[0]?.short_pay_cents ?? -1);
     const tot = Number(verify[0]?.total_cents ?? 0);
     const net = Number(verify[0]?.approved_amount_cents ?? -1);
+    if (tot !== DEMO_SHORT_INVOICE_TOTAL_CENTS) {
+      fail(`DEMO-INV-SHORT total ${tot} want ${DEMO_SHORT_INVOICE_TOTAL_CENTS}`);
+    }
     if (sp !== DEMO_SHORT_PAY_SHORTFALL_CENTS) {
       fail(`DEMO-INV-SHORT short_pay_cents=${sp} want ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
     }
     if (net !== tot - DEMO_SHORT_PAY_SHORTFALL_CENTS) {
       fail(`DEMO-INV-SHORT net ${net} ≠ total ${tot} − ${DEMO_SHORT_PAY_SHORTFALL_CENTS}`);
     }
+    const { rows: zeroCheck } = await q(
+      `SELECT count(*)::int AS n FROM repair.invoice_lines
+       WHERE invoice_id = $1 AND short_pay_cents = 0`,
+      [d.invoiceId],
+    );
+    if (Number(zeroCheck[0]?.n ?? 0) > 0) {
+      fail("DEMO-INV-SHORT must not store $0 short-pay rows");
+    }
+    const { rows: posCheck } = await q(
+      `SELECT count(*)::int AS n FROM repair.invoice_lines
+       WHERE invoice_id = $1 AND coalesce(short_pay_cents,0) > 0`,
+      [d.invoiceId],
+    );
+    if (Number(posCheck[0]?.n ?? 0) !== 2) {
+      fail(`DEMO-INV-SHORT expected 2 shorted lines, got ${posCheck[0]?.n}`);
+    }
     ok(
-      `DEMO-INV-SHORT short-pay $${(DEMO_SHORT_PAY_SHORTFALL_CENTS / 100).toFixed(2)} (net = total − shortfall)`,
+      `DEMO-INV-SHORT $${(DEMO_SHORT_INVOICE_TOTAL_CENTS / 100).toFixed(2)} short-pay $${(DEMO_SHORT_PAY_SHORTFALL_CENTS / 100).toFixed(2)} across 2 lines`,
     );
   }
 
-  // 5) Paid
+  // 5) Paid in closed Sep 2026 — never close the real open calendar month here
   {
     const d = await driveToSubmitted({
       shopId: sid,
@@ -517,26 +552,29 @@ export async function seedInvoiceExamples(shopId?: string) {
         actor: "owner@demo",
       });
       if (!appr.ok) fail(appr.error);
-      const { ensureOpenAccountingMonth, closeAccountingMonth } = await import(
+      const { resetDemoAccountingMonths } = await import(
         "../services/accounting-months"
       );
-      const open = await ensureOpenAccountingMonth({ actor: "owner@demo" });
-      const closed = await closeAccountingMonth({
-        monthId: open.id,
-        actor: "owner@demo",
-        confirm: true,
-      });
-      if (!closed.ok) fail(closed.error);
+      const months = await resetDemoAccountingMonths({ actor: "owner@demo" });
+      // Park this Paid invoice in closed Sep 2026 (not the open Oct month)
+      await q(
+        `UPDATE repair.invoices
+         SET accounting_month_id = $2,
+             workflow_status = 'MONTH_CLOSED',
+             payment_status = 'MONTH_CLOSED'
+         WHERE id = $1`,
+        [d.invoiceId, months.closed.id],
+      );
       const paid = await recordInvoicePaid({
         invoiceId: d.invoiceId,
         actor: "owner@demo",
-        paidAt: "2026-10-01",
+        paidAt: "2026-09-28",
         paidRef: "CHK-DEMO-PAID",
         paidMethod: "CHECK",
       });
       if (!paid.ok) fail(paid.error);
     }
-    ok("DEMO-INV-PAID recorded");
+    ok("DEMO-INV-PAID recorded in closed Sep 2026");
   }
 
   // Verify each lands (idempotent second pass must not duplicate)

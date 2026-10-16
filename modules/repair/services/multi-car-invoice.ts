@@ -90,6 +90,30 @@ export async function listMultiCarCandidates(opts: {
   }));
 }
 
+function normalizeCarKey(carMark: string, carNumber: string): string {
+  const mark = carMark.toUpperCase().padEnd(4, " ").slice(0, 4).trim();
+  const num = carNumber.replace(/\D/g, "").padStart(6, "0").slice(-6);
+  return `${mark}|${num}`;
+}
+
+/** Unique car initial+number pairs present in a multi-car 500-byte file. */
+export function carsInAarFile(
+  bytes: Buffer,
+): Array<{ carMark: string; carNumber: string; key: string }> {
+  const parsed = parseAarFile(bytes);
+  const seen = new Map<string, { carMark: string; carNumber: string; key: string }>();
+  for (const line of parsed.lines) {
+    if (line.recordFormat !== "1") continue;
+    const raw = line.rawLine;
+    const m = raw.slice(47, 51).trim().toUpperCase();
+    const n = raw.slice(51, 57).replace(/\D/g, "").padStart(6, "0").slice(-6);
+    if (!m || !n) continue;
+    const key = `${m}|${n}`;
+    if (!seen.has(key)) seen.set(key, { carMark: m, carNumber: n, key });
+  }
+  return [...seen.values()];
+}
+
 function aarLinesForCar(
   bytes: Buffer,
   carMark: string,
@@ -112,6 +136,28 @@ function aarLinesForCar(
       qtyRaw != null && qtyRaw !== "" && Number.isFinite(Number(qtyRaw))
         ? Number(qtyRaw)
         : null;
+    const cond =
+      line.fields?.condition_code != null
+        ? String(line.fields.condition_code).trim()
+        : null;
+    const desc =
+      line.fields?.description != null
+        ? String(line.fields.description).trim()
+        : raw.length >= 216
+          ? raw.slice(166, 216).trim() || null
+          : null;
+    const removedJob =
+      line.fields?.removed_job_code != null
+        ? String(line.fields.removed_job_code).trim()
+        : raw.length >= 134
+          ? raw.slice(130, 134).trim() || null
+          : null;
+    const removedQual =
+      line.fields?.removed_qualifier != null
+        ? String(line.fields.removed_qualifier).trim()
+        : raw.length >= 137
+          ? raw.slice(134, 137).trim() || null
+          : null;
     out.push({
       lineNo: out.length + 1,
       jobCode: String(line.appliedJobCode ?? "").trim(),
@@ -120,11 +166,18 @@ function aarLinesForCar(
           ? String(line.fields.location_on_car)
           : null,
       qualifier: line.appliedQualifier != null ? String(line.appliedQualifier) : null,
+      conditionCode: cond || null,
+      whyMade: line.whyMade != null ? String(line.whyMade) : null,
+      removedJobCode: removedJob,
+      removedQualifier: removedQual,
+      description: desc,
       qty,
       laborCents: labor,
       materialCents: material,
       totalCents: labor + material,
       respCode: line.respCode != null ? String(line.respCode).trim() : null,
+      carMark: mark,
+      carNumber: num,
     });
   }
   return out;
@@ -225,6 +278,34 @@ export async function createMultiCarInvoice(opts: {
     }
   }
 
+  // Split 500-byte by each record's car initial+number; selected set must match exactly.
+  const fileCars = carsInAarFile(opts.aarFile.bytes);
+  const selectedKeys = new Set(
+    selected.map((c) => normalizeCarKey(c.carMark, c.carNumber)),
+  );
+  const fileKeys = new Set(fileCars.map((c) => c.key));
+  for (const fc of fileCars) {
+    if (!selectedKeys.has(fc.key)) {
+      return {
+        ok: false,
+        status: 422,
+        error: `HARD REJECT: car ${fc.carMark} ${fc.carNumber} is in the 500-byte file but was not selected for this shop`,
+        hardRejects: ["UNSELECTED_CAR_IN_FILE"],
+      };
+    }
+  }
+  for (const c of selected) {
+    const key = normalizeCarKey(c.carMark, c.carNumber);
+    if (!fileKeys.has(key)) {
+      return {
+        ok: false,
+        status: 422,
+        error: `HARD REJECT: selected car ${c.carMark} ${c.carNumber} is missing from the 500-byte file`,
+        hardRejects: ["SELECTED_CAR_MISSING_FROM_FILE"],
+      };
+    }
+  }
+
   // Per-car match + totals from 500-byte split
   const carResults: Array<{
     candidate: MultiCarCandidate;
@@ -236,6 +317,14 @@ export async function createMultiCarInvoice(opts: {
   let sumEstimate = 0;
   for (const c of selected) {
     const invLines = aarLinesForCar(opts.aarFile.bytes, c.carMark, c.carNumber);
+    if (!invLines.length) {
+      return {
+        ok: false,
+        status: 422,
+        error: `HARD REJECT: selected car ${c.carMark} ${c.carNumber} is missing from the 500-byte file`,
+        hardRejects: ["SELECTED_CAR_MISSING_FROM_FILE"],
+      };
+    }
     const est = await loadApprovedEstimateLines({
       eventId: c.eventId,
       tenantId,
@@ -245,11 +334,10 @@ export async function createMultiCarInvoice(opts: {
       invoiceLines: invLines,
     });
     const invoicedCents = invLines.reduce((s, l) => s + l.totalCents, 0);
-    // If no car-specific lines in multi AAR, fall back to estimate total (seed path)
-    const cents = invoicedCents > 0 ? invoicedCents : c.estimateCents;
+    const cents = invoicedCents;
     const flags: string[] = [];
     const diffs = matched.filter((m) => m.kind !== "MATCH").length;
-    if (diffs > 0 && invoicedCents > 0) flags.push("LINE_DIFF");
+    if (diffs > 0) flags.push("LINE_DIFF");
     if (Math.abs(cents - c.estimateCents) > 0) flags.push("TOTAL_MISMATCH");
     carResults.push({
       candidate: c,
@@ -554,30 +642,80 @@ export async function createMultiCarInvoice(opts: {
   };
 }
 
+/** Plain-language status for a multi-car summary row (never raw ACTIVE). */
+export function carStatusPlain(opts: {
+  lineStatus: string;
+  differenceCents: number;
+  flags?: string;
+}): string {
+  const st = (opts.lineStatus || "").toUpperCase();
+  if (st === "REJECTED") return "Rejected";
+  if (st === "SHORT_PAID") return "Short-paid";
+  const diff = opts.differenceCents;
+  const hasExc =
+    Boolean(opts.flags && opts.flags.trim()) || Math.abs(diff) > 0;
+  if (!hasExc && diff === 0) return "Matches";
+  if (diff > 0) {
+    return `Over $${(diff / 100).toFixed(2)}`;
+  }
+  if (diff < 0) {
+    return `Under $${(Math.abs(diff) / 100).toFixed(2)}`;
+  }
+  return "Exceptions";
+}
+
 export async function listInvoiceCars(opts: {
   invoiceId: string;
   tenantId?: string;
 }) {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const { rows } = await q(
-    `SELECT * FROM repair.invoice_cars
-     WHERE invoice_id = $1 AND tenant_id = $2
-     ORDER BY sort_order, car_mark, car_number`,
+    `SELECT ic.*,
+            (SELECT count(*)::int FROM repair.invoice_lines il
+             WHERE il.invoice_id = ic.invoice_id
+               AND il.invoice_car_id = ic.id
+               AND (
+                 coalesce(il.short_pay_cents,0) > 0
+               )) AS short_lines,
+            (SELECT count(*)::int FROM repair.invoice_lines il
+             WHERE il.invoice_id = ic.invoice_id AND il.invoice_car_id = ic.id) AS line_count
+     FROM repair.invoice_cars ic
+     WHERE ic.invoice_id = $1 AND ic.tenant_id = $2
+     ORDER BY ic.sort_order, ic.car_mark, ic.car_number`,
     [opts.invoiceId, tenantId],
   );
-  return rows.map((r) => ({
-    id: String(r.id),
-    eventId: String(r.event_id),
-    estimateId: r.estimate_id ? String(r.estimate_id) : null,
-    carMark: String(r.car_mark),
-    carNumber: String(r.car_number),
-    estimateCents: Number(r.estimate_cents ?? 0),
-    invoicedCents: Number(r.invoiced_cents ?? 0),
-    differenceCents: Number(r.difference_cents ?? 0),
-    flags: r.flags_summary ? String(r.flags_summary) : "",
-    lineStatus: String(r.line_status ?? "ACTIVE"),
-    shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
-  }));
+  return rows.map((r) => {
+    const flags = r.flags_summary ? String(r.flags_summary) : "";
+    const differenceCents = Number(r.difference_cents ?? 0);
+    const lineStatus = String(r.line_status ?? "ACTIVE");
+    // Exception count: LINE_DIFF flag tokens + total mismatch + short lines
+    const flagParts = flags
+      .split(/[,;]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const exceptionsCount =
+      flagParts.length +
+      (Number(r.short_lines ?? 0) > 0 && !flagParts.includes("SHORT_PAY")
+        ? Number(r.short_lines)
+        : 0);
+    return {
+      id: String(r.id),
+      eventId: String(r.event_id),
+      estimateId: r.estimate_id ? String(r.estimate_id) : null,
+      carMark: String(r.car_mark),
+      carNumber: String(r.car_number),
+      estimateCents: Number(r.estimate_cents ?? 0),
+      invoicedCents: Number(r.invoiced_cents ?? 0),
+      differenceCents,
+      flags,
+      exceptionsCount:
+        exceptionsCount ||
+        (Math.abs(differenceCents) > 0 || flagParts.length ? Math.max(1, flagParts.length) : 0),
+      lineStatus,
+      statusPlain: carStatusPlain({ lineStatus, differenceCents, flags }),
+      shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
+    };
+  });
 }
 
 /** Reject or short-pay at car level (owner). */

@@ -33,16 +33,15 @@ import {
 import { ensureShopBoLink } from "../services/shop-workflow";
 import { getBoStoredStatus } from "../services/bo-status";
 import { enterPodErd } from "../services/pod";
-import { parseAarFile } from "../services/aar-parser";
+import { parseAarFile, serializeLine } from "../services/aar-parser";
 import { migrateLocal } from "./migrate-local";
 import { seedInvoiceExamples } from "./seed-invoice-examples";
 import { approveOwnerInvoice } from "../services/invoice-review";
 import { createMultiCarInvoice } from "../services/multi-car-invoice";
 import {
   ensureOpenAccountingMonth,
-  closeAccountingMonth,
+  resetDemoAccountingMonths,
 } from "../services/accounting-months";
-import { createPaymentBatch } from "../services/invoice-review";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SAMPLES = join(__dirname, "shop-samples");
@@ -103,6 +102,41 @@ function withShopMark(bytes: Buffer, shopMark: string): Buffer {
     return line.rawLine.slice(0, 71) + m + line.rawLine.slice(75);
   });
   return Buffer.from(lines.join(ending), "latin1");
+}
+
+/** Bump labor on the first Format-1 line so multi-car estimates/invoices diverge. */
+function bumpFirstLineLabor(bytes: Buffer, bumpCents: number): Buffer {
+  if (!bumpCents) return bytes;
+  const parsed = parseAarFile(bytes);
+  const ending = parsed.lineEnding === "CRLF" ? "\r\n" : "\n";
+  let bumped = false;
+  const lines = parsed.lines.map((line) => {
+    if (line.recordFormat !== "1" || bumped) return line.rawLine;
+    bumped = true;
+    const labor = Math.max(0, Math.trunc(line.laborCents ?? 0) + bumpCents);
+    return serializeLine({
+      ...line,
+      laborCents: labor,
+      fields: { ...line.fields, labor_cents: labor },
+    });
+  });
+  return Buffer.from(lines.join(ending), "latin1");
+}
+
+/** Collect Format-1 raw lines for one car (already stamped in bytes). */
+function format1RawLines(bytes: Buffer): string[] {
+  const parsed = parseAarFile(bytes);
+  return parsed.lines
+    .filter((l) => l.recordFormat === "1")
+    .map((l) => l.rawLine);
+}
+
+function buildMultiCarAar(carBuffers: Buffer[]): Buffer {
+  const parts: string[] = [];
+  for (const buf of carBuffers) {
+    parts.push(...format1RawLines(buf));
+  }
+  return Buffer.from(parts.join("\r\n") + "\r\n", "latin1");
 }
 
 function blankCid(bytes: Buffer): Buffer {
@@ -812,8 +846,10 @@ async function seedClosed(shopId: string, base: Buffer) {
 
 
 /**
- * §H r4 — idempotent 5-car multi-car invoice (DEMO-INV-MULTI) + one month batch.
+ * §H r5 — idempotent 5-car multi-car invoice (DEMO-INV-MULTI).
+ * Cars use different estimate/invoice amounts; one car has an exception.
  * Demo uses 5 cars; product allows any number ≥ 2 (no cap).
+ * Does NOT close real calendar months — month reset happens after seed.
  */
 async function seedMultiCarAndMonth(shopId: string, base: Buffer) {
   // Hide legacy r3 name so queue stays DEMO-only with the new number
@@ -829,9 +865,18 @@ async function seedMultiCarAndMonth(shopId: string, base: Buffer) {
     `SELECT id, shop_id FROM repair.invoices
      WHERE invoice_no = 'DEMO-INV-MULTI' AND deleted_at IS NULL LIMIT 1`,
   );
-  const carNumbers = ["91001", "91002", "91003", "91004", "91005"];
+  // Distinct estimate bumps; 91003 invoice gets +$250 exception vs its estimate
+  const carSpecs = [
+    { carNumber: "91001", estBump: 0, invExtra: 0 },
+    { carNumber: "91002", estBump: 50_000, invExtra: 0 },
+    { carNumber: "91003", estBump: 100_000, invExtra: 25_000 },
+    { carNumber: "91004", estBump: -30_000, invExtra: 0 },
+    { carNumber: "91005", estBump: 75_000, invExtra: 0 },
+  ];
   const eventIds: string[] = [];
-  for (const carNumber of carNumbers) {
+  const invCarBuffers: Buffer[] = [];
+  for (const spec of carSpecs) {
+    const carNumber = spec.carNumber;
     await seedCar("DEMO", carNumber);
     let row = await findDemoEvent(shopId, carNumber);
     let eventId = row?.event_id ? String(row.event_id) : "";
@@ -852,14 +897,17 @@ async function seedMultiCarAndMonth(shopId: string, base: Buffer) {
       eventId = String(bo.event.id);
     }
     await driveToOnHand(eventId, "2026-09-01T12:00:00.000Z", "Multi-car track");
+    const estBytes = bumpFirstLineLabor(
+      withShopMark(withCar(base, "DEMO", carNumber), DEMO_SHOP_MARK),
+      spec.estBump,
+    );
     if (!estimateId) {
-      const bytes = withShopMark(withCar(base, "DEMO", carNumber), DEMO_SHOP_MARK);
       const sub = await shopSubmitEstimate({
         role: "shop",
         shopMark: DEMO_SHOP_MARK,
         actor: "seed-shop-demo",
         eventId,
-        bytes,
+        bytes: estBytes,
         filename: `multi-${carNumber}.txt`,
       });
       if (!sub.ok) fail(`multi ${carNumber} submit: ${JSON.stringify(sub).slice(0, 200)}`);
@@ -888,7 +936,6 @@ async function seedMultiCarAndMonth(shopId: string, base: Buffer) {
        WHERE f.run_id = r.id AND r.estimate_id = $1 AND f.cleared_at IS NULL`,
       [estimateId],
     );
-    // Soft-delete any prior single-car smoke invoices on these events
     await q(
       `UPDATE repair.invoices
        SET deleted_at = coalesce(deleted_at, now()), deleted_by = 'seed-shop-demo'
@@ -898,9 +945,47 @@ async function seedMultiCarAndMonth(shopId: string, base: Buffer) {
       [eventId],
     );
     eventIds.push(eventId);
+    invCarBuffers.push(
+      bumpFirstLineLabor(estBytes, spec.invExtra),
+    );
   }
 
-  if (!existing[0]) {
+  const multiAar = buildMultiCarAar(invCarBuffers);
+
+  let needsRebuild = !existing[0];
+  if (existing[0]) {
+    const { rows: carRows } = await q(
+      `SELECT invoiced_cents, flags_summary FROM repair.invoice_cars
+       WHERE invoice_id = $1 AND line_status = 'ACTIVE'`,
+      [String(existing[0].id)],
+    );
+    const totals = new Set(carRows.map((r) => Number(r.invoiced_cents ?? 0)));
+    const hasExc = carRows.some((r) => String(r.flags_summary || "").trim());
+    if (totals.size < 3 || !hasExc) {
+      await q(
+        `UPDATE repair.invoices
+         SET deleted_at = now(), deleted_by = 'seed-shop-demo',
+             delete_reason = 'r5 rebuild varied multi-car'
+         WHERE id = $1`,
+        [String(existing[0].id)],
+      );
+      await q(
+        `UPDATE repair.invoice_cars
+         SET line_status = 'REJECTED', reject_reason = 'r5 rebuild'
+         WHERE invoice_id = $1`,
+        [String(existing[0].id)],
+      );
+      needsRebuild = true;
+    } else {
+      await q(
+        `UPDATE repair.invoices SET shop_id = $2 WHERE id = $1`,
+        [String(existing[0].id), shopId],
+      );
+      ok("DEMO-INV-MULTI already present (idempotent; shop re-pointed)");
+    }
+  }
+
+  if (needsRebuild) {
     await q(
       `UPDATE repair.invoice_cars
        SET line_status = 'REJECTED', reject_reason = 'seed multi-car reset'
@@ -914,75 +999,32 @@ async function seedMultiCarAndMonth(shopId: string, base: Buffer) {
       invoiceNo: "DEMO-INV-MULTI",
       actor: "seed-shop-demo",
       file: { filename: "multi.pdf", mime: "application/pdf", bytes: pdf },
-      aarFile: { filename: "multi.txt", mime: "text/plain", bytes: base },
+      aarFile: { filename: "multi.txt", mime: "text/plain", bytes: multiAar },
     });
     if (!created.ok) fail(`multi-car create: ${created.error}`);
     const appr = await approveOwnerInvoice({
       invoiceId: created.invoiceId,
       actor: "owner@demo",
       overToleranceReason:
-        "Multi-car seed — totals may differ per-car AAR split",
+        "Multi-car seed — car 91003 has intentional qty/price exception",
     });
     if (!appr.ok) fail(`multi-car approve: ${appr.error}`);
-    ok(`DEMO-INV-MULTI 5-car multi-car invoice (${created.carCount} cars)`);
-  } else {
-    // Re-point existing MULTI to current shop + keep cars active on current events
-    await q(
-      `UPDATE repair.invoices
-       SET shop_id = $2
-       WHERE id = $1`,
-      [String(existing[0].id), shopId],
+    const withExc = created.cars.filter((c) => c.flags.length > 0);
+    if (!withExc.length) {
+      fail("DEMO-INV-MULTI expected at least one car with an exception");
+    }
+    const totals = new Set(created.cars.map((c) => c.invoicedCents));
+    if (totals.size < 3) {
+      fail("DEMO-INV-MULTI cars should have visibly different invoiced amounts");
+    }
+    ok(
+      `DEMO-INV-MULTI 5-car multi-car invoice (${created.carCount} cars; ${withExc.length} exception car(s); distinct totals=${totals.size})`,
     );
-    ok("DEMO-INV-MULTI already present (idempotent; shop re-pointed)");
   }
 
-  // One open month with approved invoices; close once for batch seed if needed
-  const open = await ensureOpenAccountingMonth({ actor: "seed-shop-demo" });
-  const { rows: openInv } = await q(
-    `SELECT id FROM repair.invoices
-     WHERE accounting_month_id = $1 AND deleted_at IS NULL
-       AND payment_status = 'APPROVED_IN_OPEN_MONTH'`,
-    [open.id],
-  );
-  if (openInv.length) {
-    const closed = await closeAccountingMonth({
-      monthId: open.id,
-      actor: "owner@demo",
-      confirm: true,
-    });
-    if (!closed.ok) fail(closed.error);
-    const { rows: batchExist } = await q(
-      `SELECT id FROM repair.payment_batches
-       WHERE batch_no = 'DEMO-BATCH-MONTH' AND deleted_at IS NULL LIMIT 1`,
-    );
-    if (!batchExist[0]) {
-      const ids = openInv.map((r) => String(r.id));
-      // Also include newly month-closed
-      const { rows: mc } = await q(
-        `SELECT id FROM repair.invoices
-         WHERE deleted_at IS NULL AND payment_status = 'MONTH_CLOSED'
-         LIMIT 20`,
-      );
-      const batch = await createPaymentBatch({
-        invoiceIds: mc.map((r) => String(r.id)).slice(0, 10),
-        actor: "owner@demo",
-        note: "DEMO-BATCH-MONTH",
-      });
-      if (batch.ok) {
-        await q(
-          `UPDATE repair.payment_batches SET batch_no = 'DEMO-BATCH-MONTH' WHERE id = $1`,
-          [String(batch.batch.id)],
-        );
-        ok("DEMO-BATCH-MONTH payment batch seeded");
-      } else {
-        ok(`month closed (batch skip: ${batch.error})`);
-      }
-    } else {
-      ok("DEMO-BATCH-MONTH already present");
-    }
-  } else {
-    ok(`open month ${open.monthLabel} ready (no pending approvals to close)`);
-  }
+  // Ensure Oct 2026 is open after seeding (never leave a future month open)
+  const months = await resetDemoAccountingMonths({ actor: "seed-shop-demo" });
+  ok(`accounting months reset — open ${months.open.monthLabel}, closed ${months.closed.monthLabel}`);
 }
 
 async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
@@ -1174,9 +1216,62 @@ async function main() {
   await seedInvoiceExamples(shopId);
   ok("§H invoice examples seeded on DS01");
 
-  // §H r4 — 5-car multi-car invoice + accounting month batch
+  // §H r5 — 5-car multi-car invoice (varied amounts + one exception) + month reset
   await seedMultiCarAndMonth(shopId, base);
-  ok("§H r4 multi-car + month seed");
+  ok("§H r5 multi-car + month seed");
+
+  // Seed end-state: Oct 2026 open with ≥1 Approved + MULTI; Sep 2026 closed with Paid
+  {
+    const months = await resetDemoAccountingMonths({ actor: "seed-shop-demo" });
+    await q(
+      `UPDATE repair.invoices
+       SET accounting_month_id = $1
+       WHERE deleted_at IS NULL
+         AND invoice_no IN ('DEMO-INV-MULTI', 'DEMO-INV-WITHIN', 'DEMO-INV-OVER', 'DEMO-INV-ADDED', 'DEMO-INV-SHORT', 'DEMO-INV-100005')
+         AND coalesce(payment_status,'') <> 'PAID'`,
+      [months.open.id],
+    );
+    await q(
+      `UPDATE repair.invoices
+       SET accounting_month_id = $1
+       WHERE deleted_at IS NULL AND invoice_no = 'DEMO-INV-PAID'`,
+      [months.closed.id],
+    );
+    // Ensure at least one Approved – In Open Month on Oct
+    const { rows: openAppr } = await q(
+      `SELECT id FROM repair.invoices
+       WHERE deleted_at IS NULL AND accounting_month_id = $1
+         AND payment_status = 'APPROVED_IN_OPEN_MONTH'
+       LIMIT 1`,
+      [months.open.id],
+    );
+    if (!openAppr[0]) {
+      const { rows: multi } = await q(
+        `SELECT id FROM repair.invoices
+         WHERE invoice_no = 'DEMO-INV-MULTI' AND deleted_at IS NULL LIMIT 1`,
+      );
+      if (multi[0]) {
+        await q(
+          `UPDATE repair.invoices
+           SET workflow_status = 'APPROVED_IN_OPEN_MONTH',
+               payment_status = 'APPROVED_IN_OPEN_MONTH',
+               accounting_month_id = $2
+           WHERE id = $1`,
+          [String(multi[0].id), months.open.id],
+        );
+      }
+    }
+    const { rows: futureOpen } = await q(
+      `SELECT month_label FROM repair.accounting_months
+       WHERE deleted_at IS NULL AND status = 'OPEN' AND month_label > '2026-10'`,
+    );
+    if (futureOpen.length) {
+      fail(`future open months left: ${futureOpen.map((r) => r.month_label).join(",")}`);
+    }
+    ok(
+      `seed end-state: open ${months.open.monthLabel}; Paid in closed ${months.closed.monthLabel}; no future months open`,
+    );
+  }
 
   // Assert: exactly one live DEMO 100005 event (no stray duplicates)
   {

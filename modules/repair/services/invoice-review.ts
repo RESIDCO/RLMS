@@ -63,23 +63,60 @@ export type MatchableLine = {
   jobCode: string;
   location?: string | null;
   qualifier?: string | null;
+  conditionCode?: string | null;
+  whyMade?: string | null;
+  removedJobCode?: string | null;
+  removedQualifier?: string | null;
+  description?: string | null;
   qty: number | null;
   laborCents: number;
   materialCents: number;
   totalCents: number;
   respCode: string | null;
+  /** Multi-car: owning invoice_cars.id when known */
+  invoiceCarId?: string | null;
+  carMark?: string | null;
+  carNumber?: string | null;
 };
 
 export type MatchedLine = {
   lineNo: number | null;
   jobCode: string;
   kind: LineDiffKind;
+  /** Plain-language reason for amber/red/struck row (hover / expand). */
+  exceptionReason?: string | null;
+  /** Cleared/overridden flags shown as a small badge (who/when), not a list. */
+  clearedBadges?: Array<{
+    label: string;
+    by?: string | null;
+    at?: string | null;
+  }>;
   estimate?: MatchableLine;
   invoice?: MatchableLine & {
     shortPayCents?: number | null;
     shortPayReason?: string | null;
   };
 };
+
+/** True when the matched row is an exception (not a clean MATCH). */
+export function isMatchedException(m: { kind: LineDiffKind }): boolean {
+  return m.kind !== "MATCH";
+}
+
+export function exceptionReasonForKind(kind: LineDiffKind): string | null {
+  switch (kind) {
+    case "ADDED":
+      return "Added on invoice — not on the approved estimate";
+    case "REMOVED":
+      return "Removed vs the approved estimate";
+    case "QTY_PRICE_CHANGED":
+      return "Quantity or price changed vs the approved estimate";
+    case "NOT_ON_APPROVED_ESTIMATE":
+      return "Not on the approved estimate";
+    default:
+      return null;
+  }
+}
 
 function normKeyPart(v: string | null | undefined): string {
   return (v ?? "").trim().toUpperCase();
@@ -215,6 +252,7 @@ export function matchInvoiceToEstimateLines(opts: {
         lineNo: inv.lineNo,
         jobCode: inv.jobCode,
         kind: "ADDED",
+        exceptionReason: exceptionReasonForKind("ADDED"),
         invoice: inv,
       });
       continue;
@@ -227,10 +265,22 @@ export function matchInvoiceToEstimateLines(opts: {
       inv.laborCents !== est.laborCents ||
       inv.materialCents !== est.materialCents ||
       inv.totalCents !== est.totalCents;
+    const kind: LineDiffKind =
+      qtyChanged || priceChanged ? "QTY_PRICE_CHANGED" : "MATCH";
+    const clearedBadges: MatchedLine["clearedBadges"] = [];
+    if (inv.shortPayCents != null && inv.shortPayCents > 0) {
+      clearedBadges.push({
+        label: `Short-paid $${(inv.shortPayCents / 100).toFixed(2)}`,
+        by: null,
+        at: null,
+      });
+    }
     out.push({
       lineNo: inv.lineNo,
       jobCode: inv.jobCode || est.jobCode,
-      kind: qtyChanged || priceChanged ? "QTY_PRICE_CHANGED" : "MATCH",
+      kind,
+      exceptionReason: exceptionReasonForKind(kind),
+      clearedBadges: clearedBadges.length ? clearedBadges : undefined,
       estimate: est,
       invoice: inv,
     });
@@ -242,6 +292,7 @@ export function matchInvoiceToEstimateLines(opts: {
       lineNo: s.e.lineNo,
       jobCode: s.e.jobCode,
       kind: "REMOVED",
+      exceptionReason: exceptionReasonForKind("REMOVED"),
       estimate: s.e,
     });
   }
@@ -343,6 +394,76 @@ function locationFromRaw(raw: unknown): string | null {
   return loc || null;
 }
 
+/** App. G Format-1 1-based slices (same as Estimate Review). */
+function sliceRawField(
+  raw: unknown,
+  start1: number,
+  length: number,
+): string | null {
+  if (raw == null) return null;
+  const s = String(raw);
+  if (s.length < start1) return null;
+  const v = s.slice(start1 - 1, start1 - 1 + length).trim();
+  return v || null;
+}
+
+function brcFieldsFromRaw(raw: unknown): {
+  conditionCode: string | null;
+  removedJobCode: string | null;
+  removedQualifier: string | null;
+  description: string | null;
+} {
+  return {
+    conditionCode: sliceRawField(raw, 111, 1),
+    removedJobCode: sliceRawField(raw, 131, 4),
+    removedQualifier: sliceRawField(raw, 135, 3),
+    description: sliceRawField(raw, 167, 50),
+  };
+}
+
+function toMatchableFromContentLine(l: Record<string, unknown>): MatchableLine {
+  const labor = lineLaborCents(l);
+  const mat = lineMaterialCents(l);
+  const tot = lineTotalCents(l);
+  const locStored =
+    l.location_on_car != null ? String(l.location_on_car).trim() : "";
+  const brc = brcFieldsFromRaw(l.raw_line);
+  return {
+    lineNo: Number(l.line_no ?? 0),
+    jobCode: String(l.aar_job_code ?? "").trim(),
+    location: locStored || locationFromRaw(l.raw_line),
+    qualifier:
+      l.qualifier != null && String(l.qualifier).trim()
+        ? String(l.qualifier).trim()
+        : null,
+    conditionCode:
+      l.condition_code != null && String(l.condition_code).trim()
+        ? String(l.condition_code).trim()
+        : brc.conditionCode,
+    whyMade:
+      l.why_made != null && String(l.why_made).trim()
+        ? String(l.why_made).trim()
+        : null,
+    removedJobCode:
+      l.removed_job_code != null && String(l.removed_job_code).trim()
+        ? String(l.removed_job_code).trim()
+        : brc.removedJobCode,
+    removedQualifier:
+      l.removed_qualifier != null && String(l.removed_qualifier).trim()
+        ? String(l.removed_qualifier).trim()
+        : brc.removedQualifier,
+    description:
+      l.description != null && String(l.description).trim()
+        ? String(l.description).trim()
+        : brc.description,
+    qty: qtyOf(l),
+    laborCents: labor,
+    materialCents: mat,
+    totalCents: tot || labor + mat,
+    respCode: l.resp_code != null ? String(l.resp_code) : null,
+  };
+}
+
 export async function loadApprovedEstimateLines(opts: {
   eventId: string;
   tenantId?: string;
@@ -372,27 +493,9 @@ export async function loadApprovedEstimateLines(opts: {
   }
   const estimateId = String(rows[0].estimate_id);
   const content = await getContentLinesForEstimate(estimateId, tenantId);
-  const lines = content.lines.map((l) => {
-    const labor = lineLaborCents(l);
-    const mat = lineMaterialCents(l);
-    const tot = lineTotalCents(l);
-    const locStored =
-      l.location_on_car != null ? String(l.location_on_car).trim() : "";
-    return {
-      lineNo: Number(l.line_no ?? 0),
-      jobCode: String(l.aar_job_code ?? "").trim(),
-      location: locStored || locationFromRaw(l.raw_line),
-      qualifier:
-        l.qualifier != null && String(l.qualifier).trim()
-          ? String(l.qualifier).trim()
-          : null,
-      qty: qtyOf(l),
-      laborCents: labor,
-      materialCents: mat,
-      totalCents: tot || labor + mat,
-      respCode: l.resp_code != null ? String(l.resp_code) : null,
-    };
-  });
+  const lines = content.lines.map((l) =>
+    toMatchableFromContentLine(l as Record<string, unknown>),
+  );
   return {
     estimateId,
     revisionId: content.revision?.id != null
@@ -406,8 +509,8 @@ export async function loadApprovedEstimateLines(opts: {
 export async function loadInvoiceLines(invoiceId: string, tenantId = DEFAULT_TENANT_ID) {
   const { rows } = await q(
     `SELECT line_no, aar_job_code, qualifier, location_on_car, quantity,
-            labor_cents, material_cents, total_cents, resp_code,
-            short_pay_cents, short_pay_reason, raw_line
+            labor_cents, material_cents, total_cents, resp_code, why_made,
+            short_pay_cents, short_pay_reason, raw_line, invoice_car_id
      FROM repair.invoice_lines
      WHERE invoice_id = $1 AND tenant_id = $2
      ORDER BY line_no ASC`,
@@ -416,6 +519,7 @@ export async function loadInvoiceLines(invoiceId: string, tenantId = DEFAULT_TEN
   return rows.map((r) => {
     const locStored =
       r.location_on_car != null ? String(r.location_on_car).trim() : "";
+    const brc = brcFieldsFromRaw(r.raw_line);
     return {
       lineNo: Number(r.line_no),
       jobCode: String(r.aar_job_code ?? "").trim(),
@@ -424,11 +528,20 @@ export async function loadInvoiceLines(invoiceId: string, tenantId = DEFAULT_TEN
         r.qualifier != null && String(r.qualifier).trim()
           ? String(r.qualifier).trim()
           : null,
+      conditionCode: brc.conditionCode,
+      whyMade:
+        r.why_made != null && String(r.why_made).trim()
+          ? String(r.why_made).trim()
+          : null,
+      removedJobCode: brc.removedJobCode,
+      removedQualifier: brc.removedQualifier,
+      description: brc.description,
       qty: r.quantity != null ? Number(r.quantity) : null,
       laborCents: Number(r.labor_cents ?? 0),
       materialCents: Number(r.material_cents ?? 0),
       totalCents: Number(r.total_cents ?? 0),
       respCode: r.resp_code != null ? String(r.resp_code) : null,
+      invoiceCarId: r.invoice_car_id != null ? String(r.invoice_car_id) : null,
       shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
       shortPayReason: r.short_pay_reason != null ? String(r.short_pay_reason) : null,
     };
@@ -685,17 +798,70 @@ export async function getInvoiceReviewBundle(opts: {
   // Never synthesize a phantom header line — that falsely yields 1 LINE_ADDED
   // + N LINE_REMOVED when totals match an APPROVED estimate with real lines.
   const invoiceLines = await loadInvoiceLines(opts.invoiceId, tenantId);
-  const matched = matchInvoiceToEstimateLines({
-    estimateLines: estimate.lines,
-    invoiceLines,
-  });
+  const { listInvoiceCars } = await import("./multi-car-invoice");
+  const cars = await listInvoiceCars({ invoiceId: opts.invoiceId, tenantId });
+  let matched: MatchedLine[];
+  if (Boolean(inv.is_multi_car) && cars.length > 0) {
+    // Per-car match: each car's invoice lines ↔ that car's approved estimate
+    matched = [];
+    for (const car of cars) {
+      const carEst = await loadApprovedEstimateLines({
+        eventId: car.eventId,
+        tenantId,
+      });
+      const carInv = invoiceLines.filter(
+        (l) =>
+          l.invoiceCarId === car.id ||
+          (l.carMark === car.carMark && l.carNumber === car.carNumber),
+      );
+      // Fallback: when lines aren't tagged yet, leave unmatched for this car
+      // empty rather than mixing all cars against one estimate.
+      const carMatched = matchInvoiceToEstimateLines({
+        estimateLines: carEst.lines,
+        invoiceLines: carInv.length ? carInv : [],
+      }).map((m) => ({
+        ...m,
+        estimate: m.estimate
+          ? { ...m.estimate, invoiceCarId: car.id, carMark: car.carMark, carNumber: car.carNumber }
+          : m.estimate,
+        invoice: m.invoice
+          ? { ...m.invoice, invoiceCarId: car.id, carMark: car.carMark, carNumber: car.carNumber }
+          : m.invoice,
+      }));
+      matched.push(...carMatched);
+    }
+    // Untagged invoice lines (no invoice_car_id) — match against primary estimate
+    const tagged = new Set(
+      matched.filter((m) => m.invoice).map((m) => m.invoice!.lineNo),
+    );
+    const orphanInv = invoiceLines.filter((l) => !tagged.has(l.lineNo));
+    if (orphanInv.length) {
+      matched.push(
+        ...matchInvoiceToEstimateLines({
+          estimateLines: estimate.lines,
+          invoiceLines: orphanInv,
+        }),
+      );
+    }
+    matched.sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
+  } else {
+    matched = matchInvoiceToEstimateLines({
+      estimateLines: estimate.lines,
+      invoiceLines,
+    });
+  }
   const entityCode =
     (inv.entity_code != null ? String(inv.entity_code) : null) ||
     (inv.event_entity != null ? String(inv.event_entity) : null) ||
     "*";
   const tolerance = await getEntityTolerance({ entityCode, tenantId });
   const invoiceCents = dollarsToCents(inv.total);
-  const estimateCents = estimate.totalCents || dollarsToCents(inv.estimate_total);
+  const estimateCents =
+    (Boolean(inv.is_multi_car) && cars.length
+      ? cars.reduce((s, c) => s + c.estimateCents, 0)
+      : 0) ||
+    estimate.totalCents ||
+    dollarsToCents(inv.estimate_total);
   const tolCheck = withinTolerance({
     invoiceCents,
     estimateCents,
@@ -730,8 +896,6 @@ export async function getInvoiceReviewBundle(opts: {
     validation.hardRejects.length === 0 &&
     (tolCheck.within || Boolean(inv.over_tolerance_reason));
 
-  const { listInvoiceCars } = await import("./multi-car-invoice");
-  const cars = await listInvoiceCars({ invoiceId: opts.invoiceId, tenantId });
   const { rows: monthRows } = await q(
     `SELECT month_label FROM repair.accounting_months WHERE id = $1`,
     [inv.accounting_month_id],
@@ -1113,7 +1277,14 @@ export async function shortPayOwnerInvoice(opts: {
 
   // amountCents from UI = net payable for the line (not the shortfall).
   // Line short_pay_cents MUST store the shortfall (invoiced − paid), never the paid amount.
-  let approvedCents = 0; // net payable
+  // Only lines with shortfall > 0 get a short_pay row — never store $0 short-pay.
+  // Clear prior short-pays first so rebuilds stay clean.
+  await q(
+    `UPDATE repair.invoice_lines
+     SET short_pay_cents = NULL, short_pay_reason = NULL
+     WHERE invoice_id = $1 AND tenant_id = $2`,
+    [opts.invoiceId, tenantId],
+  );
   let shortPayCents = 0; // sum of line shortfalls
   for (const sp of opts.lineShortPays) {
     const paidAmt = Math.trunc(sp.amountCents);
@@ -1142,7 +1313,7 @@ export async function shortPayOwnerInvoice(opts: {
       };
     }
     const lineShort = lineTotal - paidAmt;
-    approvedCents += paidAmt;
+    if (lineShort <= 0) continue; // no $0 short-pay rows
     shortPayCents += lineShort;
     await q(
       `UPDATE repair.invoice_lines
@@ -1151,16 +1322,20 @@ export async function shortPayOwnerInvoice(opts: {
       [lineShort, sp.reason.trim(), opts.invoiceId, sp.lineNo, tenantId],
     );
   }
+  if (shortPayCents <= 0) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "At least one line must be short-paid by more than $0",
+    };
+  }
+  // Net payable = invoice total − sum of shortfalls (unshorted lines pay in full)
+  const approvedCents = bundle.invoice.totalCents - shortPayCents;
 
   const terms = bundle.tolerance.paymentTermsDays || DEFAULT_PAYMENT_TERMS_DAYS;
   const due = new Date();
   due.setUTCDate(due.getUTCDate() + terms);
   const dueDate = due.toISOString().slice(0, 10);
-  // Header short-pay = sum of line shortfalls (also equals invoice total − net payable)
-  const headerShort = bundle.invoice.totalCents - approvedCents;
-  if (headerShort !== shortPayCents) {
-    shortPayCents = headerShort;
-  }
 
   const { ensureOpenAccountingMonth } = await import("./accounting-months");
   const openMonth = await ensureOpenAccountingMonth({

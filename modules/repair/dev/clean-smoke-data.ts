@@ -14,13 +14,13 @@ function ok(m: string) {
   console.log(`  OK  ${m}`);
 }
 
-/** Smoke invoice number patterns from §G/§H smokes (+ legacy APA). */
+/** Smoke invoice number patterns from §G/§H smokes (+ legacy APA prefix). */
 const SMOKE_INVOICE_NO_SQL = `
   invoice_no ~ '^(GA|INV-R4|INV-H-)'
   OR invoice_no LIKE 'GA%'
   OR invoice_no LIKE 'INV-R4%'
   OR invoice_no LIKE 'INV-H-%'
-  OR invoice_no = 'APA-OFOX528313'
+  OR invoice_no LIKE 'APA-%'
   OR invoice_no = 'DEMO-INV-UNIT5'
 `;
 
@@ -69,14 +69,26 @@ async function main() {
   );
   ok("deactivated invoice_cars for deleted invoices");
 
+  // Match by invoice_no prefix APA- + shop APA (covers APA-OFOX528313 and variants)
   const { rowCount: apaN } = await q(
-    `UPDATE repair.invoices
-     SET deleted_at = coalesce(deleted_at, now()), deleted_by = $1
-     WHERE deleted_at IS NULL AND tenant_id = $2
-       AND invoice_no = 'APA-OFOX528313'`,
+    `UPDATE repair.invoices i
+     SET deleted_at = coalesce(i.deleted_at, now()), deleted_by = $1
+     WHERE i.deleted_at IS NULL AND i.tenant_id = $2
+       AND (
+         i.invoice_no LIKE 'APA-%'
+         OR EXISTS (
+           SELECT 1 FROM repair.shops s
+           WHERE s.id = i.shop_id
+             AND (
+               upper(coalesce(s.shop_mark,'')) = 'APA'
+               OR upper(coalesce(s.reporting_mark,'')) = 'APA'
+             )
+             AND i.invoice_no LIKE 'APA%'
+         )
+       )`,
     [actor, DEFAULT_TENANT_ID],
   );
-  ok(`hid legacy APA-OFOX528313 (${apaN ?? 0})`);
+  ok(`hid legacy APA-* invoices / APA shop (${apaN ?? 0})`);
 
   // §H r4 — hide stale DEMO-* from older seed runs (wrong/deleted shop,
   // duplicate cars, renamed UNIT5). Keep invoices on the live DS01 shop.

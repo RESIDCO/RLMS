@@ -31,9 +31,11 @@ function applyBucket(q: any, bucket: string) {
       .eq("going_on_lease", false)
       .eq("awaiting_rent_start", false);
   }
+  if (bucket === "op") return q.eq("is_op", true);
   if (bucket === "on_rent") return q.eq("is_op", true).eq("off_rent", false);
   if (bucket === "idle_on_ol") return q.eq("is_op", true).eq("status_tag", "Idle").eq("on_ol", true);
   if (bucket === "awaiting_rent_start") return q.eq("is_op", true).eq("awaiting_rent_start", true);
+  if (bucket === "leased_off_rent") return q.eq("is_op", true).eq("off_rent", true).eq("status_tag", "Leased");
   if (bucket === "shop_conflict") return q.eq("is_op", true).eq("shop_conflict", true);
   if (bucket === "future_rent_start") return q.eq("is_op", true).eq("future_rent_start", true);
   if (bucket === "no_link") return q.eq("is_op", true).eq("no_assignment", true);

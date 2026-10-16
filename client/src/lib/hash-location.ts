@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { useHashLocation } from "wouter/use-hash-location";
 
 /**
@@ -41,11 +42,36 @@ useAppHashLocation.hrefs = (href: string) => {
   return raw.startsWith("/") ? `#${raw}` : `#/${raw}`;
 };
 
+export function parseHashSearch(hash: string): URLSearchParams {
+  const raw = String(hash ?? "");
+  const withoutHash = raw.startsWith("#") ? raw.slice(1) : raw;
+  const i = withoutHash.indexOf("?");
+  return new URLSearchParams(i >= 0 ? withoutHash.slice(i + 1) : "");
+}
+
 export function hashSearchParams(): URLSearchParams {
   if (typeof window === "undefined") return new URLSearchParams();
-  const hash = window.location.hash;
-  const i = hash.indexOf("?");
-  return new URLSearchParams(i >= 0 ? hash.slice(i + 1) : "");
+  return parseHashSearch(window.location.hash);
+}
+
+function hashSearchSnapshot(): string {
+  const q = hashSearchParams().toString();
+  return q ? `?${q}` : "";
+}
+
+function subscribeHashSearch(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("hashchange", onStoreChange);
+  window.addEventListener("popstate", onStoreChange);
+  return () => {
+    window.removeEventListener("hashchange", onStoreChange);
+    window.removeEventListener("popstate", onStoreChange);
+  };
+}
+
+/** wouter useSearch() reads location.search and is empty under hash routing. */
+export function useHashSearch(): string {
+  return useSyncExternalStore(subscribeHashSearch, hashSearchSnapshot, () => "");
 }
 
 export { isDirectoryLeaseReviewTab } from "./directory-review-tab";

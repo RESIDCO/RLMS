@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { useLocation, useSearch } from "wouter";
+import { Redirect, useLocation } from "wouter";
+import { useHashSearch } from "@/lib/hash-location";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import { apiGet, apiRequest } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
+import { Link } from "wouter";
 import { carPath, openAppTab } from "@/lib/browse-nav";
 
 function csvFromFile(file: File): Promise<string> {
@@ -242,7 +244,7 @@ export function BulkCommitmentPage() {
 export function BulkReturnPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();
-  const search = useSearch();
+  const search = useHashSearch();
   const prefill = useMemo(() => new URLSearchParams(search.replace(/^\?/, "")).get("cars") ?? "", [search]);
   const [text, setText] = useState(prefill);
   const [preview, setPreview] = useState<any>(null);
@@ -466,6 +468,9 @@ export function BulkRentStartPage() {
 }
 
 export function RentStartWatchPage({ kind }: { kind: "awaiting" | "shop" | "future" }) {
+  if (kind === "awaiting") {
+    return <Redirect to="/kpi/cars?bucket=awaiting_rent_start" />;
+  }
   const titles = {
     awaiting: "Awaiting rent start",
     shop: "Shop conflict",
@@ -493,9 +498,9 @@ export function RentStartWatchPage({ kind }: { kind: "awaiting" | "shop" | "futu
             {(data?.rows ?? []).map((r: any) => (
               <tr key={r.railcar_id} className="border-t border-border/40">
                 <td className="py-1.5 font-mono">
-                  <button type="button" className="underline" onClick={() => openAppTab(carPath(r.railcar_id))}>
+                  <Link href={carPath(r.railcar_id)} className="underline">
                     {r.reporting_marks} {r.car_number}
-                  </button>
+                  </Link>
                 </td>
                 <td>{r.link_rider}</td>
                 <td>{r.lessee_name}</td>

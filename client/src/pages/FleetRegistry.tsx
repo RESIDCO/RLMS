@@ -1,5 +1,6 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
-import { useSearch, Link, useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
+import { useHashSearch } from "@/lib/hash-location";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -417,7 +418,7 @@ function isMultiCarListQuery(raw: string): boolean {
 
 export default function FleetRegistry() {
   const canEdit = useCanEdit();
-  const wouterSearch = useSearch();
+  const wouterSearch = useHashSearch();
   const [location, setLocation] = useLocation();
   const initQ = parseFleetQuery(wouterSearch);
 

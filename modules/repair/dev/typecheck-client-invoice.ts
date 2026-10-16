@@ -1,5 +1,5 @@
 /**
- * Client typecheck gate for §H Owner invoice review + payment.
+ * Client typecheck gate for §H / §H r2 Owner invoice review + payment.
  * Run: npm run repair:typecheck-client-invoice
  */
 import { readFileSync } from "fs";
@@ -29,11 +29,19 @@ export function assertInvoiceClientTypecheck(): void {
     join(ROOT, "client/src/pages/repair/InvoiceReview.tsx"),
     "utf8",
   );
+  const payments = readFileSync(
+    join(ROOT, "client/src/pages/repair/PaymentBatches.tsx"),
+    "utf8",
+  );
   const portal = readFileSync(
     join(ROOT, "client/src/pages/repair/ShopPortal.tsx"),
     "utf8",
   );
   const app = readFileSync(join(ROOT, "client/src/App.tsx"), "utf8");
+  const nav = readFileSync(
+    join(ROOT, "client/src/pages/repair/RepairModuleNav.tsx"),
+    "utf8",
+  );
 
   if (!queue.includes("/api/repair/invoices/queue")) {
     bad("queue", "InvoiceQueue must call invoices/queue");
@@ -47,7 +55,10 @@ export function assertInvoiceClientTypecheck(): void {
   if (!queue.includes("RESIDCO")) {
     bad("brand", "InvoiceQueue must mention RESIDCO");
   }
-  ok("InvoiceQueue filters + batch export");
+  if (!queue.includes("/repair/payments")) {
+    bad("queue-link", "InvoiceQueue must link to /repair/payments");
+  }
+  ok("InvoiceQueue filters + batch export + payments link");
 
   if (
     !review.includes("Approve") ||
@@ -67,6 +78,26 @@ export function assertInvoiceClientTypecheck(): void {
   }
   ok("InvoiceReview side-by-side + actions + tolerance");
 
+  if (!payments.includes("Create batch")) {
+    bad("pay-create", "PaymentBatches must Create batch");
+  }
+  if (!payments.includes("Download CSV") && !payments.includes("Mark exported")) {
+    bad("pay-export", "PaymentBatches must Download CSV / Mark exported");
+  }
+  if (!payments.includes("Record paid")) {
+    bad("pay-paid", "PaymentBatches must Record paid");
+  }
+  if (!payments.includes("Batch history") && !payments.includes("Drill in")) {
+    bad("pay-history", "PaymentBatches must show batch history drill-in");
+  }
+  if (!payments.includes("YYYY-MM-DD") && !payments.includes("ISO")) {
+    bad("pay-iso", "PaymentBatches must document ISO dates");
+  }
+  if (!payments.includes("/api/repair/payment-batches")) {
+    bad("pay-api", "PaymentBatches must call payment-batches API");
+  }
+  ok("PaymentBatches payables + export + paid + history");
+
   if (!portal.includes("Missed POD")) {
     bad("missed-pod", "ShopPortal must restore Missed POD tile");
   }
@@ -78,10 +109,16 @@ export function assertInvoiceClientTypecheck(): void {
   if (!app.includes("InvoiceQueue") || !app.includes("InvoiceReview")) {
     bad("routes", "App must route invoice pages");
   }
+  if (!app.includes("PaymentBatches") || !app.includes("/repair/payments")) {
+    bad("payments-route", "App must route /repair/payments");
+  }
   if (app.includes('path="/repair/invoices" component={RepairComingSoon}')) {
     bad("placeholder", "Invoices must not be Coming Soon");
   }
-  ok("App routes wired");
+  if (!nav.includes("/repair/payments")) {
+    bad("nav", "RepairModuleNav must include Payments");
+  }
+  ok("App + nav routes wired");
 
   const tsc = spawnSync(
     "npx",
@@ -95,13 +132,14 @@ export function assertInvoiceClientTypecheck(): void {
       (line) =>
         (line.includes("InvoiceQueue.tsx") ||
           line.includes("InvoiceReview.tsx") ||
+          line.includes("PaymentBatches.tsx") ||
           line.includes("ShopPortal.tsx")) &&
         line.includes("error TS"),
     );
   if (pageErrors.length > 0) {
     bad("client-tsc", pageErrors.join("\n"));
   }
-  ok("tsc --noEmit: zero errors on invoice + shop portal pages");
+  ok("tsc --noEmit: zero errors on invoice + payments + shop portal pages");
   console.log("=== repair:typecheck-client-invoice PASS ===");
 }
 

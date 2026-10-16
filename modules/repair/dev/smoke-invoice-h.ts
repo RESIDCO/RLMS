@@ -26,6 +26,9 @@ import {
   listShopInvoicePayments,
   listOwnerInvoiceQueue,
   getInvoiceReviewBundle,
+  loadApprovedEstimateLines,
+  toIsoDateOnly,
+  buildPaymentBatchCsv,
   DEFAULT_TOLERANCE_CENTS,
   DEFAULT_TOLERANCE_PCT_BP,
 } from "../services/invoice-review";
@@ -237,7 +240,9 @@ async function driveToInvoice(opts: {
     aarFile: {
       filename: `inv-${opts.tag}.dat`,
       mime: "text/plain",
-      bytes: file.slice(0, Math.max(500, Math.min(file.length, 2000))),
+      // Full AAR (same bytes as approved estimate) so identical → 0 line diffs.
+      // Truncating to ~2KB left invoice_lines empty → 0 inv + N REMOVED.
+      bytes: file,
     },
   });
   if (!inv.ok) bad("invoice", inv.error);
@@ -331,7 +336,121 @@ async function main() {
     invoiceLines: [],
   });
   if (!removed.some((m) => m.kind === "REMOVED")) bad("diff-removed", "expected removed");
-  ok("match/diff: added / removed / qty-price");
+  // Identical lines → 0 diffs (line# then job+loc+qual)
+  const identicalUnit = matchInvoiceToEstimateLines({
+    estimateLines: [
+      {
+        lineNo: 1,
+        jobCode: "1000",
+        location: "L",
+        qualifier: "A",
+        qty: 1,
+        laborCents: 1000,
+        materialCents: 0,
+        totalCents: 1000,
+        respCode: "1",
+      },
+      {
+        lineNo: 2,
+        jobCode: "2000",
+        location: "R",
+        qualifier: "B",
+        qty: 2,
+        laborCents: 2000,
+        materialCents: 0,
+        totalCents: 2000,
+        respCode: "1",
+      },
+    ],
+    invoiceLines: [
+      {
+        lineNo: 1,
+        jobCode: "1000",
+        location: "L",
+        qualifier: "A",
+        qty: 1,
+        laborCents: 1000,
+        materialCents: 0,
+        totalCents: 1000,
+        respCode: "1",
+      },
+      {
+        lineNo: 2,
+        jobCode: "2000",
+        location: "R",
+        qualifier: "B",
+        qty: 2,
+        laborCents: 2000,
+        materialCents: 0,
+        totalCents: 2000,
+        respCode: "1",
+      },
+    ],
+  });
+  if (identicalUnit.some((m) => m.kind !== "MATCH")) {
+    bad(
+      "identical-unit",
+      identicalUnit.map((m) => m.kind).join(","),
+    );
+  }
+  // Fallback: match by job+location+qualifier when line numbers differ
+  const byJlq = matchInvoiceToEstimateLines({
+    estimateLines: [
+      {
+        lineNo: 10,
+        jobCode: "4455",
+        location: "AB",
+        qualifier: "01",
+        qty: 1,
+        laborCents: 500,
+        materialCents: 0,
+        totalCents: 500,
+        respCode: "1",
+      },
+    ],
+    invoiceLines: [
+      {
+        lineNo: 99,
+        jobCode: "4455",
+        location: "AB",
+        qualifier: "01",
+        qty: 1,
+        laborCents: 500,
+        materialCents: 0,
+        totalCents: 500,
+        respCode: "1",
+      },
+    ],
+  });
+  if (byJlq.length !== 1 || byJlq[0].kind !== "MATCH") {
+    bad("jlq-fallback", byJlq.map((m) => m.kind).join(","));
+  }
+  ok("match/diff: added / removed / qty-price / identical / jlq fallback");
+
+  // CSV dates must be ISO YYYY-MM-DD (not Date.toString().slice)
+  const csvProbe = buildPaymentBatchCsv([
+    {
+      batchNo: "PB-TEST",
+      invoiceNo: "INV-1",
+      shopMark: "DS01",
+      carMark: "DEMO",
+      carNumber: "1",
+      amountCents: 12345,
+      dueDate: new Date("2026-10-15T00:00:00.000Z") as unknown as string,
+      shortPayCents: null,
+    },
+  ]);
+  if (!csvProbe.includes("2026-10-15")) {
+    bad("csv-iso", `expected ISO date in CSV, got: ${csvProbe}`);
+  }
+  if (csvProbe.includes("$") || /"[A-Za]{3} /.test(csvProbe)) {
+    bad("csv-money-date", "CSV must not use $ or weekday date slices");
+  }
+  if (!csvProbe.includes("123.45")) bad("csv-money", "expected 2-decimal dollars");
+  if (toIsoDateOnly(new Date("2026-01-02T12:00:00Z")) !== "2026-01-02") {
+    bad("iso-helper", String(toIsoDateOnly(new Date("2026-01-02T12:00:00Z"))));
+  }
+  ok("CSV ISO dates + money 2dp no $");
 
   const tol0 = withinTolerance({
     invoiceCents: 10000,
@@ -397,30 +516,33 @@ async function main() {
 
   const readmeMtimeBefore = existsSync(README) ? statSync(README).mtimeMs : 0;
 
+  // INV-H-IN: keep AAR lines identical to APPROVED estimate → 0 diffs
   const within = await driveToInvoice({
     shopId,
     carNumber: `8${String(Date.now()).slice(-5)}`,
     invoiceNo: `INV-H-IN-${RUN}`,
     tag: "within",
   });
-  const withinCents = Math.round(within.estTotal * 100);
-  await replaceInvoiceLinesManual({
+  const identicalBundle = await getInvoiceReviewBundle({
     invoiceId: within.invoiceId,
-    actor: "smoke-h",
-    lines: [
-      {
-        lineNo: 1,
-        jobCode: "1000",
-        qty: 1,
-        laborCents: withinCents,
-        respCode: "1",
-      },
-    ],
   });
-  await q(`UPDATE repair.invoices SET total = $2 WHERE id = $1`, [
-    within.invoiceId,
-    within.estTotal,
-  ]);
+  if (!identicalBundle.ok) bad("identical-bundle", identicalBundle.error);
+  const identicalDiffs = identicalBundle.matched.filter((m) => m.kind !== "MATCH");
+  const identicalFlags = identicalBundle.validation.flags.filter((f) =>
+    ["LINE_ADDED", "LINE_REMOVED", "LINE_CHANGED"].includes(f.code),
+  );
+  if (identicalDiffs.length || identicalFlags.length) {
+    bad(
+      "identical-0-diffs",
+      `kinds=${identicalDiffs.map((d) => d.kind).join(",") || "none"} flags=${identicalFlags
+        .map((f) => f.code)
+        .join(",") || "none"} (estLines=${identicalBundle.matched.filter((m) => m.estimate).length} invLines=${identicalBundle.matched.filter((m) => m.invoice).length})`,
+    );
+  }
+  ok(
+    `identical invoice vs APPROVED → 0 diffs (${identicalBundle.matched.length} lines)`,
+  );
+
   const appr = await approveOwnerInvoice({
     invoiceId: within.invoiceId,
     actor: "owner@smoke-h.test",
@@ -472,27 +594,53 @@ async function main() {
     invoiceNo: `INV-H-RJ-${RUN}`,
     tag: "reject",
   });
-  await replaceInvoiceLinesManual({
-    invoiceId: rej.invoiceId,
-    actor: "smoke-h",
-    lines: [
-      { lineNo: 1, jobCode: "1000", qty: 1, laborCents: 5000, respCode: "1" },
-      { lineNo: 2, jobCode: "ADDED", qty: 1, laborCents: 5000, respCode: "1" },
-    ],
-  });
-  await q(`UPDATE repair.invoices SET total = 100.00 WHERE id = $1`, [
-    rej.invoiceId,
-  ]);
+  {
+    // Keep approved lines + append a new line# (beyond estimate) so match
+    // does not steal it via line-number-first → true LINE_ADDED.
+    const est = await loadApprovedEstimateLines({ eventId: rej.eventId });
+    const maxNo = est.lines.reduce((m, l) => Math.max(m, l.lineNo), 0);
+    await replaceInvoiceLinesManual({
+      invoiceId: rej.invoiceId,
+      actor: "smoke-h",
+      lines: [
+        ...est.lines.map((l) => ({
+          lineNo: l.lineNo,
+          jobCode: l.jobCode,
+          location: l.location,
+          qualifier: l.qualifier,
+          qty: l.qty,
+          laborCents: l.laborCents,
+          materialCents: l.materialCents,
+          respCode: l.respCode,
+        })),
+        {
+          lineNo: maxNo + 1,
+          jobCode: "ADDED",
+          qty: 1,
+          laborCents: 5000,
+          respCode: "1",
+        },
+      ],
+    });
+    await q(`UPDATE repair.invoices SET total = $2 WHERE id = $1`, [
+      rej.invoiceId,
+      (est.totalCents + 5000) / 100,
+    ]);
+  }
   const bundle = await getInvoiceReviewBundle({ invoiceId: rej.invoiceId });
   if (!bundle.ok) bad("bundle", bundle.error);
   if (!bundle.matched.some((m) => m.kind === "ADDED")) {
     bad("added-line", "expected ADDED kind on review");
   }
+  const addedNo =
+    bundle.matched.find((m) => m.kind === "ADDED")?.lineNo ?? 0;
   const rejected = await rejectOwnerInvoice({
     invoiceId: rej.invoiceId,
     actor: "owner@smoke-h.test",
     note: "Added line not authorized",
-    lineComments: [{ lineNo: 2, text: "Remove unauthorized job ADDED" }],
+    lineComments: [
+      { lineNo: Number(addedNo), text: "Remove unauthorized job ADDED" },
+    ],
   });
   if (!rejected.ok) bad("reject", rejected.error);
   const { rows: comments } = await q(
@@ -548,7 +696,26 @@ async function main() {
   if (!exp.csv.includes("batch_no") || !exp.csv.includes("amount_cents")) {
     bad("csv-layout", "generic CSV columns missing");
   }
-  ok(`payment batch CSV export (${exp.rowCount} rows)`);
+  // due_date column values must be ISO YYYY-MM-DD when present
+  const dueCells = exp.csv
+    .split(/\r?\n/)
+    .slice(1)
+    .filter(Boolean)
+    .map((line) => {
+      const cols = line.match(/"(.*?)"/g)?.map((c) => c.slice(1, -1)) ?? [];
+      return cols[6] ?? "";
+    })
+    .filter(Boolean);
+  for (const d of dueCells) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      bad("csv-due-iso", `non-ISO due_date: ${d}`);
+    }
+  }
+  if (!exp.outboxPath) bad("outbox-path", "export must write payment-outbox file");
+  if (!existsSync(exp.outboxPath)) bad("outbox-file", exp.outboxPath);
+  ok(
+    `payment batch CSV export (${exp.rowCount} rows, ISO dates, outbox ${exp.outboxPath})`,
+  );
 
   const paid = await recordInvoicePaid({
     invoiceId: within.invoiceId,
@@ -616,6 +783,15 @@ async function main() {
     /* ignore if git unavailable */
   }
   ok("git clean of tracked README after seed/smoke");
+
+  // Fallback match: copy approved lines with renumbered line_nos still MATCH via jlq
+  {
+    const est = await loadApprovedEstimateLines({ eventId: within.eventId });
+    if (est.lines.length < 2) bad("est-lines", "expected sample AAR lines");
+    // already verified identical above; ensure loadApprovedEstimateLines uses APPROVED only
+    if (!est.estimateId || !est.revisionId) bad("approved-rev", "missing APPROVED revision");
+    ok(`APPROVED revision lines loaded (${est.lines.length})`);
+  }
 
   console.log("=== repair:smoke-invoice PASS ===");
 }

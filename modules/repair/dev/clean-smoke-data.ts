@@ -1,6 +1,7 @@
 /**
- * §G r3 — Soft-delete smoke-tagged shops / events / bad orders (local DB only).
- * Requires REPAIR_LOCAL_DB=1. Never touches non-smoke rows.
+ * §G r3 / §H r2 — Soft-delete smoke-tagged shops / events / bad orders,
+ * plus smoke invoices (GA*, INV-R4*, INV-H-*) and their payment batches.
+ * Requires REPAIR_LOCAL_DB=1. Never touches non-smoke / DEMO rows.
  *
  * Run: npm run repair:clean-smoke-data
  */
@@ -10,6 +11,14 @@ import { migrateLocal } from "./migrate-local";
 function ok(m: string) {
   console.log(`  OK  ${m}`);
 }
+
+/** Smoke invoice number patterns from §G/§H smokes (never DEMO-*). */
+const SMOKE_INVOICE_NO_SQL = `
+  invoice_no ~ '^(GA|INV-R4|INV-H-)'
+  OR invoice_no LIKE 'GA%'
+  OR invoice_no LIKE 'INV-R4%'
+  OR invoice_no LIKE 'INV-H-%'
+`;
 
 async function main() {
   console.log("=== repair:clean-smoke-data ===");
@@ -25,6 +34,51 @@ async function main() {
   await migrateLocal();
 
   const actor = "clean-smoke-data";
+
+  // Soft-delete smoke invoices first (by number pattern + smoke events)
+  const { rowCount: invN } = await q(
+    `UPDATE repair.invoices i
+     SET deleted_at = coalesce(i.deleted_at, now()), deleted_by = $1
+     WHERE i.deleted_at IS NULL
+       AND i.tenant_id = $2
+       AND (
+         ${SMOKE_INVOICE_NO_SQL}
+         OR EXISTS (
+           SELECT 1 FROM repair.events e
+           WHERE e.id = i.event_id AND e.is_smoke = true
+         )
+         OR coalesce(i.created_by, '') IN ('smoke-h', 'smoke-g', 'smoke-g-r4')
+       )`,
+    [actor, DEFAULT_TENANT_ID],
+  );
+  ok(`soft-deleted smoke invoices (${invN ?? 0})`);
+
+  // Soft-delete payment batches that only reference deleted smoke invoices,
+  // or were created by smoke actors / empty after smoke clean
+  const { rowCount: batchN } = await q(
+    `UPDATE repair.payment_batches b
+     SET deleted_at = coalesce(b.deleted_at, now()), deleted_by = $1
+     WHERE b.deleted_at IS NULL
+       AND b.tenant_id = $2
+       AND (
+         coalesce(b.created_by, '') IN ('smoke-h', 'owner@smoke-h.test', 'smoke-g')
+         OR NOT EXISTS (
+           SELECT 1 FROM repair.invoices i
+           WHERE i.payment_batch_id = b.id AND i.deleted_at IS NULL
+         )
+         OR EXISTS (
+           SELECT 1 FROM repair.invoices i
+           WHERE i.payment_batch_id = b.id
+             AND (
+               i.invoice_no ~ '^(GA|INV-R4|INV-H-)'
+               OR i.invoice_no LIKE 'INV-H-%'
+             )
+         )
+       )`,
+    [actor, DEFAULT_TENANT_ID],
+  );
+  ok(`soft-deleted smoke payment batches (${batchN ?? 0})`);
+
   const { rowCount: boN } = await q(
     `UPDATE repair.bad_orders
      SET deleted_at = coalesce(deleted_at, now()), deleted_by = $1

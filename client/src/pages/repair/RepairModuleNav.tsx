@@ -60,6 +60,12 @@ const NAV: NavItem[] = [
     match: (p) => p.startsWith("/repair/invoices"),
   },
   {
+    kind: "link",
+    href: "/repair/payments",
+    label: "Payments",
+    match: (p) => p.startsWith("/repair/payments"),
+  },
+  {
     kind: "menu",
     label: "Reference",
     match: (p) =>

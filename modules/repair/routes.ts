@@ -263,6 +263,7 @@ import {
   recordInvoicePaid,
   listShopInvoicePayments,
   listPaymentBatches,
+  getPaymentBatchDetail,
 } from "./services/invoice-review";
 import {
   submitShopCrbInvoice,
@@ -2797,6 +2798,16 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     return res.json({ batches: await listPaymentBatches() });
+  });
+
+  app.get("/api/repair/payment-batches/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await getPaymentBatchDetail({
+      batchId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   });
 
   app.post("/api/repair/payment-batches", async (req, res) => {

@@ -35,6 +35,7 @@ import { getBoStoredStatus } from "../services/bo-status";
 import { enterPodErd } from "../services/pod";
 import { parseAarFile } from "../services/aar-parser";
 import { migrateLocal } from "./migrate-local";
+import { seedInvoiceExamples } from "./seed-invoice-examples";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SAMPLES = join(__dirname, "shop-samples");
@@ -599,17 +600,86 @@ async function seedClosed(shopId: string, base: Buffer) {
     [estimateId],
   );
 
-  await q(
-    `INSERT INTO repair.invoices
-       (tenant_id, event_id, shop_id, invoice_no, total, match_status,
-        workflow_status, created_by, decided_by, decided_at)
-     SELECT $1, $2, $3, 'DEMO-INV-100005', 100.00, 'APPROVED',
-            'ACCEPTED', 'seed-shop-demo', 'seed-shop-demo', now()
-     WHERE NOT EXISTS (
-       SELECT 1 FROM repair.invoices WHERE event_id = $2 AND deleted_at IS NULL
-     )`,
-    [DEFAULT_TENANT_ID, eventId, shopId],
+  // Amount must match APPROVED estimate total (never hard-code $100 / $0).
+  const { rows: totRows } = await q(
+    `SELECT r.total
+     FROM repair.estimates e
+     JOIN repair.estimate_revisions r
+       ON r.estimate_id = e.id AND r.rev_no = e.current_revision
+     WHERE e.id = $1`,
+    [estimateId],
   );
+  const estTotal = Number(totRows[0]?.total ?? 0);
+  if (!(estTotal > 0)) {
+    fail(`100005 approved estimate total missing/zero (got ${estTotal})`);
+  }
+
+  // Idempotent: exactly one DEMO-INV-100005 for this event (never duplicates).
+  const { rows: existingInv } = await q(
+    `SELECT id, total, invoice_no FROM repair.invoices
+     WHERE deleted_at IS NULL
+       AND (
+         event_id = $1
+         OR invoice_no = 'DEMO-INV-100005'
+       )
+     ORDER BY created_at ASC`,
+    [eventId],
+  );
+  const primary = existingInv.find(
+    (r) => String(r.invoice_no) === "DEMO-INV-100005" || String(r.id),
+  );
+  if (!existingInv.length) {
+    await q(
+      `INSERT INTO repair.invoices
+         (tenant_id, event_id, shop_id, invoice_no, total, estimate_total,
+          match_status, workflow_status, payment_status, created_by,
+          decided_by, decided_at)
+       VALUES ($1,$2,$3,'DEMO-INV-100005',$4,$4,'APPROVED','ACCEPTED','PAID',
+               'seed-shop-demo','seed-shop-demo', now())`,
+      [DEFAULT_TENANT_ID, eventId, shopId, estTotal],
+    );
+  } else {
+    // Soft-delete accidental duplicates; keep/repair the DEMO-INV-100005 row.
+    let keepId: string | null = null;
+    for (const r of existingInv) {
+      if (String(r.invoice_no) === "DEMO-INV-100005") {
+        keepId = String(r.id);
+        break;
+      }
+    }
+    if (!keepId) keepId = String(existingInv[0].id);
+    for (const r of existingInv) {
+      if (String(r.id) === keepId) continue;
+      await q(
+        `UPDATE repair.invoices
+         SET deleted_at = coalesce(deleted_at, now()),
+             deleted_by = 'seed-shop-demo',
+             delete_reason = 'duplicate DEMO-INV-100005'
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [String(r.id)],
+      );
+    }
+    await q(
+      `UPDATE repair.invoices
+       SET invoice_no = 'DEMO-INV-100005',
+           total = $2,
+           estimate_total = $2,
+           match_status = 'APPROVED',
+           workflow_status = coalesce(workflow_status, 'ACCEPTED'),
+           shop_id = coalesce(shop_id, $3)
+       WHERE id = $1`,
+      [keepId, estTotal, shopId],
+    );
+  }
+  void primary;
+
+  const { rows: invCount } = await q(
+    `SELECT count(*)::int AS n FROM repair.invoices
+     WHERE invoice_no = 'DEMO-INV-100005' AND deleted_at IS NULL`,
+  );
+  if (Number(invCount[0]?.n ?? 0) !== 1) {
+    fail(`DEMO-INV-100005 expected exactly 1, got ${invCount[0]?.n}`);
+  }
 
   const closed = await markBadOrderClosed({
     eventId,
@@ -619,8 +689,10 @@ async function seedClosed(shopId: string, base: Buffer) {
     invoicedAt: "2026-07-22",
   });
   if (!closed.ok) fail(`100005 close failed: ${closed.error}`);
-  ok(`Closed BO ${carMark} ${carNumber} — ${closed.closedReason}`);
-  return { eventId, estimateId, closedReason: closed.closedReason };
+  ok(
+    `Closed BO ${carMark} ${carNumber} — ${closed.closedReason} (DEMO-INV-100005 = $${estTotal.toFixed(2)})`,
+  );
+  return { eventId, estimateId, closedReason: closed.closedReason, estTotal };
 }
 
 async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
@@ -726,7 +798,25 @@ async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
     if (!life.closedReasonLine?.startsWith("Closed:")) {
       fail(`DEMO 100005 closed reason missing: ${life.closedReasonLine}`);
     }
-    ok(`assert 100005 Closed — ${life.closedReasonLine}`);
+    const { rows: invAmt } = await q(
+      `SELECT i.total, r.total AS est_total
+       FROM repair.invoices i
+       JOIN repair.estimates e ON e.event_id = i.event_id AND e.deleted_at IS NULL
+       JOIN repair.estimate_revisions r
+         ON r.estimate_id = e.id AND r.rev_no = e.current_revision
+       WHERE i.invoice_no = 'DEMO-INV-100005' AND i.deleted_at IS NULL
+       LIMIT 1`,
+    );
+    if (!invAmt[0]) fail("DEMO-INV-100005 missing after seed");
+    if (Number(invAmt[0].total) !== Number(invAmt[0].est_total)) {
+      fail(
+        `DEMO-INV-100005 total ${invAmt[0].total} ≠ approved estimate ${invAmt[0].est_total}`,
+      );
+    }
+    if (Number(invAmt[0].total) === 100 && Number(invAmt[0].est_total) !== 100) {
+      fail("DEMO-INV-100005 still stuck at hard-coded $100");
+    }
+    ok(`assert 100005 Closed — ${life.closedReasonLine} (amt matches estimate)`);
   }
 
   void shopId;
@@ -789,6 +879,10 @@ async function main() {
   ok(`wrote gitignored IDs → ${IDS_FILE}`);
 
   await assertDemoStates(shopId, ids);
+
+  // §H r2 — DS01 invoice review examples (idempotent DEMO-INV-*)
+  await seedInvoiceExamples(shopId);
+  ok("§H invoice examples seeded on DS01");
 
   console.log("=== repair:seed-shop-demo PASS ===");
   console.log(`Shop mark: ${DEMO_SHOP_MARK}`);

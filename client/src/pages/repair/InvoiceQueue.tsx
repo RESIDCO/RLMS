@@ -152,7 +152,11 @@ export default function InvoiceQueue() {
         <WorkspaceTitle title="Invoices" subtitle="Owner invoice review queue" />
         <p className="text-sm text-slate-700">
           RESIDCO · Invoice Submitted → review → Approve / Reject / Short-pay →
-          Payable → payment batch CSV export (no real payments).
+          Payable →{" "}
+          <Link href="/repair/payments" className="text-blue-700 underline">
+            payment batches
+          </Link>{" "}
+          CSV export (no real payments).
         </p>
 
         <div className="flex flex-wrap items-end gap-3 rounded border border-slate-300 bg-white p-3">

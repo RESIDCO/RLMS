@@ -4,6 +4,8 @@
  * payment batch CSV; BO Closed only when invoice Approved (Payable+).
  * Defaults: tolerance $0 + 0%, net 30 from approval, generic CSV.
  */
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { writeAudit } from "./audit";
 import {
@@ -15,6 +17,18 @@ import {
 } from "./money";
 import { parseAarFile } from "./aar-parser";
 import { getContentLinesForEstimate } from "./estimate-review";
+
+/** Local CSV outbox (gitignored under modules/repair/dev/exports/). */
+export const PAYMENT_CSV_OUTBOX_DIR = join(
+  process.cwd(),
+  "modules/repair/dev/exports/payment-outbox",
+);
+
+/**
+ * Payment batch CSV columns (generic AP placeholder — no accounting API):
+ * batch_no, invoice_no, shop_mark, car, amount_dollars (2dp, no $),
+ * amount_cents, due_date (ISO YYYY-MM-DD), short_pay_cents, currency
+ */
 
 export const DEFAULT_TOLERANCE_CENTS = 0;
 export const DEFAULT_TOLERANCE_PCT_BP = 0; // basis points
@@ -41,31 +55,59 @@ export type LineDiffKind =
   | "QTY_PRICE_CHANGED"
   | "NOT_ON_APPROVED_ESTIMATE";
 
+export type MatchableLine = {
+  lineNo: number;
+  jobCode: string;
+  location?: string | null;
+  qualifier?: string | null;
+  qty: number | null;
+  laborCents: number;
+  materialCents: number;
+  totalCents: number;
+  respCode: string | null;
+};
+
 export type MatchedLine = {
   lineNo: number | null;
   jobCode: string;
   kind: LineDiffKind;
-  estimate?: {
-    lineNo: number;
-    jobCode: string;
-    qty: number | null;
-    laborCents: number;
-    materialCents: number;
-    totalCents: number;
-    respCode: string | null;
-  };
-  invoice?: {
-    lineNo: number;
-    jobCode: string;
-    qty: number | null;
-    laborCents: number;
-    materialCents: number;
-    totalCents: number;
-    respCode: string | null;
+  estimate?: MatchableLine;
+  invoice?: MatchableLine & {
     shortPayCents?: number | null;
     shortPayReason?: string | null;
   };
 };
+
+function normKeyPart(v: string | null | undefined): string {
+  return (v ?? "").trim().toUpperCase();
+}
+
+/** Job + location + qualifier fingerprint for fallback matching. */
+export function lineMatchFingerprint(line: {
+  jobCode?: string | null;
+  location?: string | null;
+  qualifier?: string | null;
+}): string {
+  return [
+    normKeyPart(line.jobCode),
+    normKeyPart(line.location),
+    normKeyPart(line.qualifier),
+  ].join("|");
+}
+
+/** ISO YYYY-MM-DD; never weekday-only slices from Date.toString(). */
+export function toIsoDateOnly(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const s = String(value).trim();
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const parsed = new Date(s);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return null;
+}
 
 export type ValidationFinding = {
   code: string;
@@ -133,53 +175,39 @@ export async function getEntityTolerance(opts: {
   };
 }
 
+/**
+ * Match invoice lines to the APPROVED estimate revision only.
+ * 1) Same line number (primary)
+ * 2) Else first unused estimate line with same job + location + qualifier
+ * Identical invoice vs approved → every row MATCH (0 LINE_ADDED / LINE_REMOVED).
+ */
 export function matchInvoiceToEstimateLines(opts: {
-  estimateLines: Array<{
-    lineNo: number;
-    jobCode: string;
-    qty: number | null;
-    laborCents: number;
-    materialCents: number;
-    totalCents: number;
-    respCode: string | null;
-  }>;
-  invoiceLines: Array<{
-    lineNo: number;
-    jobCode: string;
-    qty: number | null;
-    laborCents: number;
-    materialCents: number;
-    totalCents: number;
-    respCode: string | null;
-    shortPayCents?: number | null;
-    shortPayReason?: string | null;
-  }>;
+  estimateLines: Array<MatchableLine>;
+  invoiceLines: Array<
+    MatchableLine & {
+      shortPayCents?: number | null;
+      shortPayReason?: string | null;
+    }
+  >;
 }): MatchedLine[] {
-  const estByKey = new Map<string, (typeof opts.estimateLines)[0]>();
-  for (const e of opts.estimateLines) {
-    const key = `${e.lineNo}|${(e.jobCode || "").trim().toUpperCase()}`;
-    estByKey.set(key, e);
-  }
-  const usedEst = new Set<string>();
+  const estSlots = opts.estimateLines.map((e, idx) => ({
+    e,
+    idx,
+    used: false,
+  }));
   const out: MatchedLine[] = [];
 
   for (const inv of opts.invoiceLines) {
-    const job = (inv.jobCode || "").trim().toUpperCase();
-    const key = `${inv.lineNo}|${job}`;
-    let est = estByKey.get(key);
-    let matchedKey = key;
-    if (!est) {
-      // fallback: job code only (first unused)
-      for (const [k, e] of estByKey) {
-        if (usedEst.has(k)) continue;
-        if ((e.jobCode || "").trim().toUpperCase() === job && job) {
-          est = e;
-          matchedKey = k;
-          break;
-        }
+    let hit = estSlots.find((s) => !s.used && s.e.lineNo === inv.lineNo);
+    if (!hit) {
+      const fp = lineMatchFingerprint(inv);
+      if (normKeyPart(inv.jobCode)) {
+        hit = estSlots.find(
+          (s) => !s.used && lineMatchFingerprint(s.e) === fp,
+        );
       }
     }
-    if (!est) {
+    if (!hit) {
       out.push({
         lineNo: inv.lineNo,
         jobCode: inv.jobCode,
@@ -188,7 +216,8 @@ export function matchInvoiceToEstimateLines(opts: {
       });
       continue;
     }
-    usedEst.add(matchedKey);
+    hit.used = true;
+    const est = hit.e;
     const qtyChanged =
       inv.qty != null && est.qty != null && Number(inv.qty) !== Number(est.qty);
     const priceChanged =
@@ -204,13 +233,13 @@ export function matchInvoiceToEstimateLines(opts: {
     });
   }
 
-  for (const [k, est] of estByKey) {
-    if (usedEst.has(k)) continue;
+  for (const s of estSlots) {
+    if (s.used) continue;
     out.push({
-      lineNo: est.lineNo,
-      jobCode: est.jobCode,
+      lineNo: s.e.lineNo,
+      jobCode: s.e.jobCode,
       kind: "REMOVED",
-      estimate: est,
+      estimate: s.e,
     });
   }
 
@@ -303,6 +332,14 @@ function qtyOf(line: Record<string, unknown>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function locationFromRaw(raw: unknown): string | null {
+  if (raw == null) return null;
+  const s = String(raw);
+  if (s.length < 110) return null;
+  const loc = s.slice(108, 110).trim();
+  return loc || null;
+}
+
 export async function loadApprovedEstimateLines(opts: {
   eventId: string;
   tenantId?: string;
@@ -310,17 +347,11 @@ export async function loadApprovedEstimateLines(opts: {
   estimateId: string | null;
   revisionId: string | null;
   totalCents: number;
-  lines: Array<{
-    lineNo: number;
-    jobCode: string;
-    qty: number | null;
-    laborCents: number;
-    materialCents: number;
-    totalCents: number;
-    respCode: string | null;
-  }>;
+  lines: MatchableLine[];
 }> {
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  // APPROVED / COMPLETED estimate only — content lines from that estimate's
+  // latest content-bearing revision (status-only approve rev may have 0 lines).
   const { rows } = await q(
     `SELECT e.id AS estimate_id, r.id AS revision_id, r.total
      FROM repair.estimates e
@@ -342,9 +373,16 @@ export async function loadApprovedEstimateLines(opts: {
     const labor = lineLaborCents(l);
     const mat = lineMaterialCents(l);
     const tot = lineTotalCents(l);
+    const locStored =
+      l.location_on_car != null ? String(l.location_on_car).trim() : "";
     return {
       lineNo: Number(l.line_no ?? 0),
       jobCode: String(l.aar_job_code ?? "").trim(),
+      location: locStored || locationFromRaw(l.raw_line),
+      qualifier:
+        l.qualifier != null && String(l.qualifier).trim()
+          ? String(l.qualifier).trim()
+          : null,
       qty: qtyOf(l),
       laborCents: labor,
       materialCents: mat,
@@ -354,7 +392,9 @@ export async function loadApprovedEstimateLines(opts: {
   });
   return {
     estimateId,
-    revisionId: String(rows[0].revision_id),
+    revisionId: content.revision?.id != null
+      ? String(content.revision.id)
+      : String(rows[0].revision_id),
     totalCents: dollarsToCents(rows[0].total),
     lines,
   };
@@ -362,24 +402,34 @@ export async function loadApprovedEstimateLines(opts: {
 
 export async function loadInvoiceLines(invoiceId: string, tenantId = DEFAULT_TENANT_ID) {
   const { rows } = await q(
-    `SELECT line_no, aar_job_code, quantity, labor_cents, material_cents,
-            total_cents, resp_code, short_pay_cents, short_pay_reason
+    `SELECT line_no, aar_job_code, qualifier, location_on_car, quantity,
+            labor_cents, material_cents, total_cents, resp_code,
+            short_pay_cents, short_pay_reason, raw_line
      FROM repair.invoice_lines
      WHERE invoice_id = $1 AND tenant_id = $2
      ORDER BY line_no ASC`,
     [invoiceId, tenantId],
   );
-  return rows.map((r) => ({
-    lineNo: Number(r.line_no),
-    jobCode: String(r.aar_job_code ?? "").trim(),
-    qty: r.quantity != null ? Number(r.quantity) : null,
-    laborCents: Number(r.labor_cents ?? 0),
-    materialCents: Number(r.material_cents ?? 0),
-    totalCents: Number(r.total_cents ?? 0),
-    respCode: r.resp_code != null ? String(r.resp_code) : null,
-    shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
-    shortPayReason: r.short_pay_reason != null ? String(r.short_pay_reason) : null,
-  }));
+  return rows.map((r) => {
+    const locStored =
+      r.location_on_car != null ? String(r.location_on_car).trim() : "";
+    return {
+      lineNo: Number(r.line_no),
+      jobCode: String(r.aar_job_code ?? "").trim(),
+      location: locStored || locationFromRaw(r.raw_line),
+      qualifier:
+        r.qualifier != null && String(r.qualifier).trim()
+          ? String(r.qualifier).trim()
+          : null,
+      qty: r.quantity != null ? Number(r.quantity) : null,
+      laborCents: Number(r.labor_cents ?? 0),
+      materialCents: Number(r.material_cents ?? 0),
+      totalCents: Number(r.total_cents ?? 0),
+      respCode: r.resp_code != null ? String(r.resp_code) : null,
+      shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
+      shortPayReason: r.short_pay_reason != null ? String(r.short_pay_reason) : null,
+    };
+  });
 }
 
 /** Persist invoice lines from 500-byte AAR (idempotent replace). */
@@ -403,18 +453,24 @@ export async function replaceInvoiceLinesFromAar(opts: {
       qtyRaw != null && qtyRaw !== "" && Number.isFinite(Number(qtyRaw))
         ? Number(qtyRaw)
         : null;
+    const locRaw = pl.fields?.location_on_car;
+    const location =
+      locRaw != null && String(locRaw).trim()
+        ? String(locRaw).trim()
+        : locationFromRaw(pl.rawLine);
     await q(
       `INSERT INTO repair.invoice_lines
-         (tenant_id, invoice_id, line_no, aar_job_code, qualifier, why_made,
-          resp_code, quantity, labor_cents, material_cents, total_cents,
+         (tenant_id, invoice_id, line_no, aar_job_code, qualifier, location_on_car,
+          why_made, resp_code, quantity, labor_cents, material_cents, total_cents,
           raw_line, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         tenantId,
         opts.invoiceId,
         lineNo,
         pl.appliedJobCode,
         pl.appliedQualifier,
+        location,
         pl.whyMade,
         pl.respCode,
         qty,
@@ -437,6 +493,8 @@ export async function replaceInvoiceLinesManual(opts: {
   lines: Array<{
     lineNo: number;
     jobCode: string;
+    location?: string | null;
+    qualifier?: string | null;
     qty?: number | null;
     laborCents: number;
     materialCents?: number;
@@ -450,14 +508,16 @@ export async function replaceInvoiceLinesManual(opts: {
     const labor = Math.trunc(l.laborCents);
     await q(
       `INSERT INTO repair.invoice_lines
-         (tenant_id, invoice_id, line_no, aar_job_code, resp_code, quantity,
-          labor_cents, material_cents, total_cents, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         (tenant_id, invoice_id, line_no, aar_job_code, qualifier, location_on_car,
+          resp_code, quantity, labor_cents, material_cents, total_cents, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         tenantId,
         opts.invoiceId,
         l.lineNo,
         l.jobCode,
+        l.qualifier ?? null,
+        l.location ?? null,
         l.respCode ?? null,
         l.qty ?? null,
         labor,
@@ -552,9 +612,10 @@ export async function listOwnerInvoiceQueue(opts: {
       shopMark: String(r.shop_mark || r.reporting_mark || ""),
       shopName: r.shop_name ? String(r.shop_name) : null,
       invoiceNo: String(r.invoice_no),
-      invoiceDate: r.invoice_date
-        ? String(r.invoice_date).slice(0, 10)
-        : String(r.created_at).slice(0, 10),
+      invoiceDate:
+        toIsoDateOnly(r.invoice_date) ??
+        toIsoDateOnly(r.created_at) ??
+        "",
       invoiceCents: invC,
       estimateCents: estC,
       differenceCents: delta,
@@ -563,8 +624,8 @@ export async function listOwnerInvoiceQueue(opts: {
       paymentStatus: r.payment_status ? String(r.payment_status) : null,
       flags: r.flags_summary ? String(r.flags_summary) : r.mismatch_flagged ? "MISMATCH" : "",
       ageDays: age,
-      dueDate: r.due_date ? String(r.due_date).slice(0, 10) : null,
-      paidAt: r.paid_at ? String(r.paid_at).slice(0, 10) : null,
+      dueDate: toIsoDateOnly(r.due_date),
+      paidAt: toIsoDateOnly(r.paid_at),
       paidRef: r.paid_ref ? String(r.paid_ref) : null,
       shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
       approvedAmountCents:
@@ -593,23 +654,9 @@ export async function getInvoiceReviewBundle(opts: {
   const inv = rows[0];
   const eventId = String(inv.event_id);
   const estimate = await loadApprovedEstimateLines({ eventId, tenantId });
-  let invoiceLines = await loadInvoiceLines(opts.invoiceId, tenantId);
-  // If no stored lines yet, synthesize one header-total line for review
-  if (!invoiceLines.length) {
-    invoiceLines = [
-      {
-        lineNo: 1,
-        jobCode: "",
-        qty: null,
-        laborCents: dollarsToCents(inv.total),
-        materialCents: 0,
-        totalCents: dollarsToCents(inv.total),
-        respCode: null,
-        shortPayCents: null,
-        shortPayReason: null,
-      },
-    ];
-  }
+  // Never synthesize a phantom header line — that falsely yields 1 LINE_ADDED
+  // + N LINE_REMOVED when totals match an APPROVED estimate with real lines.
+  const invoiceLines = await loadInvoiceLines(opts.invoiceId, tenantId);
   const matched = matchInvoiceToEstimateLines({
     estimateLines: estimate.lines,
     invoiceLines,
@@ -660,15 +707,16 @@ export async function getInvoiceReviewBundle(opts: {
     invoice: {
       id: String(inv.id),
       invoiceNo: String(inv.invoice_no),
-      invoiceDate: inv.invoice_date
-        ? String(inv.invoice_date).slice(0, 10)
-        : String(inv.created_at).slice(0, 10),
+      invoiceDate:
+        toIsoDateOnly(inv.invoice_date) ??
+        toIsoDateOnly(inv.created_at) ??
+        "",
       totalCents: invoiceCents,
       estimateCents,
       workflowStatus: inv.workflow_status ? String(inv.workflow_status) : null,
       paymentStatus: inv.payment_status ? String(inv.payment_status) : null,
-      dueDate: inv.due_date ? String(inv.due_date).slice(0, 10) : null,
-      paidAt: inv.paid_at ? String(inv.paid_at).slice(0, 10) : null,
+      dueDate: toIsoDateOnly(inv.due_date),
+      paidAt: toIsoDateOnly(inv.paid_at),
       paidRef: inv.paid_ref ? String(inv.paid_ref) : null,
       shortPayCents: inv.short_pay_cents != null ? Number(inv.short_pay_cents) : null,
       overToleranceReason: inv.over_tolerance_reason
@@ -1123,22 +1171,35 @@ export function buildPaymentBatchCsv(
     "short_pay_cents",
     "currency",
   ].join(",");
-  const lines = rows.map((r) =>
-    [
+  const lines = rows.map((r) => {
+    const dueIso = toIsoDateOnly(r.dueDate) ?? "";
+    return [
       r.batchNo,
       r.invoiceNo,
       r.shopMark,
       `${r.carMark} ${r.carNumber}`,
+      // money: exactly 2 decimals, no $ sign
       formatCentsAsDollars(r.amountCents),
       String(r.amountCents),
-      r.dueDate ?? "",
+      dueIso,
       r.shortPayCents != null ? String(r.shortPayCents) : "",
       "USD",
     ]
       .map((c) => `"${String(c).replace(/"/g, '""')}"`)
-      .join(","),
-  );
+      .join(",");
+  });
   return [header, ...lines].join("\n") + "\n";
+}
+
+export function writePaymentCsvToOutbox(opts: {
+  batchNo: string;
+  csv: string;
+}): string {
+  mkdirSync(PAYMENT_CSV_OUTBOX_DIR, { recursive: true });
+  const safe = opts.batchNo.replace(/[^A-Za-z0-9._-]+/g, "_");
+  const filePath = join(PAYMENT_CSV_OUTBOX_DIR, `${safe}.csv`);
+  writeFileSync(filePath, opts.csv, "utf8");
+  return filePath;
 }
 
 export async function exportPaymentBatch(opts: {
@@ -1155,7 +1216,8 @@ export async function exportPaymentBatch(opts: {
   if (!batches[0]) return { ok: false as const, status: 404, error: "Batch not found" };
   const batchNo = String(batches[0].batch_no);
   const { rows: invs } = await q(
-    `SELECT i.invoice_no, i.approved_amount_cents, i.total, i.due_date,
+    `SELECT i.invoice_no, i.approved_amount_cents, i.total,
+            i.due_date::text AS due_date,
             i.short_pay_cents, e.car_mark, e.car_number,
             sh.shop_mark, sh.reporting_mark
      FROM repair.invoices i
@@ -1175,15 +1237,17 @@ export async function exportPaymentBatch(opts: {
         r.approved_amount_cents != null
           ? Number(r.approved_amount_cents)
           : dollarsToCents(r.total),
-      dueDate: r.due_date ? String(r.due_date).slice(0, 10) : null,
+      dueDate: toIsoDateOnly(r.due_date),
       shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
     })),
   );
+  const outboxPath = writePaymentCsvToOutbox({ batchNo, csv });
   await q(
     `UPDATE repair.payment_batches
-     SET status = 'EXPORTED', export_csv = $1, exported_at = now(), exported_by = $2
+     SET status = 'EXPORTED', export_csv = $1, exported_at = now(),
+         exported_by = $2, outbox_path = $4
      WHERE id = $3`,
-    [csv, opts.actor, opts.batchId],
+    [csv, opts.actor, opts.batchId, outboxPath],
   );
   await q(
     `UPDATE repair.invoices
@@ -1196,11 +1260,66 @@ export async function exportPaymentBatch(opts: {
     entity: "payment_batch",
     entityId: opts.batchId,
     action: "PAYMENT_BATCH_EXPORTED",
-    after: { batch_no: batchNo, rows: invs.length },
+    after: { batch_no: batchNo, rows: invs.length, outbox_path: outboxPath },
     actor: opts.actor,
     via: "UI",
   });
-  return { ok: true as const, csv, batchNo, rowCount: invs.length };
+  return {
+    ok: true as const,
+    csv,
+    batchNo,
+    rowCount: invs.length,
+    outboxPath,
+  };
+}
+
+/** Fetch one payment batch with member invoices (history drill-in). */
+export async function getPaymentBatchDetail(opts: {
+  batchId: string;
+  tenantId?: string;
+}) {
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
+  const { rows: batches } = await q(
+    `SELECT * FROM repair.payment_batches
+     WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+    [opts.batchId, tenantId],
+  );
+  if (!batches[0]) return { ok: false as const, status: 404, error: "Batch not found" };
+  const { rows: invs } = await q(
+    `SELECT i.id, i.invoice_no, i.payment_status, i.workflow_status,
+            i.approved_amount_cents, i.total, i.due_date::text AS due_date,
+            i.paid_at::text AS paid_at, i.paid_ref, i.short_pay_cents,
+            e.car_mark, e.car_number,
+            sh.shop_mark, sh.reporting_mark, sh.name AS shop_name
+     FROM repair.invoices i
+     JOIN repair.events e ON e.id = i.event_id
+     LEFT JOIN repair.shops sh ON sh.id = i.shop_id
+     WHERE i.payment_batch_id = $1 AND i.deleted_at IS NULL
+     ORDER BY i.invoice_no ASC`,
+    [opts.batchId],
+  );
+  return {
+    ok: true as const,
+    batch: batches[0],
+    invoices: invs.map((r) => ({
+      id: String(r.id),
+      invoiceNo: String(r.invoice_no),
+      paymentStatus: r.payment_status ? String(r.payment_status) : null,
+      workflowStatus: r.workflow_status ? String(r.workflow_status) : null,
+      amountCents:
+        r.approved_amount_cents != null
+          ? Number(r.approved_amount_cents)
+          : dollarsToCents(r.total),
+      dueDate: toIsoDateOnly(r.due_date),
+      paidAt: toIsoDateOnly(r.paid_at),
+      paidRef: r.paid_ref ? String(r.paid_ref) : null,
+      shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
+      carMark: String(r.car_mark),
+      carNumber: String(r.car_number),
+      shopMark: String(r.shop_mark || r.reporting_mark || ""),
+      shopName: r.shop_name ? String(r.shop_name) : null,
+    })),
+  };
 }
 
 export async function recordInvoicePaid(opts: {
@@ -1284,8 +1403,8 @@ export async function listShopInvoicePayments(opts: {
     carNumber: String(r.car_number),
     workflowStatus: r.workflow_status ? String(r.workflow_status) : null,
     paymentStatus: r.payment_status ? String(r.payment_status) : null,
-    dueDate: r.due_date ? String(r.due_date).slice(0, 10) : null,
-    paidAt: r.paid_at ? String(r.paid_at).slice(0, 10) : null,
+    dueDate: toIsoDateOnly(r.due_date),
+    paidAt: toIsoDateOnly(r.paid_at),
     paidRef: r.paid_ref ? String(r.paid_ref) : null,
     shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
     amountCents:

@@ -18,8 +18,8 @@ import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
-import { carPath } from "@/lib/browse-nav";
 import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { KpiCarSheet } from "@/pages/KpiCarSheet";
 
 type Row = {
   railcar_id: number;
@@ -60,6 +60,7 @@ export function KpiCarListPage() {
   const dir = sp.get("dir") ?? "asc";
   const group = sp.get("group") ?? "";
   const page = Math.max(1, Number(sp.get("page") ?? 1) || 1);
+  const carId = Number(sp.get("car") || 0) || null;
 
   const setParams = (patch: Record<string, string | null>, resetPage = true) => {
     const next = new URLSearchParams(sp);
@@ -111,8 +112,6 @@ export function KpiCarListPage() {
   const [overwrite, setOverwrite] = useState(false);
   const [qDraft, setQDraft] = useState(q);
 
-  const kpiFrom = encodeURIComponent(`/kpi/cars${qsFrom(sp)}`);
-
   const selectedIds = async () => {
     if (selectAllMatching) {
       const r = await apiGet<{ ids: number[] }>(`/api/kpi/cars/ids?${listQs}`);
@@ -126,16 +125,17 @@ export function KpiCarListPage() {
       const ids = await selectedIds();
       if (!ids.length) throw new Error("Select cars first");
       if (bulk === "sold") {
-        return (await apiRequest("POST", "/api/railcars/sold/preview", { ids })).json();
+        return (await apiRequest("POST", "/api/railcars/sold/preview", { ids, bucket })).json();
       }
       if (bulk === "unsold") {
-        return (await apiRequest("POST", "/api/railcars/unsold/preview", { ids })).json();
+        return (await apiRequest("POST", "/api/railcars/unsold/preview", { ids, bucket })).json();
       }
       if (bulk === "rent_start") {
         return (await apiRequest("POST", "/api/rent-start/bulk/preview", {
           ids,
           date: rentDate || null,
           overwrite,
+          bucket,
         })).json();
       }
       if (bulk === "classify_external" || bulk === "classify_intercompany") {
@@ -145,12 +145,13 @@ export function KpiCarListPage() {
         })).json();
       }
       return (await apiRequest("POST", "/api/commitments/bulk/preview", {
-        ids,
-        action: bulk === "clear_commitment" ? "clear" : "set",
-        type: commitType,
-        name: commitName,
-        target_date: target || null,
-        overwrite,
+          ids,
+          action: bulk === "clear_commitment" ? "clear" : "set",
+          type: commitType,
+          name: commitName,
+          target_date: target || null,
+          overwrite,
+          bucket,
       })).json();
     },
     onSuccess: setPreview,
@@ -338,6 +339,18 @@ export function KpiCarListPage() {
             {(preview.rejected_inactive ?? []).length > 0 && (
               <div className="text-destructive">Inactive (no writes): {preview.rejected_inactive.length}</div>
             )}
+            {(preview.summary ?? []).map((m: string) => (
+              <div key={m} className="font-medium">{m}</div>
+            ))}
+            {(preview.kpi_delta ?? []).slice(0, 8).map((d: any) => (
+              <div key={d.railcar_id}>
+                {d.car}: {d.before_title} → {d.after_title}
+                {d.leaves_current ? " (leaves this list)" : ""}
+              </div>
+            ))}
+            {(preview.kpi_delta ?? []).length > 8 ? (
+              <div className="text-muted-foreground">+{preview.kpi_delta.length - 8} more</div>
+            ) : null}
           </div>
         )}
 
@@ -409,9 +422,13 @@ export function KpiCarListPage() {
                               />
                             </td>
                             <td className="py-1.5 font-mono">
-                              <Link href={`${carPath(r.railcar_id)}?from=${kpiFrom}`} className="underline">
+                              <button
+                                type="button"
+                                className="underline"
+                                onClick={() => setParams({ car: String(r.railcar_id) }, false)}
+                              >
                                 {r.car}
-                              </Link>
+                              </button>
                             </td>
                             <td>{r.entity ?? "—"}</td>
                             <td>{r.status_tag ?? "—"}</td>
@@ -449,6 +466,12 @@ export function KpiCarListPage() {
           </Button>
         </div>
       </div>
+      <KpiCarSheet
+        carId={carId}
+        bucket={bucket}
+        fromQs={qsFrom(sp)}
+        onClose={() => setParams({ car: null }, false)}
+      />
     </div>
   );
 }

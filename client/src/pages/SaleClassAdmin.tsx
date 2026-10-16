@@ -20,6 +20,11 @@ export default function SaleClassAdmin() {
     queryKey: ["/api/previews/occidental-ol1818"],
     queryFn: () => apiGet<any>("/api/previews/occidental-ol1818"),
   });
+  const { data: rtex } = useQuery({
+    queryKey: ["/api/previews/ol2144-rtex"],
+    queryFn: () => apiGet<any>("/api/previews/ol2144-rtex"),
+  });
+  const [rtexPreview, setRtexPreview] = useState<any>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState("legal_owner");
   const [note, setNote] = useState("");
@@ -131,6 +136,67 @@ export default function SaleClassAdmin() {
           >
             Download preview CSV
           </Button>
+        </div>
+        <div>
+          <h2 className="font-semibold mb-2">OL2144 RTEX buyer (30 Sold cars only)</h2>
+          <p className="text-sm text-muted-foreground mb-2">
+            {rtex?.car_rows ?? 0} active Sold cars on OL2144. The other 68 stay Leased and on rent.
+            No rider-wide classification. Set buyer RTEX via preview → apply after merge. Does not change active.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => downloadXlsx("/api/previews/ol2144-rtex?format=csv", "preview_ol2144_rtex_buyer.csv")}
+            >
+              Download preview CSV
+            </Button>
+            {canEdit && (
+              <>
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      const p = await (await apiRequest("POST", "/api/previews/ol2144-rtex", {})).json();
+                      setRtexPreview(p);
+                      toast({ title: "Preview ready", description: `${p.ids?.length ?? 0} cars` });
+                    } catch (e: any) {
+                      toast({ title: "Preview failed", description: e.message, variant: "destructive" });
+                    }
+                  }}
+                >
+                  Preview set buyer RTEX
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!rtexPreview?.preview_token}
+                  onClick={async () => {
+                    try {
+                      const d = await (await apiRequest("POST", "/api/previews/ol2144-rtex/apply", {
+                        preview_token: rtexPreview.preview_token,
+                      })).json();
+                      toast({ title: "Applied", description: `${d.updated} buyers set` });
+                      setRtexPreview(null);
+                      qc.invalidateQueries({ queryKey: ["/api/previews/ol2144-rtex"] });
+                      qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+                    } catch (e: any) {
+                      toast({ title: "Apply failed", description: e.message, variant: "destructive" });
+                    }
+                  }}
+                >
+                  Apply RTEX preview
+                </Button>
+              </>
+            )}
+          </div>
+          {rtexPreview?.kpi_delta && (
+            <div className="text-sm mt-2">
+              {(rtexPreview.kpi_delta as any[]).slice(0, 5).map((d) => (
+                <div key={d.railcar_id}>{d.car}: {d.before_title} → {d.after_title}</div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

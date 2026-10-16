@@ -15,10 +15,11 @@ import {
 } from "@shared/commitment";
 import { fetchAllRows } from "./fetch-all";
 import { logActivity } from "./activity-log";
+import { annotateKpiDelta } from "./kpi-delta";
 
 const RECOMPUTE_STATUS = process.env.RLMS_RECOMPUTE_FLEET_STATUS === "1";
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
-export type PreviewKind = "commitment" | "return" | "sold" | "rent_start" | "unsold" | "classify";
+export type PreviewKind = "commitment" | "return" | "sold" | "rent_start" | "unsold" | "classify" | "buyer";
 const previewStore = new Map<string, { kind: PreviewKind; expires: number; snapshot: any }>();
 
 export async function purgeExpiredPreviews() {
@@ -309,6 +310,7 @@ export async function previewBulkCommitment(
     note?: string | null;
     overwrite?: boolean;
     ids?: number[];
+    bucket?: string | null;
   },
 ) {
   const { matched, notFound, inactive } = Array.isArray(body.ids) && body.ids.length
@@ -352,6 +354,15 @@ export async function previewBulkCommitment(
       rejected: "inactive",
     })),
   };
+  const writeIds =
+    body.action === "clear"
+      ? snapshot.matched.map((m) => m.id)
+      : snapshot.matched.filter((m) => !m.commitment || snapshot.overwrite).map((m) => m.id);
+  (snapshot as any).kpi_delta = await annotateKpiDelta(
+    writeIds,
+    { kind: "commitment", action: body.action },
+    body.bucket,
+  );
   const preview_token = await putPreview("commitment", snapshot);
   return { preview_token, ...snapshot };
 }
@@ -706,7 +717,7 @@ function errHandler(res: Response, err: any) {
   res.status(status).json({ message: err?.message ?? String(err), code: err?.code });
 }
 
-export async function previewMarkSold(idsRaw: number[]) {
+export async function previewMarkSold(idsRaw: number[], opts?: { sold_to?: string | null; bucket?: string | null }) {
   const ids = Array.from(new Set(idsRaw.filter((n) => Number.isFinite(n) && n > 0)));
   if (!ids.length) throw Object.assign(new Error("ids required"), { status: 400 });
   const { data, error } = await supabaseAdmin
@@ -724,7 +735,7 @@ export async function previewMarkSold(idsRaw: number[]) {
   const buyerBy = new Map((rows ?? []).map((r: any) => [r.railcar_id, r]));
   const cars = activeCars.map((c: any) => ({
     ...c,
-    proposed_sold_to: c.sold_to || buyerBy.get(c.id)?.buyer || null,
+    proposed_sold_to: opts?.sold_to || c.sold_to || buyerBy.get(c.id)?.buyer || null,
   }));
   const snapshot = {
     ids: cars.map((r: any) => r.id),
@@ -738,6 +749,14 @@ export async function previewMarkSold(idsRaw: number[]) {
       rejected: "inactive",
     })),
   };
+  (snapshot as any).kpi_delta = await annotateKpiDelta(
+    snapshot.ids,
+    {
+      kind: "sold",
+      buyerById: new Map(cars.map((c: any) => [c.id, c.proposed_sold_to ?? null])),
+    },
+    opts?.bucket,
+  );
   return { preview_token: await putPreview("sold", snapshot), ...snapshot };
 }
 
@@ -786,7 +805,7 @@ export async function applyMarkSold(
   return { preview, updated, fleet_status: "Sold" };
 }
 
-export async function previewRemoveSold(idsRaw: number[]) {
+export async function previewRemoveSold(idsRaw: number[], bucket?: string | null) {
   const { matched, notFound, inactive } = await matchCarsFromIds(idsRaw);
   const snapshot = {
     ids: matched.filter((c) => c.fleet_status === "Sold").map((c) => c.id),
@@ -800,6 +819,7 @@ export async function previewRemoveSold(idsRaw: number[]) {
       rejected: "inactive",
     })),
   };
+  (snapshot as any).kpi_delta = await annotateKpiDelta(snapshot.ids, { kind: "unsold" }, bucket);
   return { preview_token: await putPreview("unsold", snapshot), ...snapshot };
 }
 
@@ -846,10 +866,39 @@ export async function previewClassifySale(
     .from("v_rlms_kpi_car_rows")
     .select("railcar_id, current_lease, master_lease_id, rider_id, sale_class, buyer")
     .in("railcar_id", matched.map((c) => c.id));
+  const byRider = new Map<number, { rider_id: number; master_lease_id: number | null; current_lease: string }>();
+  for (const row of rows ?? []) {
+    if (!row.rider_id) continue;
+    if (!byRider.has(row.rider_id)) {
+      byRider.set(row.rider_id, {
+        rider_id: row.rider_id,
+        master_lease_id: row.master_lease_id ?? null,
+        current_lease: row.current_lease ?? `rider ${row.rider_id}`,
+      });
+    }
+  }
+  const leases = [];
+  for (const lease of byRider.values()) {
+    const { count, error } = await supabaseAdmin
+      .from("v_rlms_kpi_car_rows")
+      .select("railcar_id", { count: "exact", head: true })
+      .eq("active", true)
+      .eq("rider_id", lease.rider_id);
+    if (error) throw error;
+    const n = count ?? 0;
+    const ol = lease.current_lease;
+    leases.push({
+      ...lease,
+      active_cars: n,
+      message: `affects ${n} active cars on ${ol}`,
+    });
+  }
   const snapshot = {
     class: klass,
     note: note ?? null,
     cars: rows ?? [],
+    leases,
+    summary: leases.map((l) => l.message),
     not_found: notFound,
     rejected_inactive: inactive.map((r) => ({ id: r.id, rejected: "inactive" })),
   };
@@ -858,8 +907,18 @@ export async function previewClassifySale(
 
 export async function applyClassifySale(previewToken: string, actor: string) {
   const preview = await getPreview("classify", previewToken);
+  const scopes =
+    preview.leases?.length
+      ? preview.leases
+      : Array.from(
+          new Map(
+            (preview.cars ?? [])
+              .filter((row: any) => row.rider_id || row.master_lease_id)
+              .map((row: any) => [row.rider_id ?? `mla:${row.master_lease_id}`, row]),
+          ).values(),
+        );
   let written = 0;
-  for (const row of preview.cars ?? []) {
+  for (const row of scopes) {
     if (!row.rider_id && !row.master_lease_id) continue;
     if (row.rider_id) {
       await supabaseAdmin.from("rlms_sale_classification").delete().eq("rider_id", row.rider_id);
@@ -882,6 +941,52 @@ export async function applyClassifySale(previewToken: string, actor: string) {
     written += 1;
   }
   return { preview, written };
+}
+
+export async function previewOl2144RtexBuyer() {
+  const { data, error } = await supabaseAdmin.from("v_kpi_preview_ol2144_rtex_buyer").select("*");
+  if (error) throw error;
+  const cars = data ?? [];
+  const snapshot = {
+    buyer: "RTEX",
+    ids: cars.map((r: any) => r.railcar_id),
+    cars,
+    rejected_inactive: [] as any[],
+  };
+  (snapshot as any).kpi_delta = await annotateKpiDelta(snapshot.ids, { kind: "buyer" }, "sold_missing_buyer");
+  return { preview_token: await putPreview("buyer", snapshot), ...snapshot };
+}
+
+export async function applyOl2144RtexBuyer(previewToken: string, actor: string) {
+  const preview = await getPreview("buyer", previewToken);
+  let updated = 0;
+  for (const id of preview.ids ?? []) {
+    const { data, error } = await supabaseAdmin
+      .from("railcars")
+      .update({ sold_to: preview.buyer ?? "RTEX" })
+      .eq("id", id)
+      .eq("active", true)
+      .eq("fleet_status", "Sold")
+      .select("id");
+    if (error) throw error;
+    if (!data?.length) continue;
+    await supabaseAdmin.from("assignment_history").insert({
+      railcar_id: id,
+      moved_at: new Date().toISOString(),
+      moved_by: actor,
+      reason: "Buyer set to RTEX (preview sign-off)",
+    });
+    await logActivity({
+      entity_type: "railcar",
+      entity_id: id,
+      action: "buyer_set",
+      actor,
+      railcar_id: id,
+      detail: { buyer: preview.buyer ?? "RTEX", preview_token: previewToken, active_unchanged: true },
+    });
+    updated += 1;
+  }
+  return { preview, updated };
 }
 
 export function registerCommitmentRoutes(
@@ -972,6 +1077,7 @@ export function registerCommitmentRoutes(
           note: req.body?.note ?? null,
           overwrite: Boolean(req.body?.overwrite),
           ids: Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : undefined,
+          bucket: req.body?.bucket ?? null,
         }),
       );
     } catch (e) {
@@ -1059,7 +1165,7 @@ export function registerCommitmentRoutes(
       const actor = await requireWrite(req, res);
       if (!actor) return;
       const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];
-      res.json(await previewMarkSold(ids));
+      res.json(await previewMarkSold(ids, { sold_to: req.body?.sold_to ?? null, bucket: req.body?.bucket ?? null }));
     } catch (e) {
       errHandler(res, e);
     }
@@ -1071,7 +1177,7 @@ export function registerCommitmentRoutes(
       if (!actor) return;
       res.json(
         await applyMarkSold(String(req.body?.preview_token ?? ""), actor, {
-          sold_to: req.body?.sold_to ?? null,
+          sold_to: req.body && Object.prototype.hasOwnProperty.call(req.body, "sold_to") ? req.body.sold_to : undefined,
           effective_date: req.body?.effective_date ?? null,
         }),
       );
@@ -1084,7 +1190,12 @@ export function registerCommitmentRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await previewRemoveSold(Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : []));
+      res.json(
+        await previewRemoveSold(
+          Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [],
+          req.body?.bucket ?? null,
+        ),
+      );
     } catch (e) {
       errHandler(res, e);
     }
@@ -1121,6 +1232,26 @@ export function registerCommitmentRoutes(
       const actor = await requireWrite(req, res);
       if (!actor) return;
       res.json(await applyClassifySale(String(req.body?.preview_token ?? ""), actor));
+    } catch (e) {
+      errHandler(res, e);
+    }
+  });
+
+  app.post("/api/previews/ol2144-rtex", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await previewOl2144RtexBuyer());
+    } catch (e) {
+      errHandler(res, e);
+    }
+  });
+
+  app.post("/api/previews/ol2144-rtex/apply", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await applyOl2144RtexBuyer(String(req.body?.preview_token ?? ""), actor));
     } catch (e) {
       errHandler(res, e);
     }
@@ -1207,6 +1338,32 @@ export function registerCommitmentRoutes(
         car_rows: rows.filter((r: any) => r.kind === "railcar").length,
         inactive_rows: 0,
       });
+    } catch (e) {
+      errHandler(res, e);
+    }
+  });
+
+  app.get("/api/previews/ol2144-rtex", async (req, res) => {
+    try {
+      const { data, error } = await supabaseAdmin.from("v_kpi_preview_ol2144_rtex_buyer").select("*");
+      if (error) throw error;
+      const rows = data ?? [];
+      if (String(req.query.format ?? "") === "csv") {
+        const headers = ["railcar_id", "car", "entity", "legal_owner", "status_tag", "old_value", "new_value"];
+        const lines = [
+          headers.join(","),
+          ...rows.map((r: any) =>
+            headers
+              .map((h) => `"${String(r[h] ?? "").replace(/"/g, '""')}"`)
+              .join(","),
+          ),
+        ];
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", 'attachment; filename="preview_ol2144_rtex_buyer.csv"');
+        res.send(lines.join("\n") + "\n");
+        return;
+      }
+      res.json({ rows, car_rows: rows.length, inactive_rows: 0 });
     } catch (e) {
       errHandler(res, e);
     }

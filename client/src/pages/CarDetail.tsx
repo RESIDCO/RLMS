@@ -1,6 +1,6 @@
 import { Link, useRoute, useLocation, useSearch } from "wouter";
 import { KPI_TITLES } from "@shared/kpi-buckets";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -124,6 +124,12 @@ export default function CarDetailPage() {
     crumbs.push({ href: lesseePath(lessee), label: lessee }, { href: lesseeOlPath(lessee, ol), label: ol });
   }
   crumbs.push({ label: mark });
+
+  const focus = new URLSearchParams(searchQs.replace(/^\?/, "")).get("focus");
+  useEffect(() => {
+    if (focus !== "assignment" || !r) return;
+    document.getElementById("assignment")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focus, r]);
 
   const searchBackPath = hasSearchSession() ? searchReturnPath() : null;
   const abs = Array.isArray(r?.railcar_ab_items) ? r.railcar_ab_items : [];

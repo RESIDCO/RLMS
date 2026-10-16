@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { KPI_BUCKETS, KPI_GROUP_COLS, KPI_SORT_COLS, KPI_TITLES, type KpiBucket } from "@shared/kpi-buckets";
+import { loadKpiCarRow } from "./kpi-delta";
 
 const ROW_COLS =
   "railcar_id, active, car, reporting_marks, car_number, entity, status_tag, derived_status, current_lease, lessee, legal_owner, buyer, commitment, rent_start_date, last_ol, reason, sale_class, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, lease_status, master_lease_id, rider_id";
@@ -188,6 +189,13 @@ export async function exportKpiCars(req: Request, res: Response) {
 }
 
 export function registerKpiCarRoutes(app: Express) {
+  app.get("/api/kpi/car/:id", async (req, res) => {
+    try {
+      res.json(await loadKpiCarRow(Number(req.params.id)));
+    } catch (e) {
+      errHandler(res, e);
+    }
+  });
   app.get("/api/kpi/cars", async (req, res) => {
     try {
       res.json(await listKpiCarsPaged(req));

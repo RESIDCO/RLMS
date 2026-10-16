@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { supabaseAdmin } from "./supabase";
 import { getPreview, putPreview, recomputeStatus } from "./commitment";
+import { annotateKpiDelta } from "./kpi-delta";
 import {
   derivedFleetStatus,
   implicitAwaitingLabel,
@@ -92,7 +93,7 @@ export async function setRentStartDate(railcarId: number, dateRaw: string | null
 
 export async function previewBulkRentStart(
   text: string,
-  opts: { date?: string | null; overwrite?: boolean; ids?: number[] },
+  opts: { date?: string | null; overwrite?: boolean; ids?: number[]; bucket?: string | null },
 ) {
   const fallback = isoDateOnly(opts.date);
   const parsed = parseCarDateRows(text, fallback);
@@ -220,6 +221,14 @@ export async function previewBulkRentStart(
     to_write,
     write_ids: to_write.map((r) => ({ id: r.id, assignment_id: r.assignment_id, new_date: r.new_date })),
   };
+  const dateById = new Map<number, string | null>(
+    (snapshot.write_ids as { id: number; new_date: string | null }[]).map((r) => [r.id, r.new_date]),
+  );
+  (snapshot as any).kpi_delta = await annotateKpiDelta(
+    snapshot.write_ids.map((r: { id: number }) => r.id),
+    { kind: "rent_start", dateById },
+    opts.bucket,
+  );
   const preview_token = await putPreview("rent_start", snapshot);
   return { preview_token, ...snapshot };
 }
@@ -331,6 +340,7 @@ export function registerRentStartRoutes(
           date: req.body?.date ?? null,
           overwrite: Boolean(req.body?.overwrite),
           ids: Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : undefined,
+          bucket: req.body?.bucket ?? null,
         }),
       );
     } catch (e) {

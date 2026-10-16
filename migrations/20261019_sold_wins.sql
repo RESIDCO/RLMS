@@ -1,5 +1,6 @@
 -- Sold-wins (external sales only) + KPI drill-down row view.
--- No car-data writes. Occidental sold_to clear is in 20261019_occidental_ol1818_apply_DO_NOT_RUN.sql.
+-- No car-data writes. Leave status-recompute triggers disabled.
+-- Do not set RLMS_RECOMPUTE_FLEET_STATUS. Occidental apply stays DO_NOT_RUN.
 
 CREATE TABLE IF NOT EXISTS public.rlms_internal_entities (
   name text PRIMARY KEY,
@@ -89,10 +90,11 @@ WHERE NOT EXISTS (
   WHERE s.master_lease_id = x.ml AND s.rider_id IS NULL
 );
 
-INSERT INTO public.rlms_sale_classification (master_lease_id, rider_id, class, buyer, note, set_by)
-SELECT 414, 645, 'external', 'RTEX',
-  'OL2144 Source Energy Services; cars tagged Sold, sold_to blank', 'bruce:2026-10-15'
-WHERE NOT EXISTS (SELECT 1 FROM public.rlms_sale_classification WHERE rider_id = 645);
+-- OL2144 / rider 645 is NOT classified external. Only 30 active cars already
+-- tagged Sold went to RTEX; the other 68 stay Leased and on rent.
+-- Set buyer RTEX on those 30 via car-level preview → apply after merge
+-- (v_kpi_preview_ol2144_rtex_buyer). Do not write sold_to in this migration.
+DELETE FROM public.rlms_sale_classification WHERE rider_id = 645;
 
 CREATE OR REPLACE FUNCTION public.rlms_norm_party(t text)
 RETURNS text
@@ -121,6 +123,7 @@ DROP VIEW IF EXISTS
   public.v_kpi_preview_rent_start_default,
   public.v_kpi_preview_rent_start_idle_on_ol,
   public.v_kpi_preview_occidental_ol1818,
+  public.v_kpi_preview_ol2144_rtex_buyer,
   public.v_rlms_kpi_car_rows,
   public.v_rlms_car_kpi;
 
@@ -465,7 +468,31 @@ JOIN LATERAL (
 ) a ON true
 JOIN public.riders r ON r.id = a.rider_id AND r.id = 557
 WHERE rc.active IS TRUE
+  AND upper(btrim(coalesce(rc.reporting_marks, ''))) = 'OCCX'
   AND rc.sold_to = 'Sold to SRIX';
+
+CREATE OR REPLACE VIEW public.v_kpi_preview_ol2144_rtex_buyer AS
+SELECT
+  rc.id AS railcar_id,
+  rc.reporting_marks,
+  rc.car_number,
+  btrim(coalesce(rc.reporting_marks, '')) || ' ' || btrim(coalesce(rc.car_number, '')) AS car,
+  rc.entity,
+  rc.legal_owner,
+  rc.fleet_status AS status_tag,
+  rc.sold_to AS old_value,
+  'RTEX'::text AS new_value
+FROM public.railcars rc
+JOIN LATERAL (
+  SELECT a0.*
+  FROM public.railcar_assignments a0
+  WHERE a0.railcar_id = rc.id
+  ORDER BY a0.id DESC
+  LIMIT 1
+) a ON true
+JOIN public.riders r ON r.id = a.rider_id AND r.id = 645
+WHERE rc.active IS TRUE
+  AND rc.fleet_status = 'Sold';
 
 CREATE OR REPLACE VIEW public.v_rlms_kpi_car_rows AS
 SELECT
@@ -554,6 +581,7 @@ GRANT SELECT ON public.v_kpi_preview_seed_off_rent TO anon, authenticated, servi
 GRANT SELECT ON public.v_kpi_preview_rent_start_default TO anon, authenticated, service_role;
 GRANT SELECT ON public.v_kpi_preview_rent_start_idle_on_ol TO anon, authenticated, service_role;
 GRANT SELECT ON public.v_kpi_preview_occidental_ol1818 TO authenticated, service_role;
+GRANT SELECT ON public.v_kpi_preview_ol2144_rtex_buyer TO authenticated, service_role;
 GRANT SELECT ON public.v_rlms_kpi_car_rows TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.rlms_norm_party(text) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.rlms_is_internal_party(text) TO authenticated, service_role;

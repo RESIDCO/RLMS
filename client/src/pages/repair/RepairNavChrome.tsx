@@ -1,23 +1,21 @@
 /**
  * §G r2 — breadcrumbs + "← Back to <source>" via returnTo (fallback: history).
- * AA: labels slate-700, values slate-900 on light surfaces.
+ * AA: shared repairUi / CSS variable tokens (light-only owner theme).
  */
 import { Link } from "wouter";
+import { repairUi } from "./repairTokens";
 
+/** @deprecated Prefer repairUi — kept as alias for existing shop/invoice call sites. */
 export const shopAa = {
-  page: "min-h-full bg-slate-50 text-slate-900",
-  label: "text-sm font-medium text-slate-700",
-  muted: "text-sm text-slate-700",
-  value: "text-sm font-semibold text-slate-900",
-  crumb: "text-sm text-slate-700 hover:underline",
-  crumbCurrent: "text-sm font-semibold text-slate-900",
-  /** White fills, near-black text, ≥4.5:1 placeholders — never dark/black input fills. */
-  input:
-    "border border-slate-400 bg-white text-slate-900 placeholder:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 focus-visible:ring-offset-2 [color-scheme:light]",
-  select:
-    "mt-1 h-9 w-full rounded-md border border-slate-400 bg-white px-2 text-sm text-slate-900 [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-slate-700",
-  textarea:
-    "border border-slate-400 bg-white text-slate-900 placeholder:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 focus-visible:ring-offset-2 [color-scheme:light]",
+  page: `${repairUi.page} min-h-full`,
+  label: repairUi.label,
+  muted: repairUi.muted,
+  value: repairUi.value,
+  crumb: repairUi.crumb,
+  crumbCurrent: repairUi.crumbCurrent,
+  input: repairUi.input,
+  select: repairUi.select,
+  textarea: repairUi.textarea,
 } as const;
 
 export type Crumb = { label: string; href?: string };
@@ -27,7 +25,7 @@ export function RepairBreadcrumbs({ items }: { items: Crumb[] }) {
     <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1">
       {items.map((c, i) => (
         <span key={`${c.label}-${i}`} className="flex items-center gap-1">
-          {i > 0 && <span className="text-slate-700">›</span>}
+          {i > 0 && <span className={repairUi.muted}>›</span>}
           {c.href && i < items.length - 1 ? (
             <Link href={c.href} className={shopAa.crumb}>
               {c.label}
@@ -93,10 +91,9 @@ export function RepairBackLink({
     <div className="flex flex-wrap items-center gap-3">
       <Link
         href={href}
-        className="text-sm font-medium text-slate-900 underline underline-offset-2"
+        className={`${repairUi.link} text-sm font-medium underline underline-offset-2`}
         onClick={(e) => {
           if (!ret && typeof window !== "undefined" && window.history.length > 1) {
-            // Prefer browser history when no returnTo
             e.preventDefault();
             window.history.back();
           }

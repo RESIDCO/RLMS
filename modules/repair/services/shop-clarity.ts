@@ -910,9 +910,10 @@ export function contrastRatio(fg: string, bg: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-/** Shop AA theme tokens — values near-black; labels muted ≥4.5:1 on white. */
+/** Shop / owner AA theme tokens — values near-black; labels muted ≥4.5:1 on white.
+ *  Keep in sync with client repair CSS vars (--repair-*) / repairTokens.ts. */
 export const SHOP_AA_TOKENS = {
-  bg: "#f8fafc", // slate-50
+  bg: "#f3f4f6",
   surface: "#ffffff",
   value: "#0f172a", // slate-900
   label: "#334155", // slate-700 — ≥4.5:1 on white
@@ -921,6 +922,11 @@ export const SHOP_AA_TOKENS = {
   placeholder: "#475569", // slate-600 — ≥4.5:1 on white
   inputBg: "#ffffff",
   focusRing: "#334155", // slate-700
+  btnDisabledBg: "#e2e8f0",
+  btnDisabledText: "#334155", // ≥4.5:1 on disabled bg
+  checkboxBg: "#ffffff",
+  checkboxBorder: "#64748b",
+  checkboxAccent: "#1e3a5f",
 } as const;
 
 function fmtMdY(ymd: string | null | undefined): string {

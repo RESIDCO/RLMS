@@ -2,7 +2,7 @@
  * §H Owner invoice queue — `/#/repair/invoices`
  * Every Invoice Submitted: car, shop, invoice no/date, amount, estimate,
  * difference, flags, age. Filters + payment batch CSV export.
- * §H r6: AA contrast (white panels, near-black text) even under dark owner theme.
+ * §H r7: shared repair theme tokens; light-only AA; disabled batch + checkboxes.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceTitle } from "./WorkspaceTitle";
 import { shopAa } from "./RepairNavChrome";
+import { repairUi } from "./repairTokens";
 import { cn } from "@/lib/utils";
 
 type QueueRow = {
@@ -58,6 +59,15 @@ const STATUS_OPTS: Array<{ value: string; label: string }> = [
   { value: "PAID", label: "Paid" },
   { value: "REJECTED", label: "Rejected" },
 ];
+
+function isPayable(r: QueueRow): boolean {
+  return (
+    r.paymentStatus === "MONTH_CLOSED" ||
+    r.paymentStatus === "PAYABLE" ||
+    r.workflowStatus === "MONTH_CLOSED" ||
+    r.workflowStatus === "PAYABLE"
+  );
+}
 
 export default function InvoiceQueue() {
   const [rows, setRows] = useState<QueueRow[]>([]);
@@ -111,7 +121,7 @@ export default function InvoiceQueue() {
     setBatchMsg("");
     const ids = Array.from(selected);
     if (!ids.length) {
-      setBatchMsg("Select payable invoices first");
+      setBatchMsg("Select invoices first");
       return;
     }
     const res = await fetch("/api/repair/payment-batches", {
@@ -153,6 +163,8 @@ export default function InvoiceQueue() {
     void load();
   }
 
+  const canBatch = selected.size > 0;
+
   return (
     <RepairOwnerShell>
       <div className={cn(shopAa.page, "mx-auto max-w-7xl px-4 py-6 space-y-4")}>
@@ -160,13 +172,18 @@ export default function InvoiceQueue() {
         <p className={shopAa.muted}>
           RESIDCO · Owner invoice review queue. Invoice Submitted → review →
           Approve / Reject / Short-pay → Payable →{" "}
-          <Link href="/repair/payments" className="font-semibold text-blue-800 underline">
+          <Link href="/repair/payments" className={repairUi.link}>
             payment batches
           </Link>{" "}
           CSV export (no real payments).
         </p>
 
-        <div className="repair-aa-panel flex flex-wrap items-end gap-3 rounded border border-slate-400 bg-white p-3 text-slate-900">
+        <div
+          className={cn(
+            repairUi.panel,
+            "flex flex-wrap items-end gap-3 rounded border p-3",
+          )}
+        >
           <div>
             <Label className={shopAa.label}>Shop mark</Label>
             <Input
@@ -198,9 +215,10 @@ export default function InvoiceQueue() {
               onChange={(e) => setMinAge(e.target.value)}
             />
           </div>
-          <label className="flex items-center gap-2 text-sm font-medium text-slate-900">
+          <label className={cn("flex items-center gap-2 text-sm font-medium", repairUi.text)}>
             <input
               type="checkbox"
+              className={repairUi.checkbox}
               checked={overOnly}
               onChange={(e) => setOverOnly(e.target.checked)}
             />
@@ -209,27 +227,39 @@ export default function InvoiceQueue() {
           <Button
             onClick={() => void load()}
             disabled={busy}
-            className="font-semibold text-slate-900"
+            className={cn(repairUi.btnSecondary, "font-semibold")}
           >
             Apply
           </Button>
-          <Button
-            variant="secondary"
-            onClick={() => void createBatch()}
-            className="font-semibold text-slate-900"
-          >
-            Create batch + export CSV
-          </Button>
+          <div className="flex flex-col gap-1">
+            <Button
+              variant="secondary"
+              onClick={() => void createBatch()}
+              disabled={!canBatch}
+              className={cn(
+                canBatch ? repairUi.btnSecondary : "",
+                "font-semibold",
+              )}
+              title={canBatch ? "Create batch + export CSV" : "Select invoices first"}
+            >
+              Create batch + export CSV
+            </Button>
+            {!canBatch && (
+              <span className={cn(repairUi.muted, "text-xs")} data-testid="batch-hint">
+                Select invoices first
+              </span>
+            )}
+          </div>
         </div>
 
         {batchMsg && (
-          <p className="text-sm font-medium text-slate-900">{batchMsg}</p>
+          <p className={cn("text-sm font-medium", repairUi.text)}>{batchMsg}</p>
         )}
         {error && <p className="text-sm font-medium text-red-800">{error}</p>}
 
-        <div className="repair-aa-panel overflow-x-auto rounded border border-slate-400 bg-white text-slate-900">
-          <table className="min-w-full text-sm text-slate-900">
-            <thead className="bg-slate-100 text-left text-slate-900">
+        <div className={cn(repairUi.panel, "overflow-x-auto rounded border")}>
+          <table className={cn("min-w-full text-sm", repairUi.text)}>
+            <thead className="bg-slate-100 text-left">
               <tr>
                 <th className="px-2 py-2">☑</th>
                 <th className="px-2 py-2">Car</th>
@@ -251,7 +281,7 @@ export default function InvoiceQueue() {
                 <tr>
                   <td
                     colSpan={13}
-                    className="px-3 py-6 text-center text-slate-700"
+                    className={cn("px-3 py-6 text-center", repairUi.muted)}
                   >
                     {busy ? "Loading…" : "No invoices match filters."}
                   </td>
@@ -261,50 +291,41 @@ export default function InvoiceQueue() {
                   <tr
                     key={r.id}
                     className={cn(
-                      "border-t border-slate-200 text-slate-900",
-                      r.differenceCents > 0 && "bg-amber-50 text-slate-900",
+                      "border-t border-slate-200",
+                      repairUi.text,
+                      r.differenceCents > 0 && repairUi.rowHighlight,
                     )}
                   >
-                    <td className="px-2 py-2 text-slate-900">
+                    <td className="px-2 py-2">
                       <input
                         type="checkbox"
+                        className={repairUi.checkbox}
                         checked={selected.has(r.id)}
                         onChange={() => toggle(r.id)}
-                        disabled={
-                          r.paymentStatus !== "MONTH_CLOSED" &&
-                          r.paymentStatus !== "PAYABLE" &&
-                          r.workflowStatus !== "MONTH_CLOSED" &&
-                          r.workflowStatus !== "PAYABLE"
-                        }
+                        disabled={!isPayable(r)}
                       />
                     </td>
-                    <td className="px-2 py-2 font-mono font-semibold text-slate-900">
+                    <td className="px-2 py-2 font-mono font-semibold">
                       {r.carMark} {r.carNumber}
                     </td>
-                    <td className="px-2 py-2 text-slate-900">{r.shopMark}</td>
-                    <td className="px-2 py-2 font-mono text-slate-900">
-                      {r.invoiceNo}
-                    </td>
-                    <td className="px-2 py-2 text-slate-900">{r.invoiceDate}</td>
-                    <td className="px-2 py-2 text-right font-mono font-semibold text-slate-900">
+                    <td className="px-2 py-2">{r.shopMark}</td>
+                    <td className="px-2 py-2 font-mono">{r.invoiceNo}</td>
+                    <td className="px-2 py-2">{r.invoiceDate}</td>
+                    <td className="px-2 py-2 text-right font-mono font-semibold">
                       {dollars(r.invoiceCents)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono text-slate-900">
+                    <td className="px-2 py-2 text-right font-mono">
                       {dollars(r.estimateCents)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono text-slate-900">
+                    <td className="px-2 py-2 text-right font-mono">
                       {dollars(r.differenceCents)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono text-slate-900">
+                    <td className="px-2 py-2 text-right font-mono">
                       {r.differencePct.toFixed(2)}%
                     </td>
-                    <td className="px-2 py-2 text-xs text-slate-900">
-                      {r.flags || "—"}
-                    </td>
-                    <td className="px-2 py-2 font-mono text-slate-900">
-                      {r.ageDays}
-                    </td>
-                    <td className="px-2 py-2 text-xs font-medium text-slate-900">
+                    <td className="px-2 py-2 text-xs">{r.flags || "—"}</td>
+                    <td className="px-2 py-2 font-mono">{r.ageDays}</td>
+                    <td className="px-2 py-2 text-xs font-medium">
                       {r.statusPlain ||
                         r.paymentStatus ||
                         r.workflowStatus ||
@@ -318,7 +339,11 @@ export default function InvoiceQueue() {
                       <Link href={`/repair/invoices/${r.id}`}>
                         <Button
                           size="sm"
-                          className="font-semibold text-slate-900 bg-amber-100 border border-amber-800 hover:bg-amber-200"
+                          className={cn(
+                            repairUi.btnSecondary,
+                            "font-semibold border",
+                            repairUi.rowHighlight,
+                          )}
                         >
                           Review
                         </Button>

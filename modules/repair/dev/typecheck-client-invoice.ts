@@ -175,11 +175,14 @@ export function assertInvoiceClientTypecheck(): void {
   if (!review.includes("Under owner review") && !review.includes("statusPlain")) {
     bad("plain-status", "InvoiceReview must use plain status words");
   }
-  if (!queue.includes("bg-white") || !review.includes("bg-white")) {
-    bad("contrast", "Invoice pages need white panels");
+  if (
+    (!queue.includes("repair-aa-panel") && !queue.includes("repairUi.panel") && !queue.includes("repair-panel")) ||
+    (!review.includes("bg-white") && !review.includes("repair-aa-panel") && !review.includes("shopAa"))
+  ) {
+    bad("contrast", "Invoice pages need repair panel / AA surface tokens");
   }
-  if (!queue.includes("shopAa") || !queue.includes("repair-aa-panel")) {
-    bad("queue-aa", "InvoiceQueue must use shopAa + repair-aa-panel");
+  if (!queue.includes("shopAa") || (!queue.includes("repair-aa-panel") && !queue.includes("repairUi.panel"))) {
+    bad("queue-aa", "InvoiceQueue must use shopAa + repair panel tokens");
   }
   if (!queue.includes("Under owner review")) {
     bad("queue-status", "InvoiceQueue status filter must use plain Under owner review");
@@ -187,13 +190,27 @@ export function assertInvoiceClientTypecheck(): void {
   if (!queue.includes("toLocaleString")) {
     bad("queue-money", "InvoiceQueue money must use toLocaleString (commas)");
   }
+  if (!queue.includes("Select invoices first")) {
+    bad("queue-batch-hint", "InvoiceQueue disabled batch needs Select invoices first");
+  }
+  if (!queue.includes("repair-checkbox") && !queue.includes("repairUi.checkbox")) {
+    bad("queue-checkbox", "InvoiceQueue must use repair-checkbox token");
+  }
   if (!payments.includes("shopAa") || !payments.includes("repair-aa-panel")) {
     bad("pay-aa", "PaymentBatches must use shopAa + repair-aa-panel");
   }
   if (!months.includes("shopAa") || !months.includes("repair-aa-panel")) {
     bad("months-aa", "AccountingMonths must use shopAa + repair-aa-panel");
   }
-  ok("Contrast + short-pay header + plain statuses");
+  const theme = readFileSync(join(ROOT, "client/src/pages/repair/repairTheme.tsx"), "utf8");
+  if (!theme.includes("REPAIR_LIGHT_ONLY")) {
+    bad("light-only", "repairTheme must export REPAIR_LIGHT_ONLY");
+  }
+  const tokens = readFileSync(join(ROOT, "client/src/pages/repair/repairTokens.ts"), "utf8");
+  if (!tokens.includes("REPAIR_THEME_HEX") || !tokens.includes("repairUi")) {
+    bad("tokens", "repairTokens.ts must define REPAIR_THEME_HEX + repairUi");
+  }
+  ok("Contrast tokens + batch hint + checkbox + short-pay + plain statuses");
 
   const tsc = spawnSync(
     "npx",

@@ -1,6 +1,7 @@
 /**
- * Owner repair UI theme (light/dark) — persisted per local user key.
- * Used by module nav + Estimates History / coming-soon shells.
+ * Owner repair UI theme — light-only for AA contrast.
+ * Dark mode was a recurring washout source (black disabled buttons / checkboxes
+ * on dark gutters). Toggle is kept for discoverability but always applies light.
  */
 import {
   createContext,
@@ -12,10 +13,13 @@ import {
   type ReactNode,
 } from "react";
 
+/** Only "light" is applied; "dark" is accepted historically then coerced to light. */
 export type RepairThemeMode = "light" | "dark";
 
 const USER_KEY = "repair.localUserId";
 const THEME_PREFIX = "repair.ownerUi.theme";
+/** Feature flag: repair owner UI is light-only (prevents half-dark washout). */
+export const REPAIR_LIGHT_ONLY = true;
 
 export function repairUserKey(): string {
   try {
@@ -30,6 +34,7 @@ export function repairUserStorageKey(base: string): string {
 }
 
 function readTheme(): RepairThemeMode {
+  if (REPAIR_LIGHT_ONLY) return "light";
   try {
     const v = localStorage.getItem(repairUserStorageKey(THEME_PREFIX));
     if (v === "dark" || v === "light") return v;
@@ -41,7 +46,8 @@ function readTheme(): RepairThemeMode {
 
 function writeTheme(mode: RepairThemeMode) {
   try {
-    localStorage.setItem(repairUserStorageKey(THEME_PREFIX), mode);
+    const stored: RepairThemeMode = REPAIR_LIGHT_ONLY ? "light" : mode;
+    localStorage.setItem(repairUserStorageKey(THEME_PREFIX), stored);
   } catch {
     /* ignore */
   }
@@ -51,6 +57,7 @@ type Ctx = {
   theme: RepairThemeMode;
   setTheme: (mode: RepairThemeMode) => void;
   toggleTheme: () => void;
+  lightOnly: boolean;
 };
 
 const RepairThemeContext = createContext<Ctx | null>(null);
@@ -65,11 +72,18 @@ export function RepairThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setTheme = useCallback((mode: RepairThemeMode) => {
-    setThemeState(mode);
-    writeTheme(mode);
+    const next: RepairThemeMode = REPAIR_LIGHT_ONLY ? "light" : mode;
+    setThemeState(next);
+    writeTheme(next);
   }, []);
 
   const toggleTheme = useCallback(() => {
+    if (REPAIR_LIGHT_ONLY) {
+      // Stay light — sun icon still works as acknowledgment, no washout.
+      setThemeState("light");
+      writeTheme("light");
+      return;
+    }
     setThemeState((prev) => {
       const next: RepairThemeMode = prev === "light" ? "dark" : "light";
       writeTheme(next);
@@ -78,7 +92,7 @@ export function RepairThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ theme, setTheme, toggleTheme }),
+    () => ({ theme, setTheme, toggleTheme, lightOnly: REPAIR_LIGHT_ONLY }),
     [theme, setTheme, toggleTheme],
   );
 
@@ -92,11 +106,11 @@ export function RepairThemeProvider({ children }: { children: ReactNode }) {
 export function useRepairTheme(): Ctx {
   const ctx = useContext(RepairThemeContext);
   if (!ctx) {
-    // Safe fallback when used outside provider (should not happen under shell)
     return {
       theme: "light",
       setTheme: () => undefined,
       toggleTheme: () => undefined,
+      lightOnly: REPAIR_LIGHT_ONLY,
     };
   }
   return ctx;

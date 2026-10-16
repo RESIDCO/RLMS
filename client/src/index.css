@@ -112,15 +112,46 @@
   }
 }
 
-/* Owner repair UI (§A): light/dark surfaces with WCAG AA+ contrast.
-   Theme toggled in module nav; persisted per user. Status cell fills keep dark text. */
-.repair-owner-ui {
-  background-color: #f3f4f6;
-  color: #0f172a;
-}
-
-.repair-owner-ui--light {
+/* ── Shared Repair theme tokens (§H r7) ───────────────────────────────
+   Single AA light palette. Owner shell is light-only (no half-dark washout).
+   --dark class aliases the same tokens so legacy toggles cannot wash out. */
+.repair-owner-ui,
+.repair-owner-ui--light,
+.repair-owner-ui--dark {
   color-scheme: light;
+  /* Semantic repair tokens */
+  --repair-bg: #f3f4f6;
+  --repair-surface: #ffffff;
+  --repair-text: #0f172a;
+  --repair-muted: #334155;
+  --repair-muted-ok: #475569;
+  --repair-border: #94a3b8;
+  --repair-border-strong: #64748b;
+  --repair-input-bg: #ffffff;
+  --repair-input-text: #0f172a;
+  --repair-placeholder: #475569;
+  --repair-btn-primary-bg: #1e3a5f;
+  --repair-btn-primary-text: #ffffff;
+  --repair-btn-secondary-bg: #e2e8f0;
+  --repair-btn-secondary-text: #0f172a;
+  --repair-btn-disabled-bg: #e2e8f0;
+  --repair-btn-disabled-text: #334155; /* ≥4.5:1 on disabled bg */
+  --repair-checkbox-bg: #ffffff;
+  --repair-checkbox-border: #64748b;
+  --repair-checkbox-accent: #1e3a5f;
+  --repair-row-highlight: #fffbeb;
+  --repair-badge-bg: #fef3c7;
+  --repair-badge-text: #78350f;
+  --repair-brand: #8b1e1e;
+  --repair-brand-hover: #6f1818;
+  --repair-nav-bg: #243b55;
+  --repair-nav-border: #1a2b3f;
+  --repair-nav-active: #1e3a5f;
+  --repair-panel-muted: #e8eaed;
+  --repair-row-alt: #e8f4fc;
+  --repair-focus: #334155;
+  --repair-link: #1e40af;
+  /* Map shadcn/vars → light AA (even if --dark class present) */
   --background: 0 0% 100%;
   --foreground: 222 47% 11%;
   --card: 0 0% 100%;
@@ -141,113 +172,171 @@
   --destructive: 0 72% 40%;
   --destructive-foreground: 0 0% 100%;
   --button-outline: rgba(51, 65, 85, 0.45);
-  background-color: #f3f4f6;
-  color: #0f172a;
+  background-color: var(--repair-bg);
+  color: var(--repair-text);
 }
 
-.repair-owner-ui--dark {
-  color-scheme: dark;
-  --background: 222 47% 7%;
-  --foreground: 210 40% 96%;
-  --card: 217 33% 12%;
-  --card-foreground: 210 40% 96%;
-  --popover: 217 33% 12%;
-  --popover-foreground: 210 40% 96%;
-  --muted: 217 25% 16%;
-  --muted-foreground: 215 20% 72%;
-  --accent: 217 25% 18%;
-  --accent-foreground: 210 40% 96%;
-  --secondary: 217 25% 16%;
-  --secondary-foreground: 210 40% 96%;
-  --border: 215 16% 40%;
-  --input: 215 16% 40%;
-  --ring: 199 89% 48%;
-  --primary: 199 89% 48%;
-  --primary-foreground: 222 47% 7%;
-  --destructive: 0 72% 51%;
-  --destructive-foreground: 0 0% 100%;
-  --button-outline: rgba(148, 163, 184, 0.45);
-  background-color: #020617;
-  color: #f1f5f9;
+.repair-page {
+  background-color: var(--repair-bg);
+  color: var(--repair-text);
+  min-height: 100%;
+}
+.repair-text { color: var(--repair-text); }
+.repair-muted { color: var(--repair-muted); font-size: 0.875rem; }
+.repair-label { color: var(--repair-muted); font-size: 0.875rem; font-weight: 500; }
+.repair-value { color: var(--repair-text); font-size: 0.875rem; font-weight: 600; }
+.repair-link { color: var(--repair-link); font-weight: 600; text-decoration: underline; }
+.repair-crumb { color: var(--repair-muted); font-size: 0.875rem; }
+.repair-crumb:hover { text-decoration: underline; }
+.repair-crumb-current { color: var(--repair-text); font-size: 0.875rem; font-weight: 600; }
+
+.repair-panel,
+.repair-aa-panel {
+  background-color: var(--repair-surface);
+  color: var(--repair-text);
+  border-color: var(--repair-border-strong);
+}
+.repair-panel label,
+.repair-panel legend,
+.repair-aa-panel label,
+.repair-aa-panel legend {
+  color: var(--repair-muted) !important;
 }
 
-.repair-owner-ui--light input:not([type="checkbox"]):not([type="radio"]),
-.repair-owner-ui--light textarea,
-.repair-owner-ui--light select {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #64748b !important;
-  caret-color: #0f172a;
+.repair-input,
+.repair-select,
+.repair-textarea,
+.repair-owner-ui input:not([type="checkbox"]):not([type="radio"]),
+.repair-owner-ui textarea,
+.repair-owner-ui select {
+  background-color: var(--repair-input-bg) !important;
+  color: var(--repair-input-text) !important;
+  border-color: var(--repair-border-strong) !important;
+  caret-color: var(--repair-input-text);
+  color-scheme: light;
 }
-
-.repair-owner-ui--dark input:not([type="checkbox"]):not([type="radio"]),
-.repair-owner-ui--dark textarea,
-.repair-owner-ui--dark select {
-  background-color: #0f172a !important;
-  color: #f1f5f9 !important;
-  border-color: #64748b !important;
-  caret-color: #f1f5f9;
+.repair-input,
+.repair-textarea {
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 0.375rem;
 }
-
-.repair-owner-ui--light input::placeholder,
-.repair-owner-ui--light textarea::placeholder {
-  color: #475569 !important;
+.repair-select {
+  margin-top: 0.25rem;
+  height: 2.25rem;
+  width: 100%;
+  border-radius: 0.375rem;
+  border-width: 1px;
+  border-style: solid;
+  padding: 0 0.5rem;
+  font-size: 0.875rem;
+}
+.repair-owner-ui input::placeholder,
+.repair-owner-ui textarea::placeholder,
+.repair-input::placeholder,
+.repair-textarea::placeholder {
+  color: var(--repair-placeholder) !important;
   opacity: 1;
 }
 
-.repair-owner-ui--dark input::placeholder,
-.repair-owner-ui--dark textarea::placeholder {
-  color: #94a3b8 !important;
-  opacity: 1;
+.repair-btn-primary {
+  background-color: var(--repair-btn-primary-bg) !important;
+  color: var(--repair-btn-primary-text) !important;
+  border-color: var(--repair-btn-primary-bg) !important;
 }
-
-.repair-owner-ui--light label,
-.repair-owner-ui--light legend,
-.repair-owner-ui--light dt,
-.repair-owner-ui--light dd {
-  color: #0f172a;
+.repair-btn-secondary {
+  background-color: var(--repair-btn-secondary-bg) !important;
+  color: var(--repair-btn-secondary-text) !important;
+  border-color: var(--repair-border) !important;
 }
-
-.repair-owner-ui--dark label,
-.repair-owner-ui--dark legend,
-.repair-owner-ui--dark dt,
-.repair-owner-ui--dark dd {
-  color: #f1f5f9;
-}
-
-.repair-owner-ui--light button:disabled,
-.repair-owner-ui--light [data-disabled] {
+.repair-owner-ui button:disabled,
+.repair-owner-ui [data-disabled],
+.repair-owner-ui button[disabled] {
   opacity: 1 !important;
-  color: #334155 !important;
-  background-color: #e2e8f0 !important;
-  border-color: #94a3b8 !important;
+  color: var(--repair-btn-disabled-text) !important;
+  background-color: var(--repair-btn-disabled-bg) !important;
+  border-color: var(--repair-border) !important;
+  cursor: not-allowed;
 }
 
-.repair-owner-ui--dark button:disabled,
-.repair-owner-ui--dark [data-disabled] {
-  opacity: 1 !important;
-  color: #cbd5e1 !important;
-  background-color: #1e293b !important;
-  border-color: #64748b !important;
+/* Light native checkboxes with visible check (never solid black squares) */
+.repair-checkbox,
+.repair-owner-ui input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--repair-checkbox-accent);
+  background-color: var(--repair-checkbox-bg) !important;
+  border: 1px solid var(--repair-checkbox-border) !important;
+  color-scheme: light !important;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.repair-owner-ui input[type="checkbox"]:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  background-color: var(--repair-btn-disabled-bg) !important;
 }
 
-.repair-owner-ui--light [role="combobox"],
-.repair-owner-ui--light button[role="combobox"] {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #64748b !important;
+.repair-row-highlight,
+.repair-owner-ui .repair-aa-panel tr.bg-amber-50,
+.repair-owner-ui .repair-aa-panel .bg-amber-50,
+.repair-owner-ui .repair-panel tr.bg-amber-50 {
+  background-color: var(--repair-row-highlight) !important;
+  color: var(--repair-text) !important;
+}
+.repair-badge {
+  background-color: var(--repair-badge-bg);
+  color: var(--repair-badge-text);
+  border: 1px solid var(--repair-border);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
-.repair-owner-ui--dark [role="combobox"],
-.repair-owner-ui--dark button[role="combobox"] {
-  background-color: #0f172a !important;
-  color: #f1f5f9 !important;
-  border-color: #64748b !important;
+.repair-brand-bar {
+  background-color: var(--repair-brand);
+  color: #ffffff;
+}
+.repair-brand-fill { background-color: var(--repair-brand); color: #ffffff; }
+.repair-brand-fill:hover { background-color: var(--repair-brand-hover); }
+.repair-brand-text { color: var(--repair-brand); }
+.repair-brand-soft-bg { background-color: color-mix(in srgb, var(--repair-brand) 10%, white); }
+.repair-nav {
+  background-color: var(--repair-nav-bg);
+  color: #ffffff;
+  border-bottom: 1px solid var(--repair-nav-border);
+}
+.repair-nav-item { color: rgba(255, 255, 255, 0.95); }
+.repair-nav-item:hover { background-color: rgba(255, 255, 255, 0.1); }
+.repair-nav-item-active {
+  background-color: var(--repair-nav-active);
+  color: #ffffff;
+  font-weight: 600;
+}
+.repair-panel-muted-bg { background-color: var(--repair-panel-muted); }
+.repair-row-alt { background-color: var(--repair-row-alt); }
+.repair-page-bg { background-color: var(--repair-bg); color: var(--repair-text); }
+
+.repair-owner-ui label,
+.repair-owner-ui legend,
+.repair-owner-ui dt,
+.repair-owner-ui dd {
+  color: var(--repair-text);
+}
+.repair-owner-ui [role="combobox"],
+.repair-owner-ui button[role="combobox"] {
+  background-color: var(--repair-input-bg) !important;
+  color: var(--repair-input-text) !important;
+  border-color: var(--repair-border-strong) !important;
 }
 
-/* Radix Select/Popover portal — match active owner theme */
-body:has(.repair-owner-ui--light) [data-radix-select-content],
-body:has(.repair-owner-ui--light) [role="listbox"] {
+/* Radix portals — always light AA when a repair shell is on the page */
+body:has(.repair-owner-ui) [data-radix-select-content],
+body:has(.repair-owner-ui) [role="listbox"] {
   --popover: 0 0% 100%;
   --popover-foreground: 222 47% 11%;
   --background: 0 0% 100%;
@@ -256,55 +345,16 @@ body:has(.repair-owner-ui--light) [role="listbox"] {
   --muted-foreground: 215 19% 28%;
   --accent: 210 40% 96%;
   --accent-foreground: 222 47% 11%;
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #64748b !important;
+  background-color: var(--repair-surface, #ffffff) !important;
+  color: var(--repair-text, #0f172a) !important;
+  border-color: var(--repair-border-strong, #64748b) !important;
+  color-scheme: light;
 }
 
-body:has(.repair-owner-ui--dark) [data-radix-select-content],
-body:has(.repair-owner-ui--dark) [role="listbox"] {
-  --popover: 217 33% 12%;
-  --popover-foreground: 210 40% 96%;
-  --background: 217 33% 12%;
-  --foreground: 210 40% 96%;
-  --muted: 217 25% 16%;
-  --muted-foreground: 215 20% 72%;
-  --accent: 217 25% 18%;
-  --accent-foreground: 210 40% 96%;
-  background-color: #1e293b !important;
-  color: #f1f5f9 !important;
-  border-color: #64748b !important;
-}
-
-/* §H r6: white/amber AA panels keep near-black text + white inputs under dark theme */
-.repair-owner-ui .repair-aa-panel {
-  background-color: #ffffff;
-  color: #0f172a;
-}
-.repair-owner-ui .repair-aa-panel label,
-.repair-owner-ui .repair-aa-panel legend {
-  color: #334155 !important; /* slate-700 ≥4.5:1 on white */
-}
-.repair-owner-ui .repair-aa-panel input:not([type="checkbox"]):not([type="radio"]),
-.repair-owner-ui .repair-aa-panel textarea,
-.repair-owner-ui .repair-aa-panel select {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #64748b !important;
-  caret-color: #0f172a;
-}
-.repair-owner-ui .repair-aa-panel input::placeholder,
-.repair-owner-ui .repair-aa-panel textarea::placeholder {
-  color: #475569 !important;
-  opacity: 1;
-}
-.repair-owner-ui .repair-aa-panel tr.bg-amber-50,
-.repair-owner-ui .repair-aa-panel .bg-amber-50 {
-  background-color: #fffbeb !important;
-  color: #0f172a !important;
-}
 .repair-owner-ui .repair-aa-panel td,
-.repair-owner-ui .repair-aa-panel th {
+.repair-owner-ui .repair-aa-panel th,
+.repair-owner-ui .repair-panel td,
+.repair-owner-ui .repair-panel th {
   color: inherit;
 }
 

@@ -2,7 +2,7 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)  
 **Routes:** `/#/repair/invoices` · `/#/repair/invoices/:id` · `/#/repair/payments` · `/#/repair/months` · `/#/repair/shop/multi-car-invoice`  
-**Requires tip:** `61d6ce7` (§H r5) → r6 FF
+**Requires tip:** `11b7496` (§H r6) → r7 FF
 
 ## Defaults (open Q)
 
@@ -13,14 +13,16 @@
 | AP export | **Generic CSV** placeholder (documented columns; no accounting API) |
 | Pay-cycle cutoff | **Replaced** by owner/MP **accounting month close** (no end-of-month auto-bucket) |
 
-## Contrast (AA)
+## Contrast (AA) — shared repair theme (§H r7)
 
-Invoice review, queue, payments, months: **white panels** (`repair-aa-panel` + `shopAa`), near-black text (`slate-900` / `slate-700` labels) even under the dark owner theme.  
-Amber highlight = light row tint with dark text. White inputs + visible labels. Readable **Review** buttons.  
+**One shared token set** (`--repair-*` in `client/src/index.css`, `repairTokens.ts` / `repairUi` / `shopAa`). Covers text, muted, surfaces, borders, inputs, primary/secondary/disabled buttons, checkboxes, badges, row highlights.  
+**Light-only** for owner repair (`REPAIR_LIGHT_ONLY`) — sun toggle cannot put pages into a half-dark washout state.  
+Invoice queue: disabled **Create batch + export CSV** = light gray + ≥4.5:1 text + hint **Select invoices first**; light checkboxes with visible check; full page uses `--repair-bg` (no dark gutter).  
+Amber highlight = light row tint with dark text. Readable **Review** buttons.  
 Line table (BRC): **Line, Loc, Qty, C, AJOB, QA, Description, WM, RJOB, QR, Resp, Labor, Material, Amount** plus **Est amount** / **Inv amount**.  
 Money as `$36,732.04` (commas). Statuses as plain words (e.g. “Under owner review” — never `UNDER_OWNER_REVIEW` in the filter).  
 **Exceptions (N)** toggle — no long flag list; highlight only exception rows.  
-Axe smoke covers `/#/repair/invoices`, `/#/repair/payments`, `/#/repair/months`.
+**Guardrails:** `npm run repair:lint-colors` fails on hard-coded hex in repair client files (self-test catches `#000000`). Axe smoke sweeps **every** repair route page + disabled/checkbox AA ratios. Future bundles fail if contrast fails.
 
 ## Status flow (approval ≠ paid)
 

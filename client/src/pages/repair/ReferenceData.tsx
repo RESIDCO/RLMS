@@ -272,7 +272,7 @@ function RefDataBody() {
 
   const panel = dark
     ? "border-slate-600 bg-slate-800/80"
-    : "border-slate-400 bg-[#e8eaed]";
+    : "border-slate-400 repair-panel-muted-bg";
   const inputCls = dark
     ? "h-8 bg-slate-900 text-slate-100 border-slate-500"
     : "h-8 bg-white text-slate-900 border-slate-500";
@@ -305,7 +305,7 @@ function RefDataBody() {
       className={
         dark
           ? "min-h-full bg-slate-950 text-sm text-slate-100"
-          : "min-h-full bg-[#f3f4f6] text-sm text-slate-900"
+          : "min-h-full repair-page-bg text-sm"
       }
     >
       <WorkspaceBanner pageTitle="Reference Data" />
@@ -327,7 +327,7 @@ function RefDataBody() {
               }}
               className={
                 t.key === tableKey
-                  ? "px-2 py-1 rounded text-xs font-semibold bg-[#243b55] text-white"
+                  ? "px-2 py-1 rounded text-xs font-semibold repair-nav-item-active"
                   : dark
                     ? "px-2 py-1 rounded text-xs border border-slate-600 hover:bg-slate-800"
                     : "px-2 py-1 rounded text-xs border border-slate-400 hover:bg-white"

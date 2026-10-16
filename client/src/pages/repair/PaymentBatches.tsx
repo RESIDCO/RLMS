@@ -273,6 +273,7 @@ export default function PaymentBatches() {
                       <td className="px-2 py-2 text-slate-900">
                         <input
                           type="checkbox"
+                          className="repair-checkbox"
                           checked={selected.has(r.id)}
                           onChange={() => toggle(r.id)}
                         />

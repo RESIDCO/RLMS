@@ -944,7 +944,7 @@ function EstimatesHistoryBody() {
     }
   }
 
-  const panel = dark ? "border-slate-600 bg-slate-800/80" : "border-slate-400 bg-[#e8eaed]";
+  const panel = dark ? "border-slate-600 bg-slate-800/80" : "border-slate-400 repair-panel-muted-bg";
   const labelCls = dark ? "text-xs text-slate-100 font-semibold" : "text-xs text-slate-900 font-semibold";
   const inputCls = dark
     ? "h-8 bg-slate-900 text-slate-100 border-slate-500"
@@ -958,7 +958,7 @@ function EstimatesHistoryBody() {
       className={
         dark
           ? "min-h-full bg-slate-950 text-sm text-slate-100"
-          : "min-h-full bg-[#f3f4f6] text-sm text-slate-900"
+          : "min-h-full repair-page-bg text-sm"
       }
     >
       <WorkspaceBanner
@@ -1479,7 +1479,7 @@ function EstimatesHistoryBody() {
                                 : "bg-slate-800/80"
                               : idx % 2 === 0
                                 ? "bg-white"
-                                : "bg-[#e8f4fc]"
+                                : "repair-row-alt"
                           }
                         >
                           <td className={`px-2 py-1.5 border-b ${dark ? "border-slate-700" : "border-slate-200"}`}>

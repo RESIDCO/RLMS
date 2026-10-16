@@ -1,6 +1,6 @@
 /**
- * Owner repair pages: sticky module nav + theme scope (light/dark, per user).
- * Shop / lessee token pages do not use this shell.
+ * Owner repair pages: sticky module nav + shared AA theme scope.
+ * Light-only — dark preference is coerced so pages never enter a half-dark state.
  */
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -14,18 +14,20 @@ function ShellInner({
   children: ReactNode;
   className?: string;
 }) {
-  const { theme } = useRepairTheme();
+  const { theme, lightOnly } = useRepairTheme();
+  const mode = lightOnly || theme !== "dark" ? "light" : "dark";
   return (
     <div
       className={cn(
         "min-h-full flex flex-col repair-owner-ui",
-        theme === "dark" ? "repair-owner-ui--dark" : "repair-owner-ui--light",
+        mode === "dark" ? "repair-owner-ui--dark" : "repair-owner-ui--light",
         className,
       )}
-      data-repair-theme={theme}
+      data-repair-theme={mode}
+      data-repair-light-only={lightOnly ? "1" : "0"}
     >
       <RepairModuleNav />
-      <div className="flex-1 min-h-0">{children}</div>
+      <div className="flex-1 min-h-0 repair-page">{children}</div>
     </div>
   );
 }
@@ -35,7 +37,7 @@ export default function RepairOwnerShell({
   className,
 }: {
   children: ReactNode;
-  /** @deprecated Theme is user-controlled via nav toggle; prop ignored. */
+  /** @deprecated Theme is light-only for AA; prop ignored. */
   light?: boolean;
   className?: string;
 }) {

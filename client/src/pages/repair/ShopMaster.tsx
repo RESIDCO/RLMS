@@ -405,7 +405,7 @@ function ShopMasterBody() {
     }
   }
 
-  const panel = dark ? "border-slate-600 bg-slate-800/80" : "border-slate-400 bg-[#e8eaed]";
+  const panel = dark ? "border-slate-600 bg-slate-800/80" : "border-slate-400 repair-panel-muted-bg";
   const inputCls = dark
     ? "h-8 bg-slate-900 text-slate-100 border-slate-500"
     : "h-8 bg-white text-slate-900 border-slate-500";
@@ -422,7 +422,7 @@ function ShopMasterBody() {
       className={
         dark
           ? "min-h-full bg-slate-950 text-sm text-slate-100"
-          : "min-h-full bg-[#f3f4f6] text-sm text-slate-900"
+          : "min-h-full repair-page-bg text-sm"
       }
     >
       <WorkspaceBanner
@@ -431,7 +431,7 @@ function ShopMasterBody() {
           <Button
             type="button"
             size="sm"
-            className="h-7 bg-white text-[#8B1E1E] hover:bg-slate-100"
+            className="h-7 bg-white repair-brand-text hover:bg-slate-100"
             onClick={openCreate}
           >
             + New Shop
@@ -462,7 +462,7 @@ function ShopMasterBody() {
               type="button"
               className={`px-3 py-1.5 ${
                 viewMode === "grid"
-                  ? "bg-[#8B1E1E] text-white"
+                  ? "repair-brand-fill"
                   : dark
                     ? "bg-slate-900 text-slate-200"
                     : "bg-white text-slate-800"
@@ -476,7 +476,7 @@ function ShopMasterBody() {
               type="button"
               className={`px-3 py-1.5 border-l ${
                 viewMode === "map"
-                  ? "bg-[#8B1E1E] text-white"
+                  ? "repair-brand-fill"
                   : dark
                     ? "bg-slate-900 text-slate-200 border-slate-600"
                     : "bg-white text-slate-800 border-slate-300"
@@ -713,7 +713,7 @@ function ShopMasterBody() {
               </div>
               <p
                 className={`text-[11px] sm:col-span-2 ${
-                  dark ? "text-slate-400" : "text-slate-600"
+                  dark ? "text-slate-700" : "text-slate-600"
                 }`}
               >
                 Leave lat/long blank to geocode from City/ST via the bundled
@@ -737,7 +737,7 @@ function ShopMasterBody() {
 
             <div className="space-y-2">
               <Label className={labelCls}>Delivering line(s)</Label>
-              <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+              <p className={`text-[11px] ${dark ? "text-slate-700" : "text-slate-600"}`}>
                 Operating railroads (NARN / BTS) — not the billing-road table.
                 Type to search; add a manual mark if missing (flagged for review).
               </p>

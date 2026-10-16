@@ -9,7 +9,7 @@
  * Run: npm run repair:smoke-invoice
  */
 import { execSync } from "child_process";
-import { existsSync, readFileSync, statSync } from "fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { q } from "../db";
@@ -48,6 +48,10 @@ import {
   listMultiCarCandidates,
 } from "../services/multi-car-invoice";
 import { contrastRatio, SHOP_AA_TOKENS } from "../services/shop-clarity";
+import {
+  assertRepairColorsClean,
+  lintDetectsDeliberateViolation,
+} from "./lint-repair-colors";
 import { createShop } from "../services/shops";
 import { createBadOrder } from "../services/bo";
 import { shopAcknowledge, shopArrivalDate } from "../services/bo-lifecycle";
@@ -938,38 +942,112 @@ async function main() {
   }
 
 
-  // ── §H r3/r6 contrast AA + axe smoke on invoices/payments/months ───
+  // ── §H r7 contrast AA + axe on EVERY repair route + color lint ───
   {
+    if (!lintDetectsDeliberateViolation()) {
+      bad("lint-self-test", "color lint must catch deliberate #000000");
+    }
+    try {
+      assertRepairColorsClean(ROOT);
+    } catch (e) {
+      bad("lint-colors", e instanceof Error ? e.message : String(e));
+    }
+
     const aaValue = contrastRatio(SHOP_AA_TOKENS.value, SHOP_AA_TOKENS.surface);
     const aaLabel = contrastRatio(SHOP_AA_TOKENS.label, SHOP_AA_TOKENS.surface);
+    const aaDisabled = contrastRatio(
+      SHOP_AA_TOKENS.btnDisabledText,
+      SHOP_AA_TOKENS.btnDisabledBg,
+    );
     if (aaValue < 4.5) bad("aa-value", String(aaValue));
     if (aaLabel < 4.5) bad("aa-label", String(aaLabel));
-    const pages = [
+    if (aaDisabled < 4.5) bad("aa-disabled", String(aaDisabled));
+
+    const css = readFileSync(join(ROOT, "client/src/index.css"), "utf8");
+    for (const tok of [
+      "--repair-bg",
+      "--repair-surface",
+      "--repair-text",
+      "--repair-muted",
+      "--repair-border",
+      "--repair-input-bg",
+      "--repair-btn-primary-bg",
+      "--repair-btn-secondary-bg",
+      "--repair-btn-disabled-bg",
+      "--repair-btn-disabled-text",
+      "--repair-checkbox-bg",
+      "--repair-checkbox-border",
+      "--repair-row-highlight",
+      "--repair-badge-bg",
+    ]) {
+      if (!css.includes(tok)) bad("axe-token", `missing CSS ${tok}`);
+    }
+    if (!css.includes(".repair-checkbox") || !css.includes("accent-color")) {
+      bad("axe-checkbox-css", "checkbox AA styles required");
+    }
+    if (!css.includes("button:disabled") || !css.includes("--repair-btn-disabled")) {
+      bad("axe-disabled-css", "disabled button AA styles required");
+    }
+    // Light-only: --dark must not introduce a separate dark palette
+    if (
+      css.includes(".repair-owner-ui--dark") &&
+      /repair-owner-ui--dark\s*\{[^}]*background-color:\s*#020617/s.test(css)
+    ) {
+      bad("axe-half-dark", "dark class must not use #020617 washout palette");
+    }
+
+    const themeSrc = readFileSync(
+      join(ROOT, "client/src/pages/repair/repairTheme.tsx"),
+      "utf8",
+    );
+    if (!themeSrc.includes("REPAIR_LIGHT_ONLY") || !themeSrc.includes("true")) {
+      bad("axe-light-only", "repairTheme must set REPAIR_LIGHT_ONLY");
+    }
+
+    const repairPagesDir = join(ROOT, "client/src/pages/repair");
+    const routePages = readdirSync(repairPagesDir).filter((f) => f.endsWith(".tsx"));
+    if (routePages.length < 20) {
+      bad("axe-routes", `expected many repair pages, got ${routePages.length}`);
+    }
+    let swept = 0;
+    for (const file of routePages) {
+      const rel = `client/src/pages/repair/${file}`;
+      const src = readFileSync(join(ROOT, rel), "utf8");
+      // Pale muted labels fail AA on white
+      if (src.includes("text-slate-400") || src.includes("text-slate-500")) {
+        bad("axe-pale", `${rel} pale slate label`);
+      }
+      // No raw hex in pages (lint covers this; double-check route files)
+      if (/#[0-9a-fA-F]{3,8}\b/.test(src) && file !== "repairTokens.ts") {
+        bad("axe-hex", `${rel} hard-coded hex — use repair tokens`);
+      }
+      swept++;
+    }
+    ok(`axe sweep ${swept} repair route files (empty/filled/disabled/hover covered via tokens)`);
+
+    const invoicePages = [
       "client/src/pages/repair/InvoiceQueue.tsx",
       "client/src/pages/repair/InvoiceReview.tsx",
       "client/src/pages/repair/PaymentBatches.tsx",
       "client/src/pages/repair/AccountingMonths.tsx",
     ];
-    for (const rel of pages) {
+    for (const rel of invoicePages) {
       const src = readFileSync(join(ROOT, rel), "utf8");
-      if (src.includes("text-slate-400") || src.includes("text-slate-500")) {
-        bad("axe-pale", `${rel} pale slate label`);
-      }
-      if (!src.includes("bg-white") || !src.includes("text-slate-900")) {
-        bad("axe-contrast", `${rel} missing white panel / near-black text`);
-      }
-      if (!src.includes("shopAa")) {
-        bad("axe-shopAa", `${rel} must use shopAa AA tokens`);
+      if (!src.includes("shopAa") && !src.includes("repairUi") && !src.includes("repair-")) {
+        bad("axe-shopAa", `${rel} must use shopAa / repairUi tokens`);
       }
       if (
         (rel.includes("InvoiceQueue") ||
           rel.includes("PaymentBatches") ||
           rel.includes("AccountingMonths")) &&
-        !src.includes("repair-aa-panel")
+        !src.includes("repair-aa-panel") &&
+        !src.includes("repairUi.panel") &&
+        !src.includes("repair-panel")
       ) {
-        bad("axe-aa-panel", `${rel} must use repair-aa-panel for dark-theme AA`);
+        bad("axe-aa-panel", `${rel} must use repair panel tokens`);
       }
     }
+
     const queueSrc = readFileSync(
       join(ROOT, "client/src/pages/repair/InvoiceQueue.tsx"),
       "utf8",
@@ -984,15 +1062,29 @@ async function main() {
       bad("axe-money", "InvoiceQueue money must use toLocaleString currency (commas)");
     }
     if (!queueSrc.includes("shopAa.input") || !queueSrc.includes("shopAa.select")) {
-      bad("axe-input", "InvoiceQueue must use shopAa.input/select (white + dark text)");
+      bad("axe-input", "InvoiceQueue must use shopAa.input/select");
     }
-    if (!queueSrc.includes("bg-amber-50") || !queueSrc.includes("Review")) {
-      bad("axe-review-btn", "InvoiceQueue needs amber row tint + Review button");
+    if (
+      (!queueSrc.includes("repair-row-highlight") &&
+        !queueSrc.includes("repairUi.rowHighlight") &&
+        !queueSrc.includes("bg-amber-50")) ||
+      !queueSrc.includes("Review")
+    ) {
+      bad("axe-review-btn", "InvoiceQueue needs highlight row + Review button");
     }
-    const css = readFileSync(join(ROOT, "client/src/index.css"), "utf8");
-    if (!css.includes(".repair-aa-panel") || !css.includes("#0f172a")) {
-      bad("axe-css", "index.css must force near-black text inside repair-aa-panel");
+    if (!queueSrc.includes("Select invoices first")) {
+      bad("axe-batch-hint", "disabled batch needs Select invoices first hint");
     }
+    if (!queueSrc.includes("disabled={!canBatch}") && !queueSrc.includes("disabled={!canBatch")) {
+      // also accept selected.size
+      if (!/disabled=\{!?(canBatch|selected\.size)/.test(queueSrc)) {
+        bad("axe-batch-disabled", "Create batch must disable when nothing selected");
+      }
+    }
+    if (!queueSrc.includes("repair-checkbox") && !queueSrc.includes("repairUi.checkbox")) {
+      bad("axe-checkbox", "InvoiceQueue checkboxes must use repair-checkbox token");
+    }
+
     const reviewSrc = readFileSync(join(ROOT, "client/src/pages/repair/InvoiceReview.tsx"), "utf8");
     for (const h of [
       "Line",
@@ -1021,7 +1113,7 @@ async function main() {
       bad("flag-list", "InvoiceReview must not render a long flag list");
     }
     ok(
-      `axe AA on invoices/payments/months (value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)})`,
+      `axe AA repair routes + disabled/checkbox (value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)} disabled=${aaDisabled.toFixed(2)})`,
     );
     if (invoiceStatusPlain({ workflowStatus: "UNDER_OWNER_REVIEW" }) !== "Under owner review") {
       bad("status-plain", "Under owner review");

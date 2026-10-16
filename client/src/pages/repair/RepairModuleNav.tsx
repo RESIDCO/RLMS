@@ -1,11 +1,11 @@
 /**
  * Sticky repairSMART-style module nav for every owner /#/repair* page.
  * Unbuilt targets route to coming-soon placeholders (not 404).
- * Admin = gear at right end; Assignments removed; light/dark toggle (per user).
+ * Admin = gear at right end; Assignments removed; light-only AA theme (sun).
  */
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { ChevronDown, Moon, Settings, Sun } from "lucide-react";
+import { ChevronDown, Settings, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRepairTheme } from "./repairTheme";
 
@@ -137,8 +137,8 @@ function Dropdown({
         className={cn(
           "inline-flex items-center gap-1 px-3 py-2 text-sm whitespace-nowrap transition-colors",
           active
-            ? "bg-[#1e3a5f] text-white font-semibold"
-            : "text-white/95 hover:bg-white/10",
+            ? "repair-nav-item-active"
+            : "repair-nav-item hover:bg-white/10",
         )}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -181,7 +181,7 @@ function Dropdown({
 export default function RepairModuleNav() {
   const [location] = useLocation();
   const path = pathOf(location);
-  const { theme, toggleTheme } = useRepairTheme();
+  const { toggleTheme } = useRepairTheme();
   const adminActive =
     path.startsWith("/repair/admin") || path.startsWith("/repair/reference-data");
   const [gearOpen, setGearOpen] = useState(false);
@@ -198,7 +198,7 @@ export default function RepairModuleNav() {
   return (
     <nav
       aria-label="Repair module"
-      className="sticky top-0 z-50 flex flex-wrap items-stretch bg-[#243b55] text-white border-b border-[#1a2b3f] shadow-sm"
+      className="sticky top-0 z-50 flex flex-wrap items-stretch repair-nav shadow-sm"
       data-testid="repair-module-nav"
     >
       <div className="flex flex-wrap items-stretch flex-1 min-w-0">
@@ -222,8 +222,8 @@ export default function RepairModuleNav() {
               className={cn(
                 "inline-flex items-center px-3 py-2 text-sm whitespace-nowrap transition-colors",
                 active
-                  ? "bg-[#1e3a5f] text-white font-semibold"
-                  : "text-white/95 hover:bg-white/10",
+                  ? "repair-nav-item-active"
+                  : "repair-nav-item hover:bg-white/10",
               )}
             >
               {item.label}
@@ -235,17 +235,14 @@ export default function RepairModuleNav() {
       <div className="flex items-stretch ml-auto border-l border-white/10">
         <button
           type="button"
-          className="inline-flex items-center justify-center px-3 py-2 text-white/95 hover:bg-white/10 transition-colors"
-          aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-          title={theme === "light" ? "Dark mode" : "Light mode"}
+          className="inline-flex items-center justify-center px-3 py-2 repair-nav-item hover:bg-white/10 transition-colors"
+          aria-label="Repair UI uses light theme for contrast (AA)"
+          title="Light theme (AA) — dark mode disabled to prevent washout"
           onClick={toggleTheme}
           data-testid="repair-theme-toggle"
+          data-repair-light-only="1"
         >
-          {theme === "light" ? (
-            <Moon className="h-4 w-4" />
-          ) : (
-            <Sun className="h-4 w-4" />
-          )}
+          <Sun className="h-4 w-4" />
         </button>
         <div className="relative" ref={gearRef}>
           <button
@@ -256,8 +253,8 @@ export default function RepairModuleNav() {
             className={cn(
               "inline-flex items-center justify-center px-3 py-2 transition-colors",
               adminActive || gearOpen
-                ? "bg-[#1e3a5f] text-white"
-                : "text-white/95 hover:bg-white/10",
+                ? "repair-nav-item-active"
+                : "repair-nav-item hover:bg-white/10",
             )}
             data-testid="repair-admin-gear"
             onClick={() => setGearOpen((o) => !o)}

@@ -444,7 +444,7 @@ export function EstimateDataFile(props: Props) {
                   "text-left",
                   brcLessee
                     ? "bg-slate-800 text-white"
-                    : "bg-[#8b1e1e] text-white",
+                    : "repair-brand-fill",
                 )}
               >
                 {!brcLessee ? (
@@ -684,7 +684,7 @@ export function EstimateDataFile(props: Props) {
                 <tr
                   className={cn(
                     "font-semibold",
-                    brcLessee ? "bg-slate-800 text-white" : "bg-[#8b1e1e] text-white",
+                    brcLessee ? "bg-slate-800 text-white" : "repair-brand-fill",
                   )}
                 >
                   <td className="p-1.5" colSpan={brcLessee ? 11 : 12}>

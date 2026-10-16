@@ -91,7 +91,7 @@ function AdminBody() {
     }
   }
 
-  const panel = dark ? "border-slate-600 bg-slate-800/80" : "border-slate-400 bg-[#e8eaed]";
+  const panel = dark ? "border-slate-600 bg-slate-800/80" : "border-slate-400 repair-panel-muted-bg";
   const inputCls = dark
     ? "h-8 bg-slate-900 text-slate-100 border-slate-500"
     : "h-8 bg-white text-slate-900 border-slate-500";
@@ -101,7 +101,7 @@ function AdminBody() {
       className={
         dark
           ? "min-h-full bg-slate-950 text-sm text-slate-100"
-          : "min-h-full bg-[#f3f4f6] text-sm text-slate-900"
+          : "min-h-full repair-page-bg text-sm"
       }
     >
       <WorkspaceBanner pageTitle="Admin" />

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { apiRequest } from "@/lib/queryClient";
+import { REPAIR_THEME_HEX } from "./repairTokens";
 
 export type CatalogItem = { id: string; code: string; display_name: string };
 
@@ -290,8 +291,8 @@ export default function ShopMap({
     for (const p of pins) {
       const marker = L.circleMarker([p.lat, p.lng], {
         radius: pickMode ? 9 : 7,
-        color: "#8B1E1E",
-        fillColor: "#c43c3c",
+        color: REPAIR_THEME_HEX.brand,
+        fillColor: REPAIR_THEME_HEX.brandSoft,
         fillOpacity: 0.9,
         weight: 2,
       });
@@ -423,7 +424,7 @@ export default function ShopMap({
         )}
       </div>
 
-      <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+      <p className={`text-[11px] ${dark ? "text-slate-700" : "text-slate-600"}`}>
         {pins.length} pin{pins.length === 1 ? "" : "s"}
         {ungeocoded > 0
           ? ` · ${ungeocoded} shop${ungeocoded === 1 ? "" : "s"} missing coordinates (set City/ST or lat/long override)`

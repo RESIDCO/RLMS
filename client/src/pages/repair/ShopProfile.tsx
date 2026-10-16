@@ -91,7 +91,7 @@ function ShopProfileBody({ shopId }: { shopId: string }) {
   const panel = dark
     ? "border-slate-600 bg-slate-950/40"
     : "border-slate-300 bg-white";
-  const muted = dark ? "text-slate-400" : "text-slate-600";
+  const muted = dark ? "text-slate-700" : "text-slate-600";
 
   const [shop, setShop] = useState<Shop | null>(null);
   const [recent, setRecent] = useState<Recent | null>(null);

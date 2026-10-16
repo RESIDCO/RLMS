@@ -1305,7 +1305,7 @@ function BadOrdersBody() {
             {row.attachment_count}
           </button>
         ) : (
-          <span className="text-slate-400">0</span>
+          <span className="text-slate-700">0</span>
         );
       case "bo_date":
         return fmtDate(row.bo_date);
@@ -1425,7 +1425,7 @@ function BadOrdersBody() {
               value={from}
               onChange={(e) => setFrom(e.target.value)}
             />
-            <span className="text-xs text-slate-500">–</span>
+            <span className="text-xs text-slate-700">–</span>
             <Input
               type="date"
               className={`${inputCls} w-[138px] min-w-[138px]`}
@@ -1506,7 +1506,7 @@ function BadOrdersBody() {
                 size="sm"
                 className={`${inputCls} w-full justify-between font-normal h-8`}
               >
-                <span className="truncate text-left text-xs text-slate-500">
+                <span className="truncate text-left text-xs text-slate-700">
                   Type car number, B/O date, shop, or reason…
                 </span>
                 <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
@@ -1525,7 +1525,7 @@ function BadOrdersBody() {
               />
               <div className="max-h-64 overflow-auto">
                 {templateLoading && (
-                  <p className="text-xs text-slate-500 px-2 py-2">Loading…</p>
+                  <p className="text-xs text-slate-700 px-2 py-2">Loading…</p>
                 )}
                 {!templateLoading &&
                   filteredTemplateRows.map((r) => (
@@ -1538,18 +1538,18 @@ function BadOrdersBody() {
                       <span className="font-medium">
                         {r.car_mark} {r.car_number}
                       </span>
-                      <span className="text-slate-500">
+                      <span className="text-slate-700">
                         {" "}
                         · {fmtDate(r.bo_date) || "—"}
                       </span>
-                      <div className="text-[11px] text-slate-500 truncate">
+                      <div className="text-[11px] text-slate-700 truncate">
                         {r.shop_display || "—"}
                         {r.bad_order_reason ? ` · ${r.bad_order_reason}` : ""}
                       </div>
                     </button>
                   ))}
                 {!templateLoading && !filteredTemplateRows.length && (
-                  <p className="text-xs text-slate-500 px-2 py-2">
+                  <p className="text-xs text-slate-700 px-2 py-2">
                     No matching Bad Orders
                   </p>
                 )}
@@ -1622,7 +1622,7 @@ function BadOrdersBody() {
               <div>
                 <Label className="text-xs">
                   {reqLabel("Multi Car list")}{" "}
-                  <span className="font-normal text-slate-500">
+                  <span className="font-normal text-slate-700">
                     (one per line; blank initials use header Initials)
                   </span>
                 </Label>
@@ -1767,7 +1767,7 @@ function BadOrdersBody() {
                         </button>
                       ))}
                       {!filteredShops.length && (
-                        <p className="text-xs text-slate-500 px-2 py-2">No shops</p>
+                        <p className="text-xs text-slate-700 px-2 py-2">No shops</p>
                       )}
                     </div>
                   </PopoverContent>
@@ -1784,7 +1784,7 @@ function BadOrdersBody() {
                 </Button>
               </div>
               {selectedShop?.billing_road && (
-                <p className="text-[11px] text-slate-500 mt-0.5">
+                <p className="text-[11px] text-slate-700 mt-0.5">
                   Billing road from shop: {selectedShop.billing_road}
                 </p>
               )}
@@ -2023,7 +2023,7 @@ function BadOrdersBody() {
               <FileText className="h-3.5 w-3.5" />
               Documents & Photos
             </h3>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[11px] text-slate-700">
               {stagedDocs.length || linkedTemplateDocs.some((d) => d.include)
                 ? `${stagedDocs.length + linkedTemplateDocs.filter((d) => d.include).length} staged — saved with Submit`
                 : "Optional — attach before submit"}
@@ -2048,16 +2048,16 @@ function BadOrdersBody() {
                   />
                   <Paperclip className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate flex-1 font-medium">{d.label}</span>
-                  <span className="text-slate-500 truncate max-w-[140px]">
+                  <span className="text-slate-700 truncate max-w-[140px]">
                     {d.filename}
                   </span>
-                  <span className="text-slate-500">
+                  <span className="text-slate-700">
                     {DOC_CATEGORIES.find((c) => c.value === d.category)?.label ||
                       d.category}
                   </span>
                 </li>
               ))}
-              <li className="text-[11px] text-slate-500 px-1">
+              <li className="text-[11px] text-slate-700 px-1">
                 Untick to skip. Submit links the same stored file (no copy). Removing
                 later only unlinks from the new BO.
               </li>
@@ -2109,7 +2109,7 @@ function BadOrdersBody() {
             />
           </div>
           <div
-            className={`border border-dashed rounded px-3 py-4 text-center text-xs ${dark ? "border-slate-600 text-slate-400" : "border-slate-300 text-slate-500"}`}
+            className={`border border-dashed rounded px-3 py-4 text-center text-xs ${dark ? "border-slate-600 text-slate-700" : "border-slate-300 text-slate-700"}`}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
@@ -2127,12 +2127,12 @@ function BadOrdersBody() {
                 >
                   <Paperclip className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate flex-1">{d.file.name}</span>
-                  <span className="text-slate-500">
+                  <span className="text-slate-700">
                     {DOC_CATEGORIES.find((c) => c.value === d.category)?.label ||
                       d.category}
                   </span>
                   {d.comment ? (
-                    <span className="text-slate-500 truncate max-w-[120px]">
+                    <span className="text-slate-700 truncate max-w-[120px]">
                       {d.comment}
                     </span>
                   ) : null}
@@ -2184,7 +2184,7 @@ function BadOrdersBody() {
       <div className="px-3 py-2">
         <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
           <span className="font-semibold">Bad Order History</span>
-          <span className="text-xs text-slate-500">{total} rows</span>
+          <span className="text-xs text-slate-700">{total} rows</span>
           <div className="flex items-center gap-1 ml-2">
             <Button
               size="sm"
@@ -2335,7 +2335,7 @@ function BadOrdersBody() {
         </div>
 
         {showCreateFilter && (
-          <p className="text-xs text-slate-500 mb-1">
+          <p className="text-xs text-slate-700 mb-1">
             Drag a column header here to group by that column — or use Group by /
             per-column filter row below.
           </p>
@@ -2412,7 +2412,7 @@ function BadOrdersBody() {
                 <tr>
                   <td
                     colSpan={visibleCols.length + 1}
-                    className="p-4 text-center text-slate-500"
+                    className="p-4 text-center text-slate-700"
                   >
                     Loading…
                   </td>
@@ -2422,7 +2422,7 @@ function BadOrdersBody() {
                 <tr>
                   <td
                     colSpan={visibleCols.length + 1}
-                    className="p-4 text-center text-slate-500"
+                    className="p-4 text-center text-slate-700"
                   >
                     No Bad Orders match the current filters.
                   </td>
@@ -2483,7 +2483,7 @@ function BadOrdersBody() {
           </table>
         </div>
         {defaultViewId !== "default" && (
-          <p className="text-[10px] text-slate-500 mt-1">
+          <p className="text-[10px] text-slate-700 mt-1">
             Default view: {views.find((v) => v.id === defaultViewId)?.name ?? defaultViewId}
           </p>
         )}
@@ -2507,7 +2507,7 @@ function BadOrdersBody() {
             <DialogTitle className="text-base">Documents & Photos</DialogTitle>
           </DialogHeader>
           {!viewer?.docs.length ? (
-            <p className="text-sm text-slate-500">No documents on this Bad Order.</p>
+            <p className="text-sm text-slate-700">No documents on this Bad Order.</p>
           ) : (
             <ul className="space-y-2 max-h-[60vh] overflow-auto">
               {viewer.docs.map((d) => (
@@ -2525,7 +2525,7 @@ function BadOrdersBody() {
                     >
                       {d.original_filename || d.kind || d.id}
                     </a>
-                    <p className="text-[11px] text-slate-500">
+                    <p className="text-[11px] text-slate-700">
                       {d.category_code || d.kind}
                       {d.comment ? ` · ${d.comment}` : ""}
                     </p>

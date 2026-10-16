@@ -58,8 +58,8 @@ export default function LesseeDocuments() {
     (selected?.original_filename ?? "").toLowerCase().endsWith(".pdf");
 
   return (
-    <div className="min-h-screen bg-[#f7f4ef]">
-      <header className="bg-[#8B1E1E] text-white px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+    <div className="min-h-screen repair-page-bg">
+      <header className="repair-brand-bar px-4 py-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-xl font-bold tracking-wide">RESIDCO</div>
           <div className="text-sm text-white/85">
@@ -88,7 +88,7 @@ export default function LesseeDocuments() {
               key={d.id}
               type="button"
               className={`w-full text-left text-xs px-2 py-1.5 rounded ${
-                selectedId === d.id ? "bg-[#8B1E1E]/10 font-medium" : "hover:bg-muted"
+                selectedId === d.id ? "repair-brand-soft-bg font-medium" : "hover:bg-muted"
               }`}
               onClick={() => setSelectedId(d.id)}
             >

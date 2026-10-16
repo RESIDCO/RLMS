@@ -141,7 +141,7 @@ function BoReasonsBody() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h1 className="text-lg font-semibold">Bad Order Reasons</h1>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-700">
               Name + optional short name + active + sort order. Optional rule-based
               flag (Rule 1 / Rule 107 / Other). Seeded reasons only — do not invent
               unmarked AAR shopping reasons.

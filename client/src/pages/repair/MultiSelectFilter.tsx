@@ -192,7 +192,7 @@ export default function MultiSelectFilter({
             </span>
           ))}
           {chips.length > 6 && (
-            <span className="text-[10px] text-slate-500">+{chips.length - 6}</span>
+            <span className="text-[10px] text-slate-700">+{chips.length - 6}</span>
           )}
         </div>
       )}

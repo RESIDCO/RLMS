@@ -354,8 +354,8 @@ export default function LesseeApproval() {
   const readOnlyPage = !canDecide || Boolean(done);
 
   return (
-    <div className="min-h-screen bg-[#f4f6f8] text-slate-900 pb-28">
-      <header className="bg-[#8B1E1E] text-white px-4 py-3 shadow-sm">
+    <div className="min-h-screen repair-page-bg pb-28">
+      <header className="repair-brand-bar px-4 py-3 shadow-sm">
         <div className="max-w-6xl mx-auto flex flex-wrap items-end justify-between gap-2">
           <div>
             <div className="text-2xl font-bold tracking-[0.08em]">{workspace}</div>
@@ -575,7 +575,7 @@ export default function LesseeApproval() {
             {/* Use plain Button — AlertDialogAction auto-closes and raced submitting=false → silent failure */}
             <Button
               disabled={submitting}
-              className="bg-[#8B1E1E] hover:bg-[#6f1818] text-white"
+              className="repair-brand-fill"
               onClick={(e) => {
                 e.preventDefault();
                 void confirmDecide();

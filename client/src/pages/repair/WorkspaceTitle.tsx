@@ -47,7 +47,7 @@ export function WorkspaceBanner({
 }) {
   const workspace = useWorkspaceTitle();
   return (
-    <div className="bg-[#8B1E1E] text-white px-4 py-2 flex items-center justify-between">
+    <div className="repair-brand-bar px-4 py-2 flex items-center justify-between">
       <div className="font-semibold tracking-wide">
         {workspace} :: {pageTitle}
       </div>

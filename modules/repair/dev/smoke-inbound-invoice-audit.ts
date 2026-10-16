@@ -13,7 +13,6 @@ import { fileURLToPath } from "url";
 import { createBadOrder } from "../services/bo";
 import { issueEventLink } from "../services/event-links";
 import { shopAccept, shopOnHand } from "../services/shop-actions";
-import { uploadEstimate, approveEstimate, submitForApproval } from "../services/estimates";
 import {
   submitShopCrbInvoice,
   ingestCrbInvoiceFromInboundEmail,
@@ -25,6 +24,10 @@ import {
 import { getInboundEmailProvider } from "../providers/inbound-email";
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { parseAarFile, signedMaterialCents } from "../services/aar-parser";
+import {
+  ensureInvoiceOtpOff,
+  uploadSubmitAndApprove,
+} from "./smoke-shared-setup";
 
 const samplePath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -62,7 +65,7 @@ async function ensureTenantOwnerMark() {
 
 async function apaShopId(): Promise<string> {
   const { ensureDemoShop } = await import("../services/shops");
-  return ensureDemoShop({
+  const id = await ensureDemoShop({
     mark: "APA",
     legalName: "Apache Railway Shop",
     city: "Snowflake",
@@ -70,6 +73,8 @@ async function apaShopId(): Promise<string> {
     splc: "859370",
     actor: "smoke",
   });
+  await ensureInvoiceOtpOff(id);
+  return id;
 }
 
 async function seedEvent(opts: {
@@ -98,11 +103,9 @@ async function seedEvent(opts: {
   if (!oh.ok) throw new Error(oh.error);
 
   const sampleBytes = opts.withSampleEstimate ? readFileSync(samplePath) : undefined;
-  const est = await uploadEstimate({
+  const { estimateId } = await uploadSubmitAndApprove({
+    eventId,
     rawToken: token,
-    actorName: "shop",
-    actorEmail: "shop@smoke.invalid",
-    via: "event_link",
     file: sampleBytes
       ? {
           filename: "Sample_Shop_500byte_OFOX2609.txt",
@@ -123,11 +126,6 @@ async function seedEvent(opts: {
           },
         ],
   });
-  if (!est.ok) throw new Error(est.error);
-  const estimateId = String(est.estimate.id);
-  await submitForApproval({ estimateId, actor: "reviewer@smoke" });
-  const appr = await approveEstimate({ estimateId, actor: "reviewer@smoke" });
-  if (!appr.ok) throw new Error(appr.error);
 
   const { rows: tot } = await q(
     `SELECT total FROM repair.estimate_revisions
@@ -195,6 +193,18 @@ async function main() {
   await seedOfoxVcf();
   await ensureTenantOwnerMark();
   const shopId = await apaShopId();
+
+  // Prior runs leave OFOX 528313 invoices that trip DUPLICATE_SCOPE WARN on good intake
+  await q(
+    `UPDATE repair.invoices
+     SET deleted_at = now(), deleted_by = 'smoke-inbound-r10',
+         delete_reason = 'r10 isolate good-intake DUPLICATE_SCOPE'
+     WHERE tenant_id = $1
+       AND deleted_at IS NULL
+       AND upper(trim(car_mark)) = 'OFOX'
+       AND regexp_replace(coalesce(car_number, ''), '^0+', '') = '528313'`,
+    [DEFAULT_TENANT_ID],
+  );
 
   // ── 1) Good file (blank invoice_no → synthetic key + WARN) ─────────
   const good = await seedEvent({

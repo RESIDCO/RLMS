@@ -111,13 +111,17 @@ export async function createBadOrder(input: CreateBadOrderInput) {
     defaultBilling &&
     requestedBilling !== defaultBilling
   ) {
-    // Legacy API callers may still send an override + reason; owner UI no longer does.
+    // Override must be explicit + reasoned (recorded on the event).
+    // Silently falling back to the shop default hid bad API callers (§H r10).
     overrideReason = (input.billingRoadOverrideReason ?? "").trim();
     if (!overrideReason) {
-      billingRoad = defaultBilling;
-    } else {
-      billingRoad = requestedBilling;
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Billing road override requires a reason",
+      };
     }
+    billingRoad = requestedBilling;
   } else if (requestedBilling && !defaultBilling) {
     billingRoad = requestedBilling;
   }

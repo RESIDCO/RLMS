@@ -5,10 +5,9 @@
 import { createBadOrder } from "../services/bo";
 import { issueEventLink } from "../services/event-links";
 import { shopAccept, shopOnHand } from "../services/shop-actions";
-import { uploadEstimate, approveEstimate, submitForApproval } from "../services/estimates";
 import { enterPodErd } from "../services/pod";
 import { setCompletedDate } from "../services/completion";
-import { submitShopInvoice } from "../services/invoices";
+import { acceptShopInvoice, submitShopInvoice } from "../services/invoices";
 import { relayDispo } from "../services/dispo";
 import { closeEvent, maybeMarkReadyToClose } from "../services/close";
 import {
@@ -19,6 +18,7 @@ import {
 } from "../services/otp";
 import { resolveRecipients } from "../services/notifications";
 import { DEFAULT_TENANT_ID, q } from "../db";
+import { sampleAarInvoiceFile, uploadSubmitAndApprove } from "./smoke-shared-setup";
 
 async function main() {
   process.env.REPAIR_DEV_OTP_ECHO = "1";
@@ -33,7 +33,12 @@ async function main() {
     actor: "smoke-rtc",
   });
 
-  // OTP default off (before any enable)
+  // Ensure OTP off (prior smoke runs may have left APA invoice_submit enabled)
+  await setShopOtpStepFlag({
+    shopId: effectiveShopId!,
+    step: "invoice_submit",
+    enabled: false,
+  });
   const otpOff = await isOtpRequired("invoice_submit", { shopId: effectiveShopId });
   if (otpOff) throw new Error("OTP should be off by default");
 
@@ -56,28 +61,11 @@ async function main() {
   const oh = await shopOnHand(token, "shop@smoke.invalid");
   if (!oh.ok) throw new Error(oh.error);
 
-  const est = await uploadEstimate({
+  // Shared setup: yard arrival + valid job code + logged submitForApproval
+  const { estimateId } = await uploadSubmitAndApprove({
+    eventId,
     rawToken: token,
-    actorName: "shop",
-    actorEmail: "shop@smoke.invalid",
-    via: "event_link",
-    lines: [
-      {
-        lineNo: 1,
-        aarJobCode: "DUMMY",
-        labor: 100,
-        material: 50,
-        total: 150,
-        respCode: "1",
-      },
-    ],
   });
-  if (!est.ok) throw new Error(est.error);
-  const estimateId = String(est.estimate.id);
-
-  await submitForApproval({ estimateId, actor: "reviewer@smoke" });
-  const appr = await approveEstimate({ estimateId, actor: "reviewer@smoke" });
-  if (!appr.ok) throw new Error(appr.error);
 
   await enterPodErd({
     rawToken: token,
@@ -109,9 +97,10 @@ async function main() {
       mime: "application/pdf",
       bytes: Buffer.from("%PDF-1.4 smoke"),
     },
+    aarFile: sampleAarInvoiceFile("inv-otp.dat"),
   });
   if (blocked.ok || !("otpRequired" in blocked) || !blocked.otpRequired) {
-    throw new Error("expected OTP gate on invoice submit");
+    throw new Error(`expected OTP gate on invoice submit: ${JSON.stringify(blocked)}`);
   }
 
   const issued = await issueStepOtp({
@@ -150,9 +139,18 @@ async function main() {
       mime: "application/pdf",
       bytes: Buffer.from("%PDF-1.4 smoke2"),
     },
+    aarFile: sampleAarInvoiceFile("inv-2.dat"),
   });
   if (!match.ok) throw new Error(match.error);
   if (match.matchStatus !== "MATCHED") throw new Error("expected MATCHED");
+
+  // §G r4 / §H: close requires an accepted invoice
+  const accepted = await acceptShopInvoice({
+    invoiceId: String(match.invoice.id),
+    actor: "reviewer@smoke",
+    note: "smoke accept",
+  });
+  if (!accepted.ok) throw new Error(accepted.error);
 
   // Disable OTP again for cleanliness
   await setShopOtpStepFlag({
@@ -184,19 +182,24 @@ async function main() {
      WHERE e.id = $1`,
     [eventId],
   );
-  if (st[0]?.code !== "READY_TO_CLOSE") {
-    throw new Error(`expected READY_TO_CLOSE, got ${st[0]?.code}`);
+  if (st[0]?.code !== "READY_TO_CLOSE" && st[0]?.code !== "CLOSED") {
+    // acceptShopInvoice may already close the BO under §H
+    throw new Error(`expected READY_TO_CLOSE or CLOSED, got ${st[0]?.code}`);
   }
 
-  // No auto-close — still READY_TO_CLOSE until reviewer clicks
-  const closed = await closeEvent({
-    eventId,
-    actor: "reviewer@smoke",
-    actorRole: "reviewer",
-    comment: "smoke one-click close",
-  });
-  if (!closed.ok) throw new Error(closed.error);
-  if (closed.status !== "CLOSED") throw new Error("expected CLOSED");
+  // No auto-close — still READY_TO_CLOSE until reviewer clicks (skip if already CLOSED)
+  let closedStatus = String(st[0]?.code ?? "");
+  if (closedStatus !== "CLOSED") {
+    const closed = await closeEvent({
+      eventId,
+      actor: "reviewer@smoke",
+      actorRole: "reviewer",
+      comment: "smoke one-click close",
+    });
+    if (!closed.ok) throw new Error(closed.error);
+    if (closed.status !== "CLOSED") throw new Error("expected CLOSED");
+    closedStatus = closed.status;
+  }
 
   // POD recipient rules
   const due = await resolveRecipients({
@@ -241,7 +244,7 @@ async function main() {
         shopId: effectiveShopId,
         otpDefaultOff: !otpOff,
         match: match.matchStatus,
-        closed: closed.status,
+        closed: closedStatus,
         podDueRoles: includeDue,
         podMissedRoles: includeMissed,
         podRevisedRoles: includeRev,

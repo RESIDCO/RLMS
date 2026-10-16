@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§H r9 Stale smoke-bad-orders status** | Apply `rlms-phase1-owner-ui-h-invoice-r9.bundle` on tip **`5ca6d17`** (§H r8). **Stale smoke (not a status bug):** `repair:smoke-bad-orders` expected approve → `CLOSED`; canonical §G r5 flow is ASSIGNED → ACCEPTED → ON_HAND → APPROVED (lifecycle bridge `ACCEPTED_WORKING` until explicit CLOSED). Smoke updated; no status-logic change. Spec: [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md). |
+| **§H r10 Older smokes + tank/billing** | Apply `rlms-phase1-owner-ui-h-invoice-r10.bundle` on tip **`0677263`** (§H r9). **(1) Stale smokes:** pod/RTC/monthly/inbound ignored `submitForApproval` yard-arrival failure → `Expected AWAITING_APPROVAL, found QUEUED`; shared setup now yard-arrives + valid job code + logs submit. **(2) Tank gate:** `ensureTankPacket` skipped `not_tank_car` (smoke never set `is_tank_car` after MG11) — smoke marks tank; gate already blocks until VERIFIED. **(3) Real bug:** billing-road override silently fell back without reason (§C r2) — restore hard 400 + record reason. Spec: [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md). |
+| **§H r9 Stale smoke-bad-orders status** | Prior: `rlms-phase1-owner-ui-h-invoice-r9.bundle` on tip **`5ca6d17`** → **`0677263`**. Stale smoke-bad-orders status flow. |
 | **§H r8 Test fixes (theme input + ref tabs)** | Prior: `rlms-phase1-owner-ui-h-invoice-r8.bundle` on tip **`834ee37`** → **`5ca6d17`**. Typecheck/smoke only: nav-input AA + 12 ref tabs. |
 | **§H r7 Global contrast theme** | Prior: `rlms-phase1-owner-ui-h-invoice-r7.bundle` on tip **`11b7496`** → **`834ee37`**. Shared `--repair-*` tokens; light-only owner UI; disabled batch + checkboxes AA; `repair:lint-colors` + axe on every repair route. |
 | **§H r6 Invoice queue contrast + months cleanup** | Prior: `rlms-phase1-owner-ui-h-invoice-r6.bundle` on tip **`61d6ce7`** → **`11b7496`**. Queue/payments/months AA; plain status; months cleanup. |
@@ -107,7 +108,29 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+34 | **`rlms-phase1-owner-ui-h-invoice-r2.bundle`** (§H r2 line-match + payments UI) | **`ebf9400`** | → **(see README)** |
 | N+39 | **`rlms-phase1-owner-ui-h-invoice-r7.bundle`** (§H r7 global contrast theme) | **`11b7496`** | → **`834ee37`** |
 | N+40 | **`rlms-phase1-owner-ui-h-invoice-r8.bundle`** (§H r8 test fixes) | **`834ee37`** | → **`5ca6d17`** |
-| N+41 | **`rlms-phase1-owner-ui-h-invoice-r9.bundle`** (§H r9 stale smoke-bad-orders) | **`5ca6d17`** | → **(see README)** |
+| N+41 | **`rlms-phase1-owner-ui-h-invoice-r9.bundle`** (§H r9 stale smoke-bad-orders) | **`5ca6d17`** | → **`0677263`** |
+| N+42 | **`rlms-phase1-owner-ui-h-invoice-r10.bundle`** (§H r10 older smokes + tank/billing) | **`0677263`** | → **(see README)** |
+
+---
+
+## Apply §H r10 Older smokes + tank/billing (on tip `0677263`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect 0677263…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-h-invoice-r10.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-h-invoice-r10.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+npm run repair:lint-colors
+npm run repair:typecheck-client-invoice
+npm run repair:smoke-pod-invoice
+npm run repair:smoke-ready-to-close
+npm run repair:smoke-monthly-close
+npm run repair:smoke-inbound-invoice
+npm run repair:smoke-estimate-lifecycle
+npm run repair:smoke-ui-review
+npm run repair:smoke-invoice
+```
 
 ---
 

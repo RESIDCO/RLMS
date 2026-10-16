@@ -30,6 +30,7 @@ import {
   assertOutboundAllowed,
   setTankCarDocGate,
 } from "../services/tank-docs";
+import { setEventTankCar } from "../services/gap-lifecycle-05";
 import {
   queryEstimateGrid,
   exportEstimateGridCsv,
@@ -237,14 +238,26 @@ async function main() {
         if (c.ok) ok("threaded comment + notify");
         else bad("comment", JSON.stringify(c));
 
-        // Tank gate blocks outbound
+        // Tank gate blocks outbound (MG11: tank cars only — mark event first)
         await setTankCarDocGate({ enabled: true, actor: "smoke" });
-        await ensureTankPacket({
+        await setEventTankCar({
+          eventId: String(bo.event.id),
+          isTankCar: true,
+          actor: "smoke",
+        });
+        const ensured = await ensureTankPacket({
           eventId: String(bo.event.id),
           estimateId: estId,
           actor: "smoke",
         });
-        const blocked = await assertOutboundAllowed({ eventId: String(bo.event.id) });
+        if (!ensured.ok || ensured.skipped || !("packet" in ensured)) {
+          bad("tank ensure", JSON.stringify(ensured));
+        } else {
+          ok("tank packet created (PENDING_SHOP)");
+        }
+        const blocked = await assertOutboundAllowed({
+          eventId: String(bo.event.id),
+        });
         if (!blocked.ok) ok("outbound blocked until tank verified");
         else bad("tank block", "expected block");
 
@@ -256,6 +269,7 @@ async function main() {
           `SELECT id FROM repair.tank_doc_packets WHERE event_id = $1`,
           [bo.event.id],
         );
+        if (!packets[0]) bad("tank packet row", "missing after ensure/shop complete");
         const decided = await ownerDecideTankDocs({
           packetId: String(packets[0].id),
           decision: "VERIFY",
@@ -276,6 +290,8 @@ async function main() {
         });
         if (actual.ok) ok("actual outbound after tank verify");
         else bad("actual outbound", JSON.stringify(actual));
+        // Restore RESIDCO default OFF (MG3)
+        await setTankCarDocGate({ enabled: false, actor: "smoke" });
       }
     }
   }

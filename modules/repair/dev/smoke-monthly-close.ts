@@ -10,12 +10,16 @@ import { fileURLToPath } from "url";
 import { createBadOrder } from "../services/bo";
 import { issueEventLink } from "../services/event-links";
 import { shopAccept, shopOnHand } from "../services/shop-actions";
-import { uploadEstimate, approveEstimate, submitForApproval } from "../services/estimates";
 import { enterPodErd } from "../services/pod";
 import { setCompletedDate } from "../services/completion";
-import { submitShopInvoice } from "../services/invoices";
+import { acceptShopInvoice, submitShopInvoice } from "../services/invoices";
 import { relayDispo } from "../services/dispo";
 import { closeEvent, maybeMarkReadyToClose } from "../services/close";
+import {
+  ensureInvoiceOtpOff,
+  sampleAarInvoiceFile,
+  uploadSubmitAndApprove,
+} from "./smoke-shared-setup";
 import {
   sendLesseeApprovalRequest,
   approveViaLesseeLink,
@@ -55,6 +59,7 @@ async function seedClosedEventWithResp6(opts: {
     splc: "859370",
     actor: opts.actor,
   });
+  await ensureInvoiceOtpOff(shopId);
 
   // Local VCF stub only seeds ARSX 100001 — reuse it for every smoke event.
   const bo = await createBadOrder({
@@ -76,11 +81,9 @@ async function seedClosedEventWithResp6(opts: {
   if (!oh.ok) throw new Error(oh.error);
 
   const sampleBytes = opts.withShopAar ? readFileSync(samplePath) : undefined;
-  const est = await uploadEstimate({
+  const { estimateId, revisionId: uploadedRev } = await uploadSubmitAndApprove({
+    eventId,
     rawToken: token,
-    actorName: "shop",
-    actorEmail: "shop@smoke.invalid",
-    via: "event_link",
     file: sampleBytes
       ? {
           filename: "Sample_Shop_500byte_OFOX2609.txt",
@@ -115,9 +118,6 @@ async function seedClosedEventWithResp6(opts: {
           },
         ],
   });
-  if (!est.ok) throw new Error(est.error);
-  const estimateId = String(est.estimate.id);
-  const revisionId = String(est.revision.id);
 
   // If AAR sample uploaded, force at least one line to stay resp 6 (sample already has many)
   if (sampleBytes) {
@@ -126,9 +126,16 @@ async function seedClosedEventWithResp6(opts: {
     if (resp6 < 1) throw new Error("sample fixture missing resp 6 lines");
   }
 
-  await submitForApproval({ estimateId, actor: "reviewer@smoke" });
-  const appr = await approveEstimate({ estimateId, actor: "reviewer@smoke" });
-  if (!appr.ok) throw new Error(appr.error);
+  let revisionId = uploadedRev;
+  if (!revisionId) {
+    const { rows: revRows } = await q(
+      `SELECT id FROM repair.estimate_revisions
+       WHERE estimate_id = $1 ORDER BY rev_no DESC LIMIT 1`,
+      [estimateId],
+    );
+    revisionId = String(revRows[0]?.id ?? "");
+  }
+  if (!revisionId) throw new Error("missing revision after approve");
 
   await enterPodErd({
     rawToken: token,
@@ -160,8 +167,17 @@ async function seedClosedEventWithResp6(opts: {
       mime: "application/pdf",
       bytes: Buffer.from("%PDF-1.4 smoke"),
     },
+    aarFile: sampleAarInvoiceFile(`inv-${opts.carNumber}.dat`),
   });
   if (!inv.ok) throw new Error(inv.error);
+
+  // §G r4 / §H: close requires an accepted invoice
+  const accepted = await acceptShopInvoice({
+    invoiceId: String(inv.invoice.id),
+    actor: "reviewer@smoke",
+    note: "smoke monthly accept",
+  });
+  if (!accepted.ok) throw new Error(accepted.error);
 
   const dispo = await relayDispo({
     eventId,
@@ -173,12 +189,19 @@ async function seedClosedEventWithResp6(opts: {
 
   const rtc = await maybeMarkReadyToClose({ eventId, actor: opts.actor });
   if (!rtc.ok) throw new Error(rtc.error);
-  const closed = await closeEvent({
-    eventId,
-    actor: "reviewer@smoke",
-    actorRole: "reviewer",
-  });
-  if (!closed.ok) throw new Error(closed.error);
+  const { rows: stRows } = await q(
+    `SELECT s.code FROM repair.events e
+     JOIN repair.statuses s ON s.id = e.status_id WHERE e.id = $1`,
+    [eventId],
+  );
+  if (String(stRows[0]?.code) !== "CLOSED") {
+    const closed = await closeEvent({
+      eventId,
+      actor: "reviewer@smoke",
+      actorRole: "reviewer",
+    });
+    if (!closed.ok) throw new Error(closed.error);
+  }
 
   return { eventId, estimateId, revisionId, shopToken: token, total };
 }
@@ -211,6 +234,26 @@ async function main() {
        'crbTaxpayerId', ''
      )
      WHERE id = $1`,
+    [DEFAULT_TENANT_ID],
+  );
+  // Prior smoke runs leave billing period 2610 closed — reopen for isolation
+  await q(
+    `UPDATE repair.billing_periods
+     SET status = 'open', closed_at = NULL, closed_by = NULL
+     WHERE tenant_id = $1 AND account_month = '2610'`,
+    [DEFAULT_TENANT_ID],
+  );
+  // Lock leftover unlocked CLOSED events so collectRebillEvents only sees
+  // the events this smoke seeds (otherwise missing-map checks are polluted).
+  await q(
+    `UPDATE repair.events e
+     SET billing_locked_at = coalesce(e.billing_locked_at, now())
+     FROM repair.statuses s
+     WHERE e.status_id = s.id
+       AND e.tenant_id = $1
+       AND e.deleted_at IS NULL
+       AND e.billing_locked_at IS NULL
+       AND s.code = 'CLOSED'`,
     [DEFAULT_TENANT_ID],
   );
   const owner = await getCarOwnerMark();
@@ -283,6 +326,8 @@ async function main() {
   const viaLink = await approveViaLesseeLink({
     rawToken: sentA.token,
     decision: "APPROVE",
+    respondentName: "Smoke Lessee",
+    respondentEmail: "lessee@smoke.invalid",
   });
   if (!viaLink.ok) throw new Error(viaLink.error);
   if (viaLink.channel !== "url") throw new Error("expected url channel");
@@ -333,19 +378,45 @@ async function main() {
   if (confirmed.channel !== "email_reply") throw new Error("expected email_reply channel");
 
   // ── Missing mapping blocks export (Q15) ────────────────────────────
-  const deactivated = await softDeleteBilledPartyMapping({
-    id: String(mappingId),
-    actor: "smoke-mc",
-    reason: "smoke missing-mark check",
+  // Soft-delete every active LESSEE mapping that could resolve ARSX 100001
+  // (car key and that car's lease_rider fallback — prior runs may leave extras).
+  const { rows: riderRows } = await q(
+    `SELECT lease_rider FROM repair.cars_ref
+     WHERE upper(car_mark)='ARSX' AND car_number='100001' LIMIT 1`,
+  ).catch(() => ({ rows: [] as Array<{ lease_rider?: string }> }));
+  const leaseRider = riderRows[0]?.lease_rider
+    ? String(riderRows[0].lease_rider)
+    : null;
+  const activeMaps = await listBilledPartyMappings({
+    partyRole: "LESSEE",
+    includeInactive: false,
   });
-  if (!deactivated.ok) throw new Error(deactivated.error);
+  for (const m of activeMaps) {
+    const carHit =
+      String(m.car_mark ?? "").toUpperCase() === "ARSX" &&
+      String(m.car_number ?? "") === "100001";
+    const riderHit =
+      leaseRider != null &&
+      String(m.lease_rider ?? "") === leaseRider &&
+      (m.car_mark == null || m.car_number == null);
+    if (carHit || riderHit || String(m.id) === String(mappingId)) {
+      const deactivated = await softDeleteBilledPartyMapping({
+        id: String(m.id),
+        actor: "smoke-mc",
+        reason: "smoke missing-mark check",
+      });
+      if (!deactivated.ok) throw new Error(deactivated.error);
+    }
+  }
   const blocked = await runMonthlyClose({
     accountMonth: "2610",
     actor: "reviewer@smoke",
     exportDir: join(dirname(fileURLToPath(import.meta.url)), "exports"),
   });
   if (blocked.ok || blocked.status !== 422 || !("missing" in blocked)) {
-    throw new Error("expected export blocked when billed-party mapping missing");
+    throw new Error(
+      `expected export blocked when billed-party mapping missing: ${JSON.stringify(blocked)}`,
+    );
   }
 
   // Restore mapping

@@ -17,8 +17,7 @@ import { uploadEventDocument } from "../services/estimates";
 import { editHeaderField, listHeaderEdits } from "../services/header-edits";
 import { loadEstimateAar } from "../services/estimate-load";
 import { issueEventLink } from "../services/event-links";
-import { shopArrivalDate } from "../services/bo-lifecycle";
-import { shopAccept } from "../services/shop-actions";
+import { shopAcknowledge, shopArrivalDate } from "../services/bo-lifecycle";
 import { assertAtMostTwoDecimals } from "../services/money";
 
 function ok(label: string) {
@@ -172,7 +171,8 @@ async function main() {
     scope: "SHOP",
     actor: "smoke@local",
   });
-  const acc = await shopAccept(shopLink.token, "shop@smoke.local");
+  // shopAcknowledge sets bo.status=ACCEPTED (§G r5); shopAccept alone leaves ASSIGNED
+  const acc = await shopAcknowledge(shopLink.token, "shop@smoke.local");
   if (!acc.ok) bad("shop accept", acc.error);
   const arr = await shopArrivalDate(shopLink.token, "shop@smoke.local", "2026-10-01");
   if (!arr.ok) bad("arrival", arr.error);
@@ -206,17 +206,18 @@ async function main() {
   }
   ok(`Data File header present (${Object.keys(hdr).length} keys)`);
 
+  // billingParty is LOCK (void+resubmit); pencil an EDIT_AUDIT field instead
   const edit = await editHeaderField({
     estimateId: estId,
-    fieldKey: "billingParty",
-    newValue: "ZZZZ",
+    fieldKey: "kindOfCar",
+    newValue: "T",
     reason: "smoke pencil edit",
     actor: "reviewer@smoke.local",
     actorRole: "reviewer",
   });
   if (!edit.ok) bad("header edit", edit.error);
   const edits = await listHeaderEdits({ estimateId: estId });
-  if (!edits.some((e) => e.field_key === "billingParty" && e.new_value === "ZZZZ")) {
+  if (!edits.some((e) => e.field_key === "kindOfCar" && e.new_value === "T")) {
     bad("header audit", "edit not in audit log");
   }
   ok("audited header pencil edit (old→new, user, time)");

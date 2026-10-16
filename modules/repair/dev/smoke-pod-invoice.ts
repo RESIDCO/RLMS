@@ -5,7 +5,6 @@
 import { createBadOrder } from "../services/bo";
 import { issueEventLink } from "../services/event-links";
 import { shopAccept, shopOnHand } from "../services/shop-actions";
-import { uploadEstimate, approveEstimate, submitForApproval } from "../services/estimates";
 import { enterPodErd, runPodReminders } from "../services/pod";
 import { setCompletedDate, rollbackCompletedDate } from "../services/completion";
 import { submitShopInvoice } from "../services/invoices";
@@ -13,6 +12,7 @@ import { relayDispo } from "../services/dispo";
 import { upsertContact, addAdhocEmails } from "../services/contacts";
 import { resolveRecipients } from "../services/notifications";
 import { DEFAULT_TENANT_ID } from "../db";
+import { sampleAarInvoiceFile, uploadSubmitAndApprove } from "./smoke-shared-setup";
 
 async function main() {
   const bo = await createBadOrder({
@@ -35,28 +35,11 @@ async function main() {
   await shopAccept(token, "shop@smoke.invalid");
   await shopOnHand(token, "shop@smoke.invalid");
 
-  const est = await uploadEstimate({
+  // Shared setup: yard arrival + valid job code + logged submitForApproval
+  const { estimateId } = await uploadSubmitAndApprove({
+    eventId,
     rawToken: token,
-    actorName: "shop",
-    actorEmail: "shop@smoke.invalid",
-    via: "event_link",
-    lines: [
-      {
-        lineNo: 1,
-        aarJobCode: "DUMMY",
-        labor: 100,
-        material: 50,
-        total: 150,
-        respCode: "1",
-      },
-    ],
   });
-  if (!est.ok) throw new Error(est.error);
-  const estimateId = String(est.estimate.id);
-
-  await submitForApproval({ estimateId, actor: "reviewer@smoke" });
-  const appr = await approveEstimate({ estimateId, actor: "reviewer@smoke" });
-  if (!appr.ok) throw new Error(appr.error);
 
   const pod = await enterPodErd({
     rawToken: token,
@@ -74,6 +57,7 @@ async function main() {
   if (!done.ok) throw new Error(done.error);
   if (!done.estimate.locked) throw new Error("expected locked");
 
+  const aarFile = sampleAarInvoiceFile("inv-1.dat");
   const mismatch = await submitShopInvoice({
     rawToken: token,
     invoiceNo: "INV-1",
@@ -84,6 +68,7 @@ async function main() {
       mime: "application/pdf",
       bytes: Buffer.from("%PDF-1.4 smoke"),
     },
+    aarFile,
   });
   if (!mismatch.ok) throw new Error(mismatch.error);
   if (mismatch.matchStatus !== "MISMATCH" || !mismatch.mismatchFlagged) {
@@ -100,6 +85,7 @@ async function main() {
       mime: "application/pdf",
       bytes: Buffer.from("%PDF-1.4 smoke2"),
     },
+    aarFile: sampleAarInvoiceFile("inv-2.dat"),
   });
   if (!match.ok) throw new Error(match.error);
   if (match.matchStatus !== "MATCHED") throw new Error("expected MATCHED");

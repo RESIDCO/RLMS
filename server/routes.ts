@@ -924,6 +924,17 @@ export async function registerRoutes(
       }
       const in_transit_leased_count = in_program_count;
 
+      let leased_off_rent = 0;
+      try {
+        const { count, error: retagErr } = await supabaseAdmin
+          .from("v_kpi_preview_retag")
+          .select("railcar_id", { count: "exact", head: true });
+        if (retagErr) throw retagErr;
+        leased_off_rent = count ?? 0;
+      } catch (e: any) {
+        console.warn("[dashboard] leased_off_rent unavailable:", e?.message ?? e);
+      }
+
       let activeOlCount = sqlKpis ? Number(sqlKpis.riders_count) || 0 : 0;
       let dealsExpiring: { year: number; count: number }[] = Array.isArray(fleetSql?.deals_expiring)
         ? fleetSql.deals_expiring.map((d: any) => ({ year: Number(d.year), count: Number(d.count) || 0 }))
@@ -1068,6 +1079,7 @@ export async function registerRoutes(
               sale_unclear: Number(sqlKpis.sale_unclear) || 0,
               sold_tag_suspect: Number(sqlKpis.sold_tag_suspect) || 0,
               sold_missing_buyer: Number(sqlKpis.sold_missing_buyer) || 0,
+              leased_off_rent,
             }
           : {
           total_fleet: railcars.length,
@@ -1100,6 +1112,7 @@ export async function registerRoutes(
           lessee_count: carsByFleet.length,
           lease_authority: "asset_report",
           railcars_scanned: Number((scannedCountRes as any)?.count) || allRailcarsRaw.length,
+          leased_off_rent,
         },
         detail: {
           all_cars: [],

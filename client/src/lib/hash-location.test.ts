@@ -3,6 +3,7 @@
 
 import { contactsDirectoryPath, readDirectoryNavState } from "./directory-nav";
 import { isDirectoryLeaseReviewTab } from "./directory-review-tab";
+import { parseHashSearch } from "./hash-location";
 
 let passed = 0;
 let failed = 0;
@@ -31,6 +32,10 @@ ok(
   "add=1 opens the add-contact dialog",
 );
 ok(readDirectoryNavState(new URLSearchParams("add=1")).addContact === true, "add=1 parses");
+
+const kpiQs = parseHashSearch("#/kpi/cars?bucket=idle&car=5");
+ok(kpiQs.get("bucket") === "idle" && kpiQs.get("car") === "5", "#/kpi/cars?bucket=idle&car=5 → bucket=idle, car=5");
+ok(parseHashSearch("#/kpi/cars").get("bucket") == null, "hash without query is empty");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

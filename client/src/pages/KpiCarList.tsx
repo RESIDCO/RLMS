@@ -1,5 +1,7 @@
-import { Fragment, useMemo, useState } from "react";
-import { Link, useLocation, useSearch } from "wouter";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "wouter";
+import { useHashSearch } from "@/lib/hash-location";
+import { olPath } from "@/lib/browse-nav";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -18,7 +20,7 @@ import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { KpiCarSheet } from "@/pages/KpiCarSheet";
 
 type Row = {
@@ -43,7 +45,7 @@ function qsFrom(sp: URLSearchParams) {
 }
 
 export function KpiCarListPage() {
-  const search = useSearch();
+  const search = useHashSearch();
   const [, navigate] = useLocation();
   const canEdit = useCanEdit();
   const { toast } = useToast();
@@ -111,6 +113,31 @@ export function KpiCarListPage() {
   const [rentDate, setRentDate] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [qDraft, setQDraft] = useState(q);
+  const sheetPushedRef = useRef(false);
+
+  const listPathWithoutCar = useMemo(() => {
+    const next = new URLSearchParams(sp);
+    next.delete("car");
+    return `/kpi/cars${qsFrom(next)}`;
+  }, [sp]);
+
+  useEffect(() => {
+    setQDraft(q);
+  }, [q]);
+
+  useLayoutEffect(() => {
+    if (carId) return;
+    const y = sessionStorage.getItem(`rlms:kpi-scroll:${listPathWithoutCar}`);
+    if (y) window.scrollTo(0, Number(y) || 0);
+  }, [carId, listPathWithoutCar]);
+
+  useEffect(() => {
+    const persist = () => {
+      sessionStorage.setItem(`rlms:kpi-scroll:${listPathWithoutCar}`, String(window.scrollY));
+    };
+    window.addEventListener("scroll", persist, { passive: true });
+    return () => window.removeEventListener("scroll", persist);
+  }, [listPathWithoutCar]);
 
   const selectedIds = async () => {
     if (selectAllMatching) {
@@ -285,7 +312,7 @@ export function KpiCarListPage() {
           <Button size="sm" onClick={() => setParams({ q: qDraft })}>Apply filters</Button>
         </div>
 
-        {canEdit && (
+        {canEdit && bucket !== "leased_off_rent" && (
           <div className="flex flex-wrap gap-2 items-end border border-border rounded-md p-3">
             <div className="text-sm">{selectAllMatching ? `All ${total} matching` : `${selected.size} selected`}</div>
             <Button size="sm" variant="outline" onClick={() => setSelectAllMatching(true)}>Select all {total} matching</Button>
@@ -354,6 +381,11 @@ export function KpiCarListPage() {
           </div>
         )}
 
+        {bucket === "leased_off_rent" && (
+          <div className="text-sm rounded-md border border-border p-3">
+            Retag preview (tagged Leased, off rent). Apply only after sign-off — this page does not write tags.
+          </div>
+        )}
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : (
@@ -425,7 +457,11 @@ export function KpiCarListPage() {
                               <button
                                 type="button"
                                 className="underline"
-                                onClick={() => setParams({ car: String(r.railcar_id) }, false)}
+                                onClick={() => {
+                                  sessionStorage.setItem(`rlms:kpi-scroll:${listPathWithoutCar}`, String(window.scrollY));
+                                  sheetPushedRef.current = true;
+                                  setParams({ car: String(r.railcar_id) }, false);
+                                }}
                               >
                                 {r.car}
                               </button>
@@ -435,9 +471,22 @@ export function KpiCarListPage() {
                             <td>{r.derived_status ?? "—"}</td>
                             <td>
                               {r.current_lease ? (
-                                <Link href={`/browse/ol/${encodeURIComponent(r.current_lease)}`} className="underline">
-                                  {r.current_lease}
-                                </Link>
+                                <span className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    className="underline"
+                                    onClick={() => setParams({ lease: r.current_lease })}
+                                  >
+                                    {r.current_lease}
+                                  </button>
+                                  <Link
+                                    href={olPath(r.current_lease)}
+                                    title="Open in Browse"
+                                    className="text-muted-foreground hover:text-primary"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </Link>
+                                </span>
                               ) : "—"}
                             </td>
                             <td>{r.lessee ?? "—"}</td>
@@ -469,8 +518,18 @@ export function KpiCarListPage() {
       <KpiCarSheet
         carId={carId}
         bucket={bucket}
-        fromQs={qsFrom(sp)}
-        onClose={() => setParams({ car: null }, false)}
+        fromPath={listPathWithoutCar}
+        onClose={() => {
+          if (!carId) return;
+          if (sheetPushedRef.current) {
+            sheetPushedRef.current = false;
+            window.history.back();
+            return;
+          }
+          const next = new URLSearchParams(sp);
+          next.delete("car");
+          navigate(`/kpi/cars${qsFrom(next)}`, { replace: true });
+        }}
       />
     </div>
   );

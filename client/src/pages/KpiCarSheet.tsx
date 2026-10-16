@@ -41,12 +41,12 @@ function KpiDeltaBlock({ delta }: { delta: any[] | undefined }) {
 export function KpiCarSheet({
   carId,
   bucket,
-  fromQs,
+  fromPath,
   onClose,
 }: {
   carId: number | null;
   bucket: string;
-  fromQs: string;
+  fromPath: string;
   onClose: () => void;
 }) {
   const canEdit = useCanEdit();
@@ -74,7 +74,7 @@ export function KpiCarSheet({
 
   const row = data?.row;
   const ids = carId ? [carId] : [];
-  const from = encodeURIComponent(`/kpi/cars${fromQs.startsWith("?") ? fromQs : `?${fromQs}`}`);
+  const from = encodeURIComponent(fromPath.startsWith("/") ? fromPath : `/${fromPath}`);
 
   const runPreview = useMutation({
     mutationFn: async (nextKind: NonNullable<typeof kind>) => {
@@ -155,12 +155,20 @@ export function KpiCarSheet({
               </div>
             </div>
 
-            <Link
-              href={`${carPath(row.railcar_id)}?from=${from}&focus=assignment`}
-              className="text-sm underline"
-            >
-              Edit assignment on car page
-            </Link>
+            <div className="flex flex-col gap-1">
+              <Link
+                href={`${carPath(row.railcar_id)}?from=${from}`}
+                className="text-sm underline"
+              >
+                Open full page
+              </Link>
+              <Link
+                href={`${carPath(row.railcar_id)}?from=${from}&focus=assignment`}
+                className="text-sm underline"
+              >
+                Edit assignment on car page
+              </Link>
+            </div>
 
             {canEdit && (
               <>

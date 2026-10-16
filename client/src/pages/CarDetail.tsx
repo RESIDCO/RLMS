@@ -1,4 +1,5 @@
-import { Link, useRoute, useLocation, useSearch } from "wouter";
+import { Link, useRoute, useLocation } from "wouter";
+import { useHashSearch } from "@/lib/hash-location";
 import { KPI_TITLES } from "@shared/kpi-buckets";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -37,7 +38,7 @@ type DetailPayload = {
 
 export default function CarDetailPage() {
   const [, navigate] = useLocation();
-  const searchQs = useSearch();
+  const searchQs = useHashSearch();
   const canEdit = useCanEdit();
   const { toast } = useToast();
   const queryClient = useQueryClient();

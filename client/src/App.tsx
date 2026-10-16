@@ -57,6 +57,8 @@ import ShopEstimateDetail from "@/pages/repair/ShopEstimateDetail";
 import InvoiceQueue from "@/pages/repair/InvoiceQueue";
 import InvoiceReview from "@/pages/repair/InvoiceReview";
 import PaymentBatches from "@/pages/repair/PaymentBatches";
+import AccountingMonths from "@/pages/repair/AccountingMonths";
+import ShopMultiCarInvoice from "@/pages/repair/ShopMultiCarInvoice";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -144,6 +146,8 @@ function AppRouter() {
       <Route path="/repair/invoices/:id" component={InvoiceReview} />
       <Route path="/repair/invoices" component={InvoiceQueue} />
       <Route path="/repair/payments" component={PaymentBatches} />
+      <Route path="/repair/months" component={AccountingMonths} />
+      <Route path="/repair/shop/multi-car-invoice" component={ShopMultiCarInvoice} />
       <Route path="/repair/assignments" component={RepairComingSoon} />
       <Route path="/repair/shops/:id" component={ShopProfile} />
       <Route path="/repair/shops" component={ShopMaster} />

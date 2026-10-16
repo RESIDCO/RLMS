@@ -266,6 +266,20 @@ import {
   getPaymentBatchDetail,
 } from "./services/invoice-review";
 import {
+  ensureOpenAccountingMonth,
+  listAccountingMonths,
+  getAccountingMonth,
+  previewMonthClose,
+  closeAccountingMonth,
+  reopenAccountingMonth,
+} from "./services/accounting-months";
+import {
+  listMultiCarCandidates,
+  createMultiCarInvoice,
+  listInvoiceCars,
+  decideInvoiceCar,
+} from "./services/multi-car-invoice";
+import {
   submitShopCrbInvoice,
   ingestCrbInvoiceFromInboundEmail,
   decideInvoiceReview,
@@ -2789,6 +2803,136 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       paidAt: String(req.body?.paidAt ?? ""),
       paidRef: String(req.body?.paidRef ?? ""),
       paidMethod: req.body?.paidMethod ? String(req.body.paidMethod) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** §H r3 accounting months */
+  app.get("/api/repair/accounting-months", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    await ensureOpenAccountingMonth({ actor: actorFrom(req) });
+    return res.json({ months: await listAccountingMonths() });
+  });
+
+  app.get("/api/repair/accounting-months/:id", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const month = await getAccountingMonth({ monthId: String(req.params.id) });
+    if (!month) return res.status(404).json({ error: "Not found" });
+    const preview = month.status === "OPEN"
+      ? await previewMonthClose({ monthId: month.id })
+      : null;
+    return res.json({
+      month,
+      totals: preview && preview.ok ? preview.totals : month.closeTotals,
+    });
+  });
+
+  app.post("/api/repair/accounting-months/:id/close", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await closeAccountingMonth({
+      monthId: String(req.params.id),
+      actor: actorFrom(req),
+      confirm: Boolean(req.body?.confirm),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/accounting-months/:id/reopen", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await reopenAccountingMonth({
+      monthId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: String(req.body?.reason ?? ""),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  /** §H r3 multi-car */
+  app.get("/api/repair/shop/multi-car-candidates", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const actor = shopActorFrom(req);
+    const ctx = await resolveShopContext(actor);
+    if (!ctx.ok) return res.status(ctx.status).json({ error: ctx.error });
+    const candidates = await listMultiCarCandidates({
+      shopId: String(ctx.shop.id),
+      tenantId: ctx.tenantId,
+    });
+    return res.json({ candidates, readOnly: ctx.readOnly });
+  });
+
+  app.post("/api/repair/shop/multi-car-invoice", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const actor = shopActorFrom(req);
+    const ctx = await resolveShopContext(actor);
+    if (!ctx.ok) return res.status(ctx.status).json({ error: ctx.error });
+    if (ctx.readOnly) return res.status(403).json({ error: "Read-only shop view" });
+    const eventIds = Array.isArray(req.body?.eventIds)
+      ? req.body.eventIds.map((x: unknown) => String(x))
+      : [];
+    const pdfB64 = req.body?.pdfBase64 ? String(req.body.pdfBase64) : "";
+    const aarB64 = req.body?.aarBase64 ? String(req.body.aarBase64) : "";
+    if (!pdfB64 || !aarB64) {
+      return res.status(400).json({ error: "pdfBase64 and aarBase64 required" });
+    }
+    const result = await createMultiCarInvoice({
+      shopId: String(ctx.shop.id),
+      eventIds,
+      invoiceNo: String(req.body?.invoiceNo ?? ""),
+      actor: actor.actor || actorFrom(req),
+      total: req.body?.total != null ? Number(req.body.total) : undefined,
+      file: {
+        filename: String(req.body?.pdfFilename ?? "invoice.pdf"),
+        mime: "application/pdf",
+        bytes: Buffer.from(pdfB64, "base64"),
+      },
+      aarFile: {
+        filename: String(req.body?.aarFilename ?? "invoice.txt"),
+        mime: "text/plain",
+        bytes: Buffer.from(aarB64, "base64"),
+      },
+      tenantId: ctx.tenantId,
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        error: result.error,
+        hardRejects: result.hardRejects,
+      });
+    }
+    return res.json(result);
+  });
+
+  app.get("/api/repair/invoices/:id/cars", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({
+      cars: await listInvoiceCars({ invoiceId: String(req.params.id) }),
+    });
+  });
+
+  app.post("/api/repair/invoices/:id/cars/:carId/decide", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const action = String(req.body?.action ?? "");
+    if (action !== "reject" && action !== "short_pay") {
+      return res.status(400).json({ error: "action must be reject or short_pay" });
+    }
+    const result = await decideInvoiceCar({
+      invoiceId: String(req.params.id),
+      invoiceCarId: String(req.params.carId),
+      actor: actorFrom(req),
+      action,
+      reason: String(req.body?.reason ?? ""),
+      shortPayCents:
+        req.body?.shortPayCents != null ? Number(req.body.shortPayCents) : undefined,
     });
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);

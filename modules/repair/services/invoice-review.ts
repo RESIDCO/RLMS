@@ -35,6 +35,9 @@ export const DEFAULT_TOLERANCE_PCT_BP = 0; // basis points
 export const DEFAULT_PAYMENT_TERMS_DAYS = 30;
 
 export type InvoicePaymentStatus =
+  | "APPROVED_IN_OPEN_MONTH"
+  | "MONTH_CLOSED"
+  | "SENT_TO_AP"
   | "PAYABLE"
   | "IN_BATCH"
   | "EXPORTED"
@@ -565,7 +568,9 @@ export async function listOwnerInvoiceQueue(opts: {
             i.workflow_status, i.payment_status, i.match_status, i.mismatch_flagged,
             i.created_at, i.decided_at, i.due_date, i.paid_at, i.paid_ref,
             i.short_pay_cents, i.approved_amount_cents, i.flags_summary,
-            i.entity_code, i.shop_id,
+            i.entity_code, i.shop_id, i.is_multi_car, i.car_count,
+            i.accounting_month_id,
+            am.month_label,
             e.car_mark, e.car_number, e.id AS event_id,
             sh.name AS shop_name, sh.shop_mark, sh.reporting_mark,
             ROUND(COALESCE(i.total,0) * 100)::bigint AS invoice_cents,
@@ -575,12 +580,15 @@ export async function listOwnerInvoiceQueue(opts: {
      FROM repair.invoices i
      JOIN repair.events e ON e.id = i.event_id
      LEFT JOIN repair.shops sh ON sh.id = i.shop_id
+     LEFT JOIN repair.accounting_months am ON am.id = i.accounting_month_id
      WHERE i.tenant_id = $1 AND i.deleted_at IS NULL
        AND ($2::uuid IS NULL OR i.shop_id = $2)
        AND (
          $3::text IS NULL
          OR i.workflow_status = $3
          OR i.payment_status = $3
+         OR ($3 = 'PAYABLE' AND i.payment_status IN ('MONTH_CLOSED','PAYABLE'))
+         OR ($3 = 'MONTH_CLOSED' AND i.payment_status IN ('MONTH_CLOSED','PAYABLE'))
        )
      ORDER BY i.created_at DESC
      LIMIT $4`,
@@ -630,7 +638,27 @@ export async function listOwnerInvoiceQueue(opts: {
       shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
       approvedAmountCents:
         r.approved_amount_cents != null ? Number(r.approved_amount_cents) : null,
+      netPayableCents:
+        r.approved_amount_cents != null
+          ? Number(r.approved_amount_cents)
+          : invC - (r.short_pay_cents != null ? Number(r.short_pay_cents) : 0),
+      isMultiCar: Boolean(r.is_multi_car),
+      carCount: Number(r.car_count ?? 1),
+      monthLabel: r.month_label != null ? String(r.month_label) : null,
+      accountingMonthId:
+        r.accounting_month_id != null ? String(r.accounting_month_id) : null,
+      statusPlain: null as string | null,
       tolerance: tol,
+    });
+  }
+  const { invoiceStatusPlain } = await import("./accounting-months");
+  for (const row of out) {
+    row.statusPlain = invoiceStatusPlain({
+      workflowStatus: row.workflowStatus,
+      paymentStatus: row.paymentStatus,
+      monthLabel: row.monthLabel,
+      paidAt: row.paidAt,
+      paidRef: row.paidRef,
     });
   }
   return out;
@@ -702,6 +730,25 @@ export async function getInvoiceReviewBundle(opts: {
     validation.hardRejects.length === 0 &&
     (tolCheck.within || Boolean(inv.over_tolerance_reason));
 
+  const { listInvoiceCars } = await import("./multi-car-invoice");
+  const cars = await listInvoiceCars({ invoiceId: opts.invoiceId, tenantId });
+  const { rows: monthRows } = await q(
+    `SELECT month_label FROM repair.accounting_months WHERE id = $1`,
+    [inv.accounting_month_id],
+  ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+  const monthLabel =
+    monthRows[0]?.month_label != null ? String(monthRows[0].month_label) : null;
+  const { invoiceStatusPlain } = await import("./accounting-months");
+  const { formatCentsAsMoney } = await import("./money");
+  const netPayable =
+    inv.approved_amount_cents != null
+      ? Number(inv.approved_amount_cents)
+      : inv.short_pay_cents != null
+        ? invoiceCents - Number(inv.short_pay_cents)
+        : null;
+  const shortPay =
+    inv.short_pay_cents != null ? Number(inv.short_pay_cents) : null;
+
   return {
     ok: true as const,
     invoice: {
@@ -715,10 +762,21 @@ export async function getInvoiceReviewBundle(opts: {
       estimateCents,
       workflowStatus: inv.workflow_status ? String(inv.workflow_status) : null,
       paymentStatus: inv.payment_status ? String(inv.payment_status) : null,
+      statusPlain: invoiceStatusPlain({
+        workflowStatus: inv.workflow_status ? String(inv.workflow_status) : null,
+        paymentStatus: inv.payment_status ? String(inv.payment_status) : null,
+        monthLabel,
+        paidAt: toIsoDateOnly(inv.paid_at),
+        paidRef: inv.paid_ref ? String(inv.paid_ref) : null,
+      }),
       dueDate: toIsoDateOnly(inv.due_date),
       paidAt: toIsoDateOnly(inv.paid_at),
       paidRef: inv.paid_ref ? String(inv.paid_ref) : null,
-      shortPayCents: inv.short_pay_cents != null ? Number(inv.short_pay_cents) : null,
+      shortPayCents: shortPay,
+      netPayableCents: netPayable,
+      isMultiCar: Boolean(inv.is_multi_car),
+      carCount: Number(inv.car_count ?? 1),
+      monthLabel,
       overToleranceReason: inv.over_tolerance_reason
         ? String(inv.over_tolerance_reason)
         : null,
@@ -726,6 +784,7 @@ export async function getInvoiceReviewBundle(opts: {
       ownerNote: inv.owner_decision_note ? String(inv.owner_decision_note) : null,
     },
     car: { mark: String(inv.car_mark), number: String(inv.car_number) },
+    cars,
     shop: {
       id: inv.shop_id ? String(inv.shop_id) : null,
       mark: String(inv.shop_mark || inv.reporting_mark || ""),
@@ -742,9 +801,11 @@ export async function getInvoiceReviewBundle(opts: {
     approveEnabled: canApprove || (validation.hardRejects.length === 0 && tolCheck.within),
     respSplit: split,
     displays: {
-      invoiceTotal: formatCentsAsDollars(invoiceCents),
-      estimateTotal: formatCentsAsDollars(estimateCents),
-      delta: formatCentsAsDollars(tolCheck.deltaCents),
+      invoiceTotal: formatCentsAsMoney(invoiceCents),
+      estimateTotal: formatCentsAsMoney(estimateCents),
+      delta: formatCentsAsMoney(tolCheck.deltaCents),
+      shortPay: shortPay != null ? formatCentsAsMoney(shortPay) : null,
+      netPayable: netPayable != null ? formatCentsAsMoney(netPayable) : null,
     },
   };
 }
@@ -821,10 +882,46 @@ export async function approveOwnerInvoice(opts: {
   const rebill =
     split.lessee6Cents > 0 || split.road3Cents > 0 ? "REBILL_PENDING" : "NONE";
 
+  const { ensureOpenAccountingMonth } = await import("./accounting-months");
+  const openMonth = await ensureOpenAccountingMonth({
+    tenantId,
+    actor: opts.actor,
+  });
+
+  // Freeze car / lease snapshot as of approval
+  const { rows: snapRows } = await q(
+    `SELECT e.car_mark, e.car_number, e.entity_code, e.shop_id,
+            e.car_mark AS mark, e.car_number AS number
+     FROM repair.events e WHERE e.id = $1`,
+    [bundle.eventId],
+  );
+  const carSnapshot = {
+    mark: String(snapRows[0]?.car_mark ?? bundle.car.mark),
+    number: String(snapRows[0]?.car_number ?? bundle.car.number),
+    entityCode: snapRows[0]?.entity_code != null ? String(snapRows[0].entity_code) : null,
+    approvedAt: new Date().toISOString(),
+  };
+  const { rows: leaseRows } = await q(
+    `SELECT lessee, rider, assignment, assignment_id, start_date, end_date
+     FROM public.v_valid_export_rows_data
+     WHERE car_initial = $1 AND car_number = $2
+     ORDER BY start_date DESC NULLS LAST LIMIT 1`,
+    [carSnapshot.mark, carSnapshot.number],
+  ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+  const leaseSnapshot = leaseRows[0]
+    ? {
+        lessee: leaseRows[0].lessee != null ? String(leaseRows[0].lessee) : null,
+        rider: leaseRows[0].rider != null ? String(leaseRows[0].rider) : null,
+        assignment:
+          leaseRows[0].assignment != null ? String(leaseRows[0].assignment) : null,
+        asOf: new Date().toISOString(),
+      }
+    : { asOf: new Date().toISOString() };
+
   const { rows } = await q(
     `UPDATE repair.invoices
-     SET workflow_status = 'PAYABLE',
-         payment_status = 'PAYABLE',
+     SET workflow_status = 'APPROVED_IN_OPEN_MONTH',
+         payment_status = 'APPROVED_IN_OPEN_MONTH',
          decided_by = $1, decided_at = now(),
          approved_by = coalesce(approved_by, $1),
          approved_at = coalesce(approved_at, now()),
@@ -834,7 +931,10 @@ export async function approveOwnerInvoice(opts: {
          approved_amount_cents = $5,
          over_tolerance_reason = $6,
          rebill_status = $7,
-         flags_summary = $8
+         flags_summary = $8,
+         accounting_month_id = $9,
+         car_snapshot = $10::jsonb,
+         lease_snapshot = $11::jsonb
      WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL
        AND coalesce(workflow_status,'') IN (
          'UNDER_OWNER_REVIEW','INVOICE_SUBMITTED','ACCEPTED',''
@@ -849,6 +949,9 @@ export async function approveOwnerInvoice(opts: {
       opts.overToleranceReason?.trim() || null,
       rebill,
       bundle.validation.flags.map((f) => f.code).join(",") || null,
+      openMonth.id,
+      JSON.stringify(carSnapshot),
+      JSON.stringify(leaseSnapshot),
     ],
   );
   if (!rows[0]) {
@@ -863,10 +966,12 @@ export async function approveOwnerInvoice(opts: {
     tenantId,
     entity: "invoice",
     entityId: opts.invoiceId,
-    action: "INVOICE_APPROVED_PAYABLE",
+    action: "INVOICE_APPROVED_IN_OPEN_MONTH",
     after: {
-      workflow_status: "PAYABLE",
-      payment_status: "PAYABLE",
+      workflow_status: "APPROVED_IN_OPEN_MONTH",
+      payment_status: "APPROVED_IN_OPEN_MONTH",
+      accounting_month_id: openMonth.id,
+      month_label: openMonth.monthLabel,
       due_date: dueDate,
       approved_amount_cents: approvedCents,
       over_tolerance_reason: opts.overToleranceReason ?? null,
@@ -883,12 +988,31 @@ export async function approveOwnerInvoice(opts: {
     actor: opts.actor,
     tenantId,
   });
+  // Multi-car: close each car's BO on approval
+  const { rows: carEvents } = await q(
+    `SELECT event_id FROM repair.invoice_cars
+     WHERE invoice_id = $1 AND line_status = 'ACTIVE'`,
+    [opts.invoiceId],
+  );
+  for (const ce of carEvents) {
+    const eid = String(ce.event_id);
+    if (eid === bundle.eventId) continue;
+    await closeBoAfterInvoiceApprove({
+      eventId: eid,
+      invoiceNo: bundle.invoice.invoiceNo,
+      actor: opts.actor,
+      tenantId,
+    });
+  }
 
   return {
     ok: true as const,
     invoice: rows[0],
     dueDate,
-    paymentStatus: "PAYABLE" as const,
+    paymentStatus: "APPROVED_IN_OPEN_MONTH" as const,
+    workflowStatus: "APPROVED_IN_OPEN_MONTH" as const,
+    accountingMonthId: openMonth.id,
+    monthLabel: openMonth.monthLabel,
     rebillStatus: rebill,
     respSplit: split,
   };
@@ -987,10 +1111,13 @@ export async function shortPayOwnerInvoice(opts: {
     };
   }
 
-  let approvedCents = 0;
+  // amountCents from UI = net payable for the line (not the shortfall).
+  // Line short_pay_cents MUST store the shortfall (invoiced − paid), never the paid amount.
+  let approvedCents = 0; // net payable
+  let shortPayCents = 0; // sum of line shortfalls
   for (const sp of opts.lineShortPays) {
-    const amt = Math.trunc(sp.amountCents);
-    if (amt < 0) {
+    const paidAmt = Math.trunc(sp.amountCents);
+    if (paidAmt < 0) {
       return { ok: false as const, status: 400, error: `Line ${sp.lineNo}: amount must be ≥ 0` };
     }
     if (!(sp.reason ?? "").trim()) {
@@ -1000,12 +1127,28 @@ export async function shortPayOwnerInvoice(opts: {
         error: `Line ${sp.lineNo}: short-pay reason required`,
       };
     }
-    approvedCents += amt;
+    const { rows: lineRows } = await q(
+      `SELECT coalesce(total_cents,0)::bigint AS total_cents
+       FROM repair.invoice_lines
+       WHERE invoice_id = $1 AND line_no = $2 AND tenant_id = $3`,
+      [opts.invoiceId, sp.lineNo, tenantId],
+    );
+    const lineTotal = Number(lineRows[0]?.total_cents ?? 0);
+    if (paidAmt > lineTotal) {
+      return {
+        ok: false as const,
+        status: 400,
+        error: `Line ${sp.lineNo}: pay amount exceeds invoiced line`,
+      };
+    }
+    const lineShort = lineTotal - paidAmt;
+    approvedCents += paidAmt;
+    shortPayCents += lineShort;
     await q(
       `UPDATE repair.invoice_lines
        SET short_pay_cents = $1, short_pay_reason = $2
        WHERE invoice_id = $3 AND line_no = $4 AND tenant_id = $5`,
-      [amt, sp.reason.trim(), opts.invoiceId, sp.lineNo, tenantId],
+      [lineShort, sp.reason.trim(), opts.invoiceId, sp.lineNo, tenantId],
     );
   }
 
@@ -1013,12 +1156,22 @@ export async function shortPayOwnerInvoice(opts: {
   const due = new Date();
   due.setUTCDate(due.getUTCDate() + terms);
   const dueDate = due.toISOString().slice(0, 10);
-  const shortPayCents = bundle.invoice.totalCents - approvedCents;
+  // Header short-pay = sum of line shortfalls (also equals invoice total − net payable)
+  const headerShort = bundle.invoice.totalCents - approvedCents;
+  if (headerShort !== shortPayCents) {
+    shortPayCents = headerShort;
+  }
+
+  const { ensureOpenAccountingMonth } = await import("./accounting-months");
+  const openMonth = await ensureOpenAccountingMonth({
+    tenantId,
+    actor: opts.actor,
+  });
 
   const { rows } = await q(
     `UPDATE repair.invoices
-     SET workflow_status = 'SHORT_PAID',
-         payment_status = 'SHORT_PAID',
+     SET workflow_status = 'APPROVED_IN_OPEN_MONTH',
+         payment_status = 'APPROVED_IN_OPEN_MONTH',
          decided_by = $1, decided_at = now(),
          approved_by = coalesce(approved_by, $1),
          approved_at = coalesce(approved_at, now()),
@@ -1027,6 +1180,7 @@ export async function shortPayOwnerInvoice(opts: {
          short_pay_cents = $6,
          short_pay_reason = $7,
          match_status = 'APPROVED',
+         accounting_month_id = coalesce(accounting_month_id, $8),
          rebill_status = CASE
            WHEN coalesce(rebill_status,'NONE') = 'NONE' THEN 'NONE'
            ELSE rebill_status END
@@ -1040,25 +1194,10 @@ export async function shortPayOwnerInvoice(opts: {
       approvedCents,
       shortPayCents,
       reason,
+      openMonth.id,
     ],
   );
   if (!rows[0]) return { ok: false as const, status: 404, error: "Invoice not found" };
-
-  // Short-paid is still an approval for close gate
-  await q(
-    `UPDATE repair.invoices SET payment_status = 'PAYABLE', workflow_status = 'PAYABLE'
-     WHERE id = $1`,
-    [opts.invoiceId],
-  );
-  // Keep short_pay markers; payment_status Payable with short_pay_cents set
-  await q(
-    `UPDATE repair.invoices
-     SET short_pay_cents = $2, short_pay_reason = $3,
-         approved_amount_cents = $4,
-         payment_status = 'PAYABLE', workflow_status = 'PAYABLE'
-     WHERE id = $1`,
-    [opts.invoiceId, shortPayCents, reason, approvedCents],
-  );
 
   await writeAudit({
     tenantId,
@@ -1084,10 +1223,13 @@ export async function shortPayOwnerInvoice(opts: {
 
   return {
     ok: true as const,
-    approvedAmountCents: approvedCents,
-    shortPayCents,
+    approvedAmountCents: approvedCents, // net payable
+    shortPayCents, // shortfall amount
+    netPayableCents: approvedCents,
     dueDate,
-    paymentStatus: "PAYABLE" as const,
+    paymentStatus: "APPROVED_IN_OPEN_MONTH" as const,
+    workflowStatus: "APPROVED_IN_OPEN_MONTH" as const,
+    monthLabel: openMonth.monthLabel,
   };
 }
 
@@ -1112,11 +1254,11 @@ export async function createPaymentBatch(opts: {
   const batchId = String(batchRows[0].id);
   const { rows: updated } = await q(
     `UPDATE repair.invoices
-     SET payment_status = 'IN_BATCH',
-         workflow_status = 'IN_BATCH',
+     SET payment_status = 'SENT_TO_AP',
+         workflow_status = 'SENT_TO_AP',
          payment_batch_id = $1
      WHERE id = ANY($2::uuid[]) AND tenant_id = $3 AND deleted_at IS NULL
-       AND payment_status IN ('PAYABLE','SHORT_PAID')
+       AND payment_status IN ('MONTH_CLOSED','PAYABLE','SHORT_PAID')
      RETURNING id`,
     [batchId, opts.invoiceIds, tenantId],
   );
@@ -1251,8 +1393,9 @@ export async function exportPaymentBatch(opts: {
   );
   await q(
     `UPDATE repair.invoices
-     SET payment_status = 'EXPORTED', workflow_status = 'EXPORTED'
-     WHERE payment_batch_id = $1 AND deleted_at IS NULL`,
+     SET payment_status = 'SENT_TO_AP', workflow_status = 'SENT_TO_AP'
+     WHERE payment_batch_id = $1 AND deleted_at IS NULL
+       AND payment_status IS DISTINCT FROM 'PAID'`,
     [opts.batchId],
   );
   await writeAudit({
@@ -1344,7 +1487,7 @@ export async function recordInvoicePaid(opts: {
          paid_ref = $4,
          paid_method = $5
      WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
-       AND payment_status IN ('PAYABLE','IN_BATCH','EXPORTED','SHORT_PAID')
+       AND payment_status IN ('MONTH_CLOSED','SENT_TO_AP','PAYABLE','IN_BATCH','EXPORTED','SHORT_PAID')
      RETURNING *`,
     [
       opts.invoiceId,
@@ -1388,30 +1531,48 @@ export async function listShopInvoicePayments(opts: {
             i.due_date::text AS due_date, i.paid_at::text AS paid_at,
             i.paid_ref, i.short_pay_cents,
             i.approved_amount_cents, i.total, i.created_at,
+            am.month_label,
             e.car_mark, e.car_number
      FROM repair.invoices i
      JOIN repair.events e ON e.id = i.event_id
+     LEFT JOIN repair.accounting_months am ON am.id = i.accounting_month_id
      WHERE i.tenant_id = $1 AND i.shop_id = $2 AND i.deleted_at IS NULL
      ORDER BY i.created_at DESC
      LIMIT 200`,
     [tenantId, opts.shopId],
   );
-  return rows.map((r) => ({
-    id: String(r.id),
-    invoiceNo: String(r.invoice_no),
-    carMark: String(r.car_mark),
-    carNumber: String(r.car_number),
-    workflowStatus: r.workflow_status ? String(r.workflow_status) : null,
-    paymentStatus: r.payment_status ? String(r.payment_status) : null,
-    dueDate: toIsoDateOnly(r.due_date),
-    paidAt: toIsoDateOnly(r.paid_at),
-    paidRef: r.paid_ref ? String(r.paid_ref) : null,
-    shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
-    amountCents:
-      r.approved_amount_cents != null
-        ? Number(r.approved_amount_cents)
-        : dollarsToCents(r.total),
-  }));
+  const { shopInvoiceStatusPlain } = await import("./accounting-months");
+  return rows.map((r) => {
+    const workflowStatus = r.workflow_status ? String(r.workflow_status) : null;
+    const paymentStatus = r.payment_status ? String(r.payment_status) : null;
+    const paidAt = toIsoDateOnly(r.paid_at);
+    const paidRef = r.paid_ref ? String(r.paid_ref) : null;
+    const monthLabel = r.month_label != null ? String(r.month_label) : null;
+    return {
+      id: String(r.id),
+      invoiceNo: String(r.invoice_no),
+      carMark: String(r.car_mark),
+      carNumber: String(r.car_number),
+      workflowStatus,
+      paymentStatus,
+      statusPlain: shopInvoiceStatusPlain({
+        workflowStatus,
+        paymentStatus,
+        monthLabel,
+        paidAt,
+        paidRef,
+      }),
+      monthLabel,
+      dueDate: toIsoDateOnly(r.due_date),
+      paidAt,
+      paidRef,
+      shortPayCents: r.short_pay_cents != null ? Number(r.short_pay_cents) : null,
+      amountCents:
+        r.approved_amount_cents != null
+          ? Number(r.approved_amount_cents)
+          : dollarsToCents(r.total),
+    };
+  });
 }
 
 export async function listPaymentBatches(tenantId = DEFAULT_TENANT_ID) {

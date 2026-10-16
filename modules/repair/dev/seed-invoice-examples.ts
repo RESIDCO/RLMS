@@ -395,7 +395,12 @@ export async function seedInvoiceExamples(shopId?: string) {
       `SELECT payment_status, short_pay_cents FROM repair.invoices WHERE id = $1`,
       [d.invoiceId],
     );
-    if (String(st[0]?.payment_status) !== "PAYABLE" || st[0]?.short_pay_cents == null) {
+    if (
+      !["APPROVED_IN_OPEN_MONTH", "PAYABLE", "MONTH_CLOSED"].includes(
+        String(st[0]?.payment_status ?? ""),
+      ) ||
+      st[0]?.short_pay_cents == null
+    ) {
       const est = await loadApprovedEstimateLines({ eventId: d.eventId });
       const lineShortPays = est.lines.slice(0, 2).map((l, i) => ({
         lineNo: l.lineNo,
@@ -468,6 +473,16 @@ export async function seedInvoiceExamples(shopId?: string) {
         actor: "owner@demo",
       });
       if (!appr.ok) fail(appr.error);
+      const { ensureOpenAccountingMonth, closeAccountingMonth } = await import(
+        "../services/accounting-months"
+      );
+      const open = await ensureOpenAccountingMonth({ actor: "owner@demo" });
+      const closed = await closeAccountingMonth({
+        monthId: open.id,
+        actor: "owner@demo",
+        confirm: true,
+      });
+      if (!closed.ok) fail(closed.error);
       const paid = await recordInvoicePaid({
         invoiceId: d.invoiceId,
         actor: "owner@demo",

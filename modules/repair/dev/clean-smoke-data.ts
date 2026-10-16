@@ -18,6 +18,7 @@ const SMOKE_INVOICE_NO_SQL = `
   OR invoice_no LIKE 'GA%'
   OR invoice_no LIKE 'INV-R4%'
   OR invoice_no LIKE 'INV-H-%'
+  OR invoice_no = 'APA-OFOX528313'
 `;
 
 async function main() {
@@ -52,6 +53,27 @@ async function main() {
     [actor, DEFAULT_TENANT_ID],
   );
   ok(`soft-deleted smoke invoices (${invN ?? 0})`);
+
+  await q(
+    `UPDATE repair.invoice_cars ic
+     SET line_status = 'REJECTED',
+         reject_reason = coalesce(reject_reason, 'smoke clean')
+     WHERE ic.line_status = 'ACTIVE'
+       AND EXISTS (
+         SELECT 1 FROM repair.invoices i
+         WHERE i.id = ic.invoice_id AND i.deleted_at IS NOT NULL
+       )`,
+  );
+  ok("deactivated invoice_cars for deleted invoices");
+
+  const { rowCount: apaN } = await q(
+    `UPDATE repair.invoices
+     SET deleted_at = coalesce(deleted_at, now()), deleted_by = $1
+     WHERE deleted_at IS NULL AND tenant_id = $2
+       AND invoice_no = 'APA-OFOX528313'`,
+    [actor, DEFAULT_TENANT_ID],
+  );
+  ok(`hid legacy APA-OFOX528313 (${apaN ?? 0})`);
 
   // Soft-delete payment batches that only reference deleted smoke invoices,
   // or were created by smoke actors / empty after smoke clean

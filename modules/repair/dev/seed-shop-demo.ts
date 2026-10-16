@@ -36,6 +36,13 @@ import { enterPodErd } from "../services/pod";
 import { parseAarFile } from "../services/aar-parser";
 import { migrateLocal } from "./migrate-local";
 import { seedInvoiceExamples } from "./seed-invoice-examples";
+import { approveOwnerInvoice } from "../services/invoice-review";
+import { createMultiCarInvoice } from "../services/multi-car-invoice";
+import {
+  ensureOpenAccountingMonth,
+  closeAccountingMonth,
+} from "../services/accounting-months";
+import { createPaymentBatch } from "../services/invoice-review";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SAMPLES = join(__dirname, "shop-samples");
@@ -634,8 +641,8 @@ async function seedClosed(shopId: string, base: Buffer) {
          (tenant_id, event_id, shop_id, invoice_no, total, estimate_total,
           match_status, workflow_status, payment_status, created_by,
           decided_by, decided_at)
-       VALUES ($1,$2,$3,'DEMO-INV-100005',$4,$4,'APPROVED','ACCEPTED','PAID',
-               'seed-shop-demo','seed-shop-demo', now())`,
+       VALUES ($1,$2,$3,'DEMO-INV-100005',$4,$4,'MATCHED','UNDER_OWNER_REVIEW',NULL,
+               'seed-shop-demo',NULL, NULL)`,
       [DEFAULT_TENANT_ID, eventId, shopId, estTotal],
     );
   } else {
@@ -681,6 +688,38 @@ async function seedClosed(shopId: string, base: Buffer) {
     fail(`DEMO-INV-100005 expected exactly 1, got ${invCount[0]?.n}`);
   }
 
+  const { rows: invIdRows } = await q(
+    `SELECT id, payment_status, workflow_status FROM repair.invoices
+     WHERE invoice_no = 'DEMO-INV-100005' AND deleted_at IS NULL LIMIT 1`,
+  );
+  const invId = String(invIdRows[0].id);
+  const paySt = String(invIdRows[0].payment_status ?? "");
+  if (
+    !["APPROVED_IN_OPEN_MONTH", "MONTH_CLOSED", "SENT_TO_AP", "PAID", "PAYABLE"].includes(
+      paySt,
+    )
+  ) {
+    // Ensure lines exist for review
+    const { replaceInvoiceLinesFromAar } = await import("../services/invoice-review");
+    await replaceInvoiceLinesFromAar({
+      invoiceId: invId,
+      aarBytes: base,
+      actor: "seed-shop-demo",
+    }).catch(() => undefined);
+    await q(
+      `UPDATE repair.invoices
+       SET workflow_status = 'UNDER_OWNER_REVIEW',
+           total = $2, estimate_total = $2
+       WHERE id = $1`,
+      [invId, estTotal],
+    );
+    const appr = await approveOwnerInvoice({
+      invoiceId: invId,
+      actor: "owner@demo",
+    });
+    if (!appr.ok) fail(`100005 approve invoice: ${appr.error}`);
+  }
+
   const closed = await markBadOrderClosed({
     eventId,
     actor: "seed-shop-demo",
@@ -688,11 +727,175 @@ async function seedClosed(shopId: string, base: Buffer) {
     invoiceNo: "DEMO-INV-100005",
     invoicedAt: "2026-07-22",
   });
-  if (!closed.ok) fail(`100005 close failed: ${closed.error}`);
+  if (!closed.ok) {
+    // approveOwnerInvoice already closes BO; tolerate already-closed
+    const st = await getBoStoredStatus({ eventId });
+    if (st?.status !== "CLOSED") fail(`100005 close failed: ${closed.error}`);
+  }
   ok(
-    `Closed BO ${carMark} ${carNumber} — ${closed.closedReason} (DEMO-INV-100005 = $${estTotal.toFixed(2)})`,
+    `Closed BO ${carMark} ${carNumber} via approved invoice (DEMO-INV-100005 = $${estTotal.toFixed(2)})`,
   );
-  return { eventId, estimateId, closedReason: closed.closedReason, estTotal };
+  return {
+    eventId,
+    estimateId,
+    closedReason: closed.ok ? closed.closedReason : "Closed via approved invoice",
+    estTotal,
+  };
+}
+
+
+/** §H r3 — idempotent 5-car unit-train multi-car invoice + one month batch. */
+async function seedUnitTrainAndMonth(shopId: string, base: Buffer) {
+  const { rows: existing } = await q(
+    `SELECT id FROM repair.invoices
+     WHERE invoice_no = 'DEMO-INV-UNIT5' AND deleted_at IS NULL LIMIT 1`,
+  );
+  const carNumbers = ["91001", "91002", "91003", "91004", "91005"];
+  const eventIds: string[] = [];
+  for (const carNumber of carNumbers) {
+    await seedCar("DEMO", carNumber);
+    let row = await findDemoEvent(shopId, carNumber);
+    let eventId = row?.event_id ? String(row.event_id) : "";
+    let estimateId = row?.estimate_id ? String(row.estimate_id) : "";
+    if (!eventId) {
+      const bo = await createBadOrder({
+        carMark: "DEMO",
+        carNumber,
+        shopId,
+        shoppingReason: "Unit train demo",
+        actor: "seed-shop-demo",
+        boRuleCode: "OTHER",
+        boRuleOtherText: "Unit train",
+        boDate: "2026-09-01",
+        allowDuplicates: true,
+      });
+      if (!bo.ok) fail(JSON.stringify(bo));
+      eventId = String(bo.event.id);
+    }
+    await driveToOnHand(eventId, "2026-09-01T12:00:00.000Z", "Unit track");
+    if (!estimateId) {
+      const bytes = withShopMark(withCar(base, "DEMO", carNumber), DEMO_SHOP_MARK);
+      const sub = await shopSubmitEstimate({
+        role: "shop",
+        shopMark: DEMO_SHOP_MARK,
+        actor: "seed-shop-demo",
+        eventId,
+        bytes,
+        filename: `unit-${carNumber}.txt`,
+      });
+      if (!sub.ok) fail(`unit ${carNumber} submit: ${JSON.stringify(sub).slice(0, 200)}`);
+      estimateId = String(sub.estimateId);
+    }
+    {
+      const code = await estimateStatus(estimateId);
+      if (code !== "APPROVED" && code !== "COMPLETED") {
+        await ensureAwaitingApproval(estimateId, eventId);
+        const ap = await approveEstimate({ estimateId, actor: "owner@demo" });
+        if (!ap.ok) fail(`unit ${carNumber} approve: ${JSON.stringify(ap)}`);
+      }
+    }
+    await updateBoLifecycleDates({
+      eventId,
+      actor: "seed-shop-demo",
+      actorRole: "shop",
+      arrival: "2026-09-01",
+      completed: "2026-09-15",
+      released: "2026-09-16",
+    });
+    await q(
+      `UPDATE repair.estimate_validation_findings f
+       SET cleared_at = coalesce(cleared_at, now()), cleared_by = 'owner@demo'
+       FROM repair.estimate_validation_runs r
+       WHERE f.run_id = r.id AND r.estimate_id = $1 AND f.cleared_at IS NULL`,
+      [estimateId],
+    );
+    // Soft-delete any prior single-car smoke invoices on these events
+    await q(
+      `UPDATE repair.invoices
+       SET deleted_at = coalesce(deleted_at, now()), deleted_by = 'seed-shop-demo'
+       WHERE event_id = $1 AND deleted_at IS NULL
+         AND invoice_no <> 'DEMO-INV-UNIT5'
+         AND coalesce(is_multi_car,false) = false`,
+      [eventId],
+    );
+    eventIds.push(eventId);
+  }
+
+  if (!existing[0]) {
+    await q(
+      `UPDATE repair.invoice_cars
+       SET line_status = 'REJECTED', reject_reason = 'seed unit train reset'
+       WHERE event_id = ANY($1::uuid[]) AND line_status = 'ACTIVE'`,
+      [eventIds],
+    );
+    const pdf = Buffer.from("%PDF-1.4 DEMO unit train");
+    const created = await createMultiCarInvoice({
+      shopId,
+      eventIds,
+      invoiceNo: "DEMO-INV-UNIT5",
+      actor: "seed-shop-demo",
+      file: { filename: "unit5.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "unit5.txt", mime: "text/plain", bytes: base },
+    });
+    if (!created.ok) fail(`unit5 create: ${created.error}`);
+    const appr = await approveOwnerInvoice({
+      invoiceId: created.invoiceId,
+      actor: "owner@demo",
+      overToleranceReason: "Unit train seed — totals may differ per-car AAR split",
+    });
+    if (!appr.ok) fail(`unit5 approve: ${appr.error}`);
+    ok(`DEMO-INV-UNIT5 5-car unit train (${created.carCount} cars)`);
+  } else {
+    ok("DEMO-INV-UNIT5 already present (idempotent)");
+  }
+
+  // One open month with approved invoices; close once for batch seed if needed
+  const open = await ensureOpenAccountingMonth({ actor: "seed-shop-demo" });
+  const { rows: openInv } = await q(
+    `SELECT id FROM repair.invoices
+     WHERE accounting_month_id = $1 AND deleted_at IS NULL
+       AND payment_status = 'APPROVED_IN_OPEN_MONTH'`,
+    [open.id],
+  );
+  if (openInv.length) {
+    const closed = await closeAccountingMonth({
+      monthId: open.id,
+      actor: "owner@demo",
+      confirm: true,
+    });
+    if (!closed.ok) fail(closed.error);
+    const { rows: batchExist } = await q(
+      `SELECT id FROM repair.payment_batches
+       WHERE batch_no = 'DEMO-BATCH-MONTH' AND deleted_at IS NULL LIMIT 1`,
+    );
+    if (!batchExist[0]) {
+      const ids = openInv.map((r) => String(r.id));
+      // Also include newly month-closed
+      const { rows: mc } = await q(
+        `SELECT id FROM repair.invoices
+         WHERE deleted_at IS NULL AND payment_status = 'MONTH_CLOSED'
+         LIMIT 20`,
+      );
+      const batch = await createPaymentBatch({
+        invoiceIds: mc.map((r) => String(r.id)).slice(0, 10),
+        actor: "owner@demo",
+        note: "DEMO-BATCH-MONTH",
+      });
+      if (batch.ok) {
+        await q(
+          `UPDATE repair.payment_batches SET batch_no = 'DEMO-BATCH-MONTH' WHERE id = $1`,
+          [String(batch.batch.id)],
+        );
+        ok("DEMO-BATCH-MONTH payment batch seeded");
+      } else {
+        ok(`month closed (batch skip: ${batch.error})`);
+      }
+    } else {
+      ok("DEMO-BATCH-MONTH already present");
+    }
+  } else {
+    ok(`open month ${open.monthLabel} ready (no pending approvals to close)`);
+  }
 }
 
 async function assertDemoStates(shopId: string, ids: Record<string, unknown>) {
@@ -883,6 +1086,10 @@ async function main() {
   // §H r2 — DS01 invoice review examples (idempotent DEMO-INV-*)
   await seedInvoiceExamples(shopId);
   ok("§H invoice examples seeded on DS01");
+
+  // §H r3 — 5-car unit train + accounting month batch
+  await seedUnitTrainAndMonth(shopId, base);
+  ok("§H r3 unit train + month seed");
 
   console.log("=== repair:seed-shop-demo PASS ===");
   console.log(`Shop mark: ${DEMO_SHOP_MARK}`);

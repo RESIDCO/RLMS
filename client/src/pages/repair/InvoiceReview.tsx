@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceTitle } from "./WorkspaceTitle";
 import { cn } from "@/lib/utils";
+import { shopAa } from "./RepairNavChrome";
 
 type MatchedLine = {
   lineNo: number | null;
@@ -32,6 +33,18 @@ type MatchedLine = {
   };
 };
 
+type InvoiceCar = {
+  id: string;
+  eventId: string;
+  carMark: string;
+  carNumber: string;
+  estimateCents: number;
+  invoicedCents: number;
+  differenceCents: number;
+  flags: string;
+  lineStatus: string;
+};
+
 type Bundle = {
   invoice: {
     id: string;
@@ -41,10 +54,16 @@ type Bundle = {
     estimateCents: number;
     workflowStatus: string | null;
     paymentStatus: string | null;
+    statusPlain?: string | null;
     dueDate: string | null;
     overToleranceReason: string | null;
+    shortPayCents?: number | null;
+    netPayableCents?: number | null;
+    isMultiCar?: boolean;
+    monthLabel?: string | null;
   };
   car: { mark: string; number: string };
+  cars?: InvoiceCar[];
   shop: { mark: string; name: string | null };
   matched: MatchedLine[];
   validation: {
@@ -70,7 +89,13 @@ type Bundle = {
     road3Cents: number;
     otherCents: number;
   };
-  displays: { invoiceTotal: string; estimateTotal: string; delta: string };
+  displays: {
+    invoiceTotal: string;
+    estimateTotal: string;
+    delta: string;
+    shortPay?: string | null;
+    netPayable?: string | null;
+  };
 };
 
 function dollars(cents: number): string {
@@ -129,7 +154,9 @@ export default function InvoiceReview() {
       setMsg(json.error || `HTTP ${res.status}`);
       return;
     }
-    setMsg(`Approved → Payable (due ${json.dueDate}). BO Closed.`);
+    setMsg(
+      `Approved – In Open Month${json.monthLabel ? ` (${json.monthLabel})` : ""} (due ${json.dueDate}). BO Closed.`,
+    );
     void load();
   }
 
@@ -217,7 +244,7 @@ export default function InvoiceReview() {
 
   return (
     <RepairOwnerShell>
-      <div className="mx-auto max-w-6xl px-4 py-6 space-y-4">
+      <div className={cn(shopAa.page, "mx-auto max-w-6xl px-4 py-6 space-y-4")}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <WorkspaceTitle
             title={`Invoice ${bundle.invoice.invoiceNo}`}
@@ -234,13 +261,17 @@ export default function InvoiceReview() {
           <div className="rounded border border-slate-300 bg-white p-3">
             <p className="text-slate-700">Invoice</p>
             <p className="font-mono text-lg font-semibold text-slate-900">
-              ${bundle.displays.invoiceTotal}
+              {bundle.displays.invoiceTotal.startsWith("$")
+                ? bundle.displays.invoiceTotal
+                : `$${bundle.displays.invoiceTotal}`}
             </p>
           </div>
           <div className="rounded border border-slate-300 bg-white p-3">
             <p className="text-slate-700">Approved estimate</p>
             <p className="font-mono text-lg font-semibold text-slate-900">
-              ${bundle.displays.estimateTotal}
+              {bundle.displays.estimateTotal.startsWith("$")
+                ? bundle.displays.estimateTotal
+                : `$${bundle.displays.estimateTotal}`}
             </p>
           </div>
           <div className="rounded border border-slate-300 bg-white p-3">
@@ -251,7 +282,10 @@ export default function InvoiceReview() {
                 bundle.tolCheck.within ? "text-slate-900" : "text-amber-800",
               )}
             >
-              ${bundle.displays.delta} ({(bundle.tolCheck.pctDeltaBp / 100).toFixed(2)}%)
+              {bundle.displays.delta.startsWith("$")
+                ? bundle.displays.delta
+                : `$${bundle.displays.delta}`}{" "}
+              ({(bundle.tolCheck.pctDeltaBp / 100).toFixed(2)}%)
             </p>
             <p className="text-xs text-slate-600">
               Tolerance ${ (bundle.tolerance.toleranceCents / 100).toFixed(2) } /{" "}
@@ -259,13 +293,34 @@ export default function InvoiceReview() {
               {bundle.tolerance.paymentTermsDays}
             </p>
           </div>
-          <div className="rounded border border-slate-300 bg-white p-3">
-            <p className="text-slate-700">Status</p>
+          <div className="rounded border border-slate-400 bg-white p-3">
+            <p className={shopAa.label}>Status</p>
             <p className="font-semibold text-slate-900">
-              {bundle.invoice.paymentStatus || bundle.invoice.workflowStatus}
+              {bundle.invoice.statusPlain ||
+                bundle.invoice.paymentStatus ||
+                bundle.invoice.workflowStatus}
             </p>
+            {bundle.invoice.monthLabel && (
+              <p className="text-xs text-slate-700">
+                Month {bundle.invoice.monthLabel}
+              </p>
+            )}
             {bundle.invoice.dueDate && (
               <p className="text-xs text-slate-700">Due {bundle.invoice.dueDate}</p>
+            )}
+            {(bundle.invoice.shortPayCents != null ||
+              bundle.displays.shortPay) && (
+              <p className="mt-1 text-xs font-semibold text-slate-900">
+                Short-pay {bundle.displays.shortPay ?? dollars(bundle.invoice.shortPayCents ?? 0)}
+                {" · "}
+                Net payable{" "}
+                {bundle.displays.netPayable ??
+                  dollars(
+                    bundle.invoice.netPayableCents ??
+                      bundle.invoice.totalCents -
+                        (bundle.invoice.shortPayCents ?? 0),
+                  )}
+              </p>
             )}
           </div>
         </div>
@@ -298,18 +353,58 @@ export default function InvoiceReview() {
           </div>
         )}
 
-        <div className="overflow-x-auto rounded border border-slate-300 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-100 text-left">
+        {bundle.cars && bundle.cars.length > 0 && (
+          <div className="overflow-x-auto rounded border border-slate-400 bg-white">
+            <p className="border-b border-slate-300 px-3 py-2 text-sm font-semibold text-slate-900">
+              Per-car summary (shared invoice {bundle.invoice.invoiceNo})
+            </p>
+            <table className="min-w-full text-sm text-slate-900">
+              <thead className="bg-slate-100 text-left">
+                <tr>
+                  <th className="px-2 py-2">Car</th>
+                  <th className="px-2 py-2 text-right">Estimate</th>
+                  <th className="px-2 py-2 text-right">Invoiced</th>
+                  <th className="px-2 py-2 text-right">Difference</th>
+                  <th className="px-2 py-2">Flags</th>
+                  <th className="px-2 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bundle.cars.map((c) => (
+                  <tr key={c.id} className="border-t border-slate-200">
+                    <td className="px-2 py-1.5 font-mono font-semibold">
+                      {c.carMark} {c.carNumber}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono">
+                      {dollars(c.estimateCents)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono">
+                      {dollars(c.invoicedCents)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono">
+                      {dollars(c.differenceCents)}
+                    </td>
+                    <td className="px-2 py-1.5 text-xs">{c.flags || "—"}</td>
+                    <td className="px-2 py-1.5 text-xs">{c.lineStatus}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded border border-slate-400 bg-white">
+          <table className="min-w-full text-sm text-slate-900">
+            <thead className="bg-slate-100 text-left text-slate-900">
               <tr>
-                <th className="px-2 py-2">Line</th>
-                <th className="px-2 py-2">Job</th>
-                <th className="px-2 py-2">Kind</th>
-                <th className="px-2 py-2 text-right">Est qty</th>
-                <th className="px-2 py-2 text-right">Est $</th>
-                <th className="px-2 py-2 text-right">Inv qty</th>
-                <th className="px-2 py-2 text-right">Inv $</th>
-                <th className="px-2 py-2">Resp</th>
+                <th className="px-2 py-2 font-semibold">Line</th>
+                <th className="px-2 py-2 font-semibold">Job</th>
+                <th className="px-2 py-2 font-semibold">Match</th>
+                <th className="px-2 py-2 font-semibold">Change</th>
+                <th className="px-2 py-2 text-right font-semibold">Est amount</th>
+                <th className="px-2 py-2 text-right font-semibold">Est qty</th>
+                <th className="px-2 py-2 text-right font-semibold">Inv amount</th>
+                <th className="px-2 py-2 font-semibold">Resp</th>
               </tr>
             </thead>
             <tbody>
@@ -327,20 +422,30 @@ export default function InvoiceReview() {
                   <td className="px-2 py-1.5 font-mono">
                     {m.jobCode || m.estimate?.jobCode || "—"}
                   </td>
-                  <td className="px-2 py-1.5 text-xs">{m.kind}</td>
-                  <td className="px-2 py-1.5 text-right font-mono">
-                    {m.estimate?.qty ?? "—"}
+                  <td className="px-2 py-1.5 text-xs text-slate-900">
+                    {m.kind === "MATCH" ? "Match" : "—"}
                   </td>
-                  <td className="px-2 py-1.5 text-right font-mono">
+                  <td className="px-2 py-1.5 text-xs text-slate-900">
+                    {m.kind === "MATCH"
+                      ? "—"
+                      : m.kind === "ADDED"
+                        ? "Added"
+                        : m.kind === "REMOVED"
+                          ? "Removed"
+                          : m.kind === "QTY_PRICE_CHANGED"
+                            ? "Qty/price changed"
+                            : "Not on approved estimate"}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-900">
                     {m.estimate ? dollars(m.estimate.totalCents) : "—"}
                   </td>
-                  <td className="px-2 py-1.5 text-right font-mono">
-                    {m.invoice?.qty ?? "—"}
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-900">
+                    {m.estimate?.qty ?? "—"}
                   </td>
-                  <td className="px-2 py-1.5 text-right font-mono">
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-900">
                     {m.invoice ? dollars(m.invoice.totalCents) : "—"}
                   </td>
-                  <td className="px-2 py-1.5 font-mono">
+                  <td className="px-2 py-1.5 font-mono text-slate-900">
                     {m.invoice?.respCode || m.estimate?.respCode || "—"}
                   </td>
                 </tr>
@@ -385,7 +490,9 @@ export default function InvoiceReview() {
           </div>
         )}
 
-        {(bundle.invoice.paymentStatus === "PAYABLE" ||
+        {(bundle.invoice.paymentStatus === "MONTH_CLOSED" ||
+          bundle.invoice.paymentStatus === "PAYABLE" ||
+          bundle.invoice.paymentStatus === "SENT_TO_AP" ||
           bundle.invoice.paymentStatus === "EXPORTED" ||
           bundle.invoice.paymentStatus === "IN_BATCH") && (
           <div className="flex flex-wrap items-end gap-2 rounded border border-slate-300 bg-white p-4">

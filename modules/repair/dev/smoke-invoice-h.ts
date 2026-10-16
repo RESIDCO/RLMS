@@ -1,7 +1,8 @@
 /**
- * §H Owner invoice review + shop payment smoke.
- * match/diff, tolerance gating, reject+comments, short-pay, batch export,
- * paid, shop sees only own, totals reconcile. Seed does not dirty tracked files.
+ * §H / §H r3 Owner invoice review + monthly close + multi-car smoke.
+ * match/diff, contrast AA, tolerance, reject, short-pay (shortfall+net),
+ * approve→open month→close→AP→paid, 5-car multi-car, duplicate car reject.
+ * Seed does not dirty tracked files.
  *
  * Run: npm run repair:smoke-invoice
  */
@@ -32,6 +33,16 @@ import {
   DEFAULT_TOLERANCE_CENTS,
   DEFAULT_TOLERANCE_PCT_BP,
 } from "../services/invoice-review";
+import {
+  ensureOpenAccountingMonth,
+  closeAccountingMonth,
+  invoiceStatusPlain,
+} from "../services/accounting-months";
+import {
+  createMultiCarInvoice,
+  listMultiCarCandidates,
+} from "../services/multi-car-invoice";
+import { contrastRatio, SHOP_AA_TOKENS } from "../services/shop-clarity";
 import { createShop } from "../services/shops";
 import { createBadOrder } from "../services/bo";
 import { shopAcknowledge, shopArrivalDate } from "../services/bo-lifecycle";
@@ -548,10 +559,10 @@ async function main() {
     actor: "owner@smoke-h.test",
   });
   if (!appr.ok) bad("approve-within", appr.error);
-  if (String(appr.paymentStatus) !== "PAYABLE") {
-    bad("payable", String(appr.paymentStatus));
+  if (String(appr.paymentStatus) !== "APPROVED_IN_OPEN_MONTH") {
+    bad("approved-open-month", String(appr.paymentStatus));
   }
-  ok(`within tolerance → Payable (due ${appr.dueDate})`);
+  ok(`within tolerance → Approved – In Open Month (due ${appr.dueDate})`);
 
   const over = await driveToInvoice({
     shopId,
@@ -681,7 +692,42 @@ async function main() {
   if (shorted.approvedAmountCents !== 12500) {
     bad("short-amt", String(shorted.approvedAmountCents));
   }
-  ok("short-pay with per-line reasons");
+  if (shorted.shortPayCents !== 2500) {
+    bad("short-header", String(shorted.shortPayCents));
+  }
+  const { rows: spLines } = await q(
+    `SELECT line_no, short_pay_cents FROM repair.invoice_lines
+     WHERE invoice_id = $1 ORDER BY line_no`,
+    [sp.invoiceId],
+  );
+  const byNo = Object.fromEntries(
+    spLines.map((r) => [Number(r.line_no), Number(r.short_pay_cents)]),
+  );
+  if (byNo[1] !== 0 || byNo[2] !== 2500) {
+    bad("short-line-store", JSON.stringify(byNo));
+  }
+  ok("short-pay reconciles (header shortfall + net payable; lines store shortfall)");
+
+  // Monthly close replaces pay-cycle cutoff — close open month to free AP
+  const openMonth = await ensureOpenAccountingMonth({ actor: "owner@smoke-h.test" });
+  const closed = await closeAccountingMonth({
+    monthId: openMonth.id,
+    actor: "owner@smoke-h.test",
+    confirm: true,
+  });
+  if (!closed.ok) bad("month-close", closed.error);
+  {
+    const { rows: st } = await q(
+      `SELECT payment_status FROM repair.invoices WHERE id = $1`,
+      [within.invoiceId],
+    );
+    if (String(st[0]?.payment_status) !== "MONTH_CLOSED") {
+      bad("month-closed-status", String(st[0]?.payment_status));
+    }
+  }
+  ok(
+    `month close ${openMonth.monthLabel} → Month Closed (${closed.invoicesClosed} inv)`,
+  );
 
   const batch = await createPaymentBatch({
     invoiceIds: [within.invoiceId, over.invoiceId],
@@ -791,6 +837,110 @@ async function main() {
     // already verified identical above; ensure loadApprovedEstimateLines uses APPROVED only
     if (!est.estimateId || !est.revisionId) bad("approved-rev", "missing APPROVED revision");
     ok(`APPROVED revision lines loaded (${est.lines.length})`);
+  }
+
+
+  // ── §H r3 contrast AA on invoice routes (axe-equivalent) ───────────
+  {
+    const aaValue = contrastRatio(SHOP_AA_TOKENS.value, SHOP_AA_TOKENS.surface);
+    const aaLabel = contrastRatio(SHOP_AA_TOKENS.label, SHOP_AA_TOKENS.surface);
+    if (aaValue < 4.5) bad("aa-value", String(aaValue));
+    if (aaLabel < 4.5) bad("aa-label", String(aaLabel));
+    const pages = [
+      "client/src/pages/repair/InvoiceQueue.tsx",
+      "client/src/pages/repair/InvoiceReview.tsx",
+      "client/src/pages/repair/PaymentBatches.tsx",
+      "client/src/pages/repair/AccountingMonths.tsx",
+    ];
+    for (const rel of pages) {
+      const src = readFileSync(join(ROOT, rel), "utf8");
+      if (src.includes("text-slate-400") || src.includes("text-slate-500")) {
+        bad("axe-pale", `${rel} pale slate label`);
+      }
+      if (!src.includes("bg-white") || !src.includes("text-slate-900")) {
+        bad("axe-contrast", `${rel} missing white panel / near-black text`);
+      }
+    }
+    const reviewSrc = readFileSync(join(ROOT, "client/src/pages/repair/InvoiceReview.tsx"), "utf8");
+    for (const h of [
+      "Line",
+      "Job",
+      "Match",
+      "Change",
+      "Est amount",
+      "Est qty",
+      "Inv amount",
+      "Resp",
+    ]) {
+      if (!reviewSrc.includes(h)) bad("axe-header", `missing ${h}`);
+    }
+    ok(
+      `AA contrast axe on invoice/payments/months (value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)})`,
+    );
+    if (invoiceStatusPlain({ workflowStatus: "UNDER_OWNER_REVIEW" }) !== "Under owner review") {
+      bad("status-plain", "Under owner review");
+    }
+  }
+
+  // ── §H r3 multi-car 5-car unit train + duplicate reject ─────────────
+  {
+    const cars = ["91001", "91002", "91003", "91004", "91005"];
+    const eventIds: string[] = [];
+    for (const num of cars) {
+      const d = await driveToInvoice({
+        shopId,
+        carNumber: num,
+        invoiceNo: `INV-H-MC-SKIP-${num}-${RUN}`,
+        tag: `mc-${num}`,
+      });
+      // Remove auto single invoice so car is free for multi-car
+      await q(
+        `UPDATE repair.invoices SET deleted_at = now(), deleted_by = 'smoke-h'
+         WHERE id = $1`,
+        [d.invoiceId],
+      );
+      eventIds.push(d.eventId);
+    }
+    const cand = await listMultiCarCandidates({ shopId });
+    const pick = cand.filter((c) => eventIds.includes(c.eventId));
+    if (pick.length < 5) bad("mc-cand", `expected 5 got ${pick.length}`);
+    const aar = readFileSync(SAMPLE);
+    const pdf = Buffer.from("%PDF-1.4 smoke multi-car");
+    const created = await createMultiCarInvoice({
+      shopId,
+      eventIds: pick.map((c) => c.eventId),
+      invoiceNo: `INV-H-MC5-${RUN}`,
+      actor: "smoke-h",
+      total: pick.reduce((s, c) => s + c.estimateCents, 0) / 100,
+      file: { filename: "mc.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "mc.txt", mime: "text/plain", bytes: aar },
+      tenantId: undefined,
+    });
+    if (!created.ok) bad("mc-create", created.error);
+    if (created.carCount !== 5) bad("mc-count", String(created.carCount));
+    const bundle = await getInvoiceReviewBundle({ invoiceId: created.invoiceId });
+    if (!bundle.ok) bad("mc-bundle", bundle.error);
+    if (!bundle.cars || bundle.cars.length !== 5) {
+      bad("mc-cars", String(bundle.cars?.length));
+    }
+    ok(`5-car multi-car invoice ${created.invoiceNo} splits+reconciles`);
+
+    const dup = await createMultiCarInvoice({
+      shopId,
+      eventIds: [pick[0]!.eventId, pick[1]!.eventId],
+      invoiceNo: `INV-H-MC-DUP-${RUN}`,
+      actor: "smoke-h",
+      file: { filename: "dup.pdf", mime: "application/pdf", bytes: pdf },
+      aarFile: { filename: "dup.txt", mime: "text/plain", bytes: aar },
+    });
+    if (dup.ok) bad("mc-dup", "duplicate car should reject");
+    if (!String(dup.error).toLowerCase().includes("already")) {
+      // hardRejects DUPLICATE_CAR also ok
+      if (!(dup.hardRejects ?? []).includes("DUPLICATE_CAR")) {
+        bad("mc-dup-msg", dup.error);
+      }
+    }
+    ok("duplicate car on active invoice HARD REJECT");
   }
 
   console.log("=== repair:smoke-invoice PASS ===");

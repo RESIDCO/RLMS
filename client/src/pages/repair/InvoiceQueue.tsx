@@ -27,12 +27,16 @@ type QueueRow = {
   differencePct: number;
   workflowStatus: string | null;
   paymentStatus: string | null;
+  statusPlain?: string | null;
   flags: string;
   ageDays: number;
   dueDate: string | null;
   paidAt: string | null;
   paidRef: string | null;
   shortPayCents: number | null;
+  netPayableCents?: number | null;
+  isMultiCar?: boolean;
+  monthLabel?: string | null;
 };
 
 function dollars(cents: number): string {
@@ -45,9 +49,9 @@ function dollars(cents: number): string {
 const STATUS_OPTS = [
   "",
   "UNDER_OWNER_REVIEW",
-  "PAYABLE",
-  "IN_BATCH",
-  "EXPORTED",
+  "APPROVED_IN_OPEN_MONTH",
+  "MONTH_CLOSED",
+  "SENT_TO_AP",
   "PAID",
   "REJECTED",
 ];
@@ -256,7 +260,9 @@ export default function InvoiceQueue() {
                         checked={selected.has(r.id)}
                         onChange={() => toggle(r.id)}
                         disabled={
+                          r.paymentStatus !== "MONTH_CLOSED" &&
                           r.paymentStatus !== "PAYABLE" &&
+                          r.workflowStatus !== "MONTH_CLOSED" &&
                           r.workflowStatus !== "PAYABLE"
                         }
                       />
@@ -281,10 +287,14 @@ export default function InvoiceQueue() {
                     </td>
                     <td className="px-2 py-2 text-xs">{r.flags || "—"}</td>
                     <td className="px-2 py-2 font-mono">{r.ageDays}</td>
-                    <td className="px-2 py-2 text-xs">
-                      {r.paymentStatus || r.workflowStatus || "—"}
+                    <td className="px-2 py-2 text-xs text-slate-900">
+                      {r.statusPlain ||
+                        r.paymentStatus ||
+                        r.workflowStatus ||
+                        "—"}
+                      {r.isMultiCar ? " · multi-car" : ""}
                       {r.shortPayCents != null && r.shortPayCents > 0
-                        ? " · short-paid"
+                        ? ` · short-pay ${dollars(r.shortPayCents)} / net ${dollars(r.netPayableCents ?? r.invoiceCents - r.shortPayCents)}`
                         : ""}
                     </td>
                     <td className="px-2 py-2">

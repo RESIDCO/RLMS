@@ -75,7 +75,7 @@ export default function PaymentBatches() {
     setError("");
     try {
       const [qRes, bRes] = await Promise.all([
-        fetch("/api/repair/invoices/queue?status=PAYABLE"),
+        fetch("/api/repair/invoices/queue?status=MONTH_CLOSED"),
         fetch("/api/repair/payment-batches"),
       ]);
       const qJson = await qRes.json();

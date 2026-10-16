@@ -1,8 +1,8 @@
-# Owner UI — Sub-section H: Invoice review + shop payment
+# Owner UI — Sub-section H: Invoice review + monthly close + multi-car
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)  
-**Routes:** `/#/repair/invoices` · `/#/repair/invoices/:id` · `/#/repair/payments`  
-**Requires tip:** `ebf9400` (§H) → r2 FF
+**Routes:** `/#/repair/invoices` · `/#/repair/invoices/:id` · `/#/repair/payments` · `/#/repair/months` · `/#/repair/shop/multi-car-invoice`  
+**Requires tip:** `81a3d3e` (§H r2) → r3 FF
 
 ## Defaults (open Q)
 
@@ -11,50 +11,52 @@
 | Tolerance | Both **$** and **%** — default **$0 / 0%** (per entity, `*` row) |
 | Payment terms | **Net 30** from invoice approval |
 | AP export | **Generic CSV** placeholder (documented columns; no accounting API) |
+| Pay-cycle cutoff | **Replaced** by owner/MP **accounting month close** (no end-of-month auto-bucket) |
 
-## Owner invoice queue
+## Contrast (AA)
 
-Every **Invoice Submitted** (and later payment statuses): car, shop, invoice no., invoice date, amount, approved estimate amount, difference ($ and %), flags, age days.  
-Filters: shop, status, age, amount over estimate.
+Invoice review, queue, payments, months: **white panels**, near-black text (`slate-900` / `slate-700` labels).  
+Line table headers: **Line, Job, Match, Change, Est amount, Est qty, Inv amount, Resp**.  
+Money as `$36,732.04`. Statuses as plain words (e.g. “Under owner review”).
+
+## Status flow (approval ≠ paid)
+
+Invoice Submitted → Under Owner Review → **Approved – In Open Month** → **Month Closed** → **Sent to AP** → **Paid** (only when payment date + check/ACH ref recorded).
+
+Shop sees: “Approved – scheduled with \<month\> close”, then “Paid \<date\> ref \<ref\>”.
+
+## Accounting months `/#/repair/months`
+
+- One **OPEN** month at a time. Approved invoices land in the open month with frozen car/lease snapshot.
+- Owner/MP closes when ready (review totals by shop + by resp owner/lessee6/road3) → confirm.
+- Close freezes month (read-only, audited); later approvals → next month.
+- Reopen: owner-only with reason.
+- Placeholders: CRB received, lessee rebill output (later phase). Show **Lessee rebill pending** and **Road rebill pending** totals now.
 
 ## Invoice review
 
-- Side-by-side **APPROVED** estimate revision vs invoice lines.
-- Match: **line number** first, then **job code + location + qualifier** fallback.
-- Identical invoice → **0** differences (no `LINE_ADDED` / `LINE_REMOVED`).
-- Highlight: added / removed / qty-price changed / not on approved estimate.
-- Validation (same engine): AAR pricing current for account date, invoice no. required, CID flags cleared, totals reconcile to the cent.
-- Within tolerance → **Approve** enabled. Over → owner/MP approval with reason.
-- Actions (audited): **Approve**, **Reject** with line comments (back to shop), **Short-pay** (lesser amount, reason per line).
-- Resp split: owner vs lessee (6) vs damaging road (3) — rebill queued **Rebill pending** (next phase).
+- Side-by-side **APPROVED** estimate revision vs invoice lines (line# then job+location+qualifier).
+- **Approve** / **Reject** / **Short-pay**.
+- Short-pay: line `short_pay_cents` = **shortfall** (not paid amount). Header shows **short-pay amount** and **net payable**.
+- Multi-car: per-car summary (car, estimate, invoiced, difference, flags) → drill-in; approve all or reject/short-pay at line or car level.
+
+## Multi-car invoice (unit trains / bulk)
+
+Shop **Create multi-car invoice**: select several Completed estimates (same shop, same billing entity); one 500-byte + PDF; one invoice number.  
+Split per car; match each car’s lines to that car’s approved estimate; header total = sum of cars.  
+Rules: car on only one active invoice; mix Resp-3 wreck with others **HARD REJECT**; total mismatch **HARD REJECT**.  
+Payment pays invoice once; each car’s BO closes on approval.
 
 ## Shop payment `/#/repair/payments`
 
-- Approve → **Payable**, due date = approval + net terms.
-- Payables list with checkboxes → **Create batch** → **Download CSV / Mark exported** → **Record paid** (ISO date + check/ACH ref).
-- Batch history with drill-in.
-- CSV columns: `batch_no,invoice_no,shop_mark,car,amount_dollars,amount_cents,due_date,short_pay_cents,currency`
-  - Dates: **ISO YYYY-MM-DD** (with year)
-  - Money: **2 decimals, no $**
-- CSV also written to `modules/repair/dev/exports/payment-outbox/` (gitignored).
-- Statuses: Payable → In Batch → Exported → Paid. Short-paid shown via `short_pay_cents`.
-- Shop sees own invoice status + paid date/ref only.
-- **BO Closed** only when invoice Approved (Payable or later).
+- After **Month Closed**, invoices are AP-eligible → Create batch → CSV → Sent to AP → Record paid.
+- CSV columns: `batch_no,invoice_no,shop_mark,car,amount_dollars,amount_cents,due_date,short_pay_cents,currency` (ISO dates; money 2dp no `$`).
+- Outbox: `modules/repair/dev/exports/payment-outbox/`.
 
 ## Clean + seed
 
-- `repair:clean-smoke-data` also hides smoke invoices (`GA*`, `INV-R4*`, `INV-H-*`) and related payment batches.
-- `repair:seed-shop-demo` / `repair:seed-invoice-examples`: idempotent `DEMO-INV-100005` (amount = approved estimate, never duplicate) plus DS01 examples:
-  - `DEMO-INV-WITHIN` (0 diffs, ready to approve)
-  - `DEMO-INV-OVER` (awaiting reason)
-  - `DEMO-INV-ADDED` (added line)
-  - `DEMO-INV-SHORT` (short-pay)
-  - `DEMO-INV-PAID` (paid)
-
-## §G carryovers
-
-- **Missed POD** tile restored (counts BOs past POD, alongside base stored status).
-- Closed BO shows **Closed** in bad-order list (never blank).
+- `repair:clean-smoke-data` hides `GA*`, `INV-R4*`, `INV-H-*`, and legacy **`APA-OFOX528313`**.
+- `repair:seed-shop-demo` (idempotent ×2): DEMO 100005 closed via approved invoice; DS01 invoice examples; **5-car unit-train** `DEMO-INV-UNIT5`; one month/batch.
 
 ## Smoke
 
@@ -64,7 +66,6 @@ npm run repair:typecheck-client-invoice
 npm run repair:smoke-invoice
 npm run repair:clean-smoke-data
 npm run repair:seed-shop-demo   # twice → no DEMO-INV duplicates
-npm run repair:smoke-shop       # prior still passes
 ```
 
 Integer cents. Local Postgres. Append-only. No real payments / no Adapter.

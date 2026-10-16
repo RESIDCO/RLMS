@@ -1,5 +1,5 @@
 /**
- * Client typecheck gate for §H / §H r2 Owner invoice review + payment.
+ * Client typecheck gate for §H / §H r2 / §H r3 invoice + months + multi-car.
  * Run: npm run repair:typecheck-client-invoice
  */
 import { readFileSync } from "fs";
@@ -120,6 +120,48 @@ export function assertInvoiceClientTypecheck(): void {
   }
   ok("App + nav routes wired");
 
+  const months = readFileSync(
+    join(ROOT, "client/src/pages/repair/AccountingMonths.tsx"),
+    "utf8",
+  );
+  const multi = readFileSync(
+    join(ROOT, "client/src/pages/repair/ShopMultiCarInvoice.tsx"),
+    "utf8",
+  );
+  if (!months.includes("accounting-months") || !months.includes("close month")) {
+    bad("months", "AccountingMonths must close accounting months");
+  }
+  if (!months.includes("Lessee rebill pending") || !months.includes("Road rebill pending")) {
+    bad("rebill-pending", "Months UI must show rebill pending totals");
+  }
+  if (!app.includes("AccountingMonths") || !app.includes("/repair/months")) {
+    bad("months-route", "App must route /repair/months");
+  }
+  if (!nav.includes("/repair/months")) {
+    bad("months-nav", "Nav must include Months");
+  }
+  if (!multi.includes("multi-car") || !multi.includes("Create multi-car invoice")) {
+    bad("multi", "ShopMultiCarInvoice required");
+  }
+  if (!app.includes("ShopMultiCarInvoice")) {
+    bad("multi-route", "App must route multi-car create");
+  }
+  ok("Accounting months + multi-car UI wired");
+
+  if (!review.includes("Est amount") || !review.includes("Inv amount")) {
+    bad("headers", "InvoiceReview headers must include Est/Inv amount");
+  }
+  if (!review.includes("Net payable") && !review.includes("net payable")) {
+    bad("short-net", "InvoiceReview must show short-pay and net payable");
+  }
+  if (!review.includes("Under owner review") && !review.includes("statusPlain")) {
+    bad("plain-status", "InvoiceReview must use plain status words");
+  }
+  if (!queue.includes("bg-white") || !review.includes("bg-white")) {
+    bad("contrast", "Invoice pages need white panels");
+  }
+  ok("Contrast + short-pay header + plain statuses");
+
   const tsc = spawnSync(
     "npx",
     ["tsc", "-p", "tsconfig.json", "--noEmit", "--pretty", "false"],
@@ -133,6 +175,8 @@ export function assertInvoiceClientTypecheck(): void {
         (line.includes("InvoiceQueue.tsx") ||
           line.includes("InvoiceReview.tsx") ||
           line.includes("PaymentBatches.tsx") ||
+          line.includes("AccountingMonths.tsx") ||
+          line.includes("ShopMultiCarInvoice.tsx") ||
           line.includes("ShopPortal.tsx")) &&
         line.includes("error TS"),
     );

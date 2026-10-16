@@ -119,6 +119,10 @@ type DashboardData = {
     shop_conflict?: number;
     future_rent_start?: number;
     lease_ended_watch?: number;
+    sold_needs_tag?: number;
+    sale_unclear?: number;
+    sold_tag_suspect?: number;
+    sold_missing_buyer?: number;
   };
   detail: {
     all_cars: CarRow[];
@@ -623,7 +627,7 @@ export default function Dashboard() {
                 }
                 icon={TimerOff}
                 accent={data.kpis.going_on_lease_cars ? "warning" : "muted"}
-                onClick={() => navigate("/kpi/cars?bucket=off_rent")}
+                onClick={() => navigate("/kpi/cars?bucket=going_on_lease")}
               />
               <KpiCard
                 testId="kpi-stale"
@@ -648,6 +652,41 @@ export default function Dashboard() {
                 subtext="No assignment row (already inside Off Rent)"
                 icon={CircleDashed}
                 onClick={() => navigate("/kpi/cars?bucket=no_link")}
+              />
+              <KpiCard
+                testId="kpi-sold-needs-tag"
+                label="Sold – needs tag"
+                value={data.kpis.sold_needs_tag ?? 0}
+                subtext="External sale, still tagged Leased. Bulk Mark Sold after preview."
+                icon={PackageMinus}
+                accent={(data.kpis.sold_needs_tag ?? 0) > 0 ? "warning" : "muted"}
+                onClick={() => navigate("/kpi/cars?bucket=sold_needs_tag")}
+              />
+              <KpiCard
+                testId="kpi-sale-unclear"
+                label="Sale unclear"
+                value={data.kpis.sale_unclear ?? 0}
+                subtext="Classify External or Intercompany. No car-data write."
+                icon={AlertTriangle}
+                accent={(data.kpis.sale_unclear ?? 0) > 0 ? "warning" : "muted"}
+                onClick={() => navigate("/kpi/cars?bucket=sale_unclear")}
+              />
+              <KpiCard
+                testId="kpi-sold-tag-suspect"
+                label="Sold tag suspect"
+                value={data.kpis.sold_tag_suspect ?? 0}
+                subtext="Tagged Sold, live OL, internal owner. Review only."
+                icon={AlertTriangle}
+                accent={(data.kpis.sold_tag_suspect ?? 0) > 0 ? "warning" : "muted"}
+                onClick={() => navigate("/kpi/cars?bucket=sold_tag_suspect")}
+              />
+              <KpiCard
+                testId="kpi-sold-missing-buyer"
+                label="Sold with blank buyer"
+                value={data.kpis.sold_missing_buyer ?? 0}
+                subtext="OL2144 / others tagged Sold with blank sold_to"
+                icon={PackageMinus}
+                onClick={() => navigate("/kpi/cars?bucket=sold_missing_buyer")}
               />
               <KpiCard
                 testId="kpi-riders"

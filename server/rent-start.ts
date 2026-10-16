@@ -56,6 +56,9 @@ export async function setRentStartDate(railcarId: number, dateRaw: string | null
   const { data: car, error: cErr } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", railcarId).maybeSingle();
   if (cErr) throw cErr;
   if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
+  if (car.active !== true) {
+    throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
+  }
   if (car.fleet_status === "Sold") {
     throw Object.assign(new Error("Sold cars are never changed by rent-start logic"), { status: 400 });
   }
@@ -89,18 +92,48 @@ export async function setRentStartDate(railcarId: number, dateRaw: string | null
 
 export async function previewBulkRentStart(
   text: string,
-  opts: { date?: string | null; overwrite?: boolean },
+  opts: { date?: string | null; overwrite?: boolean; ids?: number[] },
 ) {
   const fallback = isoDateOnly(opts.date);
   const parsed = parseCarDateRows(text, fallback);
   const hasCarTokens = parseCarListText(text).some((t) => t.initial);
-  if (!hasCarTokens) throw Object.assign(new Error("No car numbers found"), { status: 400 });
+  if (!hasCarTokens && !(opts.ids && opts.ids.length)) {
+    throw Object.assign(new Error("No car numbers found"), { status: 400 });
+  }
 
   const matched: any[] = [];
   const not_found: { raw: string }[] = [];
   const not_on_ol: any[] = [];
   const already_has_date: any[] = [];
   const to_write: any[] = [];
+  const rejected_inactive: any[] = [];
+
+  if (opts.ids && opts.ids.length) {
+    const ids = Array.from(new Set(opts.ids.filter((n) => Number.isFinite(n) && n > 0)));
+    const { data, error } = await supabaseAdmin.from("railcars").select(CAR_SEL).in("id", ids);
+    if (error) throw error;
+    const found = new Set((data ?? []).map((c: any) => c.id));
+    for (const id of ids) {
+      if (!found.has(id)) not_found.push({ raw: String(id) });
+    }
+    for (const car of data ?? []) {
+      if (car.active !== true) {
+        rejected_inactive.push({
+          id: car.id,
+          marks: car.reporting_marks,
+          car_number: car.car_number,
+          rejected: "inactive",
+        });
+        continue;
+      }
+      parsed.push({
+        initial: String(car.reporting_marks ?? "").trim().toUpperCase(),
+        number: String(car.car_number ?? ""),
+        date: fallback,
+        raw: `${car.reporting_marks} ${car.car_number}`,
+      });
+    }
+  }
 
   for (const t of parsed) {
     if (!t.initial || !t.number) {
@@ -123,6 +156,15 @@ export async function previewBulkRentStart(
       continue;
     }
     const car = hits[0];
+    if (car.active !== true) {
+      rejected_inactive.push({
+        id: car.id,
+        marks: car.reporting_marks,
+        car_number: car.car_number,
+        rejected: "inactive",
+      });
+      continue;
+    }
     if (car.fleet_status === "Sold") {
       not_on_ol.push({
         id: car.id,
@@ -174,6 +216,7 @@ export async function previewBulkRentStart(
     not_found,
     not_on_ol,
     already_has_date,
+    rejected_inactive,
     to_write,
     write_ids: to_write.map((r) => ({ id: r.id, assignment_id: r.assignment_id, new_date: r.new_date })),
   };
@@ -287,6 +330,7 @@ export function registerRentStartRoutes(
         await previewBulkRentStart(String(req.body?.text ?? ""), {
           date: req.body?.date ?? null,
           overwrite: Boolean(req.body?.overwrite),
+          ids: Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : undefined,
         }),
       );
     } catch (e) {

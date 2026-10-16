@@ -1,4 +1,5 @@
-import { Link, useRoute, useLocation } from "wouter";
+import { Link, useRoute, useLocation, useSearch } from "wouter";
+import { KPI_TITLES } from "@shared/kpi-buckets";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -36,6 +37,7 @@ type DetailPayload = {
 
 export default function CarDetailPage() {
   const [, navigate] = useLocation();
+  const searchQs = useSearch();
   const canEdit = useCanEdit();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -85,8 +87,22 @@ export default function CarDetailPage() {
     (lesseeP?.ol ? decodeURIComponent(lesseeP.ol) : null) ||
     (entityP?.ol ? decodeURIComponent(entityP.ol) : null);
   const lessee = r?.lessee_name || (lesseeP?.lessee ? decodeURIComponent(lesseeP.lessee) : null);
+  const fromRaw = new URLSearchParams(searchQs.replace(/^\?/, "")).get("from");
+  let fromPath: string | null = null;
+  let fromKpiTitle: string | null = null;
+  if (fromRaw) {
+    try {
+      fromPath = decodeURIComponent(fromRaw);
+      const bucket = new URLSearchParams(fromPath.split("?")[1] ?? "").get("bucket");
+      fromKpiTitle = bucket ? (KPI_TITLES[bucket] ?? bucket) : "KPI list";
+    } catch {
+      fromPath = fromRaw;
+    }
+  }
   const crumbs: { href?: string; label: string }[] = [{ href: "/", label: "Dashboard" }];
-  if (fromLessee && lesseeP) {
+  if (fromPath && fromKpiTitle) {
+    crumbs.push({ href: fromPath, label: fromKpiTitle });
+  } else if (fromLessee && lesseeP) {
     const L = decodeURIComponent(lesseeP.lessee);
     const O = decodeURIComponent(lesseeP.ol);
     crumbs.push({ href: lesseePath(L), label: L }, { href: lesseeOlPath(L, O), label: O });
@@ -129,6 +145,18 @@ export default function CarDetailPage() {
         }
       />
       <div className="px-4 sm:px-8 py-5 max-w-5xl">
+        {fromPath && (
+          <div className="mb-3">
+            <Link
+              href={fromPath}
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
+              data-testid="link-back-to-kpi"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to {fromKpiTitle ?? "KPI list"}
+            </Link>
+          </div>
+        )}
         {searchBackPath && (
           <div className="mb-3">
             <Link

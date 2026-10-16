@@ -399,50 +399,7 @@ export function LeaseEndedWatchPage() {
   );
 }
 
-export function KpiCarListPage() {
-  const search = useSearch();
-  const bucket = new URLSearchParams(search.replace(/^\?/, "")).get("bucket") ?? "off_rent";
-  const titles: Record<string, string> = {
-    off_rent: "Off Rent",
-    idle: "Idle (seed / committed)",
-    idle_on_ol: "Tagged Idle on OL — under review",
-    unassigned: "Unassigned / Available for Opportunities",
-    on_rent: "Active Cars (on rent)",
-    no_link: "No lease link",
-    mtm: "Month to Month",
-    awaiting_rent_start: "Awaiting rent start",
-    shop_conflict: "Shop conflict",
-    future_rent_start: "Future rent starts",
-  };
-  const { data } = useQuery({
-    queryKey: ["/api/kpi/cars", bucket],
-    queryFn: () => apiGet<any>(`/api/kpi/cars?bucket=${encodeURIComponent(bucket)}`),
-  });
-  return (
-    <div>
-      <PageHeader title={titles[bucket] ?? bucket} subtitle={`${data?.rows?.length ?? 0} cars`} />
-      <div className="p-6">
-        <table className="w-full text-sm">
-          <thead><tr className="text-left text-muted-foreground text-xs"><th>Car</th><th>Entity</th><th>Link</th><th>Lessee</th></tr></thead>
-          <tbody>
-            {(data?.rows ?? []).map((r: any) => (
-              <tr key={r.railcar_id} className="border-t border-border/40">
-                <td className="py-1.5 font-mono">
-                  <button type="button" className="underline" onClick={() => openAppTab(carPath(r.railcar_id))}>
-                    {r.reporting_marks} {r.car_number}
-                  </button>
-                </td>
-                <td>{r.entity}</td>
-                <td>{r.link_rider ?? "—"}</td>
-                <td>{r.lessee_name ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+export { KpiCarListPage } from "@/pages/KpiCarList";
 
 export function BulkRentStartPage() {
   const canEdit = useCanEdit();

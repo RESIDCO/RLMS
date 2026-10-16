@@ -45,6 +45,7 @@ import {
   KpiCarListPage,
   RentStartWatchPage,
 } from "@/pages/CommitmentOps";
+import SaleClassAdmin from "@/pages/SaleClassAdmin";
 
 function RedirectAllCars() {
   const [loc] = useLocation();
@@ -119,6 +120,7 @@ function AppRouter() {
       <Route path="/returns/bulk" component={BulkReturnPage} />
       <Route path="/returns/watch" component={LeaseEndedWatchPage} />
       <Route path="/kpi/cars" component={KpiCarListPage} />
+      <Route path="/admin/sale-class" component={SaleClassAdmin} />
       <Route path="/reports" component={Reports} />
       <Route path="/fleet-intelligence" component={Reports} />
       <Route path="/users" component={AdminOnlyUsers} />

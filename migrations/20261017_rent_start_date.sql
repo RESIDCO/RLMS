@@ -652,6 +652,7 @@ ol_counts AS (
 ),
 vcf AS (
   SELECT
+    upper(ol_code) AS ol,
     ol_code AS rider_name,
     min(substring(btrim(lease_end_date::text) from 1 for 10)) AS expiration_date,
     max(lessee_clean) AS lessee_name,

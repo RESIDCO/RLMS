@@ -34,6 +34,8 @@
     "repair:typecheck-client-lessee": "tsx modules/repair/dev/typecheck-client-lessee.ts",
     "repair:smoke-shop": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/smoke-shop-g.ts",
     "repair:typecheck-client-shop": "tsx modules/repair/dev/typecheck-client-shop.ts",
+    "repair:smoke-invoice": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/smoke-invoice-h.ts",
+    "repair:typecheck-client-invoice": "tsx modules/repair/dev/typecheck-client-invoice.ts",
     "repair:seed-shop-demo": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/seed-shop-demo.ts",
     "repair:clean-smoke-data": "cross-env REPAIR_LOCAL_DB=1 REPAIR_DEV_BYPASS_AUTH=1 tsx modules/repair/dev/clean-smoke-data.ts",
     "repair:import-ref-data": "tsx modules/repair/dev/import-ref-data.ts",

@@ -41,6 +41,9 @@ export const BO_STATUS_TILE: Record<Exclude<BoStatus, "DECLINED">, string> = {
   CLOSED: "Closed",
 };
 
+/** Overlay tile: BOs past POD (alongside base stored status). */
+export const MISSED_POD_TILE = "Missed POD";
+
 export const SHOP_STATUS_TILES = [
   BO_STATUS_TILE.ASSIGNED,
   BO_STATUS_TILE.ACCEPTED,
@@ -52,6 +55,7 @@ export const SHOP_STATUS_TILES = [
   BO_STATUS_TILE.APPROVED,
   BO_STATUS_TILE.IN_REPAIR,
   BO_STATUS_TILE.COMPLETED,
+  MISSED_POD_TILE,
   BO_STATUS_TILE.INVOICE_SUBMITTED,
   BO_STATUS_TILE.CLOSED,
 ] as const;
@@ -181,10 +185,27 @@ export function emptyTileCounts(): Record<ShopStatusTile, number> {
 }
 
 export function statusFromTile(tile: string): BoStatus | null {
+  if (tile === MISSED_POD_TILE) return null; // overlay — not a stored status
   for (const [code, label] of Object.entries(BO_STATUS_TILE)) {
     if (label === tile) return code as BoStatus;
   }
   return null;
+}
+
+/** Display label for bad-order lists — never blank for known statuses. */
+export function displayBoStatusLabel(
+  status: string | null | undefined,
+  lifecycleFallback?: string | null,
+): string {
+  const s = String(status ?? "").trim();
+  if (s && BO_STATUS_LABEL[s as BoStatus]) return BO_STATUS_LABEL[s as BoStatus];
+  if (s === "CLOSED" || String(lifecycleFallback ?? "").toUpperCase() === "CLOSED") {
+    return "Closed";
+  }
+  const life = String(lifecycleFallback ?? "").trim();
+  if (life === "CLOSED") return "Closed";
+  if (life) return life;
+  return s || "—";
 }
 
 export async function getBoStoredStatus(opts: {

@@ -10,6 +10,7 @@
 
 | Tip | Meaning |
 |---|---|
+| **§H Owner invoice review + shop payment** | Apply `rlms-phase1-owner-ui-h-invoice.bundle` on tip **`c5bad2a`** (§G r5). Invoice queue `/#/repair/invoices`, side-by-side review, Approve/Reject/Short-pay, payment batch CSV (no real ACH), Missed POD tile + Closed label. Smoke: `npm run repair:smoke-invoice`. Typecheck: `npm run repair:typecheck-client-invoice`. Spec: [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md). |
 | **§G r5 One stored BO status** | Apply `rlms-phase1-owner-ui-g-shop-r5.bundle` on tip **`0a577f0`** (§G r4). `bo.status` + state machine; accept persists; flags only on estimates; compact timeline; seed via real transitions; tile counts = stored status. Smoke: `npm run repair:smoke-shop`. Typecheck: `npm run repair:typecheck-client-shop`. Spec: [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md). |
 | **§G r4 Shop BO workflow + tiles + invoice** | Prior: `rlms-phase1-owner-ui-g-shop-r4.bundle` on tip **`cbff463`** → **`0a577f0`**. Signed shop link confirm→on hand→estimate→POD/complete→invoice; clickable status tiles; Closed requires accepted invoice. |
 | **§G r3 Inputs / closed BO / seed** | Prior: `rlms-phase1-owner-ui-g-shop-r3.bundle` on tip **`bb837ae`** → **`cbff463`**. White inputs AA; closed reason + inconsistent-state block; smoke hide/clean; seed hard-fail DEMO 100001–100005; owner/MP read-only shop view; DEV banner production-gated. |
@@ -59,9 +60,10 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | **Wreck** | Dual-track wreck event (Rule 107 / Resp 3) — [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) | **BUILD + hotfix + DV panel** (`ba5dc51`) |
 | **5 / §E** | Document Viewer (shot 03) + BRC PDF / Lessee email — [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) | Apply `rlms-phase1-owner-ui-e-brc-email.bundle` on **`73b9e3d`** |
 | **6 / §F** | Lessee screen — [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) | Apply `rlms-phase1-owner-ui-f-lessee-r3.bundle` on **`d172911`** |
-| **7 / §G** | Shop portal + Railinc validation (+ r2/r3) — [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md) | Apply `rlms-phase1-owner-ui-g-shop-r3.bundle` on **`bb837ae`** |
+| **7 / §G** | Shop portal + Railinc validation (+ r2–r5) — [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md) | Apply `rlms-phase1-owner-ui-g-shop-r5.bundle` on **`0a577f0`** |
+| **8 / §H** | Invoice review + shop payment — [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md) | Apply `rlms-phase1-owner-ui-h-invoice.bundle` on **`c5bad2a`** |
 
-**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) · [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) · [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md)  
+**Sub-specs:** [OWNER_UI_A_ESTIMATES_HISTORY.md](./OWNER_UI_A_ESTIMATES_HISTORY.md) · [OWNER_UI_B_SHOP_MASTER.md](./OWNER_UI_B_SHOP_MASTER.md) · [OWNER_UI_C_BAD_ORDERS.md](./OWNER_UI_C_BAD_ORDERS.md) · [OWNER_UI_D_ESTIMATE_REVIEW.md](./OWNER_UI_D_ESTIMATE_REVIEW.md) · [OWNER_UI_WRECK.md](./OWNER_UI_WRECK.md) · [OWNER_UI_E_DOCUMENT_VIEWER.md](./OWNER_UI_E_DOCUMENT_VIEWER.md) · [OWNER_UI_F_LESSEE.md](./OWNER_UI_F_LESSEE.md) · [OWNER_UI_G_SHOP.md](./OWNER_UI_G_SHOP.md) · [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md)  
 **Overall map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)
 
 ---
@@ -93,7 +95,34 @@ If still on **`f911faa`** / **`0c0be23`**, pull §D r5 + prior fold + wreck-spec
 | N+29 | **`rlms-phase1-owner-ui-g-shop-r2.bundle`** (§G r2 shop clarity + review aids) | **`85199a7`** | → **`bb837ae`** |
 | N+30 | **`rlms-phase1-owner-ui-g-shop-r3.bundle`** (§G r3 inputs / closed BO / seed) | **`bb837ae`** | → **`cbff463`** |
 | N+31 | **`rlms-phase1-owner-ui-g-shop-r4.bundle`** (§G r4 shop BO workflow + tiles + invoice) | **`cbff463`** | → **`0a577f0`** |
-| N+32 | **`rlms-phase1-owner-ui-g-shop-r5.bundle`** (§G r5 one stored BO status) | **`0a577f0`** | → **(see README)** |
+| N+32 | **`rlms-phase1-owner-ui-g-shop-r5.bundle`** (§G r5 one stored BO status) | **`0a577f0`** | → **`c5bad2a`** |
+| N+33 | **`rlms-phase1-owner-ui-h-invoice.bundle`** (§H invoice review + payment) | **`c5bad2a`** | → **(see README)** |
+
+---
+
+## Apply §H Owner invoice review + shop payment (on tip `c5bad2a`)
+
+```powershell
+cd C:\Users\BruceHarbridge\rlms-push
+git rev-parse HEAD   # expect c5bad2a…
+git bundle verify PATH\TO\rlms-phase1-owner-ui-h-invoice.bundle
+git pull PATH\TO\rlms-phase1-owner-ui-h-invoice.bundle HEAD
+git push -u origin cursor/repair-module-phase1-4199
+```
+
+Then:
+
+```powershell
+$env:DATABASE_URL = "postgresql://repairdev:repairdev@127.0.0.1:5433/rlms_repair_dev"
+$env:REPAIR_LOCAL_DB = "1"
+$env:REPAIR_DEV_BYPASS_AUTH = "1"
+npm install
+npm run repair:migrate:local
+npm run repair:typecheck-client-invoice
+npm run repair:smoke-invoice
+npm run repair:dev:local
+# http://127.0.0.1:5000/#/repair/invoices
+```
 
 ---
 

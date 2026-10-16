@@ -299,6 +299,32 @@ export async function submitShopInvoice(opts: {
     });
   }
 
+  // §H: persist invoice lines from 500-byte for side-by-side review
+  try {
+    const { replaceInvoiceLinesFromAar } = await import("./invoice-review");
+    await replaceInvoiceLinesFromAar({
+      invoiceId: String(rows[0].id),
+      aarBytes: opts.aarFile!.bytes,
+      actor: opts.actorEmail,
+      tenantId,
+    });
+  } catch {
+    /* non-fatal — review can synthesize a header line */
+  }
+
+  await q(
+    `UPDATE repair.invoices
+     SET invoice_date = coalesce(invoice_date, CURRENT_DATE),
+         approved_estimate_cents = $2,
+         flags_summary = $3
+     WHERE id = $1`,
+    [
+      rows[0].id,
+      estimateCents,
+      validation.flags.map((f) => f.code).join(",") || null,
+    ],
+  ).catch(() => undefined);
+
   await writeAudit({
     tenantId,
     entity: "invoice",
@@ -402,17 +428,39 @@ export async function approveInvoiceMatch(opts: {
   return { ok: true as const, invoice: rows[0] };
 }
 
-/** §G r4 owner accept shop invoice (Estimate Review read-only path). */
+/**
+ * §G r4 / §H owner accept shop invoice.
+ * §H: Approve → Payable (net terms) and close BO. Prefer approveOwnerInvoice
+ * for full validation; this path remains for Estimate Review one-click accept.
+ */
 export async function acceptShopInvoice(opts: {
   invoiceId: string;
   actor: string;
   note?: string;
   tenantId?: string;
 }) {
+  const { approveOwnerInvoice } = await import("./invoice-review");
+  const approved = await approveOwnerInvoice({
+    invoiceId: opts.invoiceId,
+    actor: opts.actor,
+    overToleranceReason: opts.note?.trim() || "Accepted via Estimate Review",
+    tenantId: opts.tenantId,
+  });
+  if (approved.ok) {
+    if (opts.note?.trim()) {
+      await q(
+        `UPDATE repair.invoices SET owner_decision_note = $2 WHERE id = $1`,
+        [opts.invoiceId, opts.note.trim()],
+      ).catch(() => undefined);
+    }
+    return { ok: true as const, invoice: approved.invoice };
+  }
+  // Fallback: prior ACCEPTED semantics if already past review gate
   const tenantId = opts.tenantId ?? DEFAULT_TENANT_ID;
   const { rows } = await q(
     `UPDATE repair.invoices
-     SET workflow_status = 'ACCEPTED',
+     SET workflow_status = 'PAYABLE',
+         payment_status = coalesce(payment_status, 'PAYABLE'),
          decided_by = $1, decided_at = now(),
          owner_decision_note = $4,
          match_status = CASE
@@ -420,21 +468,30 @@ export async function acceptShopInvoice(opts: {
            ELSE 'APPROVED'
          END,
          approved_by = coalesce(approved_by, $1),
-         approved_at = coalesce(approved_at, now())
+         approved_at = coalesce(approved_at, now()),
+         due_date = coalesce(due_date, (CURRENT_DATE + interval '30 days')::date),
+         approved_amount_cents = coalesce(
+           approved_amount_cents,
+           ROUND(COALESCE(total, 0) * 100)::bigint
+         )
      WHERE id = $2 AND tenant_id = $3 AND deleted_at IS NULL
-       AND coalesce(workflow_status, '') <> 'ACCEPTED'
+       AND coalesce(workflow_status, '') NOT IN ('PAID','REJECTED')
      RETURNING *`,
     [opts.actor, opts.invoiceId, tenantId, opts.note?.trim() || null],
   );
   if (!rows[0]) {
-    return { ok: false as const, status: 404, error: "Invoice not found or already accepted" };
+    return {
+      ok: false as const,
+      status: approved.status ?? 404,
+      error: approved.error || "Invoice not found or already accepted",
+    };
   }
   await writeAudit({
     tenantId,
     entity: "invoice",
     entityId: opts.invoiceId,
     action: "INVOICE_ACCEPTED",
-    after: { workflow_status: "ACCEPTED", note: opts.note ?? null },
+    after: { workflow_status: "PAYABLE", note: opts.note ?? null },
     actor: opts.actor,
     via: "UI",
   });

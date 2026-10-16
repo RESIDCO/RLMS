@@ -34,6 +34,7 @@ type HomePayload = {
     yard_arrived_at?: string;
     is_wreck?: boolean;
     statusTile?: string;
+    statusLabel?: string;
     closedReasonLine?: string | null;
     inconsistentClosed?: boolean;
     inconsistentClosedReasons?: string[];
@@ -65,6 +66,7 @@ const STATUS_TILES = [
   "Approved",
   "In Repair",
   "Completed",
+  "Missed POD",
   "Invoice Submitted",
   "Closed",
 ];
@@ -338,7 +340,10 @@ export default function ShopPortal() {
                           {bo.car_mark} {bo.car_number}
                         </span>
                         <span className="ml-2 text-sm text-slate-700">
-                          {bo.statusTile || bo.lifecycle_status || "—"}
+                          {bo.statusLabel ||
+                            bo.statusTile ||
+                            bo.lifecycle_status ||
+                            "—"}
                           {bo.is_wreck ? " · Wreck" : ""}
                         </span>
                         {bo.closedReasonLine && (

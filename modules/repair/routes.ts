@@ -253,6 +253,18 @@ import {
   rejectShopInvoice,
 } from "./services/invoices";
 import {
+  listOwnerInvoiceQueue,
+  getInvoiceReviewBundle,
+  approveOwnerInvoice,
+  rejectOwnerInvoice,
+  shortPayOwnerInvoice,
+  createPaymentBatch,
+  exportPaymentBatch,
+  recordInvoicePaid,
+  listShopInvoicePayments,
+  listPaymentBatches,
+} from "./services/invoice-review";
+import {
   submitShopCrbInvoice,
   ingestCrbInvoiceFromInboundEmail,
   decideInvoiceReview,
@@ -2666,6 +2678,164 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     const uid = await maybeRequireUser(deps, req, res);
     if (!uid) return;
     return res.json({ invoices: await listInvoicesForEvent(String(req.params.id)) });
+  });
+
+  /** §H owner invoice queue */
+  app.get("/api/repair/invoices/queue", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    let shopId: string | null = null;
+    const shopMark = req.query.shopMark ? String(req.query.shopMark).trim() : "";
+    if (shopMark) {
+      const { rows } = await q(
+        `SELECT id FROM repair.shops
+         WHERE deleted_at IS NULL
+           AND (upper(coalesce(shop_mark, reporting_mark)) = upper($1))
+         LIMIT 1`,
+        [shopMark],
+      );
+      shopId = rows[0]?.id ? String(rows[0].id) : "00000000-0000-0000-0000-000000000000";
+    }
+    const invoices = await listOwnerInvoiceQueue({
+      shopId,
+      status: req.query.status ? String(req.query.status) : null,
+      minAgeDays: req.query.minAgeDays != null ? Number(req.query.minAgeDays) : null,
+      overEstimateOnly:
+        req.query.overEstimateOnly === "1" || req.query.overEstimateOnly === "true",
+    });
+    return res.json({ invoices });
+  });
+
+  app.get("/api/repair/invoices/:id/review", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await getInvoiceReviewBundle({
+      invoiceId: String(req.params.id),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/invoices/:id/owner-approve", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await approveOwnerInvoice({
+      invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+      overToleranceReason: req.body?.overToleranceReason
+        ? String(req.body.overToleranceReason)
+        : undefined,
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        error: result.error,
+        hardRejects: (result as { hardRejects?: unknown }).hardRejects,
+        tolCheck: (result as { tolCheck?: unknown }).tolCheck,
+      });
+    }
+    return res.json(result);
+  });
+
+  app.post("/api/repair/invoices/:id/owner-reject", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const lineComments = Array.isArray(req.body?.lineComments)
+      ? req.body.lineComments.map(
+          (c: { lineNo?: number; text?: string }) => ({
+            lineNo: Number(c.lineNo ?? 0),
+            text: String(c.text ?? ""),
+          }),
+        )
+      : undefined;
+    const result = await rejectOwnerInvoice({
+      invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+      note: String(req.body?.note ?? req.body?.reason ?? ""),
+      lineComments,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/invoices/:id/short-pay", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const lineShortPays = Array.isArray(req.body?.lineShortPays)
+      ? req.body.lineShortPays.map(
+          (c: { lineNo?: number; amountCents?: number; reason?: string }) => ({
+            lineNo: Number(c.lineNo ?? 0),
+            amountCents: Number(c.amountCents ?? 0),
+            reason: String(c.reason ?? ""),
+          }),
+        )
+      : [];
+    const result = await shortPayOwnerInvoice({
+      invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+      reason: String(req.body?.reason ?? ""),
+      lineShortPays,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/invoices/:id/record-paid", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await recordInvoicePaid({
+      invoiceId: String(req.params.id),
+      actor: actorFrom(req),
+      paidAt: String(req.body?.paidAt ?? ""),
+      paidRef: String(req.body?.paidRef ?? ""),
+      paidMethod: req.body?.paidMethod ? String(req.body.paidMethod) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/payment-batches", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    return res.json({ batches: await listPaymentBatches() });
+  });
+
+  app.post("/api/repair/payment-batches", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const invoiceIds = Array.isArray(req.body?.invoiceIds)
+      ? req.body.invoiceIds.map((x: unknown) => String(x))
+      : [];
+    const result = await createPaymentBatch({
+      invoiceIds,
+      actor: actorFrom(req),
+      note: req.body?.note ? String(req.body.note) : undefined,
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.post("/api/repair/payment-batches/:id/export", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const result = await exportPaymentBatch({
+      batchId: String(req.params.id),
+      actor: actorFrom(req),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  });
+
+  app.get("/api/repair/shop/invoice-payments", async (req, res) => {
+    const uid = await maybeRequireUser(deps, req, res);
+    if (!uid) return;
+    const actor = shopActorFrom(req);
+    const ctx = await resolveShopContext(actor);
+    if (!ctx.ok) return res.status(ctx.status).json({ error: ctx.error });
+    const payments = await listShopInvoicePayments({
+      shopId: String(ctx.shop.id),
+      tenantId: ctx.tenantId,
+    });
+    return res.json({ payments, readOnly: ctx.readOnly });
   });
 
   app.post("/api/repair/invoices/:id/approve", async (req, res) => {

@@ -54,6 +54,8 @@ import WreckEvent from "@/pages/repair/WreckEvent";
 import ShopPortal from "@/pages/repair/ShopPortal";
 import ShopBoDetail from "@/pages/repair/ShopBoDetail";
 import ShopEstimateDetail from "@/pages/repair/ShopEstimateDetail";
+import InvoiceQueue from "@/pages/repair/InvoiceQueue";
+import InvoiceReview from "@/pages/repair/InvoiceReview";
 import NotFound from "@/pages/not-found";
 
 function RedirectAllCars() {
@@ -138,7 +140,8 @@ function AppRouter() {
       <Route path="/repair/estimates/brc" component={RepairComingSoon} />
       <Route path="/repair/bad-orders" component={BadOrders} />
       <Route path="/repair/outbound-dispos" component={RepairComingSoon} />
-      <Route path="/repair/invoices" component={RepairComingSoon} />
+      <Route path="/repair/invoices/:id" component={InvoiceReview} />
+      <Route path="/repair/invoices" component={InvoiceQueue} />
       <Route path="/repair/assignments" component={RepairComingSoon} />
       <Route path="/repair/shops/:id" component={ShopProfile} />
       <Route path="/repair/shops" component={ShopMaster} />

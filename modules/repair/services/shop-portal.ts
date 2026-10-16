@@ -406,11 +406,15 @@ export async function shopPortalHome(opts: ShopActor & {
     }
   }
 
+  const { MISSED_POD_TILE, displayBoStatusLabel } = await import("./bo-status");
   const tileCounts = emptyTileCounts();
   const badOrdersAll = bos.map((bo) => {
     const eid = String(bo.event_id);
+    const boStatus = bo.bo_status ? String(bo.bo_status) : null;
     const isClosed =
-      Boolean(bo.closed_at) || String(bo.lifecycle_status ?? "") === "CLOSED";
+      boStatus === "CLOSED" ||
+      Boolean(bo.closed_at) ||
+      String(bo.lifecycle_status ?? "") === "CLOSED";
     const meta = invByEvent.get(eid);
     const est = estByEvent.get(eid);
     const completed =
@@ -418,13 +422,17 @@ export async function shopPortalHome(opts: ShopActor & {
       meta?.completed ||
       null;
     const invoiceAccepted =
-      meta?.workflow_status === "ACCEPTED" || meta?.match_status === "APPROVED";
+      meta?.workflow_status === "ACCEPTED" ||
+      meta?.workflow_status === "PAYABLE" ||
+      meta?.workflow_status === "PAID" ||
+      meta?.workflow_status === "EXPORTED" ||
+      meta?.workflow_status === "IN_BATCH" ||
+      meta?.match_status === "APPROVED";
+    const pastPod = missedPodEvents.has(eid) && !isClosed;
     const missedPodRequired =
-      missedPodEvents.has(eid) &&
-      !bo.missed_pod_reason_code &&
-      !isClosed;
+      pastPod && !bo.missed_pod_reason_code;
     const tile = classifyBoTile({
-      boStatus: bo.bo_status ? String(bo.bo_status) : null,
+      boStatus,
       eventStatus: bo.event_status ? String(bo.event_status) : null,
       lifecycleStatus: bo.lifecycle_status ? String(bo.lifecycle_status) : null,
       acknowledgedAt: bo.acknowledged_at ? String(bo.acknowledged_at) : null,
@@ -442,13 +450,21 @@ export async function shopPortalHome(opts: ShopActor & {
       isClosed,
     });
     tileCounts[tile] += 1;
+    if (pastPod) tileCounts[MISSED_POD_TILE as keyof typeof tileCounts] += 1;
+
+    const statusLabel = displayBoStatusLabel(
+      boStatus,
+      isClosed ? "CLOSED" : bo.lifecycle_status ? String(bo.lifecycle_status) : null,
+    );
 
     if (!isClosed) {
       return {
         ...bo,
-        status: bo.bo_status ? String(bo.bo_status) : null,
+        status: boStatus,
         statusTile: tile,
-        missedPod: missedPodRequired,
+        statusLabel,
+        missedPod: pastPod,
+        missedPodRequired,
         closedReasonLine: null as string | null,
         inconsistentClosed: false,
         inconsistentClosedReasons: [] as string[],
@@ -477,7 +493,10 @@ export async function shopPortalHome(opts: ShopActor & {
     return {
       ...bo,
       lifecycle_status: "CLOSED",
-      statusTile: tile,
+      status: "CLOSED",
+      statusTile: tile || "Closed",
+      statusLabel: "Closed",
+      missedPod: false,
       closedReasonLine,
       inconsistentClosed: inconsistency.inconsistent,
       inconsistentClosedReasons: inconsistency.reasons,
@@ -491,7 +510,11 @@ export async function shopPortalHome(opts: ShopActor & {
   let badOrders = badOrdersAll;
   let filteredEstimates = estimateRows;
   if (tileFilter && isKnownTile) {
-    badOrders = badOrdersAll.filter((b) => b.statusTile === tileFilter);
+    if (tileFilter === MISSED_POD_TILE) {
+      badOrders = badOrdersAll.filter((b) => Boolean((b as { missedPod?: boolean }).missedPod));
+    } else {
+      badOrders = badOrdersAll.filter((b) => b.statusTile === tileFilter);
+    }
     const keep = new Set(badOrders.map((b) => String(b.event_id)));
     filteredEstimates = estimateRows.filter((e) => keep.has(String(e.event_id)));
   } else if (opts.status) {

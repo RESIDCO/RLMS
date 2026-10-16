@@ -4,6 +4,7 @@
  */
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { formatShopLabel } from "./shops";
+import { BO_STATUS_LABEL, type BoStatus } from "./bo-status";
 
 export const DEFAULT_BO_STATUSES = [
   "QUEUED",
@@ -78,8 +79,25 @@ export function displayLifecycleStatus(code: string): string {
     case "DECLINED":
       return "Declined";
     default:
-      return code;
+      return code || "—";
   }
+}
+
+/** Prefer stored bo.status (§G r5 / §H); Closed never blank. */
+export function displayBadOrderStatus(opts: {
+  status?: string | null;
+  lifecycleStatus?: string | null;
+}): string {
+  const st = String(opts.status ?? "").trim().toUpperCase();
+  if (st === "CLOSED") return "Closed";
+  if (st && BO_STATUS_LABEL[st as BoStatus]) {
+    return BO_STATUS_LABEL[st as BoStatus];
+  }
+  const life = String(opts.lifecycleStatus ?? "").trim().toUpperCase();
+  if (life === "CLOSED") return "Closed";
+  const shown = displayLifecycleStatus(life);
+  if (shown && shown !== "—") return shown;
+  return "—";
 }
 
 export async function queryBadOrderGrid(filters: BoGridFilters = {}) {
@@ -110,7 +128,9 @@ export async function queryBadOrderGrid(filters: BoGridFilters = {}) {
             bo.shopping_reason AS bad_order_reason,
             bo.bo_rule_code,
             bo.bo_rule_other_text,
+            bo.status AS bo_status,
             bo.lifecycle_status,
+            bo.closed_at,
             bo.stcc,
             bo.reporting_road,
             bo.dc_road,
@@ -165,7 +185,12 @@ export async function queryBadOrderGrid(filters: BoGridFilters = {}) {
      WHERE bo.tenant_id = $1
        AND bo.deleted_at IS NULL
        AND ev.deleted_at IS NULL
-       AND ($2::text[] IS NULL OR bo.lifecycle_status = ANY($2))
+       AND (
+         $2::text[] IS NULL
+         OR bo.lifecycle_status = ANY($2)
+         OR bo.status = ANY($2)
+         OR ('CLOSED' = ANY($2) AND (bo.status = 'CLOSED' OR bo.closed_at IS NOT NULL))
+       )
        AND ($3::uuid[] IS NULL OR ev.shop_id = ANY($3))
        AND ($4::text IS NULL OR upper(ev.car_mark) = upper($4))
        AND ($5::text IS NULL OR ev.car_number = $5)
@@ -199,7 +224,12 @@ export async function queryBadOrderGrid(filters: BoGridFilters = {}) {
      WHERE bo.tenant_id = $1
        AND bo.deleted_at IS NULL
        AND ev.deleted_at IS NULL
-       AND ($2::text[] IS NULL OR bo.lifecycle_status = ANY($2))
+       AND (
+         $2::text[] IS NULL
+         OR bo.lifecycle_status = ANY($2)
+         OR bo.status = ANY($2)
+         OR ('CLOSED' = ANY($2) AND (bo.status = 'CLOSED' OR bo.closed_at IS NOT NULL))
+       )
        AND ($3::uuid[] IS NULL OR ev.shop_id = ANY($3))
        AND ($4::text IS NULL OR upper(ev.car_mark) = upper($4))
        AND ($5::text IS NULL OR ev.car_number = $5)
@@ -253,8 +283,17 @@ export async function queryBadOrderGrid(filters: BoGridFilters = {}) {
         r.bo_rule_other_text != null ? String(r.bo_rule_other_text) : null,
       dest_city: r.dest_city,
       dest_state: r.dest_state,
-      lifecycle_status: String(r.lifecycle_status),
-      status_display: displayLifecycleStatus(String(r.lifecycle_status)),
+      lifecycle_status:
+        String(r.bo_status ?? "") === "CLOSED" ||
+        String(r.lifecycle_status ?? "") === "CLOSED" ||
+        r.closed_at
+          ? "CLOSED"
+          : String(r.lifecycle_status ?? ""),
+      status_display: displayBadOrderStatus({
+        status: r.bo_status != null ? String(r.bo_status) : null,
+        lifecycleStatus: r.lifecycle_status != null ? String(r.lifecycle_status) : null,
+      }),
+      bo_status: r.bo_status != null ? String(r.bo_status) : null,
       yard_arrived_at: r.yard_arrived_at,
       arrival_date: r.arrival_date,
       estimate_id: r.estimate_id != null ? String(r.estimate_id) : null,

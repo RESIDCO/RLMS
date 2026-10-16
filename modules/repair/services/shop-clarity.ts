@@ -278,8 +278,14 @@ export async function getBoLifecycleBundle(opts: {
   const isClosed = Boolean(bo?.closed_at) || String(bo?.lifecycle_status ?? "") === "CLOSED";
   const invoiceNo = inv[0]?.invoice_no ? String(inv[0].invoice_no) : null;
   const invoicedAt = ymd(inv[0]?.created_at);
+  const invWf = String(inv[0]?.workflow_status ?? "");
   const invoiceAccepted =
-    String(inv[0]?.workflow_status ?? "") === "ACCEPTED" ||
+    invWf === "ACCEPTED" ||
+    invWf === "PAYABLE" ||
+    invWf === "IN_BATCH" ||
+    invWf === "EXPORTED" ||
+    invWf === "PAID" ||
+    invWf === "SHORT_PAID" ||
     String(inv[0]?.match_status ?? "") === "APPROVED";
   const invoiceWorkflow = inv[0]?.workflow_status
     ? String(inv[0].workflow_status)
@@ -1021,8 +1027,14 @@ export async function assertCloseRequirements(opts: {
       error: "Cannot close: invoice required",
     };
   }
+  const wf = String(inv[0].workflow_status ?? "");
   const accepted =
-    String(inv[0].workflow_status ?? "") === "ACCEPTED" ||
+    wf === "ACCEPTED" ||
+    wf === "PAYABLE" ||
+    wf === "IN_BATCH" ||
+    wf === "EXPORTED" ||
+    wf === "PAID" ||
+    wf === "SHORT_PAID" ||
     String(inv[0].match_status ?? "") === "APPROVED";
   if (!accepted) {
     return {

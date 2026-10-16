@@ -178,6 +178,21 @@ export function assertInvoiceClientTypecheck(): void {
   if (!queue.includes("bg-white") || !review.includes("bg-white")) {
     bad("contrast", "Invoice pages need white panels");
   }
+  if (!queue.includes("shopAa") || !queue.includes("repair-aa-panel")) {
+    bad("queue-aa", "InvoiceQueue must use shopAa + repair-aa-panel");
+  }
+  if (!queue.includes("Under owner review")) {
+    bad("queue-status", "InvoiceQueue status filter must use plain Under owner review");
+  }
+  if (!queue.includes("toLocaleString")) {
+    bad("queue-money", "InvoiceQueue money must use toLocaleString (commas)");
+  }
+  if (!payments.includes("shopAa") || !payments.includes("repair-aa-panel")) {
+    bad("pay-aa", "PaymentBatches must use shopAa + repair-aa-panel");
+  }
+  if (!months.includes("shopAa") || !months.includes("repair-aa-panel")) {
+    bad("months-aa", "AccountingMonths must use shopAa + repair-aa-panel");
+  }
   ok("Contrast + short-pay header + plain statuses");
 
   const tsc = spawnSync(

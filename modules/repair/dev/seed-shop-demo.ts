@@ -1261,15 +1261,20 @@ async function main() {
         );
       }
     }
-    const { rows: futureOpen } = await q(
-      `SELECT month_label FROM repair.accounting_months
-       WHERE deleted_at IS NULL AND status = 'OPEN' AND month_label > '2026-10'`,
+    const { rows: futureAny } = await q(
+      `SELECT month_label, status FROM repair.accounting_months
+       WHERE deleted_at IS NULL AND month_label > $1`,
+      [months.open.monthLabel],
     );
-    if (futureOpen.length) {
-      fail(`future open months left: ${futureOpen.map((r) => r.month_label).join(",")}`);
+    if (futureAny.length) {
+      fail(
+        `months after open left: ${futureAny
+          .map((r) => `${r.month_label}/${r.status}`)
+          .join(",")}`,
+      );
     }
     ok(
-      `seed end-state: open ${months.open.monthLabel}; Paid in closed ${months.closed.monthLabel}; no future months open`,
+      `seed end-state: open ${months.open.monthLabel}; Paid in closed ${months.closed.monthLabel}; no months after open`,
     );
   }
 

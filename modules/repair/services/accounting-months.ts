@@ -144,12 +144,23 @@ export async function listAccountingMonths(opts?: {
   tenantId?: string;
 }): Promise<AccountingMonthRow[]> {
   const tenantId = opts?.tenantId ?? DEFAULT_TENANT_ID;
+  // Show only the open month and past months — hide empty future months
+  // left CLOSED by older close runs (e.g. 2026-11 / 2026-12 / 2027-01).
   const { rows } = await q(
     `SELECT m.*,
             (SELECT count(*)::int FROM repair.invoices i
              WHERE i.accounting_month_id = m.id AND i.deleted_at IS NULL) AS invoice_count
      FROM repair.accounting_months m
      WHERE m.tenant_id = $1 AND m.deleted_at IS NULL
+       AND (
+         m.status = 'OPEN'
+         OR m.month_label <= coalesce(
+           (SELECT month_label FROM repair.accounting_months
+            WHERE tenant_id = $1 AND status = 'OPEN' AND deleted_at IS NULL
+            ORDER BY month_label DESC LIMIT 1),
+           to_char(timezone('utc', now()), 'YYYY-MM')
+         )
+       )
      ORDER BY m.month_label DESC`,
     [tenantId],
   );
@@ -415,7 +426,9 @@ export async function closeAccountingMonth(opts: {
 
 /**
  * Demo/seed helper: force Sep 2026 CLOSED + Oct 2026 OPEN.
- * Soft-deletes any OPEN months after 2026-10; never leaves a future month open.
+ * Soft-deletes ANY months after the open label (OPEN or CLOSED leftovers
+ * from old runs such as 2026-11 / 2026-12 / 2027-01); never leaves a
+ * future month visible or open.
  */
 export async function resetDemoAccountingMonths(opts?: {
   tenantId?: string;
@@ -431,18 +444,25 @@ export async function resetDemoAccountingMonths(opts?: {
     throw new Error(`Demo open month ${openLabel} is in the future`);
   }
 
-  // Close / hide any OPEN months that aren't the desired open label
+  // Hide every month after the open label (empty future CLOSED leftovers too)
   await q(
     `UPDATE repair.accounting_months
      SET status = 'CLOSED',
          closed_at = coalesce(closed_at, now()),
          closed_by = coalesce(closed_by, $1),
-         deleted_at = CASE
-           WHEN month_label > $2 THEN coalesce(deleted_at, now())
-           ELSE deleted_at END,
-         deleted_by = CASE
-           WHEN month_label > $2 THEN coalesce(deleted_by, $1)
-           ELSE deleted_by END
+         deleted_at = coalesce(deleted_at, now()),
+         deleted_by = coalesce(deleted_by, $1)
+     WHERE tenant_id = $3 AND deleted_at IS NULL
+       AND month_label > $2`,
+    [actor, openLabel, tenantId],
+  );
+
+  // Close any other OPEN months that aren't the desired open label
+  await q(
+    `UPDATE repair.accounting_months
+     SET status = 'CLOSED',
+         closed_at = coalesce(closed_at, now()),
+         closed_by = coalesce(closed_by, $1)
      WHERE tenant_id = $3 AND status = 'OPEN' AND deleted_at IS NULL
        AND month_label IS DISTINCT FROM $2`,
     [actor, openLabel, tenantId],

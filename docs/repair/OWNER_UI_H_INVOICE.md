@@ -2,7 +2,7 @@
 
 **Parent map:** [OWNER_UI_SPEC.md](./OWNER_UI_SPEC.md)  
 **Routes:** `/#/repair/invoices` · `/#/repair/invoices/:id` · `/#/repair/payments` · `/#/repair/months` · `/#/repair/shop/multi-car-invoice`  
-**Requires tip:** `ea48201` (§H r4) → r5 FF
+**Requires tip:** `61d6ce7` (§H r5) → r6 FF
 
 ## Defaults (open Q)
 
@@ -15,10 +15,12 @@
 
 ## Contrast (AA)
 
-Invoice review, queue, payments, months: **white panels**, near-black text (`slate-900` / `slate-700` labels).  
+Invoice review, queue, payments, months: **white panels** (`repair-aa-panel` + `shopAa`), near-black text (`slate-900` / `slate-700` labels) even under the dark owner theme.  
+Amber highlight = light row tint with dark text. White inputs + visible labels. Readable **Review** buttons.  
 Line table (BRC): **Line, Loc, Qty, C, AJOB, QA, Description, WM, RJOB, QR, Resp, Labor, Material, Amount** plus **Est amount** / **Inv amount**.  
-Money as `$36,732.04`. Statuses as plain words (e.g. “Under owner review”).  
-**Exceptions (N)** toggle — no long flag list; highlight only exception rows.
+Money as `$36,732.04` (commas). Statuses as plain words (e.g. “Under owner review” — never `UNDER_OWNER_REVIEW` in the filter).  
+**Exceptions (N)** toggle — no long flag list; highlight only exception rows.  
+Axe smoke covers `/#/repair/invoices`, `/#/repair/payments`, `/#/repair/months`.
 
 ## Status flow (approval ≠ paid)
 
@@ -31,6 +33,7 @@ Shop sees: “Approved – scheduled with \<month\> close”, then “Paid \<dat
 - One **OPEN** month at a time. Approved invoices land in the open month with frozen car/lease snapshot.
 - Owner/MP closes when ready (review totals by shop + by resp owner/lessee6/road3) → confirm.
 - Close freezes month (read-only, audited); later approvals → next month.
+- List shows **open month + past months only** — empty future months (e.g. 2026-11 / 2026-12 / 2027-01) from old runs are soft-deleted by clean/seed.
 - Reopen: owner-only with reason.
 - Placeholders: CRB received, lessee rebill output (later phase). Show **Lessee rebill pending** and **Road rebill pending** totals now.
 

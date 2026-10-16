@@ -234,6 +234,29 @@ async function main() {
   );
   ok(`legacy §G Shop A/B smoke marks cleaned (${legacy ?? 0})`);
 
+  // Soft-delete empty future accounting months left CLOSED by old close runs
+  // (e.g. 2026-11 / 2026-12 / 2027-01) so the months list is open + past only.
+  const { resetDemoAccountingMonths } = await import(
+    "../services/accounting-months"
+  );
+  const months = await resetDemoAccountingMonths({ actor });
+  const { rows: afterOpen } = await q(
+    `SELECT month_label FROM repair.accounting_months
+     WHERE tenant_id = $1 AND deleted_at IS NULL
+       AND month_label > $2`,
+    [DEFAULT_TENANT_ID, months.open.monthLabel],
+  );
+  if (afterOpen.length) {
+    throw new Error(
+      `future months still visible after clean: ${afterOpen
+        .map((r) => r.month_label)
+        .join(",")}`,
+    );
+  }
+  ok(
+    `accounting months reset: open ${months.open.monthLabel}; no months after open`,
+  );
+
   console.log("=== repair:clean-smoke-data PASS ===");
 }
 

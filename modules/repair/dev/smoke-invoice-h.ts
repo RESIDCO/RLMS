@@ -41,6 +41,7 @@ import {
   invoiceStatusPlain,
   resetDemoAccountingMonths,
   isFutureMonthLabel,
+  listAccountingMonths,
 } from "../services/accounting-months";
 import {
   createMultiCarInvoice,
@@ -937,7 +938,7 @@ async function main() {
   }
 
 
-  // ── §H r3 contrast AA on invoice routes (axe-equivalent) ───────────
+  // ── §H r3/r6 contrast AA + axe smoke on invoices/payments/months ───
   {
     const aaValue = contrastRatio(SHOP_AA_TOKENS.value, SHOP_AA_TOKENS.surface);
     const aaLabel = contrastRatio(SHOP_AA_TOKENS.label, SHOP_AA_TOKENS.surface);
@@ -957,6 +958,40 @@ async function main() {
       if (!src.includes("bg-white") || !src.includes("text-slate-900")) {
         bad("axe-contrast", `${rel} missing white panel / near-black text`);
       }
+      if (!src.includes("shopAa")) {
+        bad("axe-shopAa", `${rel} must use shopAa AA tokens`);
+      }
+      if (
+        (rel.includes("InvoiceQueue") ||
+          rel.includes("PaymentBatches") ||
+          rel.includes("AccountingMonths")) &&
+        !src.includes("repair-aa-panel")
+      ) {
+        bad("axe-aa-panel", `${rel} must use repair-aa-panel for dark-theme AA`);
+      }
+    }
+    const queueSrc = readFileSync(
+      join(ROOT, "client/src/pages/repair/InvoiceQueue.tsx"),
+      "utf8",
+    );
+    if (!queueSrc.includes("Under owner review")) {
+      bad("axe-status-plain", "InvoiceQueue status filter must say Under owner review");
+    }
+    if (queueSrc.includes('>"UNDER_OWNER_REVIEW"<') || /\{s \|\| "All"\}/.test(queueSrc)) {
+      bad("axe-status-raw", "InvoiceQueue must not show raw UNDER_OWNER_REVIEW as label");
+    }
+    if (!queueSrc.includes("toLocaleString") || !queueSrc.includes("currency")) {
+      bad("axe-money", "InvoiceQueue money must use toLocaleString currency (commas)");
+    }
+    if (!queueSrc.includes("shopAa.input") || !queueSrc.includes("shopAa.select")) {
+      bad("axe-input", "InvoiceQueue must use shopAa.input/select (white + dark text)");
+    }
+    if (!queueSrc.includes("bg-amber-50") || !queueSrc.includes("Review")) {
+      bad("axe-review-btn", "InvoiceQueue needs amber row tint + Review button");
+    }
+    const css = readFileSync(join(ROOT, "client/src/index.css"), "utf8");
+    if (!css.includes(".repair-aa-panel") || !css.includes("#0f172a")) {
+      bad("axe-css", "index.css must force near-black text inside repair-aa-panel");
     }
     const reviewSrc = readFileSync(join(ROOT, "client/src/pages/repair/InvoiceReview.tsx"), "utf8");
     for (const h of [
@@ -986,7 +1021,7 @@ async function main() {
       bad("flag-list", "InvoiceReview must not render a long flag list");
     }
     ok(
-      `AA contrast + BRC headers + Exceptions toggle (value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)})`,
+      `axe AA on invoices/payments/months (value=${aaValue.toFixed(2)} label=${aaLabel.toFixed(2)})`,
     );
     if (invoiceStatusPlain({ workflowStatus: "UNDER_OWNER_REVIEW" }) !== "Under owner review") {
       bad("status-plain", "Under owner review");
@@ -1305,6 +1340,58 @@ async function main() {
       bad("queue-apa", "APA still in owner queue");
     }
     ok("clean hides APA-OFOX528313; queue has no legacy APA");
+  }
+
+  // ── §H r6: no month later than open month after clean + seed ───────
+  {
+    // Plant empty future CLOSED leftovers (old close-run shape)
+    for (const label of ["2026-11", "2026-12", "2027-01"]) {
+      await q(
+        `INSERT INTO repair.accounting_months
+           (tenant_id, month_label, status, opened_by, closed_by, closed_at, created_by)
+         VALUES (
+           (SELECT id FROM repair.tenants LIMIT 1),
+           $1, 'CLOSED', 'smoke-h', 'smoke-h', now(), 'smoke-h'
+         )
+         ON CONFLICT (tenant_id, month_label) DO UPDATE
+           SET status = 'CLOSED', deleted_at = NULL, closed_at = now()`,
+        [label],
+      );
+    }
+    execSync("npm run repair:clean-smoke-data", {
+      cwd: ROOT,
+      env: { ...process.env, REPAIR_LOCAL_DB: "1", REPAIR_DEV_BYPASS_AUTH: "1" },
+      stdio: "pipe",
+    });
+    execSync("npm run repair:seed-shop-demo", {
+      cwd: ROOT,
+      env: { ...process.env, REPAIR_LOCAL_DB: "1", REPAIR_DEV_BYPASS_AUTH: "1" },
+      stdio: "pipe",
+    });
+    const months = await listAccountingMonths();
+    const open = months.find((m) => m.status === "OPEN");
+    if (!open || open.monthLabel !== "2026-10") {
+      bad("open-month", `expected open 2026-10 got ${open?.monthLabel}`);
+    }
+    const after = months.filter((m) => m.monthLabel > open!.monthLabel);
+    if (after.length) {
+      bad(
+        "months-future-list",
+        `list shows months after open: ${after.map((m) => m.monthLabel).join(",")}`,
+      );
+    }
+    const { rows: liveAfter } = await q(
+      `SELECT month_label FROM repair.accounting_months
+       WHERE deleted_at IS NULL AND month_label > $1`,
+      [open!.monthLabel],
+    );
+    if (liveAfter.length) {
+      bad(
+        "months-future-db",
+        `live months after open: ${liveAfter.map((r) => r.month_label).join(",")}`,
+      );
+    }
+    ok("clean+seed: open 2026-10; no months after open (list + DB)");
   }
 
   console.log("=== repair:smoke-invoice PASS ===");

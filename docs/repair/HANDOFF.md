@@ -10,7 +10,8 @@
 
 | Tip | Meaning |
 |---|---|
-| **§H r5 Invoice review simplify + demo cleanup** | Apply `rlms-phase1-owner-ui-h-invoice-r5.bundle` on tip **`ea48201`** (§H r4). BRC line grid + Exceptions toggle; multi-car per-car grids + hard reject unselected/missing cars; SHORT $36,732.04 / $747.50 across 2 lines; open month 2026-10; no future months closed; clean APA by prefix. Smoke: `npm run repair:smoke-invoice`. Typecheck: `npm run repair:typecheck-client-invoice`. Spec: [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md). |
+| **§H r6 Invoice queue contrast + months cleanup** | Apply `rlms-phase1-owner-ui-h-invoice-r6.bundle` on tip **`61d6ce7`** (§H r5). Queue/payments/months AA (`repair-aa-panel` + `shopAa`); plain status filter; money with commas; soft-delete empty future months so list is open + past only. Smoke: `npm run repair:smoke-invoice`. Typecheck: `npm run repair:typecheck-client-invoice`. Spec: [OWNER_UI_H_INVOICE.md](./OWNER_UI_H_INVOICE.md). |
+| **§H r5 Invoice review simplify + demo cleanup** | Prior: `rlms-phase1-owner-ui-h-invoice-r5.bundle` on tip **`ea48201`** → **`61d6ce7`**. BRC line grid + Exceptions toggle; multi-car; SHORT $36,732.04 / $747.50; open 2026-10. |
 | **§H r4 Demo seed fix + multi-car naming** | Prior: `rlms-phase1-owner-ui-h-invoice-r4.bundle` on tip **`478319a`** → **`ea48201`**. Seed re-point; `DEMO-INV-MULTI`; SHORT $747.50. |
 | **§H r3 Invoice + multi-car + monthly close** | Prior: `rlms-phase1-owner-ui-h-invoice-r3.bundle` on tip **`81a3d3e`** → **`478319a`**. Contrast AA; short-pay header; multi-car; accounting months. |
 | **§H r2 Invoice review fixes** | Prior: `rlms-phase1-owner-ui-h-invoice-r2.bundle` on tip **`ebf9400`**. |

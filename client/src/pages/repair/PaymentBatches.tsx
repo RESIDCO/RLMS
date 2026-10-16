@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceTitle } from "./WorkspaceTitle";
+import { shopAa } from "./RepairNavChrome";
 import { cn } from "@/lib/utils";
 
 type PayableRow = {
@@ -202,36 +203,46 @@ export default function PaymentBatches() {
 
   return (
     <RepairOwnerShell>
-      <div className="mx-auto max-w-7xl px-4 py-6 space-y-6">
-        <WorkspaceTitle
-          title="Payments"
-          subtitle="Shop payment batches — CSV export only (no real ACH)"
-        />
-        <p className="text-sm text-slate-700">
-          RESIDCO · Payable → Create batch → Download CSV / Mark exported →
-          Record paid (date + check/ACH ref). Dates in CSV are ISO YYYY-MM-DD;
-          amounts are 2 decimals with no $.
+      <div className={cn(shopAa.page, "mx-auto max-w-7xl px-4 py-6 space-y-6")}>
+        <WorkspaceTitle title="Payments" />
+        <p className={shopAa.muted}>
+          RESIDCO · Shop payment batches — CSV export only (no real ACH). Payable
+          → Create batch → Download CSV / Mark exported → Record paid (date +
+          check/ACH ref). Dates in CSV are ISO YYYY-MM-DD; amounts are 2
+          decimals with no $.
         </p>
         <p className="text-sm">
-          <Link href="/repair/invoices" className="text-blue-700 underline">
+          <Link
+            href="/repair/invoices"
+            className="font-semibold text-blue-800 underline"
+          >
             ← Invoice queue
           </Link>
         </p>
 
-        <div className="flex flex-wrap items-end gap-3 rounded border border-slate-300 bg-white p-3">
-          <Button onClick={() => void load()} disabled={busy}>
+        <div className="repair-aa-panel flex flex-wrap items-end gap-3 rounded border border-slate-400 bg-white p-3 text-slate-900">
+          <Button
+            onClick={() => void load()}
+            disabled={busy}
+            className="font-semibold text-slate-900"
+          >
             Refresh
           </Button>
-          <Button onClick={() => void createBatch()}>Create batch</Button>
+          <Button
+            onClick={() => void createBatch()}
+            className="font-semibold text-slate-900"
+          >
+            Create batch
+          </Button>
         </div>
 
         {msg && <p className="text-sm font-medium text-slate-900">{msg}</p>}
-        {error && <p className="text-sm text-red-700">{error}</p>}
+        {error && <p className="text-sm font-medium text-red-800">{error}</p>}
 
         <section className="space-y-2">
           <h2 className="text-base font-semibold text-slate-900">Payables</h2>
-          <div className="overflow-x-auto rounded border border-slate-300 bg-white">
-            <table className="min-w-full text-sm">
+          <div className="repair-aa-panel overflow-x-auto rounded border border-slate-400 bg-white text-slate-900">
+            <table className="min-w-full text-sm text-slate-900">
               <thead className="bg-slate-100 text-left text-slate-900">
                 <tr>
                   <th className="px-2 py-2">☑</th>
@@ -248,7 +259,7 @@ export default function PaymentBatches() {
                   <tr>
                     <td
                       colSpan={7}
-                      className="px-3 py-6 text-center text-slate-600"
+                      className="px-3 py-6 text-center text-slate-700"
                     >
                       {busy ? "Loading…" : "No payable invoices."}
                     </td>
@@ -257,28 +268,32 @@ export default function PaymentBatches() {
                   payables.map((r) => (
                     <tr
                       key={r.id}
-                      className="border-t border-slate-200"
+                      className="border-t border-slate-200 text-slate-900"
                     >
-                      <td className="px-2 py-2">
+                      <td className="px-2 py-2 text-slate-900">
                         <input
                           type="checkbox"
                           checked={selected.has(r.id)}
                           onChange={() => toggle(r.id)}
                         />
                       </td>
-                      <td className="px-2 py-2 font-mono font-semibold">
+                      <td className="px-2 py-2 font-mono font-semibold text-slate-900">
                         {r.carMark} {r.carNumber}
                       </td>
-                      <td className="px-2 py-2">{r.shopMark}</td>
-                      <td className="px-2 py-2 font-mono">{r.invoiceNo}</td>
-                      <td className="px-2 py-2 text-right font-mono">
+                      <td className="px-2 py-2 text-slate-900">{r.shopMark}</td>
+                      <td className="px-2 py-2 font-mono text-slate-900">
+                        {r.invoiceNo}
+                      </td>
+                      <td className="px-2 py-2 text-right font-mono font-semibold text-slate-900">
                         {dollars(r.invoiceCents)}
                         {r.shortPayCents != null && r.shortPayCents > 0
                           ? " · short"
                           : ""}
                       </td>
-                      <td className="px-2 py-2 font-mono">{r.dueDate || "—"}</td>
-                      <td className="px-2 py-2 text-xs">
+                      <td className="px-2 py-2 font-mono text-slate-900">
+                        {r.dueDate || "—"}
+                      </td>
+                      <td className="px-2 py-2 text-xs font-medium text-slate-900">
                         {r.paymentStatus || r.workflowStatus || "—"}
                       </td>
                     </tr>
@@ -293,8 +308,8 @@ export default function PaymentBatches() {
           <h2 className="text-base font-semibold text-slate-900">
             Batch history
           </h2>
-          <div className="overflow-x-auto rounded border border-slate-300 bg-white">
-            <table className="min-w-full text-sm">
+          <div className="repair-aa-panel overflow-x-auto rounded border border-slate-400 bg-white text-slate-900">
+            <table className="min-w-full text-sm text-slate-900">
               <thead className="bg-slate-100 text-left text-slate-900">
                 <tr>
                   <th className="px-2 py-2">Batch #</th>
@@ -309,7 +324,7 @@ export default function PaymentBatches() {
                   <tr>
                     <td
                       colSpan={5}
-                      className="px-3 py-6 text-center text-slate-600"
+                      className="px-3 py-6 text-center text-slate-700"
                     >
                       No batches yet.
                     </td>
@@ -319,22 +334,26 @@ export default function PaymentBatches() {
                     <tr
                       key={b.id}
                       className={cn(
-                        "border-t border-slate-200",
-                        activeBatchId === b.id && "bg-sky-50",
+                        "border-t border-slate-200 text-slate-900",
+                        activeBatchId === b.id && "bg-sky-50 text-slate-900",
                       )}
                     >
-                      <td className="px-2 py-2 font-mono">{b.batch_no}</td>
-                      <td className="px-2 py-2 text-xs">{b.status}</td>
-                      <td className="px-2 py-2 font-mono">
+                      <td className="px-2 py-2 font-mono text-slate-900">
+                        {b.batch_no}
+                      </td>
+                      <td className="px-2 py-2 text-xs font-medium text-slate-900">
+                        {b.status}
+                      </td>
+                      <td className="px-2 py-2 font-mono text-slate-900">
                         {b.invoice_count ?? "—"}
                       </td>
-                      <td className="px-2 py-2 font-mono text-xs">
+                      <td className="px-2 py-2 font-mono text-xs text-slate-900">
                         {String(b.created_at).slice(0, 19)}
                       </td>
                       <td className="px-2 py-2 space-x-2">
                         <Button
                           size="sm"
-                          variant="outline"
+                          className="font-semibold text-slate-900 bg-white border border-slate-700"
                           onClick={() => void openBatch(b.id)}
                         >
                           Drill in
@@ -342,6 +361,7 @@ export default function PaymentBatches() {
                         {b.status !== "EXPORTED" && b.status !== "CLOSED" ? (
                           <Button
                             size="sm"
+                            className="font-semibold text-slate-900"
                             onClick={() => void downloadAndExport(b.id)}
                           >
                             Download CSV / Mark exported
@@ -350,6 +370,7 @@ export default function PaymentBatches() {
                           <Button
                             size="sm"
                             variant="secondary"
+                            className="font-semibold text-slate-900"
                             onClick={() => void downloadAndExport(b.id)}
                           >
                             Re-download CSV
@@ -365,32 +386,32 @@ export default function PaymentBatches() {
         </section>
 
         {activeBatchId && (
-          <section className="space-y-3 rounded border border-slate-300 bg-white p-4">
+          <section className="repair-aa-panel space-y-3 rounded border border-slate-400 bg-white p-4 text-slate-900">
             <h2 className="text-base font-semibold text-slate-900">
               Batch detail
             </h2>
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <Label className="text-slate-800">Paid date (ISO)</Label>
+                <Label className={shopAa.label}>Paid date (ISO)</Label>
                 <Input
-                  className="h-8 w-36 font-mono"
+                  className={cn(shopAa.input, "mt-1 h-8 w-36 font-mono")}
                   value={paidAt}
                   onChange={(e) => setPaidAt(e.target.value)}
                   placeholder="YYYY-MM-DD"
                 />
               </div>
               <div>
-                <Label className="text-slate-800">Check / ACH ref</Label>
+                <Label className={shopAa.label}>Check / ACH ref</Label>
                 <Input
-                  className="h-8 w-40 font-mono"
+                  className={cn(shopAa.input, "mt-1 h-8 w-40 font-mono")}
                   value={paidRef}
                   onChange={(e) => setPaidRef(e.target.value)}
                 />
               </div>
               <div>
-                <Label className="text-slate-800">Method</Label>
+                <Label className={shopAa.label}>Method</Label>
                 <select
-                  className="mt-0 block h-8 rounded border border-slate-300 bg-white px-2 text-sm"
+                  className={cn(shopAa.select, "mt-1 h-8 w-auto")}
                   value={paidMethod}
                   onChange={(e) => setPaidMethod(e.target.value)}
                 >
@@ -401,8 +422,8 @@ export default function PaymentBatches() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-100 text-left">
+              <table className="min-w-full text-sm text-slate-900">
+                <thead className="bg-slate-100 text-left text-slate-900">
                   <tr>
                     <th className="px-2 py-2">Invoice #</th>
                     <th className="px-2 py-2">Car</th>
@@ -415,21 +436,26 @@ export default function PaymentBatches() {
                 </thead>
                 <tbody>
                   {batchInvoices.map((inv) => (
-                    <tr key={inv.id} className="border-t border-slate-200">
-                      <td className="px-2 py-2 font-mono">{inv.invoiceNo}</td>
-                      <td className="px-2 py-2 font-mono">
+                    <tr
+                      key={inv.id}
+                      className="border-t border-slate-200 text-slate-900"
+                    >
+                      <td className="px-2 py-2 font-mono text-slate-900">
+                        {inv.invoiceNo}
+                      </td>
+                      <td className="px-2 py-2 font-mono text-slate-900">
                         {inv.carMark} {inv.carNumber}
                       </td>
-                      <td className="px-2 py-2 text-right font-mono">
+                      <td className="px-2 py-2 text-right font-mono font-semibold text-slate-900">
                         {dollars(inv.amountCents)}
                       </td>
-                      <td className="px-2 py-2 font-mono">
+                      <td className="px-2 py-2 font-mono text-slate-900">
                         {inv.dueDate || "—"}
                       </td>
-                      <td className="px-2 py-2 text-xs">
+                      <td className="px-2 py-2 text-xs font-medium text-slate-900">
                         {inv.paymentStatus || "—"}
                       </td>
-                      <td className="px-2 py-2 text-xs font-mono">
+                      <td className="px-2 py-2 text-xs font-mono text-slate-900">
                         {inv.paidAt
                           ? `${inv.paidAt} ${inv.paidRef || ""}`
                           : "—"}
@@ -438,6 +464,7 @@ export default function PaymentBatches() {
                         {inv.paymentStatus !== "PAID" && (
                           <Button
                             size="sm"
+                            className="font-semibold text-slate-900"
                             onClick={() => void recordPaid(inv.id)}
                           >
                             Record paid

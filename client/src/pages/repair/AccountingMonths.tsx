@@ -135,10 +135,13 @@ export default function AccountingMonths() {
     <RepairOwnerShell>
       <div className={cn(shopAa.page, "mx-auto max-w-5xl px-4 py-6 space-y-4")}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <WorkspaceTitle
-            title="Accounting months"
-            subtitle="RESIDCO / RLMS — one open month; close when ready (no fixed pay-cycle cutoff)"
-          />
+          <div>
+            <WorkspaceTitle title="Accounting months" />
+            <p className={shopAa.muted}>
+              RESIDCO / RLMS — one open month; close when ready (no fixed
+              pay-cycle cutoff). List shows the open month and past months only.
+            </p>
+          </div>
           <div className="flex gap-2">
             <Link href="/repair/invoices">
               <Button variant="outline" size="sm">
@@ -157,7 +160,7 @@ export default function AccountingMonths() {
         {msg && <p className="text-sm font-medium text-slate-900">{msg}</p>}
 
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
-          <div className="rounded border border-slate-400 bg-white p-3">
+          <div className="repair-aa-panel rounded border border-slate-400 bg-white p-3 text-slate-900">
             <p className={shopAa.label}>Months</p>
             <ul className="mt-2 space-y-1">
               {months.map((m) => (
@@ -187,7 +190,7 @@ export default function AccountingMonths() {
 
           <div className="space-y-3">
             {active && (
-              <div className="rounded border border-slate-400 bg-white p-4 space-y-3">
+              <div className="repair-aa-panel rounded border border-slate-400 bg-white p-4 space-y-3 text-slate-900">
                 <h2 className="text-lg font-semibold text-slate-900">
                   {active.monthLabel} —{" "}
                   {active.status === "OPEN" ? "Open" : "Closed (read-only)"}

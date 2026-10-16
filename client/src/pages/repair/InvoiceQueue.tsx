@@ -2,6 +2,7 @@
  * §H Owner invoice queue — `/#/repair/invoices`
  * Every Invoice Submitted: car, shop, invoice no/date, amount, estimate,
  * difference, flags, age. Filters + payment batch CSV export.
+ * §H r6: AA contrast (white panels, near-black text) even under dark owner theme.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceTitle } from "./WorkspaceTitle";
+import { shopAa } from "./RepairNavChrome";
 import { cn } from "@/lib/utils";
 
 type QueueRow = {
@@ -46,14 +48,15 @@ function dollars(cents: number): string {
   });
 }
 
-const STATUS_OPTS = [
-  "",
-  "UNDER_OWNER_REVIEW",
-  "APPROVED_IN_OPEN_MONTH",
-  "MONTH_CLOSED",
-  "SENT_TO_AP",
-  "PAID",
-  "REJECTED",
+/** Filter values stay API enums; labels are plain words for the UI. */
+const STATUS_OPTS: Array<{ value: string; label: string }> = [
+  { value: "", label: "All" },
+  { value: "UNDER_OWNER_REVIEW", label: "Under owner review" },
+  { value: "APPROVED_IN_OPEN_MONTH", label: "Approved – In Open Month" },
+  { value: "MONTH_CLOSED", label: "Month Closed" },
+  { value: "SENT_TO_AP", label: "Sent to AP" },
+  { value: "PAID", label: "Paid" },
+  { value: "REJECTED", label: "Rejected" },
 ];
 
 export default function InvoiceQueue() {
@@ -152,50 +155,50 @@ export default function InvoiceQueue() {
 
   return (
     <RepairOwnerShell>
-      <div className="mx-auto max-w-7xl px-4 py-6 space-y-4">
-        <WorkspaceTitle title="Invoices" subtitle="Owner invoice review queue" />
-        <p className="text-sm text-slate-700">
-          RESIDCO · Invoice Submitted → review → Approve / Reject / Short-pay →
-          Payable →{" "}
-          <Link href="/repair/payments" className="text-blue-700 underline">
+      <div className={cn(shopAa.page, "mx-auto max-w-7xl px-4 py-6 space-y-4")}>
+        <WorkspaceTitle title="Invoices" />
+        <p className={shopAa.muted}>
+          RESIDCO · Owner invoice review queue. Invoice Submitted → review →
+          Approve / Reject / Short-pay → Payable →{" "}
+          <Link href="/repair/payments" className="font-semibold text-blue-800 underline">
             payment batches
           </Link>{" "}
           CSV export (no real payments).
         </p>
 
-        <div className="flex flex-wrap items-end gap-3 rounded border border-slate-300 bg-white p-3">
+        <div className="repair-aa-panel flex flex-wrap items-end gap-3 rounded border border-slate-400 bg-white p-3 text-slate-900">
           <div>
-            <Label className="text-slate-800">Shop mark</Label>
+            <Label className={shopAa.label}>Shop mark</Label>
             <Input
-              className="h-8 w-24 font-mono uppercase"
+              className={cn(shopAa.input, "mt-1 h-8 w-24 font-mono uppercase")}
               value={shop}
               onChange={(e) => setShop(e.target.value.toUpperCase())}
               placeholder="DS01"
             />
           </div>
           <div>
-            <Label className="text-slate-800">Status</Label>
+            <Label className={shopAa.label}>Status</Label>
             <select
-              className="mt-0 block h-8 rounded border border-slate-300 bg-white px-2 text-sm"
+              className={cn(shopAa.select, "mt-1 h-8 w-auto min-w-[12rem]")}
               value={status}
               onChange={(e) => setStatus(e.target.value)}
             >
               {STATUS_OPTS.map((s) => (
-                <option key={s || "all"} value={s}>
-                  {s || "All"}
+                <option key={s.value || "all"} value={s.value}>
+                  {s.label}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <Label className="text-slate-800">Min age (days)</Label>
+            <Label className={shopAa.label}>Min age (days)</Label>
             <Input
-              className="h-8 w-20"
+              className={cn(shopAa.input, "mt-1 h-8 w-20")}
               value={minAge}
               onChange={(e) => setMinAge(e.target.value)}
             />
           </div>
-          <label className="flex items-center gap-2 text-sm text-slate-900">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-900">
             <input
               type="checkbox"
               checked={overOnly}
@@ -203,10 +206,18 @@ export default function InvoiceQueue() {
             />
             Amount over estimate
           </label>
-          <Button onClick={() => void load()} disabled={busy}>
+          <Button
+            onClick={() => void load()}
+            disabled={busy}
+            className="font-semibold text-slate-900"
+          >
             Apply
           </Button>
-          <Button variant="secondary" onClick={() => void createBatch()}>
+          <Button
+            variant="secondary"
+            onClick={() => void createBatch()}
+            className="font-semibold text-slate-900"
+          >
             Create batch + export CSV
           </Button>
         </div>
@@ -214,10 +225,10 @@ export default function InvoiceQueue() {
         {batchMsg && (
           <p className="text-sm font-medium text-slate-900">{batchMsg}</p>
         )}
-        {error && <p className="text-sm text-red-700">{error}</p>}
+        {error && <p className="text-sm font-medium text-red-800">{error}</p>}
 
-        <div className="overflow-x-auto rounded border border-slate-300 bg-white">
-          <table className="min-w-full text-sm">
+        <div className="repair-aa-panel overflow-x-auto rounded border border-slate-400 bg-white text-slate-900">
+          <table className="min-w-full text-sm text-slate-900">
             <thead className="bg-slate-100 text-left text-slate-900">
               <tr>
                 <th className="px-2 py-2">☑</th>
@@ -240,7 +251,7 @@ export default function InvoiceQueue() {
                 <tr>
                   <td
                     colSpan={13}
-                    className="px-3 py-6 text-center text-slate-600"
+                    className="px-3 py-6 text-center text-slate-700"
                   >
                     {busy ? "Loading…" : "No invoices match filters."}
                   </td>
@@ -250,11 +261,11 @@ export default function InvoiceQueue() {
                   <tr
                     key={r.id}
                     className={cn(
-                      "border-t border-slate-200",
-                      r.differenceCents > 0 && "bg-amber-50",
+                      "border-t border-slate-200 text-slate-900",
+                      r.differenceCents > 0 && "bg-amber-50 text-slate-900",
                     )}
                   >
-                    <td className="px-2 py-2">
+                    <td className="px-2 py-2 text-slate-900">
                       <input
                         type="checkbox"
                         checked={selected.has(r.id)}
@@ -267,27 +278,33 @@ export default function InvoiceQueue() {
                         }
                       />
                     </td>
-                    <td className="px-2 py-2 font-mono font-semibold">
+                    <td className="px-2 py-2 font-mono font-semibold text-slate-900">
                       {r.carMark} {r.carNumber}
                     </td>
-                    <td className="px-2 py-2">{r.shopMark}</td>
-                    <td className="px-2 py-2 font-mono">{r.invoiceNo}</td>
-                    <td className="px-2 py-2">{r.invoiceDate}</td>
-                    <td className="px-2 py-2 text-right font-mono">
+                    <td className="px-2 py-2 text-slate-900">{r.shopMark}</td>
+                    <td className="px-2 py-2 font-mono text-slate-900">
+                      {r.invoiceNo}
+                    </td>
+                    <td className="px-2 py-2 text-slate-900">{r.invoiceDate}</td>
+                    <td className="px-2 py-2 text-right font-mono font-semibold text-slate-900">
                       {dollars(r.invoiceCents)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono">
+                    <td className="px-2 py-2 text-right font-mono text-slate-900">
                       {dollars(r.estimateCents)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono">
+                    <td className="px-2 py-2 text-right font-mono text-slate-900">
                       {dollars(r.differenceCents)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono">
+                    <td className="px-2 py-2 text-right font-mono text-slate-900">
                       {r.differencePct.toFixed(2)}%
                     </td>
-                    <td className="px-2 py-2 text-xs">{r.flags || "—"}</td>
-                    <td className="px-2 py-2 font-mono">{r.ageDays}</td>
                     <td className="px-2 py-2 text-xs text-slate-900">
+                      {r.flags || "—"}
+                    </td>
+                    <td className="px-2 py-2 font-mono text-slate-900">
+                      {r.ageDays}
+                    </td>
+                    <td className="px-2 py-2 text-xs font-medium text-slate-900">
                       {r.statusPlain ||
                         r.paymentStatus ||
                         r.workflowStatus ||
@@ -299,7 +316,10 @@ export default function InvoiceQueue() {
                     </td>
                     <td className="px-2 py-2">
                       <Link href={`/repair/invoices/${r.id}`}>
-                        <Button size="sm" variant="outline">
+                        <Button
+                          size="sm"
+                          className="font-semibold text-slate-900 bg-amber-100 border border-amber-800 hover:bg-amber-200"
+                        >
                           Review
                         </Button>
                       </Link>

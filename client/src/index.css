@@ -276,6 +276,38 @@ body:has(.repair-owner-ui--dark) [role="listbox"] {
   border-color: #64748b !important;
 }
 
+/* §H r6: white/amber AA panels keep near-black text + white inputs under dark theme */
+.repair-owner-ui .repair-aa-panel {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+.repair-owner-ui .repair-aa-panel label,
+.repair-owner-ui .repair-aa-panel legend {
+  color: #334155 !important; /* slate-700 ≥4.5:1 on white */
+}
+.repair-owner-ui .repair-aa-panel input:not([type="checkbox"]):not([type="radio"]),
+.repair-owner-ui .repair-aa-panel textarea,
+.repair-owner-ui .repair-aa-panel select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #64748b !important;
+  caret-color: #0f172a;
+}
+.repair-owner-ui .repair-aa-panel input::placeholder,
+.repair-owner-ui .repair-aa-panel textarea::placeholder {
+  color: #475569 !important;
+  opacity: 1;
+}
+.repair-owner-ui .repair-aa-panel tr.bg-amber-50,
+.repair-owner-ui .repair-aa-panel .bg-amber-50 {
+  background-color: #fffbeb !important;
+  color: #0f172a !important;
+}
+.repair-owner-ui .repair-aa-panel td,
+.repair-owner-ui .repair-aa-panel th {
+  color: inherit;
+}
+
 @layer utilities {
   .font-mono-num {
     font-family: var(--font-mono);

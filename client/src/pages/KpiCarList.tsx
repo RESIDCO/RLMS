@@ -46,15 +46,31 @@ function qsFrom(sp: URLSearchParams) {
 }
 
 function kpiThClass(col: (typeof KPI_SORT_COLS)[number]) {
-  const sticky = col === "car" ? "sticky left-8 z-20 bg-card" : "";
+  const sticky =
+    col === "car"
+      ? "sticky left-8 z-20 bg-background border-r border-border"
+      : "";
   return `py-1.5 pr-3 ${sticky}`;
 }
 
-function kpiTdClass(col: (typeof KPI_SORT_COLS)[number]) {
+function kpiTdClass(col: (typeof KPI_SORT_COLS)[number], selected = false) {
   const layout = KPI_COL_LAYOUT[col];
-  const sticky = col === "car" ? "sticky left-8 z-10 bg-card" : "";
+  const fill = selected
+    ? "bg-muted/40 group-hover/kpirow:bg-muted/40"
+    : "bg-background group-hover/kpirow:bg-muted/20";
+  const sticky =
+    col === "car"
+      ? `sticky left-8 z-10 ${fill} border-r border-border`
+      : "";
   const wrap = col === "car" ? "whitespace-nowrap font-mono" : layout.truncate ? "max-w-[12rem] truncate" : "";
   return `py-1.5 pr-3 ${sticky} ${wrap}`.trim();
+}
+
+function kpiCheckClass(selected = false) {
+  const fill = selected
+    ? "bg-muted/40 group-hover/kpirow:bg-muted/40"
+    : "bg-background group-hover/kpirow:bg-muted/20";
+  return `sticky left-0 z-10 ${fill}`;
 }
 
 export function KpiCarListPage() {
@@ -406,7 +422,7 @@ export function KpiCarListPage() {
             <table className="w-full text-sm border-separate border-spacing-0">
               <thead>
                 <tr className="text-left text-muted-foreground text-xs">
-                  <th className="w-8 min-w-8 sticky left-0 z-20 bg-card">
+                  <th className="w-8 min-w-8 sticky left-0 z-20 bg-background">
                     <Checkbox
                       checked={allPageSelected}
                       onCheckedChange={(v) => {
@@ -452,11 +468,16 @@ export function KpiCarListPage() {
                         </tr>
                       ) : null}
                       {!hide &&
-                        g.rows.map((r) => (
-                          <tr key={r.railcar_id} className="border-t border-border/40">
-                            <td className="sticky left-0 z-10 bg-card">
+                        g.rows.map((r) => {
+                          const rowSelected = selectAllMatching || selected.has(r.railcar_id);
+                          return (
+                          <tr
+                            key={r.railcar_id}
+                            className={`group/kpirow border-t border-border/40 ${rowSelected ? "bg-muted/40" : "hover:bg-muted/20"}`}
+                          >
+                            <td className={kpiCheckClass(rowSelected)}>
                               <Checkbox
-                                checked={selectAllMatching || selected.has(r.railcar_id)}
+                                checked={rowSelected}
                                 onCheckedChange={(v) => {
                                   const next = new Set(selected);
                                   if (v) next.add(r.railcar_id);
@@ -466,7 +487,7 @@ export function KpiCarListPage() {
                                 }}
                               />
                             </td>
-                            <td className={kpiTdClass("car")} style={{ minWidth: KPI_COL_LAYOUT.car.minWidth }}>
+                            <td className={kpiTdClass("car", rowSelected)} style={{ minWidth: KPI_COL_LAYOUT.car.minWidth }}>
                               <button
                                 type="button"
                                 className="underline whitespace-nowrap"
@@ -511,7 +532,8 @@ export function KpiCarListPage() {
                             <td className={kpiTdClass("last_ol")} style={{ minWidth: KPI_COL_LAYOUT.last_ol.minWidth }}>{r.last_ol ?? "—"}</td>
                             <td className={kpiTdClass("reason")} style={{ minWidth: KPI_COL_LAYOUT.reason.minWidth }}>{r.reason ?? "—"}</td>
                           </tr>
-                        ))}
+                          );
+                        })}
                     </Fragment>
                   );
                 })}

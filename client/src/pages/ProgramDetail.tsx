@@ -19,6 +19,7 @@ import ProgramDocsPanel from "@/components/ProgramDocsPanel";
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import ShopCombobox, { type ShopOption } from "@/components/ShopCombobox";
 import AccountCombobox from "@/components/AccountCombobox";
+import { UndoLastChange } from "@/components/UndoLastChange";
 import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
 import { carPathFromProgram, navigateHash, programsPathFromQuery, useHashSearch } from "@/lib/hash-location";
 import { cn } from "@/lib/utils";
@@ -1465,6 +1466,7 @@ export default function ProgramDetailPage() {
             />
           </TabsContent>
           <TabsContent value="activity" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
+            {canEdit ? <div className="mb-2"><UndoLastChange programId={id} /></div> : null}
             <ActivityList rows={activity} />
           </TabsContent>
         </Tabs>

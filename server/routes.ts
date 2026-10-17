@@ -68,6 +68,7 @@ import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates
 import { pickRow } from "@shared/change-log";
 import { diffProgramPatch } from "@shared/program-patch";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
+import { applyUndo, eligibleUndo, previewUndo, resolveUndoGroup } from "./undo";
 import { recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
@@ -4154,6 +4155,47 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/undo/eligible", async (req, res) => {
+    try {
+      const userId = await requireWrite(req, res);
+      if (!userId) return;
+      const railcarId = req.query.railcar_id ? Number(req.query.railcar_id) : undefined;
+      const programId = req.query.program_id ? Number(req.query.program_id) : undefined;
+      res.json(await eligibleUndo({
+        actor: userId,
+        railcarId: Number.isFinite(railcarId) ? railcarId : undefined,
+        programId: Number.isFinite(programId) ? programId : undefined,
+      }));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/undo/preview", async (req, res) => {
+    try {
+      const userId = await requireWrite(req, res);
+      if (!userId) return;
+      const group = await resolveUndoGroup(req.body ?? {});
+      if (!group) return res.status(400).json({ message: "change_group or activity_id required" });
+      res.json(await previewUndo(group, userId));
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message, conflicts: err.conflicts });
+      errHandler(res, err);
+    }
+  });
+
+  app.post("/api/undo", async (req, res) => {
+    try {
+      const userId = await requireWrite(req, res);
+      if (!userId) return;
+      const group = await resolveUndoGroup(req.body ?? {});
+      if (!group) return res.status(400).json({ message: "change_group or activity_id required" });
+      const result = await applyUndo(group, userId);
+      res.json({ ...result, undoable: false });
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message, conflicts: err.conflicts });
+      errHandler(res, err);
+    }
+  });
+
   app.get("/api/activity", async (req, res) => {
     try {
       const railcarId = req.query.railcar_id ? Number(req.query.railcar_id) : undefined;
@@ -4190,7 +4232,7 @@ export async function registerRoutes(
         entity_type,
         entity_id,
         body,
-        actor: req.authUser?.email ?? "system",
+        actor: writerId,
       });
       res.status(201).json(row);
     } catch (err) {

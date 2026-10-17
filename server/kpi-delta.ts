@@ -8,14 +8,15 @@ import {
 } from "@shared/kpi-buckets";
 
 const FLAG_COLS =
-  "railcar_id, car, active, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, status_tag, lease_status, buyer, rent_start_date";
+  "railcar_id, car, active, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, status_tag, lease_status, buyer, rent_start_date, open_abatement";
 
 export type KpiPatch =
   | { kind: "commitment"; action: "set" | "clear" }
   | { kind: "rent_start"; dateById: Map<number, string | null> }
   | { kind: "sold"; buyer?: string | null; buyerById?: Map<number, string | null> }
   | { kind: "unsold" }
-  | { kind: "buyer" };
+  | { kind: "buyer" }
+  | { kind: "abatement" };
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -29,6 +30,11 @@ function addDays(iso: string, n: number) {
 
 function applyPatch(row: any, patch: KpiPatch): KpiFlagRow {
   const next: KpiFlagRow = { ...row };
+  if (patch.kind === "abatement") {
+    next.open_abatement = true;
+    next.on_rent = false;
+    return next;
+  }
   if (patch.kind === "commitment") {
     next.has_open_commitment = patch.action === "set";
     return next;
@@ -120,7 +126,7 @@ export async function loadKpiCarRow(id: number) {
   const { data, error } = await supabaseAdmin
     .from("v_rlms_kpi_car_rows")
     .select(
-      "railcar_id, active, car, reporting_marks, car_number, entity, status_tag, derived_status, current_lease, lessee, legal_owner, buyer, commitment, rent_start_date, last_ol, reason, sale_class, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, lease_status, master_lease_id, rider_id",
+      "railcar_id, active, car, reporting_marks, car_number, entity, status_tag, derived_status, current_lease, lessee, legal_owner, buyer, commitment, rent_start_date, last_ol, reason, sale_class, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, lease_status, master_lease_id, rider_id, open_abatement, rent_stop_type, stop_date, expected_resume_date, rent_stop_reason",
     )
     .eq("railcar_id", id)
     .maybeSingle();

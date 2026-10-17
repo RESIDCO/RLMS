@@ -112,6 +112,7 @@ import {
   previewRemoveProgramCars,
 } from "./program-previews";
 import { registerRentStartRoutes } from "./rent-start";
+import { registerRentStopRoutes } from "./rent-stops";
 import { registerKpiCarRoutes } from "./kpi-cars";
 import { registerColumnPrefRoutes } from "./column-prefs";
 import { statusFromAssignmentLink } from "@shared/commitment";
@@ -389,6 +390,7 @@ export async function registerRoutes(
   await recoverStaleExportJobs();
   registerCommitmentRoutes(app, requireWrite);
   registerRentStartRoutes(app, requireWrite);
+  registerRentStopRoutes(app, requireWrite);
   registerKpiCarRoutes(app);
 
   // ---------- Batch Lease Setup (wizard) ----------
@@ -1019,7 +1021,7 @@ export async function registerRoutes(
             sold_count: Number(sqlKpis.sold) || 0,
             idle_count: Number(sqlKpis.idle) || 0,
             leased_count: Number(sqlKpis.leased) || 0,
-            abatement_count: Number(sqlKpis.abatement) || 0,
+            abatement_count: Number(sqlKpis.rental_abatement ?? sqlKpis.abatement) || 0,
             active_cars_including_sold: Number(sqlKpis.active_including_sold) || 0,
             rps_total: Number(sqlKpis.rps_total) || 0,
             rps_assigned: Number(sqlKpis.rps_assigned) || 0,
@@ -1032,7 +1034,12 @@ export async function registerRoutes(
         : null;
 
       const sqlActiveCars = fleetKpis
-        ? Math.max(0, fleetKpis.total_fleet - (Number(sqlKpis.off_rent) || 0))
+        ? Math.max(
+            0,
+            fleetKpis.total_fleet -
+              (Number(sqlKpis.off_rent) || 0) -
+              (Number(sqlKpis.rental_abatement ?? sqlKpis.abatement) || 0),
+          )
         : jsActiveCars;
       const { count: staleProgramN } = await supabaseAdmin
         .from("v_program_progress")
@@ -1065,6 +1072,7 @@ export async function registerRoutes(
               idle_count: fleetKpis.idle_count,
               leased_count: fleetKpis.leased_count,
               abatement_count: fleetKpis.abatement_count,
+              rental_abatement: fleetKpis.abatement_count,
               in_program_count,
               in_transit_leased_count,
               active_cars_including_sold: fleetKpis.active_cars_including_sold,

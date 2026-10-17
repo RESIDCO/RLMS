@@ -4,6 +4,8 @@ export type KpiStatusFlags = {
   is_sold?: boolean | null;
   is_op?: boolean | null;
   off_rent?: boolean | null;
+  on_rent?: boolean | null;
+  open_abatement?: boolean | null;
   has_open_commitment?: boolean | null;
   in_open_program?: boolean | null;
   going_on_lease?: boolean | null;
@@ -18,6 +20,7 @@ export function kpiIdlePlan(r: KpiStatusFlags): boolean {
 
 export function derivedKpiStatus(r: KpiStatusFlags): "Sold" | "Leased" | "Idle" | "Unassigned" {
   if (r.is_sold) return "Sold";
+  if (r.open_abatement) return "Leased";
   if (!r.off_rent) return "Leased";
   if (kpiIdlePlan(r)) return "Idle";
   return "Unassigned";

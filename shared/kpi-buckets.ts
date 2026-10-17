@@ -16,6 +16,7 @@ export const KPI_BUCKETS = [
   "sold_tag_suspect",
   "sold_missing_buyer",
   "leased_off_rent",
+  "rental_abatement",
 ] as const;
 
 export type KpiBucket = (typeof KPI_BUCKETS)[number];
@@ -38,6 +39,7 @@ export const KPI_TITLES: Record<string, string> = {
   sold_tag_suspect: "Sold tag suspect",
   sold_missing_buyer: "Sold with blank buyer",
   leased_off_rent: "Tagged Leased but off rent",
+  rental_abatement: "Rental abatement",
 };
 
 export const KPI_SORT_COLS = [
@@ -79,6 +81,7 @@ export const KPI_PRIMARY_ORDER: KpiBucket[] = [
   "sold_tag_suspect",
   "sold_missing_buyer",
   "leased_off_rent",
+  "rental_abatement",
   "on_rent",
   "awaiting_rent_start",
   "idle_on_ol",
@@ -112,6 +115,7 @@ export type KpiFlagRow = {
   sold_missing_buyer?: boolean | null;
   status_tag?: string | null;
   lease_status?: string | null;
+  open_abatement?: boolean | null;
 };
 
 export function kpiBucketsForRow(r: KpiFlagRow): KpiBucket[] {
@@ -126,7 +130,8 @@ export function kpiBucketsForRow(r: KpiFlagRow): KpiBucket[] {
   if (r.is_op && r.off_rent) out.push("off_rent");
   if (r.is_op && r.off_rent && idleSeed) out.push("idle");
   if (r.is_op && r.off_rent && !idleSeed) out.push("unassigned");
-  if (r.is_op && !r.off_rent) out.push("on_rent");
+  if (r.is_op && !r.off_rent && !r.open_abatement) out.push("on_rent");
+  if (r.is_op && r.open_abatement && !r.is_sold) out.push("rental_abatement");
   if (r.is_op && r.status_tag === "Idle" && r.on_ol) out.push("idle_on_ol");
   if (r.is_op && r.awaiting_rent_start) out.push("awaiting_rent_start");
   if (r.is_op && r.off_rent && r.status_tag === "Leased") out.push("leased_off_rent");

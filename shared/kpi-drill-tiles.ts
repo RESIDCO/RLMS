@@ -16,6 +16,7 @@ export const KPI_DRILL_TILES = [
   { testId: "kpi-sold-missing-buyer", bucket: "sold_missing_buyer", expectedCount: 1 },
   { testId: "kpi-sale-unclear", bucket: "sale_unclear", expectedCount: 0 },
   { testId: "kpi-leased-off-rent", bucket: "leased_off_rent", expectedCount: 90 },
+  { testId: "kpi-rental-abatement", bucket: "rental_abatement", expectedCount: 0 },
 ] as const;
 
 export function kpiDrillPath(bucket: string) {

@@ -92,6 +92,7 @@ type DashboardData = {
     idle_count?: number;
     leased_count?: number;
     abatement_count?: number;
+    rental_abatement?: number;
     in_program_count?: number;
     in_transit_leased_count?: number;
     rps_total: number;
@@ -511,6 +512,14 @@ export default function Dashboard() {
                 subtext="Off rent with a Commitment, or on OL awaiting rent start"
                 icon={PauseCircle}
                 onClick={() => navigate(kpiDrillPath("idle"))}
+              />
+              <KpiCard
+                testId="kpi-rental-abatement"
+                label="Rental abatement"
+                value={data.kpis.rental_abatement ?? data.kpis.abatement_count ?? 0}
+                subtext="On OL, credit to lessee — not Idle, not on-rent"
+                icon={TimerOff}
+                onClick={() => navigate(kpiDrillPath("rental_abatement"))}
               />
               <KpiCard
                 testId="kpi-active-assignments"

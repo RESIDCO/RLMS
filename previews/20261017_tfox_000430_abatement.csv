@@ -1,0 +1,2 @@
+railcar_id,car,ol,lessee,active,status_tag,on_rent,off_rent,in_open_program,type,reason,stop_date,expected_resume_date,apply
+29330,TFOX 000430,OL2330,Graymont Western,true,Leased,true,false,true,Abatement,quality repair,2026-10-16,,false

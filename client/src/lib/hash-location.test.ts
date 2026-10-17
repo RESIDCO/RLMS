@@ -3,7 +3,14 @@
 
 import { contactsDirectoryPath, readDirectoryNavState } from "./directory-nav";
 import { isDirectoryLeaseReviewTab } from "./directory-review-tab";
-import { parseHashSearch } from "./hash-location";
+import {
+  carPathFromProgram,
+  decodeHashFrom,
+  encodeHashFrom,
+  parseHashSearch,
+  programPathWithFrom,
+  programsPathFromQuery,
+} from "./hash-location";
 
 let passed = 0;
 let failed = 0;
@@ -36,6 +43,31 @@ ok(readDirectoryNavState(new URLSearchParams("add=1")).addContact === true, "add
 const kpiQs = parseHashSearch("#/kpi/cars?bucket=idle&car=5");
 ok(kpiQs.get("bucket") === "idle" && kpiQs.get("car") === "5", "#/kpi/cars?bucket=idle&car=5 → bucket=idle, car=5");
 ok(parseHashSearch("#/kpi/cars").get("bucket") == null, "hash without query is empty");
+
+const listQuery = "status=closed&q=West Plains&type=Return";
+ok(decodeHashFrom(encodeHashFrom(listQuery)) === listQuery, "encodeHashFrom/decodeHashFrom round-trip");
+ok(encodeHashFrom("?" + listQuery) === encodeHashFrom(listQuery), "encodeHashFrom strips leading ?");
+ok(decodeHashFrom("") === "" && decodeHashFrom(null) === "", "empty from decodes to empty");
+
+const programHref = programPathWithFrom(12, listQuery);
+ok(programHref.startsWith("/programs/12?from="), "program path carries from=");
+const programParsed = parseHashSearch("#" + programHref);
+ok(programParsed.get("from") === listQuery, "parseHashSearch get(from) restores list query");
+ok(programsPathFromQuery(programParsed.get("from")) === `/programs?${listQuery}`, "back path is /programs?{list query}");
+ok(programPathWithFrom(12, "") === "/programs/12", "no from when list query is empty");
+ok(programsPathFromQuery(null) === "/programs", "no from returns plain /programs");
+
+const programQuery = programHref.slice(programHref.indexOf("?") + 1);
+const carHref = carPathFromProgram(99, 12, programQuery);
+ok(carHref.includes("from_program=12"), "car path carries from_program");
+const carParsed = parseHashSearch("#" + carHref);
+ok(carParsed.get("from_program") === "12", "from_program id round-trips");
+ok(carParsed.get("from") === programQuery, "car from= is encoded program query");
+const backToProgram = `/programs/12?${carParsed.get("from")}`;
+ok(
+  parseHashSearch("#" + backToProgram).get("from") === listQuery,
+  "program from= still restores list query after car hop",
+);
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRoute } from "wouter";
+import { Link, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
@@ -20,9 +20,9 @@ import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker"
 import ShopCombobox, { type ShopOption } from "@/components/ShopCombobox";
 import AccountCombobox from "@/components/AccountCombobox";
 import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
-import { navigateHash } from "@/lib/hash-location";
+import { carPathFromProgram, navigateHash, programsPathFromQuery, useHashSearch } from "@/lib/hash-location";
 import { cn } from "@/lib/utils";
-import { Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
+import { ArrowLeft, ChevronRight, Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { colsQuery } from "@shared/column-views";
@@ -236,6 +236,13 @@ async function downloadReport(url: string) {
 export default function ProgramDetailPage() {
   const [, params] = useRoute("/programs/:id");
   const id = Number(params?.id);
+  const hashSearch = useHashSearch();
+  const fromListQuery = new URLSearchParams(hashSearch.replace(/^\?/, "")).get("from");
+  const programQuery = hashSearch.replace(/^\?/, "");
+  const programsHref = programsPathFromQuery(fromListQuery);
+  function goBackToPrograms() {
+    navigateHash(programsHref);
+  }
   const canEdit = useCanEdit();
   const isAdmin = useIsAdmin();
   const qc = useQueryClient();
@@ -486,7 +493,17 @@ export default function ProgramDetailPage() {
       case "car":
         return (
           <td key={key} className="px-2 py-1.5 font-mono whitespace-nowrap">
-            {label}
+            {c.railcar_id ? (
+              <Link
+                href={carPathFromProgram(c.railcar_id, id, programQuery)}
+                className="hover:underline"
+                data-testid={`link-program-car-${c.railcar_id}`}
+              >
+                {label}
+              </Link>
+            ) : (
+              label
+            )}
             {exited && <div className="text-[10px] text-muted-foreground">Exited {String(c.exited_date).slice(0, 10)}</div>}
           </td>
         );
@@ -715,6 +732,28 @@ export default function ProgramDetailPage() {
 
   return (
     <div className="h-full min-h-[36rem] flex flex-col overflow-hidden">
+      <div className="shrink-0 px-4 sm:px-8 pt-4 pb-0 space-y-1.5">
+        <button
+          type="button"
+          onClick={goBackToPrograms}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
+          data-testid="button-back-to-programs"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to Programs
+        </button>
+        <nav className="flex items-center gap-1.5 flex-wrap" aria-label="Breadcrumb">
+          <button
+            type="button"
+            onClick={goBackToPrograms}
+            className="text-sm text-muted-foreground hover:text-primary"
+          >
+            Programs
+          </button>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+          <span className="text-sm text-foreground font-medium">{program.name}</span>
+        </nav>
+      </div>
       <PageHeader
         title={program.name}
         subtitle={catName}

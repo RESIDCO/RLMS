@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
@@ -19,8 +19,7 @@ import { mergeColOrder } from "@/lib/grid-columns";
 import { ColumnHeaderLabel } from "@/components/ColumnHelp";
 import { columnLabel } from "@shared/column-dictionary";
 import { cn } from "@/lib/utils";
-import { openAppTab, programPath, programsListPath } from "@/lib/browse-nav";
-import { hashSearchParams, navigateHash } from "@/lib/hash-location";
+import { navigateHash, programPathWithFrom, useHashSearch } from "@/lib/hash-location";
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import AccountCombobox from "@/components/AccountCombobox";
 import { ProgramPreviewDialog } from "@/components/ProgramPreviewDialog";
@@ -66,10 +65,46 @@ async function downloadReport(url: string) {
 
 const LIFE_FILTERS = new Set(["all", "draft", "active", "closed", "cancelled", "ready", "stale"]);
 
-function statusFromHash(): string {
-  const s = hashSearchParams().get("status")?.trim().toLowerCase() ?? "";
+function statusFromParams(params: URLSearchParams): string {
+  const s = params.get("status")?.trim().toLowerCase() ?? "";
   if (s === "open" || s === "on_hold" || s === "complete") return s === "complete" ? "closed" : "active";
   return LIFE_FILTERS.has(s) ? s : "active";
+}
+
+type ProgramListFilters = {
+  q: string;
+  status: string;
+  type: string;
+  category: string;
+  entity: string;
+  manager: string;
+};
+
+function readListFilters(params: URLSearchParams): ProgramListFilters {
+  return {
+    q: params.get("q") ?? "",
+    status: statusFromParams(params),
+    type: params.get("type")?.trim() || "all",
+    category: params.get("category")?.trim() || "all",
+    entity: params.get("entity")?.trim() || "all",
+    manager: params.get("manager")?.trim() || "all",
+  };
+}
+
+function programsListQuery(filters: ProgramListFilters): string {
+  const p = new URLSearchParams();
+  if (filters.q.trim()) p.set("q", filters.q.trim());
+  if (filters.status && filters.status !== "active") p.set("status", filters.status);
+  if (filters.type && filters.type !== "all") p.set("type", filters.type);
+  if (filters.category && filters.category !== "all") p.set("category", filters.category);
+  if (filters.entity && filters.entity !== "all") p.set("entity", filters.entity);
+  if (filters.manager && filters.manager !== "all") p.set("manager", filters.manager);
+  return p.toString();
+}
+
+function programsListHref(filters: ProgramListFilters): string {
+  const qs = programsListQuery(filters);
+  return qs ? `/programs?${qs}` : "/programs";
 }
 
 const PROGRAM_LIST_COLS: { key: string; label: string; pinned?: boolean }[] = [
@@ -88,12 +123,50 @@ export default function ProgramsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const canEdit = useCanEdit();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState(statusFromHash);
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [entityFilter, setEntityFilter] = useState("all");
-  const [managerFilter, setManagerFilter] = useState("all");
+  const hashSearch = useHashSearch();
+  const hashFilters = useMemo(
+    () => readListFilters(new URLSearchParams(hashSearch.replace(/^\?/, ""))),
+    [hashSearch],
+  );
+  const [search, setSearch] = useState(hashFilters.q);
+  const [statusFilter, setStatusFilter] = useState(hashFilters.status);
+  const [typeFilter, setTypeFilter] = useState(hashFilters.type);
+  const [categoryFilter, setCategoryFilter] = useState(hashFilters.category);
+  const [entityFilter, setEntityFilter] = useState(hashFilters.entity);
+  const [managerFilter, setManagerFilter] = useState(hashFilters.manager);
+
+  useEffect(() => {
+    setSearch(hashFilters.q);
+    setStatusFilter(hashFilters.status);
+    setTypeFilter(hashFilters.type);
+    setCategoryFilter(hashFilters.category);
+    setEntityFilter(hashFilters.entity);
+    setManagerFilter(hashFilters.manager);
+  }, [hashFilters]);
+
+  const listFilters: ProgramListFilters = {
+    q: search,
+    status: statusFilter,
+    type: typeFilter,
+    category: categoryFilter,
+    entity: entityFilter,
+    manager: managerFilter,
+  };
+
+  function replaceListFilters(next: ProgramListFilters) {
+    setSearch(next.q);
+    setStatusFilter(next.status);
+    setTypeFilter(next.type);
+    setCategoryFilter(next.category);
+    setEntityFilter(next.entity);
+    setManagerFilter(next.manager);
+    navigateHash(programsListHref(next), { replace: true });
+  }
+
+  function openProgram(id: number) {
+    const qs = hashSearch.replace(/^\?/, "") || programsListQuery(listFilters);
+    navigateHash(programPathWithFrom(id, qs));
+  }
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
   const colPrefs = useColumnPrefs("programs", PROGRAM_LIST_DEFAULT);
@@ -224,14 +297,11 @@ export default function ProgramsPage() {
             inputClassName="h-9"
             placeholder="Search name or status narrative…"
             value={search}
-            onChange={setSearch}
+            onChange={(v) => replaceListFilters({ ...listFilters, q: v })}
           />
           <Select
             value={statusFilter}
-            onValueChange={(v) => {
-              setStatusFilter(v);
-              navigateHash(programsListPath(v), { replace: true });
-            }}
+            onValueChange={(v) => replaceListFilters({ ...listFilters, status: v })}
           >
             <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Lifecycle" /></SelectTrigger>
             <SelectContent>
@@ -244,7 +314,7 @@ export default function ProgramsPage() {
               <SelectItem value="stale">Stale</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <Select value={typeFilter} onValueChange={(v) => replaceListFilters({ ...listFilters, type: v })}>
             <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Type" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
@@ -253,7 +323,7 @@ export default function ProgramsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <Select value={categoryFilter} onValueChange={(v) => replaceListFilters({ ...listFilters, category: v })}>
             <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Category" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All categories</SelectItem>
@@ -262,7 +332,7 @@ export default function ProgramsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={entityFilter} onValueChange={setEntityFilter}>
+          <Select value={entityFilter} onValueChange={(v) => replaceListFilters({ ...listFilters, entity: v })}>
             <SelectTrigger className="h-9 w-44 text-sm"><SelectValue placeholder="Entity" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All entities</SelectItem>
@@ -272,7 +342,7 @@ export default function ProgramsPage() {
             </SelectContent>
           </Select>
           {managers.length > 0 && (
-            <Select value={managerFilter} onValueChange={setManagerFilter}>
+            <Select value={managerFilter} onValueChange={(v) => replaceListFilters({ ...listFilters, manager: v })}>
               <SelectTrigger className="h-9 w-44 text-sm"><SelectValue placeholder="Manager" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All managers</SelectItem>
@@ -328,7 +398,7 @@ export default function ProgramsPage() {
                     <tr
                       key={p.id}
                       className="border-t border-border/50 hover:bg-muted/30 cursor-pointer"
-                      onClick={() => openAppTab(programPath(p.id))}
+                      onClick={() => openProgram(p.id)}
                     >
                       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         <Checkbox checked={selected.has(p.id)} onCheckedChange={() => toggle(p.id)} aria-label={`Select ${p.name}`} />
@@ -388,7 +458,7 @@ export default function ProgramsPage() {
         onCreated={(id) => {
           setCreateOpen(false);
           qc.invalidateQueries({ queryKey: ["/api/programs"] });
-          openAppTab(programPath(id));
+          openProgram(id);
         }}
       />
     </div>

@@ -1,19 +1,12 @@
 /**
- * useColumnPrefs
- *
- * Persists a user's optional-column visibility, plus optional reorder/resize
- * layout, to /api/prefs/columns.
- *
- * Usage:
- *   const { visibleCols, toggleCol, resetCols, prefsLoaded, colOrder, setColOrder, colWidths, setColWidth } =
- *     useColumnPrefs("fleet_registry", DEFAULT_COLS);
- *
- * `visible_cols` in the database is jsonb. Older rows are a string array of
- * visible keys. Newer rows are `{ cols, order, widths }`. Both are accepted.
+ * Persists column visibility, order, and widths via /api/prefs/columns.
+ * Named views, admin-published defaults, Reset to default.
+ * Program car tables share list key `program_cars` (not per program).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth, useIsAdmin } from "@/lib/AuthContext";
+import { coalesceViewName, normalizeListKey, type PrefsPayload } from "@shared/column-views";
 
 const DEBOUNCE_MS = 800;
 
@@ -23,13 +16,12 @@ type Cached = {
   widths: Record<string, number>;
 };
 
-type PrefsObject = {
-  cols: string[];
-  order?: string[];
-  widths?: Record<string, number>;
+export type TableViewMeta = {
+  view_name: string;
+  is_default: boolean;
+  is_shared: boolean;
+  updated_at: string | null;
 };
-
-const memCache = new Map<string, Cached>();
 
 function parseStored(raw: unknown): Cached | null {
   if (raw == null) return null;
@@ -61,83 +53,90 @@ function parseStored(raw: unknown): Cached | null {
   return { cols, order, widths };
 }
 
+function toPayload(next: Cached): PrefsPayload {
+  return { cols: Array.from(next.cols), order: next.order, widths: next.widths };
+}
+
+const memCache = new Map<string, Cached>();
+
+function cacheKey(userId: string, listKey: string, viewName: string) {
+  return `${userId}:${listKey}:${viewName}`;
+}
+
 export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   const { session } = useAuth();
+  const isAdmin = useIsAdmin();
+  const listKey = normalizeListKey(page);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(defaultCols);
   const [colOrder, setColOrderState] = useState<string[]>([]);
   const [colWidths, setColWidthsState] = useState<Record<string, number>>({});
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [viewName, setViewName] = useState("Default");
+  const [views, setViews] = useState<TableViewMeta[]>([]);
+  const [sharedDefault, setSharedDefault] = useState<Cached | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fetchedRef = useRef(false);
   const latest = useRef<Cached>({ cols: defaultCols, order: [], widths: {} });
   latest.current = { cols: visibleCols, order: colOrder, widths: colWidths };
+  const viewNameRef = useRef(viewName);
+  viewNameRef.current = viewName;
+
+  const applyCached = useCallback((parsed: Cached | null) => {
+    const next = parsed ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number> };
+    setVisibleCols(next.cols);
+    setColOrderState(next.order);
+    setColWidthsState(next.widths);
+    latest.current = next;
+  }, [defaultCols]);
+
+  const load = useCallback(
+    async (wantedView?: string) => {
+      if (!session?.access_token) {
+        setPrefsLoaded(true);
+        return;
+      }
+      const qs = new URLSearchParams({ list_key: listKey });
+      if (wantedView) qs.set("view_name", wantedView);
+      const r = await fetch(`/api/prefs/columns?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = r.ok ? await r.json() : null;
+      const parsed = parseStored(data?.visible_cols);
+      const name = coalesceViewName(data?.view_name);
+      setViewName(name);
+      setViews(Array.isArray(data?.views) ? data.views : []);
+      setSharedDefault(parseStored(data?.shared_default?.visible_cols));
+      if (parsed) {
+        memCache.set(cacheKey(session.user.id, listKey, name), parsed);
+        applyCached(parsed);
+      } else {
+        applyCached(parseStored(data?.shared_default?.visible_cols));
+      }
+      setPrefsLoaded(true);
+    },
+    [session?.access_token, session?.user?.id, listKey, applyCached],
+  );
 
   useEffect(() => {
-    if (!session?.access_token || fetchedRef.current) {
-      setPrefsLoaded(true);
-      return;
-    }
-
-    const cacheKey = `${session.user.id}:${page}`;
-    if (memCache.has(cacheKey)) {
-      const cached = memCache.get(cacheKey)!;
-      setVisibleCols(cached.cols);
-      setColOrderState(cached.order);
-      setColWidthsState(cached.widths);
-      setPrefsLoaded(true);
-      fetchedRef.current = true;
-      return;
-    }
-
-    fetchedRef.current = true;
-
-    fetch(`/api/prefs/columns?page=${encodeURIComponent(page)}`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        const parsed = parseStored(data?.visible_cols);
-        if (parsed) {
-          memCache.set(cacheKey, parsed);
-          setVisibleCols(parsed.cols);
-          setColOrderState(parsed.order);
-          setColWidthsState(parsed.widths);
-        }
-      })
-      .catch(() => {
-        // Silently fall back to defaults if API is unreachable
-      })
-      .finally(() => {
-        setPrefsLoaded(true);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.access_token]);
+    load().catch(() => setPrefsLoaded(true));
+  }, [load]);
 
   const persist = useCallback(
-    (next: Cached) => {
+    (next: Cached, name = viewNameRef.current) => {
       if (!session?.access_token) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        const cacheKey = `${session.user.id}:${page}`;
-        memCache.set(cacheKey, next);
-        const body: PrefsObject = {
-          cols: Array.from(next.cols),
-          order: next.order,
-          widths: next.widths,
-        };
+        memCache.set(cacheKey(session.user.id, listKey, name), next);
         fetch("/api/prefs/columns", {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ page, visible_cols: body }),
-        }).catch(() => {
-          // Silently ignore save failures — local state is still correct
-        });
+          body: JSON.stringify({ list_key: listKey, page: listKey, view_name: name, visible_cols: toPayload(next) }),
+        }).catch(() => {});
       }, DEBOUNCE_MS);
     },
-    [session?.access_token, page]
+    [session?.access_token, session?.user?.id, listKey],
   );
 
   const toggleCol = useCallback(
@@ -149,16 +148,14 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
       setVisibleCols(nextCols);
       persist(next);
     },
-    [persist]
+    [persist],
   );
 
   const resetCols = useCallback(() => {
-    const next = { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number> };
-    setVisibleCols(defaultCols);
-    setColOrderState([]);
-    setColWidthsState({});
+    const next = sharedDefault ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number> };
+    applyCached(next);
     persist(next);
-  }, [defaultCols, persist]);
+  }, [sharedDefault, defaultCols, persist, applyCached]);
 
   const setColOrder = useCallback(
     (order: string[]) => {
@@ -166,7 +163,7 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
       setColOrderState(order);
       persist(next);
     },
-    [persist]
+    [persist],
   );
 
   const setColWidth = useCallback(
@@ -176,12 +173,121 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
       setColWidthsState(widths);
       persist(next);
     },
-    [persist]
+    [persist],
   );
 
-  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+  const authHeaders = useCallback(() => {
+    if (!session?.access_token) return null;
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    };
+  }, [session?.access_token]);
+
+  const selectView = useCallback(
+    (name: string) => {
+      load(name).catch(() => {});
+    },
+    [load],
+  );
+
+  const saveAs = useCallback(
+    async (name: string) => {
+      const headers = authHeaders();
+      if (!headers) return;
+      const next = latest.current;
+      const r = await fetch("/api/prefs/columns/views", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          list_key: listKey,
+          view_name: name,
+          visible_cols: toPayload(next),
+        }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || "Could not save view");
+      }
+      setViewName(coalesceViewName(name));
+      await load(name);
+    },
+    [authHeaders, listKey, load],
+  );
+
+  const renameView = useCallback(
+    async (newName: string) => {
+      const headers = authHeaders();
+      if (!headers) return;
+      const r = await fetch("/api/prefs/columns/views", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ list_key: listKey, view_name: viewNameRef.current, new_name: newName }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || "Could not rename view");
+      }
+      setViewName(newName);
+      await load(newName);
+    },
+    [authHeaders, listKey, load],
+  );
+
+  const deleteView = useCallback(async () => {
+    const headers = authHeaders();
+    if (!headers) return;
+    const r = await fetch(
+      `/api/prefs/columns/views?list_key=${encodeURIComponent(listKey)}&view_name=${encodeURIComponent(viewNameRef.current)}`,
+      { method: "DELETE", headers },
+    );
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || "Could not delete view");
+    }
+    await load();
+  }, [authHeaders, listKey, load]);
+
+  const setDefault = useCallback(async () => {
+    const headers = authHeaders();
+    if (!headers) return;
+    const r = await fetch("/api/prefs/columns/default", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ list_key: listKey, view_name: viewNameRef.current }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || "Could not set default");
+    }
+    await load(viewNameRef.current);
+  }, [authHeaders, listKey, load]);
+
+  const publish = useCallback(async () => {
+    const headers = authHeaders();
+    if (!headers) return;
+    const r = await fetch("/api/prefs/columns/publish", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        list_key: listKey,
+        view_name: viewNameRef.current,
+        visible_cols: toPayload(latest.current),
+      }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || "Could not publish default");
+    }
+    await load(viewNameRef.current);
+  }, [authHeaders, listKey, load]);
+
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
 
   return {
+    listKey,
     visibleCols,
     toggleCol,
     resetCols,
@@ -190,5 +296,16 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
     setColOrder,
     colWidths,
     setColWidth,
+    viewName,
+    views,
+    selectView,
+    saveAs,
+    renameView,
+    deleteView,
+    setDefault,
+    publish,
+    isAdmin,
   };
 }
+
+export const useTableView = useColumnPrefs;

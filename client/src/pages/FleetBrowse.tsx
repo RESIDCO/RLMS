@@ -9,7 +9,7 @@ import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
-import { ChevronRight, Columns3, Download } from "lucide-react";
+import { ChevronRight, Download } from "lucide-react";
 import {
   ENTITY_SLUGS,
   entityOlCarPath,
@@ -28,16 +28,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { ColumnHeaderLabel } from "@/components/ColumnHelp";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
 
@@ -151,10 +144,8 @@ function CarTable({
     onToggleAll: () => void;
   };
 }) {
-  const { visibleCols, toggleCol, resetCols, prefsLoaded } = useColumnPrefs(
-    "browse_car_list",
-    BROWSE_CAR_DEFAULT_COLS,
-  );
+  const colPrefs = useColumnPrefs("browse_car_list", BROWSE_CAR_DEFAULT_COLS);
+  const { visibleCols } = colPrefs;
   const show = (key: string) => visibleCols.has(key);
   const ids = cars.map((c) => c.id);
   const allOn = Boolean(selection && ids.length > 0 && ids.every((id) => selection.selected.has(id)));
@@ -162,44 +153,7 @@ function CarTable({
   return (
     <div className="space-y-2">
       <div className="flex justify-end">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-              <Columns3 className="h-3.5 w-3.5" />
-              Columns
-              {!prefsLoaded ? (
-                <span className="h-3.5 w-3.5 rounded-full bg-muted animate-pulse" />
-              ) : visibleCols.size > 0 ? (
-                <span className="ml-0.5 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none">
-                  {visibleCols.size}
-                </span>
-              ) : null}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Optional columns
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {BROWSE_CAR_OPT_COLS.map(({ key, label }) => (
-              <DropdownMenuCheckboxItem
-                key={key}
-                checked={visibleCols.has(key)}
-                onCheckedChange={() => toggleCol(key)}
-              >
-                {label}
-              </DropdownMenuCheckboxItem>
-            ))}
-            {visibleCols.size > 0 && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-xs text-muted-foreground" onClick={() => resetCols()}>
-                  Reset to default
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <ColumnPicker columns={[...BROWSE_CAR_OPT_COLS]} prefs={colPrefs} />
       </div>
       <div className="rounded-xl border border-card-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
@@ -215,14 +169,14 @@ function CarTable({
                     />
                   </th>
                 )}
-                <th className="px-4 py-2.5 text-left font-medium">Marks</th>
-                <th className="px-4 py-2.5 text-left font-medium">Car #</th>
-                <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
-                {show("entity") && <th className="px-4 py-2.5 text-left font-medium">Entity</th>}
-                {show("status") && <th className="px-4 py-2.5 text-left font-medium">Status</th>}
-                {show("type") && <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Type</th>}
-                {show("lessee") && <th className="px-4 py-2.5 text-left font-medium">Lessee</th>}
-                {show("ol") && <th className="px-4 py-2.5 text-left font-medium">OL</th>}
+                <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="marks" /></th>
+                <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="car_number" fallback="Car #" /></th>
+                <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="lease_type" /></th>
+                {show("entity") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="entity" /></th>}
+                {show("status") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="status" /></th>}
+                {show("type") && <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell"><ColumnHeaderLabel listKey="browse_car_list" colKey="type" /></th>}
+                {show("lessee") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="lessee" /></th>}
+                {show("ol") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="ol" /></th>}
               </tr>
             </thead>
             <tbody>
@@ -306,11 +260,11 @@ function GroupView({ kind, keyName }: { kind: "lessee" | "entity"; keyName: stri
             <table className="w-full text-xs">
               <thead className="bg-muted/40 text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-2.5 text-left font-medium">OL / Rider</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Effective</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Expires</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Cars</th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="ol" fallback="OL / Rider" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="lease_type" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="effective" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="expires" /></th>
+                  <th className="px-4 py-2.5 text-right font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="car_count" /></th>
                 </tr>
               </thead>
               <tbody>
@@ -534,11 +488,11 @@ function TurningView({ year }: { year: number }) {
                   <th className="px-3 py-2.5 w-8">
                     <Checkbox checked={allOn} onCheckedChange={toggleAll} aria-label="Select all OLs" />
                   </th>
-                  <th className="px-4 py-2.5 text-left font-medium">OL / Rider</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Effective</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Expires</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Cars</th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="ol" fallback="OL / Rider" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="lease_type" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="effective" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="expires" /></th>
+                  <th className="px-4 py-2.5 text-right font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="car_count" /></th>
                 </tr>
               </thead>
               <tbody>

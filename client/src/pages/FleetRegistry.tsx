@@ -39,7 +39,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Columns3, Image, ClipboardList, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Image, ClipboardList, ExternalLink } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { searchPagePath } from "@/lib/search-query";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
@@ -48,6 +48,8 @@ import { downloadRailcarsCsv } from "@/lib/railcar-csv";
 import { OpsFlagPicker } from "@/components/OpsFlagPicker";
 import { OPS_FLAG_PRESETS, composeOpsFlag } from "@shared/ops-flag";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -543,17 +545,14 @@ export default function FleetRegistry() {
     { key: "comment_event_note",  label: "Comment / Event Note" },
   ];
   const FR_DEFAULT_COLS = new Set<string>([]);
+  const colPrefs = useColumnPrefs("fleet_registry", FR_DEFAULT_COLS);
   const {
     visibleCols: visibleColsRaw,
-    toggleCol,
-    resetCols: resetVisibleCols,
-    prefsLoaded: colPrefsLoaded,
     colOrder,
     setColOrder,
     colWidths,
     setColWidth,
-  } =
-    useColumnPrefs("fleet_registry", FR_DEFAULT_COLS);
+  } = colPrefs;
   // Cast for backwards compat with existing Set<OptCol> usage in JSX
   const visibleCols = visibleColsRaw as Set<OptCol>;
   const tableCols = useMemo(() => {
@@ -973,6 +972,7 @@ export default function FleetRegistry() {
     return (
       <GridColumnTh
         key={key}
+        listKey="fleet_registry"
         colKey={key}
         width={w}
         pinned={pinned}
@@ -995,9 +995,9 @@ export default function FleetRegistry() {
             data-testid="checkbox-select-all"
           />
         ) : key === "_actions" ? null : sortKey ? (
-          <SortLabel label={FR_LABELS[key] ?? key} k={sortKey} sort={sort} onClick={toggleSort} />
+          <SortLabel label={columnLabel("fleet_registry", key, FR_LABELS[key] ?? key)} k={sortKey} sort={sort} onClick={toggleSort} />
         ) : (
-          FR_LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key
+          columnLabel("fleet_registry", key, FR_LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key)
         )}
       </GridColumnTh>
     );
@@ -1178,7 +1178,9 @@ export default function FleetRegistry() {
               variant="outline"
               onClick={async () => {
                 const rows = await apiGet<Row[]>(railcarsQs({ ...listParams, page: undefined, pageSize: undefined, all: 1 }));
-                downloadRailcarsCsv(rows);
+                downloadRailcarsCsv(rows, undefined, {
+                  keys: displayKeys.filter((k) => k !== "_select" && k !== "_actions"),
+                });
               }}
               disabled={isLoading || totalCount === 0}
               data-testid="button-export-railcars"
@@ -1319,46 +1321,7 @@ export default function FleetRegistry() {
               <SelectItem value="sold">Sold</SelectItem>
             </SelectContent>
           </Select>
-          {/* Column visibility picker */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-                <Columns3 className="h-3.5 w-3.5" />
-                Columns
-                {!colPrefsLoaded ? (
-                  <span className="h-3.5 w-3.5 rounded-full bg-muted animate-pulse" />
-                ) : visibleCols.size > 0 ? (
-                  <span className="ml-0.5 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none">
-                    {visibleCols.size}
-                  </span>
-                ) : null}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Optional columns</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {OPT_COLS.map(({ key, label }) => (
-                <DropdownMenuCheckboxItem
-                  key={key}
-                  checked={visibleCols.has(key)}
-                  onCheckedChange={() => toggleCol(key)}
-                >
-                  {label}
-                </DropdownMenuCheckboxItem>
-              ))}
-              {visibleCols.size > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-xs text-muted-foreground"
-                    onClick={() => resetVisibleCols()}
-                  >
-                    Reset to default
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ColumnPicker columns={OPT_COLS} prefs={colPrefs} />
           <div className="text-xs text-muted-foreground font-mono-num">
             {totalCount.toLocaleString()} cars
             {totalCount > 0 ? ` · page ${page} of ${totalPages}` : ""}

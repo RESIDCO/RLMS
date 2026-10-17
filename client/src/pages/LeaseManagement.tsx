@@ -34,18 +34,10 @@ import {
   StickyNote,
   Wand2,
   Download,
-  Columns3,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { cn } from "@/lib/utils";
@@ -965,16 +957,14 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
       ),
     staleTime: 45_000,
   });
+  const colPrefs = useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
   const {
     visibleCols: visibleColsRaw,
-    toggleCol,
-    resetCols: resetVisibleCols,
-    prefsLoaded: colPrefsLoaded,
     colOrder,
     setColOrder,
     colWidths,
     setColWidth,
-  } = useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
+  } = colPrefs;
   const visibleCols = visibleColsRaw as Set<RCOptCol>;
 
   const filtered = asRailcarList(cars).filter(
@@ -1027,34 +1017,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                   <SelectItem value="all">All cars</SelectItem>
                 </SelectContent>
               </Select>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors">
-                    <Columns3 className="h-3 w-3" />
-                    Columns
-                    {!colPrefsLoaded ? (
-                      <span className="h-2.5 w-2.5 rounded-full bg-muted animate-pulse" />
-                    ) : visibleCols.size > 0 ? (
-                      <span className="bg-primary text-primary-foreground rounded-full px-1 text-[9px] font-bold">{visibleCols.size}</span>
-                    ) : null}
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Show columns</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {RC_OPT_COLS.map(({ key, label }) => (
-                    <DropdownMenuCheckboxItem key={key} checked={visibleCols.has(key)} onCheckedChange={() => toggleCol(key)}>
-                      {label}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                  {(visibleCols.size > 0 || colOrder.length > 0) && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-xs text-muted-foreground" onClick={() => resetVisibleCols()}>Reset</DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ColumnPicker columns={RC_OPT_COLS} prefs={colPrefs} />
             </div>
           </div>
           {total === 0 ? (
@@ -1075,6 +1038,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                   {displayKeys.map((k) => (
                     <GridColumnTh
                       key={k}
+                      listKey="lease_rider_cars"
                       colKey={k}
                       width={colWidth(colWidths, k, RC_WIDTHS[k] ?? 110)}
                       pinned={RC_PINNED.includes(k as (typeof RC_PINNED)[number])}
@@ -1082,7 +1046,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                       onResize={setColWidth}
                       onMove={(from, to) => setColOrder(moveCol(displayKeys.filter((x) => !RC_PINNED.includes(x as (typeof RC_PINNED)[number])), from, to))}
                     >
-                      {RC_LABELS[k] ?? k}
+                      {columnLabel("lease_rider_cars", k, RC_LABELS[k] ?? k)}
                     </GridColumnTh>
                   ))}
                 </tr>

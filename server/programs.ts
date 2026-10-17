@@ -5,10 +5,16 @@ import { CAR_NUMBER_WIDTH, formatCarId, splitCarNumber } from "@shared/residco-i
 import {
   excelSheetName,
   formatCustomField,
+  deriveCompletionLevel,
+  COMPLETION_LABEL,
+  isArrivedMilestone,
   isCustomFieldPopulated,
+  isProgramDoneMilestone,
   isProgramStatus,
+  isWorkCompleteMilestone,
   parseCarPasteList,
   reportFilename,
+  trailDate,
   type ProgramFieldDef,
   type ProgramStatus,
 } from "@shared/programs";
@@ -355,15 +361,42 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
     const id = Number((o as any).railcar_id);
     nBy.set(id, (nBy.get(id) ?? 0) + 1);
   }
+  const linkIds = rows.map((r) => Number(r.id)).filter(Boolean);
+  const { data: miles } = await supabaseAdmin
+    .from("program_car_milestones")
+    .select("program_car_id, milestone, milestone_date")
+    .in("program_car_id", linkIds.length ? linkIds : [0])
+    .order("milestone_date", { ascending: true })
+    .order("id", { ascending: true });
+  const trailBy = new Map<number, { milestone: string; milestone_date: string | null }[]>();
+  for (const m of miles ?? []) {
+    const id = Number((m as any).program_car_id);
+    const list = trailBy.get(id) ?? [];
+    list.push({ milestone: String((m as any).milestone ?? ""), milestone_date: (m as any).milestone_date ?? null });
+    trailBy.set(id, list);
+  }
   return rows.map((r) => {
     const k = kBy.get(Number(r.railcar_id));
     const openCount = nBy.get(Number(r.railcar_id)) ?? 0;
+    const trail = trailBy.get(Number(r.id)) ?? [];
+    const completion_level = deriveCompletionLevel({
+      active: r.railcar?.active,
+      status: r.status,
+      milestone: r.milestone,
+      milestones: trail,
+    });
     return {
       ...r,
       kpi: k ?? null,
       open_commitment: cBy.get(Number(r.railcar_id)) ?? null,
       open_program_count: openCount,
       in_multiple_programs: openCount > 1,
+      trail,
+      completion_level,
+      work_complete_at: trailDate(trail, isWorkCompleteMilestone),
+      arrived_at: trailDate(trail, isArrivedMilestone),
+      program_done_at: trailDate(trail, isProgramDoneMilestone),
+      program_done_step: [...trail].reverse().find((t) => isProgramDoneMilestone(t.milestone))?.milestone ?? null,
     };
   });
 }
@@ -814,7 +847,14 @@ function coreCarColumns() {
   return [
     { key: "marks", label: "Reporting marks" },
     { key: "car_number", label: "Car number" },
+    { key: "completion", label: "Completion" },
     { key: "status", label: "Status" },
+    { key: "milestone", label: "Latest milestone" },
+    { key: "milestone_at", label: "Latest milestone date" },
+    { key: "work_complete_at", label: "Work complete date" },
+    { key: "arrived_at", label: "Arrived date" },
+    { key: "program_done_step", label: "Program done step" },
+    { key: "program_done_at", label: "On rent / Scrapped / Sold date" },
     { key: "completed", label: "Complete" },
     { key: "flag_tag", label: "Flag" },
     { key: "notes", label: "Notes" },
@@ -836,6 +876,20 @@ function carExportValue(row: any, key: string): string {
       return r.car_number ?? "";
     case "status":
       return row.status ?? "";
+    case "completion":
+      return COMPLETION_LABEL[row.completion_level as keyof typeof COMPLETION_LABEL] ?? row.completion_level ?? "";
+    case "milestone":
+      return row.milestone ?? "";
+    case "milestone_at":
+      return row.milestone_at ? String(row.milestone_at).slice(0, 10) : "";
+    case "work_complete_at":
+      return row.work_complete_at ? String(row.work_complete_at).slice(0, 10) : "";
+    case "arrived_at":
+      return row.arrived_at ? String(row.arrived_at).slice(0, 10) : "";
+    case "program_done_step":
+      return row.program_done_step ?? "";
+    case "program_done_at":
+      return row.program_done_at ? String(row.program_done_at).slice(0, 10) : "";
     case "completed":
       return isCarCompleted(row) ? "Yes" : "";
     case "flag_tag":
@@ -891,7 +945,7 @@ export async function buildProgramReport(opts: {
   const usedNames = new Set<string>(["summary"]);
 
   for (const p of programs) {
-    const cars = await listProgramCars(p.id, opts.includeExited);
+    const cars = await listProgramCarsWithDocs(p.id, true);
     const defs = (p.field_defs ?? []) as ProgramFieldDef[];
     const usedDefs = defs.filter((d) =>
       cars.some((c) => isCustomFieldPopulated(c.custom_fields?.[d.field_key])),
@@ -912,7 +966,20 @@ export async function buildProgramReport(opts: {
     const cfKeys = usedDefs.map((d) => `cf:${d.field_key}`);
     const allowed = [...core.map((c) => c.key), ...cfKeys];
     const fallback = allowed;
-    const keys = whitelistExportCols(allowed, opts.cols, fallback);
+    const keys0 = whitelistExportCols(allowed, opts.cols, fallback);
+    const always = [
+      "completion",
+      "milestone",
+      "milestone_at",
+      "work_complete_at",
+      "arrived_at",
+      "program_done_step",
+      "program_done_at",
+    ];
+    const keys = [...keys0];
+    for (const k of always) {
+      if (allowed.includes(k) && !keys.includes(k)) keys.push(k);
+    }
     const labelFor = (key: string) => {
       const c = core.find((x) => x.key === key);
       if (c) return c.label;

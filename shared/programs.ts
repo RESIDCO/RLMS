@@ -34,20 +34,36 @@ export const PROGRAM_TYPE_FROM_CATEGORY: Record<string, ProgramType> = {
 
 export const TRAIL_MILESTONES = [
   "Enroute",
+  "Work complete",
   "Arrived at industry",
   "Scrapped",
   "Sold",
+  "Stored",
   "On rent",
 ] as const;
 
-export const TERMINAL_MILESTONES = ["Scrapped", "Sold", "On rent"] as const;
+export const WORK_COMPLETE_MILESTONE = "Work complete";
+
+export const PROGRAM_DONE_MILESTONES = ["On rent", "Scrapped", "Sold", "Stored"] as const;
+
+export const TERMINAL_MILESTONES = PROGRAM_DONE_MILESTONES;
+
+export const COMPLETION_LEVELS = ["not_started", "in_progress", "work_done", "program_done"] as const;
+export type CompletionLevel = (typeof COMPLETION_LEVELS)[number];
+
+export const COMPLETION_LABEL: Record<CompletionLevel, string> = {
+  not_started: "Not started",
+  in_progress: "In progress",
+  work_done: "Work done",
+  program_done: "Program done",
+};
 
 export const MILESTONES_BY_TYPE: Record<ProgramType, string[]> = {
   Acquisition: ["Inspect", "Qualify", "Enroute", "Arrived at industry", "Deliver"],
-  Return: ["Off lease", "Enroute", "Arrived at industry", "Inspect", "Shop", "Ready", "On rent"],
-  Sale: ["Listed", "Offer", "Enroute", "Arrived at industry", "Closed", "Sold"],
-  "New Assignment": ["Qualify", "Enroute", "Arrived at industry", "Deliver", "On rent"],
-  Scrap: ["Enroute", "Arrived at industry", "Move to yard", "Scrapped"],
+  Return: ["Off lease", "Enroute", "Work complete", "Arrived at industry", "Inspect", "Shop", "Ready", "On rent"],
+  Sale: ["Listed", "Offer", "Enroute", "Work complete", "Arrived at industry", "Closed", "Sold"],
+  "New Assignment": ["Qualify", "Enroute", "Work complete", "Arrived at industry", "Deliver", "On rent"],
+  Scrap: ["Enroute", "Work complete", "Arrived at industry", "Move to yard", "Scrapped"],
   Repair: ["Shop in", "Work complete", "Shop out"],
   Inspection: ["Scheduled", "Inspected"],
   Quals: ["Qualify", "Certified"],
@@ -64,9 +80,48 @@ export function isArrivedMilestone(raw: string | null | undefined): boolean {
   return false;
 }
 
-export function isTerminalMilestone(raw: string | null | undefined): boolean {
+export function isWorkCompleteMilestone(raw: string | null | undefined): boolean {
+  return String(raw ?? "").trim().toLowerCase() === "work complete";
+}
+
+export function isProgramDoneMilestone(raw: string | null | undefined): boolean {
   const s = String(raw ?? "").trim().toLowerCase();
-  return (TERMINAL_MILESTONES as readonly string[]).some((m) => m.toLowerCase() === s);
+  return (PROGRAM_DONE_MILESTONES as readonly string[]).some((m) => m.toLowerCase() === s);
+}
+
+export function isTerminalMilestone(raw: string | null | undefined): boolean {
+  return isProgramDoneMilestone(raw);
+}
+
+export function deriveCompletionLevel(row: {
+  active?: boolean | null;
+  status?: string | null;
+  milestone?: string | null;
+  milestones?: { milestone?: string | null }[] | null;
+}): CompletionLevel {
+  if (row.active === false) return "program_done";
+  const names = [
+    ...(row.milestones ?? []).map((m) => m.milestone),
+    row.milestone,
+  ].filter((v) => String(v ?? "").trim()) as string[];
+  if (names.some((n) => isProgramDoneMilestone(n))) return "program_done";
+  if (names.some((n) => isWorkCompleteMilestone(n))) return "work_done";
+  if (names.length || String(row.status ?? "").trim()) return "in_progress";
+  return "not_started";
+}
+
+export function trailDate(
+  trail: { milestone?: string | null; milestone_date?: string | null }[] | null | undefined,
+  pred: (milestone: string) => boolean,
+): string | null {
+  let found: string | null = null;
+  for (const row of trail ?? []) {
+    const name = String(row.milestone ?? "");
+    if (!pred(name)) continue;
+    const d = String(row.milestone_date ?? "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) found = d;
+  }
+  return found;
 }
 
 export function putOnRentProgramTypes(): readonly ProgramType[] {
@@ -121,12 +176,16 @@ export function displayTypeFromCategory(categoryName: string | null | undefined)
   return null;
 }
 
+/** True when the car has reached the program end result (Program done). */
 export function isCarDone(row: {
   active?: boolean | null;
+  status?: string | null;
+  milestone?: string | null;
+  milestones?: { milestone?: string | null }[] | null;
   outcome_reached_at?: string | null;
   completed?: boolean | null;
 }): boolean {
-  return row.active === false || Boolean(row.outcome_reached_at) || row.completed === true;
+  return deriveCompletionLevel(row) === "program_done";
 }
 
 export function readyToClose(row: { lifecycle: string; remaining: number; total_open_links: number }): boolean {

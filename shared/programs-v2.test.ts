@@ -4,6 +4,7 @@
 import { pickEarliestOpenProgram, shouldCreateProgramCommitment } from "./commitment";
 import {
   displayTypeFromCategory,
+  deriveCompletionLevel,
   isArrivedMilestone,
   isCarDone,
   isTerminalMilestone,
@@ -40,10 +41,16 @@ ok(isTerminalMilestone("On rent"), "on rent is terminal");
 ok(!isArrivedMilestone("On rent"), "on rent is not arrival");
 ok(parseCarPasteList("TFOX 2248\nTFOX 000430, KBX 123").length === 3, "paste list splits");
 
-ok(isCarDone({ active: false }), "inactive is done");
-ok(isCarDone({ active: true, outcome_reached_at: "2026-10-01" }), "outcome is done");
-ok(isCarDone({ active: true, completed: true }), "legacy completed is done");
+ok(isCarDone({ active: false }), "inactive is program done");
+ok(isCarDone({ active: true, milestone: "On rent" }), "on rent is program done");
+ok(isCarDone({ active: true, milestones: [{ milestone: "Scrapped" }] }), "scrapped trail is program done");
+ok(!isCarDone({ active: true, milestone: "Work complete" }), "work complete is not program done");
+ok(!isCarDone({ active: true, outcome_reached_at: "2026-10-01" }), "arrived/outcome alone is not program done");
+ok(!isCarDone({ active: true, completed: true }), "legacy complete checkbox is not program done");
 ok(!isCarDone({ active: true, completed: false }), "active open is remaining");
+ok(deriveCompletionLevel({ active: true, status: "Enroute" }) === "in_progress", "status is in progress");
+ok(deriveCompletionLevel({ active: true, milestone: "Work complete" }) === "work_done", "work complete level");
+ok(deriveCompletionLevel({ active: true }) === "not_started", "blank is not started");
 
 ok(readyToClose({ lifecycle: "active", remaining: 0, total_open_links: 14 }), "14/14 ready");
 ok(!readyToClose({ lifecycle: "active", remaining: 5, total_open_links: 106 }), "Olin not ready");

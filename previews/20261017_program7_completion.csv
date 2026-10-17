@@ -1,0 +1,44 @@
+program_car_id,program_id,reporting_marks,car_number,commitment,current_status,current_notes,current_completion,proposed_action,proposed_milestone,proposed_date,proposed_completion
+123,7,TFOX,002006,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+124,7,TFOX,002023,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+126,7,TFOX,002063,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+127,7,TFOX,002105,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+128,7,TFOX,002107,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+129,7,TFOX,002138,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+130,7,TFOX,002150,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+132,7,TFOX,002216,Metalico,Enroute to Lessee Destination,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+134,7,TFOX,002233,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+136,7,TFOX,002243,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+137,7,TFOX,002249,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+139,7,TFOX,002271,Metalico,Enroute to Lessee Destination,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+140,7,TFOX,002283,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+142,7,TFOX,002308,Metalico,Enroute to Lessee Destination,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+144,7,TFOX,002332,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+145,7,TFOX,002334,Metalico,Enroute to Lessee Destination,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+147,7,TFOX,002343,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+149,7,TFOX,002351,Metalico,COMPLETE - Arrived Lessee,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+150,7,TFOX,002359,Metalico,Enroute to Lessee Destination,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+161,7,TFOX,002159,Metalico,Enroute to Lessee Destination,Complete Group For Metalico,in_progress,insert trail,On rent,,program_done
+120,7,TFOX,009615,Scrap,Awaiting Estimate,Scrap,in_progress,insert trail,Work complete,,work_done
+121,7,TFOX,009616,Scrap,Awaiting dispo & BRC,Scrap,in_progress,insert trail,Work complete,,work_done
+122,7,TFOX,009634,Scrap,Awaiting Estimate,Scrap,in_progress,insert trail,Work complete,,work_done
+154,7,TFOX,009620,Scrap,Awaiting Estimate,Scrap,in_progress,insert trail,Work complete,,work_done
+160,7,TFOX,009647,Scrap,Awaiting Estimate,Scrap,in_progress,insert trail,Work complete,,work_done
+152,7,TFOX,002019,Consolidated Scrap,Awaiting Release,,in_progress,none,,,in_progress
+125,7,TFOX,002035,Consolidated Scrap,Awaiting Estimate,,in_progress,none,,,in_progress
+155,7,TFOX,002156,Consolidated Scrap,Enroute to Lessee Destination,,in_progress,none,,,in_progress
+156,7,TFOX,002157,Consolidated Scrap,Enroute to Lessee Destination,,in_progress,none,,,in_progress
+131,7,TFOX,002182,Consolidated Scrap,Awaiting Release,,in_progress,none,,,in_progress
+151,7,TFOX,002187,Consolidated Scrap,Awaiting Release,,in_progress,none,,,in_progress
+133,7,TFOX,002225,Consolidated Scrap,Awaiting Estimate,,in_progress,none,,,in_progress
+135,7,TFOX,002238,Consolidated Scrap,Awaiting Estimate,,in_progress,none,,,in_progress
+162,7,TFOX,002248,Consolidated Scrap,Enroute to Lessee Destination,,in_progress,none,,,in_progress
+138,7,TFOX,002264,Consolidated Scrap,Awaiting Estimate,,in_progress,none,,,in_progress
+141,7,TFOX,002304,Consolidated Scrap,Awaiting Estimate,,in_progress,none,,,in_progress
+157,7,TFOX,002306,Consolidated Scrap,Enroute to Lessee Destination,,in_progress,none,,,in_progress
+143,7,TFOX,002315,Consolidated Scrap,Awaiting Release,,in_progress,none,,,in_progress
+158,7,TFOX,002318,Consolidated Scrap,Enroute to Lessee Destination,,in_progress,none,,,in_progress
+153,7,TFOX,002339,Consolidated Scrap,Awaiting Release,,in_progress,none,,,in_progress
+146,7,TFOX,002342,Consolidated Scrap,Awaiting Release,,in_progress,none,,,in_progress
+148,7,TFOX,002347,Consolidated Scrap,Awaiting Estimate,,in_progress,none,,,in_progress
+159,7,TFOX,002358,Consolidated Scrap,Enroute to Lessee Destination,,in_progress,none,,,in_progress

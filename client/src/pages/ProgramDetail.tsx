@@ -26,7 +26,6 @@ import { ArrowLeft, ChevronDown, ChevronRight, Download, History, Loader2, Plus,
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
-import { colsQuery } from "@shared/column-views";
 import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
@@ -36,7 +35,11 @@ import {
   LIFECYCLE_LABEL,
   MILESTONES_BY_TYPE,
   TRAIL_MILESTONES,
+  COMPLETION_LABEL,
+  COMPLETION_LEVELS,
+  deriveCompletionLevel,
   putOnRentProgramTypes,
+  type CompletionLevel,
   PROGRAM_CAR_DOC_CATEGORIES,
   PROGRAM_DOC_CATEGORIES,
   PROGRAM_ENTITIES,
@@ -45,7 +48,6 @@ import {
   STATUS_LABEL,
   categoryShortName,
   formatCustomField,
-  isCarDone,
   isProgramType,
   overlayLifecycle,
   type ProgramFieldDef,
@@ -123,6 +125,12 @@ type ProgramCar = {
   open_commitment?: { name?: string | null; type?: string | null; program_id?: number | null } | null;
   in_multiple_programs?: boolean;
   railcar_active?: boolean;
+  trail?: { milestone: string; milestone_date: string | null }[];
+  completion_level?: CompletionLevel;
+  work_complete_at?: string | null;
+  arrived_at?: string | null;
+  program_done_at?: string | null;
+  program_done_step?: string | null;
 };
 
 type HeaderDraft = {
@@ -169,6 +177,8 @@ function programCarSortValue(c: ProgramCar, key: string): string {
       return carLabelOf(c).toLowerCase();
     case "complete":
       return c.outcome_reached_at || c.completed ? "1" : "0";
+    case "completion":
+      return c.completion_level ?? "";
     case "active":
       return c.railcar?.active === true ? "1" : "0";
     case "milestone":
@@ -233,14 +243,21 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
     next.outcome_reached_at = null;
     next.completed = false;
   }
+  next.completion_level = deriveCompletionLevel({
+    active: next.railcar?.active,
+    status: next.status,
+    milestone: next.milestone,
+    milestones: car.trail,
+  });
   return next;
 }
 
-const PD_CORE = ["active", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi"] as const;
+const PD_CORE = ["completion", "active", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi"] as const;
 const PD_DEFAULT_COLS = new Set<string>(PD_CORE);
 const PD_LABELS: Record<string, string> = {
   car: "Car",
   complete: "Outcome",
+  completion: "Completion",
   active: "Active",
   milestone: "Milestone",
   milestone_at: "Milestone date",
@@ -295,6 +312,9 @@ export default function ProgramDetailPage() {
   const { toast } = useToast();
   const [includeExited, setIncludeExited] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [levelFilter, setLevelFilter] = useState<Set<CompletionLevel>>(
+    () => new Set(["not_started", "in_progress", "work_done"]),
+  );
   const [moreFields, setMoreFields] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [lifePreview, setLifePreview] = useState<any>(null);
@@ -673,6 +693,24 @@ export default function ProgramDetailPage() {
             />
           </td>
         );
+      case "completion": {
+        const level = c.completion_level ?? "not_started";
+        return (
+          <td key={key} className="px-2 py-1">
+            <span
+              className={cn(
+                "text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border whitespace-nowrap",
+                level === "program_done" && "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
+                level === "work_done" && "bg-umler-teal/15 text-umler-teal border-umler-teal/30",
+                level === "in_progress" && "bg-umler-amber/15 text-umler-amber border-umler-amber/30",
+                level === "not_started" && "bg-muted text-muted-foreground border-border",
+              )}
+            >
+              {COMPLETION_LABEL[level]}
+            </span>
+          </td>
+        );
+      }
       case "active":
         return (
           <td key={key} className="px-2 py-1">{c.railcar?.active === true ? "Yes" : "No"}</td>
@@ -868,13 +906,16 @@ export default function ProgramDetailPage() {
     const pasteIds = pasteMatch ? new Set(pasteMatch.matched.map((m) => m.link_id)) : null;
     return sortedCars.filter((c) => {
       if (pasteIds && !pasteIds.has(c.id)) return false;
-      return (
-        showCompleted ||
-        includeExited ||
-        !isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed })
-      );
+      const level = c.completion_level ?? deriveCompletionLevel({
+        active: c.railcar?.active,
+        status: c.status,
+        milestone: c.milestone,
+        milestones: c.trail,
+      });
+      if (!levelFilter.has(level)) return false;
+      return true;
     });
-  }, [sortedCars, showCompleted, includeExited, pasteMatch]);
+  }, [sortedCars, pasteMatch, levelFilter]);
   const detailCar = draftedCars.find((c) => c.id === detailId) ?? null;
   const splitListPct = Math.min(90, Math.max(30, Number(colWidths._split_list) || 68));
   const showPutOnRent = putOnRentProgramTypes().includes(header?.type as ProgramType);
@@ -963,18 +1004,8 @@ export default function ProgramDetailPage() {
               variant="outline"
               onClick={async () => {
                 try {
-                  const exportKeys = [
-                    "marks",
-                    "car_number",
-                    ...displayKeys.flatMap((k) => {
-                      if (k === "complete") return ["completed"];
-                      if (k === "notes" || k === "shop") return [k];
-                      if (k.startsWith("cf:")) return [k];
-                      return [];
-                    }),
-                  ];
                   await downloadReport(
-                    `/api/programs/${id}/export?include_exited=${includeExited ? "1" : "0"}&cols=${encodeURIComponent(colsQuery(exportKeys))}`,
+                    `/api/programs/${id}/export?include_exited=1&cols=all`,
                   );
                 } catch (e: any) {
                   toast({ title: "Export failed", description: e.message, variant: "destructive" });
@@ -1170,9 +1201,50 @@ export default function ProgramDetailPage() {
               )}
               {carSavedFlash && !gridDirty ? <span className="text-xs text-emerald-400">Saved</span> : null}
               {carSaveError ? <span className="text-xs text-destructive">{carSaveError}</span> : null}
+              <div className="flex items-center gap-1 flex-wrap">
+                {COMPLETION_LEVELS.map((level) => {
+                  const n = sortedCars.filter((c) => (c.completion_level ?? "not_started") === level).length;
+                  const on = levelFilter.has(level);
+                  return (
+                    <button
+                      key={level}
+                      type="button"
+                      className={cn(
+                        "text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border",
+                        on ? "bg-primary/15 border-primary/40 text-foreground" : "bg-muted border-border text-muted-foreground",
+                      )}
+                      onClick={() => {
+                        setLevelFilter((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(level)) next.delete(level);
+                          else next.add(level);
+                          if (next.size === 0) next.add(level);
+                          setShowCompleted(next.has("program_done"));
+                          return next;
+                        });
+                      }}
+                    >
+                      {COMPLETION_LABEL[level]} ({n})
+                    </button>
+                  );
+                })}
+              </div>
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Checkbox checked={showCompleted} onCheckedChange={(v) => setShowCompleted(v === true)} />
-                Show completed ({sortedCars.filter((c) => isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed })).length})
+                <Checkbox
+                  checked={levelFilter.has("program_done")}
+                  onCheckedChange={(v) => {
+                    const on = v === true;
+                    setShowCompleted(on);
+                    setLevelFilter((prev) => {
+                      const next = new Set(prev);
+                      if (on) next.add("program_done");
+                      else next.delete("program_done");
+                      if (next.size === 0) next.add("in_progress");
+                      return next;
+                    });
+                  }}
+                />
+                Show program done ({sortedCars.filter((c) => c.completion_level === "program_done").length})
               </label>
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Checkbox checked={includeExited} onCheckedChange={(v) => setIncludeExited(v === true)} />

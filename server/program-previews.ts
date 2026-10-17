@@ -9,6 +9,7 @@ import {
   setCommitment,
   clearCommitment,
   matchCarsFromIds,
+  upsertOpenCommitment,
 } from "./commitment";
 import {
   overlayLifecycle,
@@ -16,7 +17,12 @@ import {
   type ProgramLifecycle,
   type ProgramType,
 } from "@shared/programs";
-import { pickEarliestOpenProgram, shouldCreateProgramCommitment } from "@shared/commitment";
+import {
+  COMMITMENT_TYPES,
+  pickEarliestOpenProgram,
+  shouldCreateProgramCommitment,
+  type CommitmentType,
+} from "@shared/commitment";
 import { logProgramActivity, resolveProgramCars } from "./programs";
 
 function todayIso() {
@@ -456,6 +462,16 @@ function patchColumns(updates: Record<string, unknown>) {
   return out;
 }
 
+function commitmentPatch(updates: Record<string, unknown>): { type: CommitmentType; name: string } | null {
+  const raw = updates.commitment;
+  if (!raw || typeof raw !== "object") return null;
+  const c = raw as Record<string, unknown>;
+  const type = String(c.type ?? "");
+  const name = String(c.name ?? "").trim();
+  if (!(COMMITMENT_TYPES as readonly string[]).includes(type) || !name) return null;
+  return { type: type as CommitmentType, name };
+}
+
 export async function applyPatchProgramCars(token: string, actor: string) {
   return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
@@ -463,40 +479,65 @@ export async function applyPatchProgramCars(token: string, actor: string) {
   const program = await loadProgramRow(Number(preview.program_id));
   assertWritable(program, "patch cars");
   const cols = patchColumns(preview.updates ?? {});
+  const commitment = commitmentPatch(preview.updates ?? {});
   let updated = 0;
+  let commitments_written = 0;
   for (const row of preview.writable ?? []) {
     const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", row.railcar_id).maybeSingle();
     if (car?.active !== true) continue;
-    if (!Object.keys(cols).length) continue;
-    const { data: prior, error: priorErr } = await supabaseAdmin
-      .from("program_cars")
-      .select("*")
-      .eq("id", row.link_id)
-      .maybeSingle();
-    if (priorErr) throw priorErr;
-    const { data, error } = await supabaseAdmin
-      .from("program_cars")
-      .update(cols)
-      .eq("id", row.link_id)
-      .eq("program_id", program.id)
-      .select("*")
-      .single();
-    if (error) throw error;
-    const keys = Object.keys(cols);
-    await logProgramActivity({
-      program_id: program.id,
-      action: "car_patched",
-      actor,
-      program_car_id: row.link_id,
-      railcar_id: row.railcar_id,
-      detail: cols,
-      before: pickRow(prior, keys),
-      after: pickRow(data, keys),
-    });
-    updated += 1;
+    if (!Object.keys(cols).length && !commitment) continue;
+    let wrote = false;
+    if (Object.keys(cols).length) {
+      const { data: prior, error: priorErr } = await supabaseAdmin
+        .from("program_cars")
+        .select("*")
+        .eq("id", row.link_id)
+        .maybeSingle();
+      if (priorErr) throw priorErr;
+      const { data, error } = await supabaseAdmin
+        .from("program_cars")
+        .update(cols)
+        .eq("id", row.link_id)
+        .eq("program_id", program.id)
+        .select("*")
+        .single();
+      if (error) throw error;
+      const keys = Object.keys(cols);
+      await logProgramActivity({
+        program_id: program.id,
+        action: "car_patched",
+        actor,
+        program_car_id: row.link_id,
+        railcar_id: row.railcar_id,
+        detail: cols,
+        before: pickRow(prior, keys),
+        after: pickRow(data, keys),
+      });
+      wrote = true;
+    }
+    if (commitment) {
+      await upsertOpenCommitment(
+        Number(row.railcar_id),
+        { type: commitment.type, name: commitment.name, program_id: program.id },
+        actor,
+      );
+      await logProgramActivity({
+        program_id: program.id,
+        action: "commitment_set",
+        actor,
+        program_car_id: row.link_id,
+        railcar_id: row.railcar_id,
+        detail: { type: commitment.type, name: commitment.name },
+        before: {},
+        after: { type: commitment.type, name: commitment.name },
+      });
+      commitments_written += 1;
+      wrote = true;
+    }
+    if (wrote) updated += 1;
   }
   await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
-  return { preview, updated };
+  return { preview, updated, commitments_written };
   });
 }
 

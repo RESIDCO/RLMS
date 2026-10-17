@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
@@ -50,6 +50,7 @@ import {
   type ProgramStatus,
   type ProgramType,
 } from "@shared/programs";
+import { COMMITMENT_TYPES } from "@shared/commitment";
 
 type Category = { id: number; name: string };
 type StatusOption = { id: number; value: string; sort_order: number };
@@ -116,7 +117,7 @@ type ProgramCar = {
   } | null;
   shop: { id: number; name: string } | null;
   kpi?: { derived_status?: string | null; off_rent?: boolean; on_rent?: boolean } | null;
-  open_commitment?: { name?: string | null; program_id?: number | null } | null;
+  open_commitment?: { name?: string | null; type?: string | null; program_id?: number | null } | null;
   in_multiple_programs?: boolean;
   railcar_active?: boolean;
 };
@@ -159,6 +160,34 @@ function carLabelOf(c: ProgramCar): string {
   return [c.railcar?.reporting_marks, c.railcar?.car_number].filter(Boolean).join(" ") || `#${c.railcar_id}`;
 }
 
+function programCarSortValue(c: ProgramCar, key: string): string {
+  switch (key) {
+    case "car":
+      return carLabelOf(c).toLowerCase();
+    case "complete":
+      return c.outcome_reached_at || c.completed ? "1" : "0";
+    case "active":
+      return c.railcar?.active === true ? "1" : "0";
+    case "milestone":
+      return (c.milestone ?? "").toLowerCase();
+    case "milestone_at":
+      return String(c.milestone_at ?? "").slice(0, 10);
+    case "status":
+      return (c.status ?? "").toLowerCase();
+    case "notes":
+    case "comment":
+      return (c.notes ?? "").toLowerCase();
+    case "shop":
+      return (c.shop?.name ?? "").toLowerCase();
+    case "commitment":
+      return `${c.open_commitment?.type ?? ""} ${c.open_commitment?.name ?? ""}`.toLowerCase();
+    case "kpi":
+      return (c.kpi?.derived_status ?? "").toLowerCase();
+    default:
+      return "";
+  }
+}
+
 function mergeCarPatch(cur: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const next = { ...cur, ...patch };
   if (patch.custom_fields && typeof patch.custom_fields === "object") {
@@ -192,7 +221,7 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   return next;
 }
 
-const PD_CORE = ["active", "milestone", "milestone_at", "notes", "shop", "commitment", "kpi"] as const;
+const PD_CORE = ["active", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi"] as const;
 const PD_DEFAULT_COLS = new Set<string>(PD_CORE);
 const PD_LABELS: Record<string, string> = {
   car: "Car",
@@ -201,7 +230,7 @@ const PD_LABELS: Record<string, string> = {
   milestone: "Milestone",
   milestone_at: "Milestone date",
   notes: "Notes",
-  status: "Notes",
+  status: "Status",
   shop: "Shop / yard",
   commitment: "Commitment",
   kpi: "KPI bucket",
@@ -213,6 +242,8 @@ const PD_WIDTHS: Record<string, number> = {
   status: 220,
   flag: 140,
   comment: 180,
+  notes: 180,
+  commitment: 200,
   ol_entry: 110,
   ol_now: 110,
   shop: 160,
@@ -262,6 +293,8 @@ export default function ProgramDetailPage() {
   const [carSaving, setCarSaving] = useState(false);
   const [carSavedFlash, setCarSavedFlash] = useState(false);
   const [carSaveError, setCarSaveError] = useState<string | null>(null);
+  const [carFilter, setCarFilter] = useState("");
+  const lastSelectId = useRef<number | null>(null);
   const leaveDirtyRef = useRef(false);
   const heldHashRef = useRef(typeof window !== "undefined" ? window.location.hash : "");
   const skipHashRef = useRef(false);
@@ -367,6 +400,8 @@ export default function ProgramDetailPage() {
     setColOrder,
     colWidths,
     setColWidth,
+    sort,
+    setSort,
   } = colPrefs;
   const displayKeys = useMemo(() => {
     const pinnedStart = canEdit ? ["_select", "car", "complete"] : ["car", "complete"];
@@ -381,10 +416,37 @@ export default function ProgramDetailPage() {
     () => cars.map((c) => applyCarDraft(c, carDrafts[c.id], shops)),
     [cars, carDrafts, shops],
   );
-  const sortedCars = useMemo(
-    () => [...draftedCars].sort((a, b) => Number(Boolean(a.completed)) - Number(Boolean(b.completed))),
-    [draftedCars],
-  );
+  const sortedCars = useMemo(() => {
+    const q = carFilter.trim().toLowerCase();
+    const filtered = q
+      ? draftedCars.filter((c) => {
+          const hay = [
+            carLabelOf(c),
+            c.status,
+            c.notes,
+            c.milestone,
+            c.open_commitment?.name,
+            c.open_commitment?.type,
+            c.kpi?.derived_status,
+            c.shop?.name,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return hay.includes(q);
+        })
+      : draftedCars;
+    const key = sort?.key;
+    const dir = sort?.dir === "desc" ? -1 : 1;
+    return [...filtered].sort((a, b) => {
+      if (!key) return Number(Boolean(a.completed)) - Number(Boolean(b.completed));
+      const va = programCarSortValue(a, key);
+      const vb = programCarSortValue(b, key);
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+  }, [draftedCars, carFilter, sort]);
   const tableW = tableWidthFor(displayKeys, colWidths, PD_WIDTHS, 120);
   const gridW = Math.max(1100, tableW);
   const topScrollRef = useRef<HTMLDivElement>(null);
@@ -453,6 +515,15 @@ export default function ProgramDetailPage() {
         )}
         onResize={setColWidth}
         onMove={(from, to) => setColOrder(moveCol(movableKeys, from, to))}
+        onSort={
+          key === "_select" || key === "_actions"
+            ? undefined
+            : () => {
+                if (sort?.key === key) setSort({ key, dir: sort.dir === "asc" ? "desc" : "asc" });
+                else setSort({ key, dir: "asc" });
+              }
+        }
+        sortDir={sort?.key === key ? sort.dir : null}
       >
         {key === "_select" ? (
           <Checkbox
@@ -486,7 +557,12 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1">
             {!exited && (
-              <Checkbox checked={selected.has(c.id)} onCheckedChange={() => toggle(c.id)} aria-label={`Select ${label}`} />
+              <Checkbox
+                checked={selected.has(c.id)}
+                onClick={(e) => selectClick(e, c.id)}
+                onCheckedChange={() => {}}
+                aria-label={`Select ${label}`}
+              />
             )}
           </td>
         );
@@ -543,19 +619,22 @@ export default function ProgramDetailPage() {
           </td>
         );
       case "notes":
+      case "comment":
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">
             <CellInput
               readOnly={!canEdit || exited || c.railcar?.active !== true}
-              value={c.status ?? c.notes ?? ""}
-              onSave={(v) => queueCarPatch(c.id, { status: v })}
+              value={c.notes ?? ""}
+              onSave={(v) => queueCarPatch(c.id, { notes: v })}
             />
           </td>
         );
       case "commitment":
         return (
           <td key={key} className="px-2 py-1">
-            {c.open_commitment?.name ?? "—"}
+            {c.open_commitment?.name
+              ? `${c.open_commitment.type ? `${c.open_commitment.type} · ` : ""}${c.open_commitment.name}`
+              : "—"}
             {c.in_multiple_programs ? <div className="text-[10px] text-umler-amber">In 2 programs</div> : null}
           </td>
         );
@@ -706,7 +785,36 @@ export default function ProgramDetailPage() {
     window.setTimeout(() => setSavedFlash(false), 2500);
   }
 
-  function toggle(linkId: number) {
+  const visibleCars = useMemo(
+    () =>
+      sortedCars.filter(
+        (c) =>
+          showCompleted ||
+          includeExited ||
+          !isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed }),
+      ),
+    [sortedCars, showCompleted, includeExited],
+  );
+
+  function selectClick(e: MouseEvent, linkId: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    const ids = visibleCars.filter((c) => !c.exited_date).map((c) => c.id);
+    if (e.shiftKey && lastSelectId.current != null) {
+      const a = ids.indexOf(lastSelectId.current);
+      const b = ids.indexOf(linkId);
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (let i = lo; i <= hi; i++) next.add(ids[i]);
+          return next;
+        });
+        lastSelectId.current = linkId;
+        return;
+      }
+    }
+    lastSelectId.current = linkId;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(linkId)) next.delete(linkId);
@@ -978,6 +1086,13 @@ export default function ProgramDetailPage() {
               <Button size="sm" variant="ghost" onClick={() => setMoreFields((v) => !v)}>
                 {moreFields ? "Hide extra fields" : "More fields"}
               </Button>
+              <Input
+                className="h-8 w-52 text-xs"
+                value={carFilter}
+                onChange={(e) => setCarFilter(e.target.value)}
+                placeholder="Filter cars…"
+                aria-label="Filter program cars"
+              />
               <ColumnPicker
                 columns={PD_CORE.map((key) => ({ key, label: PD_LABELS[key] ?? key }))}
                 prefs={colPrefs}
@@ -1001,11 +1116,15 @@ export default function ProgramDetailPage() {
                     confirmLabel: "Apply",
                   });
                   if (!ok) return;
+                  const selectedCount = selected.size;
                   const prev = await apiRequest("POST", `/api/programs/${id}/cars/patch/preview`, {
                     link_ids: Array.from(selected),
                     updates,
                   }).then((r) => r.json());
-                  await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, { preview_token: prev.preview_token });
+                  const applied = await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, {
+                    preview_token: prev.preview_token,
+                  }).then((r) => r.json());
+                  const n = Number(applied.updated ?? selectedCount);
                   setCarDrafts((prev) => {
                     const next = { ...prev };
                     for (const linkId of selected) delete next[linkId];
@@ -1015,7 +1134,13 @@ export default function ProgramDetailPage() {
                   qc.invalidateQueries({ queryKey: carsKey });
                   qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
                   qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
-                  toast({ title: `Updated ${selected.size} car${selected.size === 1 ? "" : "s"}` });
+                  toast({
+                    title: `Saved ${n} program car${n === 1 ? "" : "s"}`,
+                    description:
+                      applied.commitments_written > 0
+                        ? `${applied.commitments_written} commitment${applied.commitments_written === 1 ? "" : "s"} written`
+                        : undefined,
+                  });
                 }}
               />
               </div>
@@ -1046,7 +1171,7 @@ export default function ProgramDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedCars.filter((c) => showCompleted || includeExited || !isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed })).map((c) => {
+                  {visibleCars.map((c) => {
                     const label = carLabelOf(c);
                     const exited = Boolean(c.exited_date);
                     const done = Boolean(c.completed);
@@ -1128,7 +1253,25 @@ export default function ProgramDetailPage() {
             </SheetTitle>
           </SheetHeader>
           {docsFor && (
-            <div className="mt-4">
+            <div className="mt-4 space-y-3">
+              <div className="text-sm space-y-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Program note</div>
+                  <div className="whitespace-pre-wrap">{docsFor.notes || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Commitment</div>
+                  <div>
+                    {docsFor.open_commitment?.name
+                      ? `${docsFor.open_commitment.type ? `${docsFor.open_commitment.type} · ` : ""}${docsFor.open_commitment.name}`
+                      : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Status</div>
+                  <div>{docsFor.status || "—"}</div>
+                </div>
+              </div>
               <ProgramDocsPanel
                 compact
                 listUrl={`/api/programs/${id}/cars/${docsFor.id}/documents`}
@@ -1336,6 +1479,7 @@ function BulkEditBar({
 }) {
   const [field, setField] = useState("shop_id");
   const [text, setText] = useState("");
+  const [commitType, setCommitType] = useState<string>("scrap");
   const [shopId, setShopId] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   const shopName = shops.find((s) => s.id === shopId)?.name ?? "";
@@ -1345,7 +1489,8 @@ function BulkEditBar({
     { value: "status", label: "Status" },
     { value: "completed", label: "Complete" },
     { value: "flag_tag", label: "Flag" },
-    { value: "notes", label: "Comment" },
+    { value: "notes", label: "Program note" },
+    { value: "commitment", label: "Commit" },
     { value: "repair_cost_total", label: "Repair $" },
     ...defs.map((d) => ({ value: `custom:${d.field_key}`, label: d.label })),
   ];
@@ -1368,7 +1513,10 @@ function BulkEditBar({
       label = `Flag to '${text || "—"}'`;
     } else if (field === "notes") {
       updates = { notes: text };
-      label = "Comment";
+      label = `Program note to '${text || "—"}'`;
+    } else if (field === "commitment") {
+      updates = { commitment: { type: commitType, name: text } };
+      label = `Commit ${commitType} '${text}'`;
     } else if (field === "repair_cost_total") {
       updates = { repair_cost_total: text };
       label = `Repair $ to '${text || "—"}'`;
@@ -1429,8 +1577,31 @@ function BulkEditBar({
           onChange={(e) => setText(e.target.value)}
           placeholder="Watch, Priority…"
         />
+      ) : field === "commitment" ? (
+        <>
+          <select
+            className="h-8 bg-background border border-border rounded px-2 text-xs [color-scheme:dark]"
+            value={commitType}
+            onChange={(e) => setCommitType(e.target.value)}
+          >
+            {COMMITMENT_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+          <Input
+            className="h-8 w-48 text-xs"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Metalico, Scrap…"
+          />
+        </>
       ) : (
-        <Input className="h-8 w-44 text-xs" value={text} onChange={(e) => setText(e.target.value)} />
+        <Input
+          className="h-8 w-44 text-xs"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={field === "notes" ? "Program note" : undefined}
+        />
       )}
       <Button size="sm" onClick={apply} disabled={pending}>
         Apply to {count} selected car{count === 1 ? "" : "s"}

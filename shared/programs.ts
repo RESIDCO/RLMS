@@ -32,18 +32,46 @@ export const PROGRAM_TYPE_FROM_CATEGORY: Record<string, ProgramType> = {
   Other: "Other",
 };
 
+export const TRAIL_MILESTONES = [
+  "Enroute",
+  "Arrived at industry",
+  "Scrapped",
+  "Sold",
+  "On rent",
+] as const;
+
+export const TERMINAL_MILESTONES = ["Scrapped", "Sold", "On rent"] as const;
+
 export const MILESTONES_BY_TYPE: Record<ProgramType, string[]> = {
-  Acquisition: ["Inspect", "Qualify", "Deliver"],
-  Return: ["Off lease", "Inspect", "Shop", "Ready"],
-  Sale: ["Listed", "Offer", "Closed"],
-  "New Assignment": ["Qualify", "Deliver", "On rent"],
-  Scrap: ["Move to yard", "Scrapped"],
+  Acquisition: ["Inspect", "Qualify", "Enroute", "Arrived at industry", "Deliver"],
+  Return: ["Off lease", "Enroute", "Arrived at industry", "Inspect", "Shop", "Ready", "On rent"],
+  Sale: ["Listed", "Offer", "Enroute", "Arrived at industry", "Closed", "Sold"],
+  "New Assignment": ["Qualify", "Enroute", "Arrived at industry", "Deliver", "On rent"],
+  Scrap: ["Enroute", "Arrived at industry", "Move to yard", "Scrapped"],
   Repair: ["Shop in", "Work complete", "Shop out"],
   Inspection: ["Scheduled", "Inspected"],
   Quals: ["Qualify", "Certified"],
   "Lining/Cleaning": ["Shop in", "Lined/cleaned", "Shop out"],
-  Other: ["Started", "Done"],
+  Other: ["Started", "Enroute", "Arrived at industry", "Done"],
 };
+
+/** Program-car "done" is arrival at the committed destination, not the later terminal step. */
+export function isArrivedMilestone(raw: string | null | undefined): boolean {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return false;
+  if (s.includes("arrived")) return true;
+  if (s === "deliver" || s === "delivered" || s.startsWith("deliver ")) return true;
+  return false;
+}
+
+export function isTerminalMilestone(raw: string | null | undefined): boolean {
+  const s = String(raw ?? "").trim().toLowerCase();
+  return (TERMINAL_MILESTONES as readonly string[]).some((m) => m.toLowerCase() === s);
+}
+
+export function putOnRentProgramTypes(): readonly ProgramType[] {
+  return ["Return", "New Assignment"];
+}
 
 export const LIFECYCLE_LABEL: Record<ProgramLifecycle, string> = {
   draft: "Draft",

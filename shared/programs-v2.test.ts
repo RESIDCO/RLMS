@@ -4,8 +4,11 @@
 import { pickEarliestOpenProgram, shouldCreateProgramCommitment } from "./commitment";
 import {
   displayTypeFromCategory,
+  isArrivedMilestone,
   isCarDone,
+  isTerminalMilestone,
   overlayLifecycle,
+  parseCarPasteList,
   readyToClose,
   isProgramStale,
 } from "./programs";
@@ -29,6 +32,13 @@ ok(displayTypeFromCategory("EOLR (End-of-Lease Return)") === "Return", "EOLR →
 ok(displayTypeFromCategory("NLD (New Lessee Delivery)") === "New Assignment", "NLD → New Assignment");
 ok(displayTypeFromCategory("Remark") === "Repair", "Remark → Repair");
 ok(displayTypeFromCategory("Qualifications") === "Quals", "Quals");
+
+ok(isArrivedMilestone("Arrived at industry"), "arrived is destination");
+ok(isArrivedMilestone("COMPLETE - Arrived Lessee"), "arrived lessee");
+ok(!isArrivedMilestone("Enroute"), "enroute is not done");
+ok(isTerminalMilestone("On rent"), "on rent is terminal");
+ok(!isArrivedMilestone("On rent"), "on rent is not arrival");
+ok(parseCarPasteList("TFOX 2248\nTFOX 000430, KBX 123").length === 3, "paste list splits");
 
 ok(isCarDone({ active: false }), "inactive is done");
 ok(isCarDone({ active: true, outcome_reached_at: "2026-10-01" }), "outcome is done");

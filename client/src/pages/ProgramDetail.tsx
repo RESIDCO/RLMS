@@ -22,7 +22,8 @@ import AccountCombobox from "@/components/AccountCombobox";
 import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
 import { carPathFromProgram, navigateHash, programsPathFromQuery, useHashSearch } from "@/lib/hash-location";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, ChevronRight, Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { colsQuery } from "@shared/column-views";
@@ -34,6 +35,8 @@ import {
   LIFECYCLE_BADGE,
   LIFECYCLE_LABEL,
   MILESTONES_BY_TYPE,
+  TRAIL_MILESTONES,
+  putOnRentProgramTypes,
   PROGRAM_CAR_DOC_CATEGORIES,
   PROGRAM_DOC_CATEGORIES,
   PROGRAM_ENTITIES,
@@ -218,6 +221,18 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   if (patch.custom_fields && typeof patch.custom_fields === "object") {
     next.custom_fields = { ...next.custom_fields, ...(patch.custom_fields as Record<string, unknown>) };
   }
+  if (patch.milestone !== undefined) next.milestone = patch.milestone === "" ? null : String(patch.milestone);
+  if (patch.milestone_at !== undefined) {
+    next.milestone_at = patch.milestone_at ? String(patch.milestone_at).slice(0, 10) : null;
+  }
+  if (patch.outcome_reached === true) {
+    next.outcome_reached_at = new Date().toISOString().slice(0, 10);
+    next.completed = true;
+  }
+  if (patch.outcome_reached === false) {
+    next.outcome_reached_at = null;
+    next.completed = false;
+  }
   return next;
 }
 
@@ -294,6 +309,18 @@ export default function ProgramDetailPage() {
   const [carSavedFlash, setCarSavedFlash] = useState(false);
   const [carSaveError, setCarSaveError] = useState<string | null>(null);
   const [carFilter, setCarFilter] = useState("");
+  const [pasteText, setPasteText] = useState("");
+  const [pasteMatch, setPasteMatch] = useState<{
+    requested: number;
+    matched_count: number;
+    matched: { token: string; link_id: number; label: string }[];
+    not_found: { token: string }[];
+    ambiguous: { token: string; matches: { label: string }[] }[];
+  } | null>(null);
+  const [pastePending, setPastePending] = useState(false);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [headerOpen, setHeaderOpen] = useState(false);
+  const [rentOpen, setRentOpen] = useState(false);
   const lastSelectId = useRef<number | null>(null);
   const leaveDirtyRef = useRef(false);
   const heldHashRef = useRef(typeof window !== "undefined" ? window.location.hash : "");
@@ -319,6 +346,19 @@ export default function ProgramDetailPage() {
   const { data: shops = [] } = useQuery<ShopOption[]>({
     queryKey: ["/api/programs/shops"],
     queryFn: () => apiRequest("GET", "/api/programs/shops").then((r) => r.json()),
+  });
+  const { data: riders = [] } = useQuery<{ id: number; rider_name: string | null; schedule_number: string | null }[]>({
+    queryKey: ["/api/riders"],
+    queryFn: () => apiRequest("GET", "/api/riders").then((r) => r.json()),
+    enabled: rentOpen,
+  });
+  const { data: trail = [] } = useQuery<
+    { id: number; milestone: string; milestone_date: string; note: string | null; actor: string | null }[]
+  >({
+    queryKey: ["/api/programs", id, "cars", detailId, "milestones"],
+    queryFn: () =>
+      apiRequest("GET", `/api/programs/${id}/cars/${detailId}/milestones`).then((r) => r.json()),
+    enabled: Number.isFinite(id) && detailId != null,
   });
   const { data: accounts = [] } = useQuery<{ id: number; name: string }[]>({
     queryKey: ["/api/accounts"],
@@ -463,35 +503,74 @@ export default function ProgramDetailPage() {
     setCarDrafts((prev) => ({ ...prev, [linkId]: mergeCarPatch(prev[linkId] ?? {}, patch) }));
   }
 
-  async function saveCarDrafts() {
-    const entries = Object.entries(carDrafts);
-    if (!entries.length || !canEdit) return;
+  async function runPatchApply(
+    n: number,
+    body: Record<string, unknown>,
+  ): Promise<{ updated?: number; commitments_written?: number }> {
     setCarSaving(true);
     setCarSaveError(null);
+    toast({ title: `Saving ${n} car${n === 1 ? "" : "s"}…` });
     try {
-      for (const [linkId, body] of entries) {
-        const prev = await apiRequest("POST", `/api/programs/${id}/cars/patch/preview`, {
-          link_ids: [Number(linkId)],
-          updates: body,
-        }).then((r) => r.json());
-        await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, { preview_token: prev.preview_token });
-      }
-      setCarDrafts({});
-      setCarSavedFlash(true);
-      window.setTimeout(() => setCarSavedFlash(false), 2500);
+      const prev = await apiRequest("POST", `/api/programs/${id}/cars/patch/preview`, body).then((r) => r.json());
+      const applied = await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, {
+        preview_token: prev.preview_token,
+      }).then((r) => r.json());
+      const u = Number(applied.updated ?? n);
+      toast({
+        title: `Saved ${u} program car${u === 1 ? "" : "s"}`,
+        description:
+          applied.commitments_written > 0
+            ? `${applied.commitments_written} commitment${applied.commitments_written === 1 ? "" : "s"} written`
+            : undefined,
+      });
       await Promise.all([
         qc.invalidateQueries({ queryKey: carsKey }),
         qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true }),
         qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true }),
       ]);
-      if (tab === "activity" || historyFor) {
+      if (tab === "activity" || historyFor || detailId) {
         await qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
+        if (detailId) qc.invalidateQueries({ queryKey: ["/api/programs", id, "cars", detailId, "milestones"] });
       }
+      return applied;
     } catch (e: any) {
       setCarSaveError(e.message || "Save failed");
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
+      throw e;
     } finally {
       setCarSaving(false);
+    }
+  }
+
+  async function saveCarDrafts() {
+    const entries = Object.entries(carDrafts);
+    if (!entries.length || !canEdit) return;
+    try {
+      await runPatchApply(entries.length, {
+        items: entries.map(([linkId, updates]) => ({ link_id: Number(linkId), updates })),
+      });
+      setCarDrafts({});
+      setCarSavedFlash(true);
+      window.setTimeout(() => setCarSavedFlash(false), 2500);
+    } catch {
+      /* toast already shown */
+    }
+  }
+
+  async function runPasteMatch(text: string) {
+    const t = text.trim();
+    if (!t) {
+      setPasteMatch(null);
+      return;
+    }
+    setPastePending(true);
+    try {
+      const r = await apiRequest("POST", `/api/programs/${id}/cars/match`, { text: t }).then((x) => x.json());
+      setPasteMatch(r);
+    } catch (e: any) {
+      toast({ title: "Paste search failed", description: e.message, variant: "destructive" });
+    } finally {
+      setPastePending(false);
     }
   }
 
@@ -785,16 +864,20 @@ export default function ProgramDetailPage() {
     window.setTimeout(() => setSavedFlash(false), 2500);
   }
 
-  const visibleCars = useMemo(
-    () =>
-      sortedCars.filter(
-        (c) =>
-          showCompleted ||
-          includeExited ||
-          !isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed }),
-      ),
-    [sortedCars, showCompleted, includeExited],
-  );
+  const visibleCars = useMemo(() => {
+    const pasteIds = pasteMatch ? new Set(pasteMatch.matched.map((m) => m.link_id)) : null;
+    return sortedCars.filter((c) => {
+      if (pasteIds && !pasteIds.has(c.id)) return false;
+      return (
+        showCompleted ||
+        includeExited ||
+        !isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed })
+      );
+    });
+  }, [sortedCars, showCompleted, includeExited, pasteMatch]);
+  const detailCar = draftedCars.find((c) => c.id === detailId) ?? null;
+  const splitListPct = Math.min(90, Math.max(30, Number(colWidths._split_list) || 68));
+  const showPutOnRent = putOnRentProgramTypes().includes(header?.type as ProgramType);
 
   function selectClick(e: MouseEvent, linkId: number) {
     e.preventDefault();
@@ -839,7 +922,7 @@ export default function ProgramDetailPage() {
   }
 
   return (
-    <div className="h-full min-h-[36rem] flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
       <div className="shrink-0 px-4 sm:px-8 pt-4 pb-0 space-y-1.5">
         <button
           type="button"
@@ -954,6 +1037,16 @@ export default function ProgramDetailPage() {
           )}
         </div>
 
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+          onClick={() => setHeaderOpen((v) => !v)}
+        >
+          {headerOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          {headerOpen ? "Hide program details" : "Show program details"}
+        </button>
+        {headerOpen && (
+        <>
         <Textarea
           className="text-sm min-h-[52px] max-h-28 overflow-y-auto"
           rows={2}
@@ -1047,6 +1140,8 @@ export default function ProgramDetailPage() {
             <span className="text-xs text-muted-foreground">Unsaved header changes</span>
           </div>
         )}
+        </>
+        )}
         </div>
 
         <Tabs value={tab} onValueChange={setTab} className="flex-1 min-h-0 flex flex-col">
@@ -1066,7 +1161,7 @@ export default function ProgramDetailPage() {
                   {carSaving ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving…
+                      Saving {Object.keys(carDrafts).length || ""} car{Object.keys(carDrafts).length === 1 ? "" : "s"}…
                     </>
                   ) : (
                     "Save Changes"
@@ -1093,6 +1188,59 @@ export default function ProgramDetailPage() {
                 placeholder="Filter cars…"
                 aria-label="Filter program cars"
               />
+              <Textarea
+                className="h-8 min-h-8 w-72 text-xs py-1.5"
+                value={pasteText}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPasteText(v);
+                  if (!v.trim()) setPasteMatch(null);
+                }}
+                onPaste={(e) => {
+                  const next = e.clipboardData.getData("text");
+                  if (next && /[\n\r,]/.test(next)) {
+                    window.setTimeout(() => void runPasteMatch(next), 0);
+                  }
+                }}
+                onBlur={() => {
+                  if (pasteText.trim() && (pasteText.includes("\n") || pasteText.includes(",") || pasteText.trim().split(/\s+/).length >= 2)) {
+                    void runPasteMatch(pasteText);
+                  }
+                }}
+                placeholder="Paste a list of cars…"
+                aria-label="Paste car list to filter"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pastePending || !pasteText.trim()}
+                onClick={() => void runPasteMatch(pasteText)}
+              >
+                {pastePending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Match paste"}
+              </Button>
+              {pasteMatch ? (
+                <>
+                  <span className="text-xs text-muted-foreground">
+                    {pasteMatch.matched_count} of {pasteMatch.requested} matched
+                    {pasteMatch.not_found.length ? ` · ${pasteMatch.not_found.length} not found` : ""}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setSelected(new Set(pasteMatch.matched.map((m) => m.link_id)))}
+                  >
+                    Select all matched
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setPasteText(""); setPasteMatch(null); }}>
+                    Clear paste
+                  </Button>
+                </>
+              ) : null}
+              {showPutOnRent && canEdit && selected.size > 0 && (
+                <Button size="sm" variant="outline" disabled={carSaving} onClick={() => setRentOpen(true)}>
+                  Put on rent
+                </Button>
+              )}
               <ColumnPicker
                 columns={PD_CORE.map((key) => ({ key, label: PD_LABELS[key] ?? key }))}
                 prefs={colPrefs}
@@ -1103,6 +1251,14 @@ export default function ProgramDetailPage() {
                 {` · ${sortedCars.length} rows`}
               </span>
             </div>
+            {pasteMatch && pasteMatch.not_found.length > 0 && (
+              <div className="text-xs text-destructive mb-2">
+                Not found: {pasteMatch.not_found.map((n) => n.token).join(", ")}
+                {pasteMatch.ambiguous?.length
+                  ? ` · Ambiguous: ${pasteMatch.ambiguous.map((a) => a.token).join(", ")}`
+                  : ""}
+              </div>
+            )}
             {canEdit && selected.size > 0 && (
               <div className="shrink-0">
               <BulkEditBar
@@ -1110,42 +1266,35 @@ export default function ProgramDetailPage() {
                 shops={shops}
                 statusOptions={statusOptions}
                 defs={defs}
+                saving={carSaving}
                 onApply={async (label, updates) => {
                   const ok = await confirmSave({
                     title: `Set ${label} for ${selected.size} selected car${selected.size === 1 ? "" : "s"}?`,
                     confirmLabel: "Apply",
                   });
                   if (!ok) return;
-                  const selectedCount = selected.size;
-                  const prev = await apiRequest("POST", `/api/programs/${id}/cars/patch/preview`, {
-                    link_ids: Array.from(selected),
-                    updates,
-                  }).then((r) => r.json());
-                  const applied = await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, {
-                    preview_token: prev.preview_token,
-                  }).then((r) => r.json());
-                  const n = Number(applied.updated ?? selectedCount);
+                  const ids = Array.from(selected);
+                  await runPatchApply(ids.length, { link_ids: ids, updates });
                   setCarDrafts((prev) => {
                     const next = { ...prev };
-                    for (const linkId of selected) delete next[linkId];
+                    for (const linkId of ids) delete next[linkId];
                     return next;
                   });
                   setSelected(new Set());
-                  qc.invalidateQueries({ queryKey: carsKey });
-                  qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
-                  qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
-                  toast({
-                    title: `Saved ${n} program car${n === 1 ? "" : "s"}`,
-                    description:
-                      applied.commitments_written > 0
-                        ? `${applied.commitments_written} commitment${applied.commitments_written === 1 ? "" : "s"} written`
-                        : undefined,
-                  });
                 }}
               />
               </div>
             )}
-            <div className="flex-1 min-h-0 rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
+            <ResizablePanelGroup
+              direction="vertical"
+              className="flex-1 min-h-0"
+              onLayout={(sizes) => {
+                const n = Math.round(sizes[0]);
+                if (Number.isFinite(n) && n !== Number(colWidths._split_list)) setColWidth("_split_list", n);
+              }}
+            >
+            <ResizablePanel defaultSize={splitListPct} minSize={30}>
+            <div className="h-full min-h-0 rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
               <div
                 ref={topScrollRef}
                 className="shrink-0 h-3 overflow-x-auto overflow-y-hidden border-b border-border"
@@ -1178,11 +1327,13 @@ export default function ProgramDetailPage() {
                     return (
                       <tr
                         key={c.id}
+                        onClick={() => setDetailId(c.id)}
                         className={cn(
-                          "border-t border-border/50",
+                          "border-t border-border/50 cursor-pointer",
                           exited && "opacity-60",
                           done && !exited && !carDrafts[c.id] && "bg-muted/20",
                           carDrafts[c.id] && "border-l-2 border-l-primary bg-primary/5",
+                          detailId === c.id && "bg-primary/10",
                         )}
                       >
                         {displayKeys.map((k) => pdCell(k, c, label, exited))}
@@ -1196,6 +1347,23 @@ export default function ProgramDetailPage() {
               </table>
               </div>
             </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={Math.max(10, 100 - splitListPct)} minSize={12}>
+              <div className="h-full min-h-0 rounded-xl border border-card-border bg-card overflow-auto p-3">
+                {detailCar ? (
+                  <CarDetailPanel
+                    car={detailCar}
+                    trail={trail}
+                    onOpenDocs={() => setDocsFor(detailCar)}
+                    onOpenHistory={() => setHistoryFor(detailCar)}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">Select a car to see notes, commitment, and milestone trail.</p>
+                )}
+              </div>
+            </ResizablePanel>
+            </ResizablePanelGroup>
           </TabsContent>
           <TabsContent value="milestones" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             <p className="text-xs text-muted-foreground mb-2">Suggested for this type. Optional — never enforced.</p>
@@ -1228,6 +1396,19 @@ export default function ProgramDetailPage() {
           qc.invalidateQueries({ queryKey: carsKey });
           qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
           qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
+        }}
+      />
+      <PutOnRentDialog
+        open={rentOpen}
+        programId={id}
+        linkIds={Array.from(selected)}
+        riders={riders}
+        onClose={() => setRentOpen(false)}
+        onApplied={() => {
+          setRentOpen(false);
+          setSelected(new Set());
+          qc.invalidateQueries({ queryKey: carsKey });
+          qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
         }}
       />
       <ProgramPreviewDialog
@@ -1296,6 +1477,67 @@ export default function ProgramDetailPage() {
           />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function CarDetailPanel({
+  car,
+  trail,
+  onOpenDocs,
+  onOpenHistory,
+}: {
+  car: ProgramCar;
+  trail: { id: number; milestone: string; milestone_date: string; note: string | null; actor: string | null }[];
+  onOpenDocs: () => void;
+  onOpenHistory: () => void;
+}) {
+  const label = carLabelOf(car);
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-medium">{label}</div>
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" onClick={onOpenHistory}><History className="h-3.5 w-3.5" /> History</Button>
+          <Button size="sm" variant="ghost" onClick={onOpenDocs}><Paperclip className="h-3.5 w-3.5" /> Files</Button>
+        </div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Latest milestone</div>
+        <div>{car.milestone || "—"}{car.milestone_at ? ` · ${String(car.milestone_at).slice(0, 10)}` : ""}</div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trail</div>
+        {trail.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">No trail rows yet. Saving a milestone keeps each date.</p>
+        ) : (
+          <ol className="space-y-1.5 mt-1">
+            {trail.map((m) => (
+              <li key={m.id} className="text-xs border-l-2 border-primary/40 pl-2">
+                <span className="font-medium">{m.milestone}</span>
+                <span className="text-muted-foreground"> · {String(m.milestone_date).slice(0, 10)}</span>
+                {m.note ? <div>{m.note}</div> : null}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Program note</div>
+        <div className="whitespace-pre-wrap text-xs">{car.notes || "—"}</div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Commitment</div>
+        <div className="text-xs">
+          {car.open_commitment?.name
+            ? `${car.open_commitment.type ? `${car.open_commitment.type} · ` : ""}${car.open_commitment.name}`
+            : "—"}
+        </div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Arrived (program done)</div>
+        <div className="text-xs">{car.outcome_reached_at ? String(car.outcome_reached_at).slice(0, 10) : "—"}</div>
+      </div>
     </div>
   );
 }
@@ -1469,12 +1711,14 @@ function BulkEditBar({
   shops,
   statusOptions,
   defs,
+  saving,
   onApply,
 }: {
   count: number;
   shops: ShopOption[];
   statusOptions: StatusOption[];
   defs: ProgramFieldDef[];
+  saving?: boolean;
   onApply: (label: string, updates: Record<string, unknown>) => Promise<void>;
 }) {
   const [field, setField] = useState("shop_id");
@@ -1483,10 +1727,12 @@ function BulkEditBar({
   const [shopId, setShopId] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   const shopName = shops.find((s) => s.id === shopId)?.name ?? "";
+  const busy = pending || Boolean(saving);
 
   const fieldOptions = [
     { value: "shop_id", label: "Shop" },
     { value: "status", label: "Status" },
+    { value: "milestone", label: "Milestone" },
     { value: "completed", label: "Complete" },
     { value: "flag_tag", label: "Flag" },
     { value: "notes", label: "Program note" },
@@ -1504,6 +1750,10 @@ function BulkEditBar({
     } else if (field === "status") {
       updates = { status: text };
       label = `Status to '${text || "—"}'`;
+    } else if (field === "milestone") {
+      const [mile, date] = text.split("|");
+      updates = { milestone: mile ?? "", milestone_at: date ?? "" };
+      label = `Milestone '${mile || "—"}'${date ? ` on ${date}` : ""}`;
     } else if (field === "completed") {
       const on = text !== "false";
       updates = { completed: on };
@@ -1561,6 +1811,25 @@ function BulkEditBar({
             <option key={o.id} value={o.value}>{o.value}</option>
           ))}
         </select>
+      ) : field === "milestone" ? (
+        <>
+          <select
+            className="h-8 bg-background border border-border rounded px-2 text-xs max-w-[220px] [color-scheme:dark]"
+            value={text.split("|")[0] ?? ""}
+            onChange={(e) => setText(`${e.target.value}|${text.split("|")[1] ?? new Date().toISOString().slice(0, 10)}`)}
+          >
+            <option value="">—</option>
+            {TRAIL_MILESTONES.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <Input
+            className="h-8 w-36 text-xs"
+            type="date"
+            value={text.split("|")[1] ?? ""}
+            onChange={(e) => setText(`${text.split("|")[0] ?? ""}|${e.target.value}`)}
+          />
+        </>
       ) : field === "completed" ? (
         <select
           className="h-8 bg-background border border-border rounded px-2 text-xs [color-scheme:dark]"
@@ -1603,8 +1872,15 @@ function BulkEditBar({
           placeholder={field === "notes" ? "Program note" : undefined}
         />
       )}
-      <Button size="sm" onClick={apply} disabled={pending}>
-        Apply to {count} selected car{count === 1 ? "" : "s"}
+      <Button size="sm" onClick={apply} disabled={busy}>
+        {busy ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Saving {count} car{count === 1 ? "" : "s"}…
+          </>
+        ) : (
+          `Apply to ${count} selected car${count === 1 ? "" : "s"}`
+        )}
       </Button>
     </div>
   );
@@ -1658,6 +1934,108 @@ function AddCarsDialog({
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={add} disabled={!picked.length || pending}>
             {pending ? "Adding…" : `Add ${picked.length || ""}`}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PutOnRentDialog({
+  open,
+  programId,
+  linkIds,
+  riders,
+  onClose,
+  onApplied,
+}: {
+  open: boolean;
+  programId: number;
+  linkIds: number[];
+  riders: { id: number; rider_name: string | null; schedule_number: string | null }[];
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const { toast } = useToast();
+  const [riderId, setRiderId] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [preview, setPreview] = useState<any>(null);
+  const [pending, setPending] = useState(false);
+
+  async function runPreview() {
+    setPending(true);
+    try {
+      const p = await apiRequest("POST", `/api/programs/${programId}/cars/put-on-rent/preview`, {
+        link_ids: linkIds,
+        rider_id: Number(riderId),
+        rent_start_date: date,
+      }).then((r) => r.json());
+      setPreview(p);
+    } catch (e: any) {
+      toast({ title: "Preview failed", description: e.message, variant: "destructive" });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function apply() {
+    if (!preview?.preview_token) return;
+    setPending(true);
+    try {
+      const r = await apiRequest("POST", `/api/programs/${programId}/cars/put-on-rent/apply`, {
+        preview_token: preview.preview_token,
+      }).then((x) => x.json());
+      toast({ title: `Put on rent: ${r.written ?? 0} cars` });
+      setPreview(null);
+      onApplied();
+    } catch (e: any) {
+      toast({ title: "Apply failed", description: e.message, variant: "destructive" });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Put on rent</DialogTitle>
+          <DialogDescription>
+            Preview first. Writes rent_start_date on the current assignment using the same lease logic as Move, one change group.
+            Program done is still arrival; On rent is the trail step after.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <select
+            className="h-8 w-full bg-background border border-border rounded px-2 text-xs [color-scheme:dark]"
+            value={riderId}
+            onChange={(e) => { setRiderId(e.target.value); setPreview(null); }}
+          >
+            <option value="">Select OL / rider…</option>
+            {riders.map((r) => (
+              <option key={r.id} value={String(r.id)}>
+                {r.rider_name || r.schedule_number || r.id}
+              </option>
+            ))}
+          </select>
+          <Input type="date" className="h-8 text-xs" value={date} onChange={(e) => { setDate(e.target.value); setPreview(null); }} />
+          {preview ? (
+            <div className="text-xs space-y-1 border border-border rounded p-2">
+              <div>Will write: {(preview.to_write ?? []).length}</div>
+              <div>Already on rider: {(preview.already_on_rider ?? []).length}</div>
+              <div>Skip (has date): {(preview.skip_has_date ?? []).length}</div>
+              <div>Sold skipped: {(preview.rejected_sold ?? []).length}</div>
+              <div>Inactive skipped: {(preview.rejected_inactive ?? []).length}</div>
+            </div>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={runPreview} disabled={!riderId || pending || !linkIds.length}>
+            {pending && !preview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Preview"}
+          </Button>
+          <Button onClick={apply} disabled={!preview?.preview_token || pending}>
+            {pending && preview ? <Loader2 className="h-4 w-4 animate-spin" /> : "Apply after preview"}
           </Button>
         </div>
       </DialogContent>

@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
-import { CAR_NUMBER_WIDTH, splitCarNumber } from "@shared/residco-import";
+import { CAR_NUMBER_WIDTH, formatCarId, splitCarNumber } from "@shared/residco-import";
 import {
   excelSheetName,
   formatCustomField,
@@ -14,7 +14,7 @@ import {
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
 import { pickRow } from "@shared/change-log";
-import { recordChange } from "./change-log";
+import { currentChangeGroup, recordChange } from "./change-log";
 
 const PROGRAM_LIST_SELECT = `
 id, name, description, status, lifecycle, type, type_other, pending_note, cancelled_at,
@@ -84,6 +84,116 @@ export async function logProgramActivity(row: {
     detail: row.detail,
     force: !row.before && !row.after,
   });
+}
+
+export async function listProgramCarMilestones(programId: number, linkId: number) {
+  const { data: link, error: linkErr } = await supabaseAdmin
+    .from("program_cars")
+    .select("id")
+    .eq("id", linkId)
+    .eq("program_id", programId)
+    .maybeSingle();
+  if (linkErr) throw linkErr;
+  if (!link) throw Object.assign(new Error("Program car not found"), { status: 404 });
+  const { data, error } = await supabaseAdmin
+    .from("program_car_milestones")
+    .select("id, program_car_id, milestone, milestone_date, note, actor, change_group, created_at")
+    .eq("program_car_id", linkId)
+    .order("milestone_date", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function appendProgramCarMilestone(opts: {
+  programCarId: number;
+  milestone: string;
+  milestoneDate: string;
+  actor?: string | null;
+  note?: string | null;
+}) {
+  const milestone = String(opts.milestone ?? "").trim();
+  const milestoneDate = String(opts.milestoneDate ?? "").slice(0, 10);
+  if (!milestone || !/^\d{4}-\d{2}-\d{2}$/.test(milestoneDate)) return null;
+  const { data: last } = await supabaseAdmin
+    .from("program_car_milestones")
+    .select("id, milestone, milestone_date")
+    .eq("program_car_id", opts.programCarId)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (
+    last &&
+    String(last.milestone) === milestone &&
+    String(last.milestone_date).slice(0, 10) === milestoneDate
+  ) {
+    return last;
+  }
+  const { data, error } = await supabaseAdmin
+    .from("program_car_milestones")
+    .insert({
+      program_car_id: opts.programCarId,
+      milestone,
+      milestone_date: milestoneDate,
+      note: opts.note ?? null,
+      actor: opts.actor ?? null,
+      change_group: currentChangeGroup(),
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function matchProgramCarsPaste(programId: number, text: string) {
+  const tokens = parseCarPasteList(text);
+  const { data: links, error } = await supabaseAdmin
+    .from("program_cars")
+    .select("id, railcar_id, exited_date, railcar:railcars(id, reporting_marks, car_number)")
+    .eq("program_id", programId);
+  if (error) throw error;
+  const byRailcar = new Map<number, { link_id: number; railcar_id: number; label: string; exited: boolean }>();
+  for (const l of links ?? []) {
+    const rc = Array.isArray((l as any).railcar) ? (l as any).railcar[0] : (l as any).railcar;
+    byRailcar.set(Number(l.railcar_id), {
+      link_id: Number(l.id),
+      railcar_id: Number(l.railcar_id),
+      label: rc ? formatCarId(rc) : String(l.railcar_id),
+      exited: Boolean(l.exited_date),
+    });
+  }
+  const matched: { token: string; link_id: number; railcar_id: number; label: string; exited: boolean }[] = [];
+  const not_found: { token: string }[] = [];
+  const ambiguous: { token: string; matches: { link_id: number; label: string }[] }[] = [];
+  const seenLink = new Set<number>();
+  for (const token of tokens) {
+    const ids = await resolveRailcarsByAnyIdentity(token);
+    const hits = [...new Set(ids.map(Number))].map((id) => byRailcar.get(id)).filter(Boolean) as {
+      link_id: number;
+      railcar_id: number;
+      label: string;
+      exited: boolean;
+    }[];
+    if (hits.length === 0) {
+      not_found.push({ token });
+      continue;
+    }
+    if (hits.length > 1) {
+      ambiguous.push({ token, matches: hits.map((h) => ({ link_id: h.link_id, label: h.label })) });
+      continue;
+    }
+    const hit = hits[0];
+    if (seenLink.has(hit.link_id)) continue;
+    seenLink.add(hit.link_id);
+    matched.push({ token, ...hit });
+  }
+  return {
+    requested: tokens.length,
+    matched_count: matched.length,
+    matched,
+    not_found,
+    ambiguous,
+  };
 }
 
 function mapProgramList(p: any) {

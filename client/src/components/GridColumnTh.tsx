@@ -1,9 +1,11 @@
 import { useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { GRID_COL_MIN } from "@/lib/grid-columns";
+import { ColumnHelp } from "@/components/ColumnHelp";
 
 export function GridColumnTh({
   colKey,
+  listKey,
   width,
   minWidth = GRID_COL_MIN,
   pinned,
@@ -13,6 +15,7 @@ export function GridColumnTh({
   onMove,
 }: {
   colKey: string;
+  listKey?: string;
   width?: number;
   minWidth?: number;
   pinned?: boolean;
@@ -75,7 +78,10 @@ export function GridColumnTh({
         className,
       )}
     >
-      {children}
+      <span className="inline-flex items-center gap-1 min-w-0">
+        {children}
+        {listKey ? <ColumnHelp listKey={listKey} colKey={colKey} /> : null}
+      </span>
       {onResize && (
         <span
           role="separator"

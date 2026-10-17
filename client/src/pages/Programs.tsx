@@ -16,6 +16,8 @@ import { FolderOpen, Plus, Download, FileSpreadsheet } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { mergeColOrder } from "@/lib/grid-columns";
+import { ColumnHeaderLabel } from "@/components/ColumnHelp";
+import { columnLabel } from "@shared/column-dictionary";
 import { cn } from "@/lib/utils";
 import { openAppTab, programPath, programsListPath } from "@/lib/browse-nav";
 import { hashSearchParams, navigateHash } from "@/lib/hash-location";
@@ -280,7 +282,13 @@ export default function ProgramsPage() {
               </SelectContent>
             </Select>
           )}
-          <ColumnPicker columns={[...PROGRAM_LIST_COLS]} prefs={colPrefs} />
+          <ColumnPicker
+            columns={PROGRAM_LIST_COLS.map((c) => ({
+              ...c,
+              label: columnLabel("programs", c.key, c.label),
+            }))}
+            prefs={colPrefs}
+          />
         </div>
 
         {isLoading ? (
@@ -299,14 +307,14 @@ export default function ProgramsPage() {
               <thead className="sticky top-0 z-10 bg-card text-[11px] uppercase tracking-wider text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))] [&>tr>th]:bg-card">
                 <tr>
                   <th className="w-10 px-3 py-2" />
-                  {showProg("title") && <th className="text-left px-3 py-2 font-medium">Title</th>}
-                  {showProg("type") && <th className="text-left px-3 py-2 font-medium">Type</th>}
-                  {showProg("lifecycle") && <th className="text-left px-3 py-2 font-medium">Lifecycle</th>}
-                  {showProg("progress") && <th className="text-left px-3 py-2 font-medium">Progress</th>}
-                  {showProg("target") && <th className="text-left px-3 py-2 font-medium">Target date</th>}
-                  {showProg("ready") && <th className="text-left px-3 py-2 font-medium">Ready</th>}
-                  {showProg("owner") && <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Owner</th>}
-                  {showProg("entity") && <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Entity</th>}
+                  {showProg("title") && <th className="text-left px-3 py-2 font-medium"><ColumnHeaderLabel listKey="programs" colKey="title" /></th>}
+                  {showProg("type") && <th className="text-left px-3 py-2 font-medium"><ColumnHeaderLabel listKey="programs" colKey="type" /></th>}
+                  {showProg("lifecycle") && <th className="text-left px-3 py-2 font-medium"><ColumnHeaderLabel listKey="programs" colKey="lifecycle" /></th>}
+                  {showProg("progress") && <th className="text-left px-3 py-2 font-medium"><ColumnHeaderLabel listKey="programs" colKey="progress" /></th>}
+                  {showProg("target") && <th className="text-left px-3 py-2 font-medium"><ColumnHeaderLabel listKey="programs" colKey="target" /></th>}
+                  {showProg("ready") && <th className="text-left px-3 py-2 font-medium"><ColumnHeaderLabel listKey="programs" colKey="ready" /></th>}
+                  {showProg("owner") && <th className="text-left px-3 py-2 font-medium hidden lg:table-cell"><ColumnHeaderLabel listKey="programs" colKey="owner" /></th>}
+                  {showProg("entity") && <th className="text-left px-3 py-2 font-medium hidden md:table-cell"><ColumnHeaderLabel listKey="programs" colKey="entity" /></th>}
                 </tr>
               </thead>
               <tbody>

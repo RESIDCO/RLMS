@@ -24,6 +24,8 @@ import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { mergeColOrder } from "@/lib/grid-columns";
 import { colsQuery } from "@shared/column-views";
+import { columnLabel } from "@shared/column-dictionary";
+import { ColumnHelp, KpiReasonHelp } from "@/components/ColumnHelp";
 import { formatCarId } from "@shared/residco-import";
 import { overlayLifecycle } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
@@ -79,7 +81,11 @@ function kpiCheckClass(selected = false) {
 }
 
 const KPI_DEFAULT_COLS = new Set<string>(KPI_SORT_COLS);
-const KPI_PICKER_COLS = KPI_SORT_COLS.map((key) => ({ key, label: key, pinned: key === "car" }));
+const KPI_PICKER_COLS = KPI_SORT_COLS.map((key) => ({
+  key,
+  label: columnLabel("kpi_cars", key),
+  pinned: key === "car",
+}));
 
 function KpiCell({
   col,
@@ -147,8 +153,8 @@ function KpiCell({
     col === "last_ol" ? r.last_ol :
     r.reason;
   return (
-    <td className={kpiTdClass(col)} style={style} title={value ?? undefined}>
-      {value ?? "—"}
+    <td className={kpiTdClass(col)} style={style} title={col === "reason" ? undefined : (value ?? undefined)}>
+      {col === "reason" ? <KpiReasonHelp value={value} /> : (value ?? "—")}
     </td>
   );
 }
@@ -431,7 +437,7 @@ export function KpiCarListPage() {
             <Input value={lessee} onChange={(e) => setParams({ lessee: e.target.value })} className="w-40" />
           </div>
           <div>
-            <Label>Reason</Label>
+            <Label>Why in KPI</Label>
             <Input value={reason} onChange={(e) => setParams({ reason: e.target.value })} className="w-40" />
           </div>
           <div>
@@ -443,7 +449,7 @@ export function KpiCarListPage() {
                 <SelectItem value="lease">Lease</SelectItem>
                 <SelectItem value="lessee">Lessee</SelectItem>
                 <SelectItem value="entity">Entity</SelectItem>
-                <SelectItem value="reason">Reason</SelectItem>
+                <SelectItem value="reason">Why in KPI</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -557,9 +563,12 @@ export function KpiCarListPage() {
                   </th>
                   {kpiCols.map((col) => (
                     <th key={col} className={kpiThClass(col)} style={{ minWidth: KPI_COL_LAYOUT[col].minWidth }}>
-                      <button type="button" className="hover:underline" onClick={() => toggleSort(col)}>
-                        {col}{sort === col ? (dir === "asc" ? " ↑" : " ↓") : ""}
-                      </button>
+                      <span className="inline-flex items-center gap-1">
+                        <button type="button" className="hover:underline" onClick={() => toggleSort(col)}>
+                          {columnLabel("kpi_cars", col)}{sort === col ? (dir === "asc" ? " ↑" : " ↓") : ""}
+                        </button>
+                        <ColumnHelp listKey="kpi_cars" colKey={col} />
+                      </span>
                     </th>
                   ))}
                 </tr>

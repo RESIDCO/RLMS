@@ -49,6 +49,7 @@ import { OpsFlagPicker } from "@/components/OpsFlagPicker";
 import { OPS_FLAG_PRESETS, composeOpsFlag } from "@shared/ops-flag";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -971,6 +972,7 @@ export default function FleetRegistry() {
     return (
       <GridColumnTh
         key={key}
+        listKey="fleet_registry"
         colKey={key}
         width={w}
         pinned={pinned}
@@ -993,9 +995,9 @@ export default function FleetRegistry() {
             data-testid="checkbox-select-all"
           />
         ) : key === "_actions" ? null : sortKey ? (
-          <SortLabel label={FR_LABELS[key] ?? key} k={sortKey} sort={sort} onClick={toggleSort} />
+          <SortLabel label={columnLabel("fleet_registry", key, FR_LABELS[key] ?? key)} k={sortKey} sort={sort} onClick={toggleSort} />
         ) : (
-          FR_LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key
+          columnLabel("fleet_registry", key, FR_LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key)
         )}
       </GridColumnTh>
     );

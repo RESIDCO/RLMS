@@ -30,6 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { ColumnHeaderLabel } from "@/components/ColumnHelp";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
 
@@ -168,14 +169,14 @@ function CarTable({
                     />
                   </th>
                 )}
-                <th className="px-4 py-2.5 text-left font-medium">Marks</th>
-                <th className="px-4 py-2.5 text-left font-medium">Car #</th>
-                <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
-                {show("entity") && <th className="px-4 py-2.5 text-left font-medium">Entity</th>}
-                {show("status") && <th className="px-4 py-2.5 text-left font-medium">Status</th>}
-                {show("type") && <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell">Type</th>}
-                {show("lessee") && <th className="px-4 py-2.5 text-left font-medium">Lessee</th>}
-                {show("ol") && <th className="px-4 py-2.5 text-left font-medium">OL</th>}
+                <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="marks" /></th>
+                <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="car_number" fallback="Car #" /></th>
+                <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="lease_type" /></th>
+                {show("entity") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="entity" /></th>}
+                {show("status") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="status" /></th>}
+                {show("type") && <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell"><ColumnHeaderLabel listKey="browse_car_list" colKey="type" /></th>}
+                {show("lessee") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="lessee" /></th>}
+                {show("ol") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="ol" /></th>}
               </tr>
             </thead>
             <tbody>
@@ -259,11 +260,11 @@ function GroupView({ kind, keyName }: { kind: "lessee" | "entity"; keyName: stri
             <table className="w-full text-xs">
               <thead className="bg-muted/40 text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-2.5 text-left font-medium">OL / Rider</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Effective</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Expires</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Cars</th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="ol" fallback="OL / Rider" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="lease_type" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="effective" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="expires" /></th>
+                  <th className="px-4 py-2.5 text-right font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="car_count" /></th>
                 </tr>
               </thead>
               <tbody>
@@ -487,11 +488,11 @@ function TurningView({ year }: { year: number }) {
                   <th className="px-3 py-2.5 w-8">
                     <Checkbox checked={allOn} onCheckedChange={toggleAll} aria-label="Select all OLs" />
                   </th>
-                  <th className="px-4 py-2.5 text-left font-medium">OL / Rider</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Lease type</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Effective</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Expires</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Cars</th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="ol" fallback="OL / Rider" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="lease_type" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="effective" /></th>
+                  <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="expires" /></th>
+                  <th className="px-4 py-2.5 text-right font-medium"><ColumnHeaderLabel listKey="browse_ol_list" colKey="car_count" /></th>
                 </tr>
               </thead>
               <tbody>

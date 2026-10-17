@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { cn } from "@/lib/utils";
@@ -1037,6 +1038,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                   {displayKeys.map((k) => (
                     <GridColumnTh
                       key={k}
+                      listKey="lease_rider_cars"
                       colKey={k}
                       width={colWidth(colWidths, k, RC_WIDTHS[k] ?? 110)}
                       pinned={RC_PINNED.includes(k as (typeof RC_PINNED)[number])}
@@ -1044,7 +1046,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                       onResize={setColWidth}
                       onMove={(from, to) => setColOrder(moveCol(displayKeys.filter((x) => !RC_PINNED.includes(x as (typeof RC_PINNED)[number])), from, to))}
                     >
-                      {RC_LABELS[k] ?? k}
+                      {columnLabel("lease_rider_cars", k, RC_LABELS[k] ?? k)}
                     </GridColumnTh>
                   ))}
                 </tr>

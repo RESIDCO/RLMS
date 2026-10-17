@@ -15,6 +15,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/hooks/use-toast";
 import type { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { moveCol } from "@/lib/grid-columns";
+import { ColumnHelp } from "@/components/ColumnHelp";
+import { columnLabel } from "@shared/column-dictionary";
 
 export type PickerColumn = { key: string; label: string; pinned?: boolean };
 
@@ -84,7 +86,10 @@ export function ColumnPicker({
               onCheckedChange={() => prefs.toggleCol(key)}
               onSelect={(e) => e.preventDefault()}
             >
-              <span className="flex-1">{label}</span>
+              <span className="flex-1 inline-flex items-center gap-1">
+                {columnLabel(prefs.listKey, key, label)}
+                <ColumnHelp listKey={prefs.listKey} colKey={key} />
+              </span>
               {movableKeys.length > 1 && prefs.visibleCols.has(key) ? (
                 <span className="ml-2 inline-flex gap-1 text-[10px] text-muted-foreground">
                   <button

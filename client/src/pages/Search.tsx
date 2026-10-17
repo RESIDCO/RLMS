@@ -28,6 +28,7 @@ import { downloadRailcarsCsv } from "@/lib/railcar-csv";
 import { useToast } from "@/hooks/use-toast";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { columnLabel } from "@shared/column-dictionary";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { useQuery } from "@tanstack/react-query";
@@ -760,6 +761,7 @@ export default function SearchPage() {
                         return (
                           <GridColumnTh
                             key={key}
+                            listKey="search_results"
                             colKey={key}
                             width={colWidth(colWidths, key, WIDTHS[key] ?? 110)}
                             pinned={pinned}
@@ -771,7 +773,7 @@ export default function SearchPage() {
                             onResize={setColWidth}
                             onMove={(from, to) => setColOrder(moveCol(movableKeys, from, to))}
                           >
-                            {key === "_actions" ? null : LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key}
+                            {key === "_actions" ? null : columnLabel("search_results", key, LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key)}
                           </GridColumnTh>
                         );
                       })}

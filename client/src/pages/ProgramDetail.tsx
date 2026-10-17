@@ -26,6 +26,7 @@ import { Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-r
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { colsQuery } from "@shared/column-views";
+import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import {
@@ -432,6 +433,7 @@ export default function ProgramDetailPage() {
     return (
       <GridColumnTh
         key={key}
+        listKey="program_cars"
         colKey={key}
         width={w}
         pinned={pinned}
@@ -452,7 +454,7 @@ export default function ProgramDetailPage() {
             aria-label="Select all cars"
           />
         ) : key === "_actions" ? null : (
-          PD_LABELS[key] ?? cf?.label ?? key
+          columnLabel("program_cars", key, PD_LABELS[key] ?? cf?.label ?? key)
         )}
       </GridColumnTh>
     );

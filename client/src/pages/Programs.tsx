@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -10,21 +10,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { confirmDelete } from "@/components/ConfirmActionDialog";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import PageHeader from "@/components/PageHeader";
-import { FolderOpen, Plus, Download, Trash2, FileSpreadsheet } from "lucide-react";
+import { FolderOpen, Plus, Download, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { openAppTab, programPath, programsListPath } from "@/lib/browse-nav";
 import { hashSearchParams, navigateHash } from "@/lib/hash-location";
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import AccountCombobox from "@/components/AccountCombobox";
+import { ProgramPreviewDialog } from "@/components/ProgramPreviewDialog";
 import {
-  CATEGORY_BADGE,
+  LIFECYCLE_BADGE,
+  LIFECYCLE_LABEL,
   PROGRAM_ENTITIES,
-  STATUS_BADGE,
-  STATUS_LABEL,
-  categoryShortName,
+  PROGRAM_TYPES,
+  overlayLifecycle,
+  type ProgramLifecycle,
   type ProgramStatus,
 } from "@shared/programs";
 
@@ -34,29 +35,36 @@ type ProgramRow = {
   name: string;
   description: string | null;
   status: ProgramStatus;
-  category_id: number | null;
-  tags: string[] | null;
+  lifecycle?: string | null;
+  type?: string | null;
+  closed_date?: string | null;
   entity: string | null;
   account_manager: string | null;
-  account_id: number | null;
-  status_narrative: string | null;
-  percent_complete: number | null;
+  target_completion_date?: string | null;
   updated_at: string;
   category: { id: number; name: string } | null;
-  car_count: number;
-  active_car_count: number;
-  doc_count: number;
+  progress?: {
+    display_type?: string | null;
+    lifecycle?: string;
+    done?: number;
+    remaining?: number;
+    total_open_links?: number;
+    ready_to_close?: boolean;
+    stale?: boolean;
+    target_completion_date?: string | null;
+  } | null;
 };
 
 async function downloadReport(url: string) {
   await downloadXlsx(url, "RLMS_Program_Status_Report.xlsx");
 }
 
-const STATUS_FILTERS = new Set(["all", "active", "open", "on_hold", "complete"]);
+const LIFE_FILTERS = new Set(["all", "draft", "active", "closed", "cancelled", "ready", "stale"]);
 
 function statusFromHash(): string {
   const s = hashSearchParams().get("status")?.trim().toLowerCase() ?? "";
-  return STATUS_FILTERS.has(s) ? s : "all";
+  if (s === "open" || s === "on_hold" || s === "complete") return s === "complete" ? "closed" : "active";
+  return LIFE_FILTERS.has(s) ? s : "active";
 }
 
 export default function ProgramsPage() {
@@ -65,6 +73,7 @@ export default function ProgramsPage() {
   const canEdit = useCanEdit();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(statusFromHash);
+  const [typeFilter, setTypeFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [entityFilter, setEntityFilter] = useState("all");
   const [managerFilter, setManagerFilter] = useState("all");
@@ -93,24 +102,21 @@ export default function ProgramsPage() {
     const rows = programs.filter((p) => {
       const blob = `${p.name} ${p.status_narrative ?? ""} ${p.description ?? ""}`.toLowerCase();
       if (q && !blob.includes(q)) return false;
-      if (statusFilter === "active") {
-        if (p.status === "complete") return false;
-      } else if (statusFilter !== "all" && p.status !== statusFilter) return false;
-      if (categoryFilter !== "all" && String(p.category_id) !== categoryFilter) return false;
+      const lc = (p.progress?.lifecycle ?? overlayLifecycle(p)) as ProgramLifecycle;
+      const type = p.progress?.display_type ?? p.type ?? "";
+      if (statusFilter === "ready") {
+        if (!p.progress?.ready_to_close) return false;
+      } else if (statusFilter === "stale") {
+        if (!p.progress?.stale) return false;
+      } else if (statusFilter !== "all" && lc !== statusFilter) return false;
+      if (typeFilter !== "all" && type !== typeFilter) return false;
+      if (categoryFilter !== "all" && String((p as any).category_id) !== categoryFilter) return false;
       if (entityFilter !== "all" && p.entity !== entityFilter) return false;
       if (managerFilter !== "all" && (p.account_manager ?? "") !== managerFilter) return false;
       return true;
     });
-    return [...rows].sort((a, b) => Number(a.status === "complete") - Number(b.status === "complete"));
-  }, [programs, search, statusFilter, categoryFilter, entityFilter, managerFilter]);
-
-  const deleteMut = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/programs/${id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/programs"] });
-      toast({ title: "Program deleted" });
-    },
-  });
+    return [...rows].sort((a, b) => Number(a.progress?.lifecycle === "closed") - Number(b.progress?.lifecycle === "closed"));
+  }, [programs, search, statusFilter, typeFilter, categoryFilter, entityFilter, managerFilter]);
 
   function toggle(id: number) {
     setSelected((prev) => {
@@ -135,7 +141,7 @@ export default function ProgramsPage() {
   }
 
   async function exportOpen() {
-    const ids = programs.filter((p) => p.status === "open").map((p) => p.id);
+    const ids = programs.filter((p) => (p.progress?.lifecycle ?? overlayLifecycle(p)) === "active").map((p) => p.id);
     if (!ids.length) {
       toast({ title: "No open programs to export", variant: "destructive" });
       return;
@@ -204,13 +210,24 @@ export default function ProgramsPage() {
               navigateHash(programsListPath(v), { replace: true });
             }}
           >
-            <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Lifecycle" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="active">Active (not complete)</SelectItem>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="on_hold">On Hold</SelectItem>
-              <SelectItem value="complete">Complete</SelectItem>
+              <SelectItem value="all">All lifecycles</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="closed">Closed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+              <SelectItem value="ready">Ready to review</SelectItem>
+              <SelectItem value="stale">Stale</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              {PROGRAM_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -260,24 +277,23 @@ export default function ProgramsPage() {
               <thead className="sticky top-0 z-10 bg-card text-[11px] uppercase tracking-wider text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))] [&>tr>th]:bg-card">
                 <tr>
                   <th className="w-10 px-3 py-2" />
-                  <th className="text-left px-3 py-2 font-medium">Program</th>
-                  <th className="text-left px-3 py-2 font-medium">Category</th>
+                  <th className="text-left px-3 py-2 font-medium">Title</th>
+                  <th className="text-left px-3 py-2 font-medium">Type</th>
+                  <th className="text-left px-3 py-2 font-medium">Lifecycle</th>
+                  <th className="text-left px-3 py-2 font-medium">Progress</th>
+                  <th className="text-left px-3 py-2 font-medium">Target date</th>
+                  <th className="text-left px-3 py-2 font-medium">Ready</th>
+                  <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Owner</th>
                   <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Entity</th>
-                  <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Account manager</th>
-                  <th className="text-left px-3 py-2 font-medium">Status</th>
-                  <th className="text-right px-3 py-2 font-medium">% Complete</th>
-                  <th className="text-right px-3 py-2 font-medium">Cars</th>
-                  <th className="text-left px-3 py-2 font-medium hidden xl:table-cell">Updated</th>
-                  <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((p) => {
-                  const cat = p.category?.name ?? "";
-                  const cars =
-                    p.active_car_count !== p.car_count && p.car_count
-                      ? `${p.active_car_count} of ${p.car_count}`
-                      : String(p.active_car_count ?? p.car_count ?? 0);
+                  const lc = (p.progress?.lifecycle ?? overlayLifecycle(p)) as ProgramLifecycle;
+                  const done = p.progress?.done ?? 0;
+                  const total = p.progress?.total_open_links ?? 0;
+                  const pct = total ? Math.round((done / total) * 100) : 0;
+                  const target = (p.progress?.target_completion_date ?? p.target_completion_date ?? "").toString().slice(0, 10);
                   return (
                     <tr
                       key={p.id}
@@ -289,54 +305,32 @@ export default function ProgramsPage() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="font-medium">{p.name}</div>
-                        {p.status_narrative && (
-                          <div className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{p.status_narrative}</div>
-                        )}
                       </td>
-                      <td className="px-3 py-2 align-middle">
-                        {cat && (
-                          <span
-                            title={cat}
-                            className={cn(
-                              "inline-flex items-center max-w-[11rem] text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap",
-                              CATEGORY_BADGE[cat] ?? "bg-muted border-border",
-                            )}
-                          >
-                            {categoryShortName(cat)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{p.entity ?? "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground hidden lg:table-cell">{p.account_manager ?? "—"}</td>
+                      <td className="px-3 py-2 text-sm">{p.progress?.display_type ?? p.type ?? "—"}</td>
                       <td className="px-3 py-2">
-                        <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", STATUS_BADGE[p.status])}>
-                          {STATUS_LABEL[p.status]}
+                        <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", LIFECYCLE_BADGE[lc])}>
+                          {LIFECYCLE_LABEL[lc]}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-right font-mono-num">{p.percent_complete != null ? `${p.percent_complete}%` : "—"}</td>
-                      <td className="px-3 py-2 text-right font-mono-num">{cars}</td>
-                      <td className="px-3 py-2 text-muted-foreground text-xs hidden xl:table-cell">
-                        {new Date(p.updated_at).toLocaleDateString()}
+                      <td className="px-3 py-2 min-w-[8rem]">
+                        <div className="h-1.5 rounded bg-muted overflow-hidden">
+                          <div className="h-full bg-umler-teal" style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">{done}/{total}</div>
                       </td>
-                      <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
-                        {canEdit && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            aria-label={`Delete ${p.name}`}
-                            onClick={async () => {
-                              const ok = await confirmDelete({
-                                title: `Delete program ${p.name}?`,
-                                description: "This removes the program, its car links, and documents. This cannot be undone.",
-                              });
-                              if (ok) deleteMut.mutate(p.id);
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
+                      <td className="px-3 py-2 text-xs">
+                        {target || "—"}
+                        {p.progress?.stale ? (
+                          <span className="ml-1 text-[10px] uppercase tracking-wide text-umler-amber">Stale</span>
+                        ) : null}
                       </td>
+                      <td className="px-3 py-2">
+                        {p.progress?.ready_to_close ? (
+                          <span className="text-[10px] uppercase tracking-wide font-semibold text-umler-teal">Ready</span>
+                        ) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground hidden lg:table-cell">{p.account_manager ?? "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{p.entity ?? "—"}</td>
                     </tr>
                   );
                 })}
@@ -374,59 +368,47 @@ function CreateProgramDialog({
 }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+  const [type, setType] = useState("");
+  const [typeOther, setTypeOther] = useState("");
   const [entity, setEntity] = useState("");
   const [manager, setManager] = useState("");
   const [accountId, setAccountId] = useState<number | null>(null);
   const [description, setDescription] = useState("");
   const [target, setTarget] = useState("");
-  const [tags, setTags] = useState("");
   const [cars, setCars] = useState<PickedCar[]>([]);
   const [pending, setPending] = useState(false);
+  const [addPreview, setAddPreview] = useState<any>(null);
   const { data: accounts = [] } = useQuery<{ id: number; name: string }[]>({
     queryKey: ["/api/accounts"],
     enabled: open,
   });
 
-  async function save() {
-    if (!name.trim() || !categoryId) {
-      toast({ title: "Name and category are required", variant: "destructive" });
-      return;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(target)) {
-      toast({ title: "Target completion date is required", variant: "destructive" });
+  async function save(asDraft: boolean) {
+    if (!name.trim()) {
+      toast({ title: "Title is required", variant: "destructive" });
       return;
     }
     setPending(true);
     try {
       const res = await apiRequest("POST", "/api/programs", {
         name: name.trim(),
-        category_id: Number(categoryId),
+        as_draft: asDraft,
+        type: type || null,
+        type_other: type === "Other" ? typeOther.trim() || null : null,
         entity: entity || null,
         account_manager: manager.trim() || null,
         account_id: accountId,
         description: description.trim() || null,
         target_completion_date: target || null,
-        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        railcar_ids: cars.map((c) => c.id),
       });
-      const row = await res.json();
-      if (cars.length) {
-        try {
-          await apiRequest("POST", `/api/programs/${row.id}/cars`, { railcar_ids: cars.map((c) => c.id) });
-        } catch (e: any) {
-          toast({ title: "Program created, but cars could not be added", description: e.message, variant: "destructive" });
-        }
+      const payload = await res.json();
+      const row = payload.program ?? payload;
+      if (payload.add_preview) {
+        setAddPreview({ ...payload.add_preview, programId: row.id });
+        return;
       }
-      onCreated(row.id);
-      setName("");
-      setCategoryId("");
-      setEntity("");
-      setManager("");
-      setAccountId(null);
-      setDescription("");
-      setTarget("");
-      setTags("");
-      setCars([]);
+      finish(row.id);
     } catch (e: any) {
       toast({ title: "Could not create program", description: e.message, variant: "destructive" });
     } finally {
@@ -434,28 +416,46 @@ function CreateProgramDialog({
     }
   }
 
+  function finish(id: number) {
+    onCreated(id);
+    setName("");
+    setType("");
+    setTypeOther("");
+    setEntity("");
+    setManager("");
+    setAccountId(null);
+    setDescription("");
+    setTarget("");
+    setCars([]);
+    setAddPreview(null);
+  }
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New program</DialogTitle>
-          <DialogDescription>Category chooses which car-level fields this program uses.</DialogDescription>
+          <DialogDescription>Title is required. Type, date, entity and cars are optional.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-2">
           <div>
-            <Label className="text-xs">Name</Label>
+            <Label className="text-xs">Title</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. OL2526 — Solvay Return" />
           </div>
           <div>
-            <Label className="text-xs">Category</Label>
-            <Select value={categoryId} onValueChange={setCategoryId}>
-              <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+            <Label className="text-xs">Type</Label>
+            <Select value={type || "none"} onValueChange={(v) => setType(v === "none" ? "" : v)}>
+              <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
               <SelectContent>
-                {categories.map((c) => (
-                  <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                <SelectItem value="none">—</SelectItem>
+                {PROGRAM_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>{t}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {type === "Other" && (
+              <Input className="mt-2" value={typeOther} onChange={(e) => setTypeOther(e.target.value)} placeholder="Describe type" />
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -483,12 +483,8 @@ function CreateProgramDialog({
             </p>
           </div>
           <div>
-            <Label className="text-xs">Target completion</Label>
-            <Input type="date" required value={target} onChange={(e) => setTarget(e.target.value)} />
-          </div>
-          <div>
-            <Label className="text-xs">Tags (comma-separated, for hybrids like NLD, Sale)</Label>
-            <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="NLD, Sale" />
+            <Label className="text-xs">Target completion (optional)</Label>
+            <Input type="date" value={target} onChange={(e) => setTarget(e.target.value)} />
           </div>
           <div>
             <Label className="text-xs">Description</Label>
@@ -500,10 +496,32 @@ function CreateProgramDialog({
             <ProgramCarPicker value={cars} onChange={setCars} />
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={save} disabled={pending}>{pending ? "Creating…" : "Create"}</Button>
+            <Button variant="ghost" onClick={onClose}>Back</Button>
+            <Button variant="outline" onClick={() => save(true)} disabled={pending}>Create as Draft</Button>
+            <Button onClick={() => save(false)} disabled={pending}>{pending ? "Creating…" : "Create"}</Button>
           </div>
         </div>
+        <ProgramPreviewDialog
+          open={Boolean(addPreview)}
+          title="Add cars"
+          preview={addPreview}
+          pending={pending}
+          onClose={() => addPreview?.programId && finish(addPreview.programId)}
+          onApply={async () => {
+            if (!addPreview?.preview_token) return;
+            setPending(true);
+            try {
+              await apiRequest("POST", `/api/programs/${addPreview.programId}/cars/apply`, {
+                preview_token: addPreview.preview_token,
+              });
+              finish(addPreview.programId);
+            } catch (e: any) {
+              toast({ title: "Could not add cars", description: e.message, variant: "destructive" });
+            } finally {
+              setPending(false);
+            }
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

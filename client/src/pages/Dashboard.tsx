@@ -625,9 +625,9 @@ export default function Dashboard() {
                 testId="kpi-stale"
                 label="Stale Commitments"
                 value={`${data.kpis.stale_commitments ?? 0} / ${data.kpis.stale_programs ?? 0}`}
-                subtext="Stale Commitments / open programs past target"
+                subtext="Stale Commitments / open programs past target. Ready-to-close programs are listed on Programs."
                 icon={AlertTriangle}
-                onClick={() => navigate("/commitments/stale")}
+                onClick={() => navigate(programsListPath("ready"))}
               />
               <KpiCard
                 testId="kpi-watch"

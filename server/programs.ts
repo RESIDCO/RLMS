@@ -14,7 +14,8 @@ import {
 } from "@shared/programs";
 
 const PROGRAM_LIST_SELECT = `
-id, name, description, status, category_id, tags, entity, account_manager, account_id,
+id, name, description, status, lifecycle, type, type_other, pending_note, cancelled_at,
+category_id, tags, entity, account_manager, account_id,
 status_narrative, percent_complete, target_completion_date, opened_date, closed_date,
 custom_fields, created_at, updated_at,
 category:program_categories(id, name),
@@ -25,6 +26,7 @@ program_documents(id)
 
 const CAR_SELECT = `
 id, program_id, railcar_id, status, notes, flag_tag, joined_date, exited_date,
+milestone, milestone_at, outcome_reached_at, exit_reason,
 completed, completed_at, rider_external_id_snapshot, shop_id, scrap_yard_id, repair_cost_total, custom_fields, added_at,
 railcar:railcars(id, car_number, reporting_marks, car_type, status, entity, active, rider_external_id, lessee_name),
 shop:shops(id, name, location),
@@ -97,9 +99,12 @@ export async function listPrograms() {
       .order("updated_at", { ascending: false });
   }
   if (q.error) throw q.error;
+  const { data: progress } = await supabaseAdmin.from("v_program_progress").select("*");
+  const byProg = new Map((progress ?? []).map((r: any) => [Number(r.program_id), r]));
   return (q.data ?? [])
     .map(mapProgramList)
-    .sort((a, b) => Number(a.status === "complete") - Number(b.status === "complete"));
+    .map((p: any) => ({ ...p, progress: byProg.get(Number(p.id)) ?? null }))
+    .sort((a, b) => Number(a.progress?.lifecycle === "closed") - Number(b.progress?.lifecycle === "closed"));
 }
 
 export async function listCategories() {
@@ -141,7 +146,8 @@ export async function getProgram(id: number) {
   const category = Array.isArray(data.category) ? data.category[0] ?? null : data.category;
   const account = Array.isArray(data.account) ? data.account[0] ?? null : data.account ?? null;
   const field_defs = data.category_id ? await listFieldDefs(Number(data.category_id)) : [];
-  return { ...data, category, account, field_defs };
+  const { data: progress } = await supabaseAdmin.from("v_program_progress").select("*").eq("program_id", id).maybeSingle();
+  return { ...data, category, account, field_defs, progress: progress ?? null };
 }
 
 export async function listProgramCars(programId: number, includeExited: boolean) {
@@ -196,7 +202,40 @@ async function attachDocCounts(rows: any[]) {
 }
 
 export async function listProgramCarsWithDocs(programId: number, includeExited: boolean) {
-  return attachDocCounts(await listProgramCars(programId, includeExited));
+  const rows = await attachDocCounts(await listProgramCars(programId, includeExited));
+  const ids = rows.map((r) => Number(r.railcar_id)).filter(Boolean);
+  if (!ids.length) return rows;
+  const { data: kpis } = await supabaseAdmin
+    .from("v_rlms_kpi_car_rows")
+    .select("railcar_id, derived_status, off_rent, on_rent, is_op, commitment, active")
+    .in("railcar_id", ids);
+  const { data: commits } = await supabaseAdmin
+    .from("car_commitments")
+    .select("railcar_id, type, name, program_id")
+    .in("railcar_id", ids)
+    .is("cleared_at", null);
+  const { data: others } = await supabaseAdmin
+    .from("v_program_open_links")
+    .select("railcar_id, program_id")
+    .in("railcar_id", ids);
+  const kBy = new Map((kpis ?? []).map((r: any) => [Number(r.railcar_id), r]));
+  const cBy = new Map((commits ?? []).map((r: any) => [Number(r.railcar_id), r]));
+  const nBy = new Map<number, number>();
+  for (const o of others ?? []) {
+    const id = Number((o as any).railcar_id);
+    nBy.set(id, (nBy.get(id) ?? 0) + 1);
+  }
+  return rows.map((r) => {
+    const k = kBy.get(Number(r.railcar_id));
+    const openCount = nBy.get(Number(r.railcar_id)) ?? 0;
+    return {
+      ...r,
+      kpi: k ?? null,
+      open_commitment: cBy.get(Number(r.railcar_id)) ?? null,
+      open_program_count: openCount,
+      in_multiple_programs: openCount > 1,
+    };
+  });
 }
 
 export async function addCarsToProgram(

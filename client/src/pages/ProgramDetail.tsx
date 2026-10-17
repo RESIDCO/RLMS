@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
-import { useCanEdit } from "@/lib/AuthContext";
+import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
+import { ProgramPreviewDialog } from "@/components/ProgramPreviewDialog";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,15 +28,24 @@ import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import {
   CATEGORY_BADGE,
+  LIFECYCLE_BADGE,
+  LIFECYCLE_LABEL,
+  MILESTONES_BY_TYPE,
   PROGRAM_CAR_DOC_CATEGORIES,
   PROGRAM_DOC_CATEGORIES,
   PROGRAM_ENTITIES,
+  PROGRAM_TYPES,
   STATUS_BADGE,
   STATUS_LABEL,
   categoryShortName,
   formatCustomField,
+  isCarDone,
+  isProgramType,
+  overlayLifecycle,
   type ProgramFieldDef,
+  type ProgramLifecycle,
   type ProgramStatus,
+  type ProgramType,
 } from "@shared/programs";
 
 type Category = { id: number; name: string };
@@ -57,9 +67,22 @@ type Program = {
   target_completion_date: string | null;
   opened_date: string | null;
   closed_date: string | null;
+  lifecycle?: string | null;
+  type?: string | null;
+  type_other?: string | null;
+  pending_note?: string | null;
   updated_at?: string;
   category: { id: number; name: string } | null;
   field_defs: ProgramFieldDef[];
+  progress?: {
+    lifecycle?: string;
+    display_type?: string | null;
+    done?: number;
+    remaining?: number;
+    total_open_links?: number;
+    ready_to_close?: boolean;
+    stale?: boolean;
+  } | null;
 };
 
 type ProgramCar = {
@@ -72,6 +95,9 @@ type ProgramCar = {
   exited_date: string | null;
   completed?: boolean;
   completed_at?: string | null;
+  milestone?: string | null;
+  milestone_at?: string | null;
+  outcome_reached_at?: string | null;
   rider_external_id_snapshot: string | null;
   shop_id: number | null;
   scrap_yard_id: number | null;
@@ -83,8 +109,13 @@ type ProgramCar = {
     car_number: string;
     reporting_marks: string | null;
     rider_external_id: string | null;
+    active?: boolean | null;
   } | null;
   shop: { id: number; name: string } | null;
+  kpi?: { derived_status?: string | null; off_rent?: boolean; on_rent?: boolean } | null;
+  open_commitment?: { name?: string | null; program_id?: number | null } | null;
+  in_multiple_programs?: boolean;
+  railcar_active?: boolean;
 };
 
 type HeaderDraft = {
@@ -98,6 +129,9 @@ type HeaderDraft = {
   closed_date: string;
   tags: string;
   category_id: string;
+  type: string;
+  type_other: string;
+  pending_note: string;
 };
 
 function headerFrom(p: Program): HeaderDraft {
@@ -112,6 +146,9 @@ function headerFrom(p: Program): HeaderDraft {
     closed_date: p.closed_date?.slice(0, 10) ?? "",
     tags: (p.tags ?? []).join(", "),
     category_id: p.category_id != null ? String(p.category_id) : "",
+    type: p.type ?? p.progress?.display_type ?? "",
+    type_other: p.type_other ?? "",
+    pending_note: p.pending_note ?? "",
   };
 }
 
@@ -153,17 +190,18 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
 }
 
 const PD_EMPTY_COLS = new Set<string>();
-const PD_CORE = ["status", "flag", "comment", "ol_entry", "ol_now", "shop", "repair"] as const;
+const PD_CORE = ["active", "milestone", "milestone_at", "notes", "shop", "commitment", "kpi"] as const;
 const PD_LABELS: Record<string, string> = {
   car: "Car",
-  complete: "Complete",
-  status: "Status",
-  flag: "Flag",
-  comment: "Comment",
-  ol_entry: "OL at entry",
-  ol_now: "OL now",
-  shop: "Shop",
-  repair: "Repair $",
+  complete: "Outcome",
+  active: "Active",
+  milestone: "Milestone",
+  milestone_at: "Milestone date",
+  notes: "Notes",
+  status: "Notes",
+  shop: "Shop / yard",
+  commitment: "Commitment",
+  kpi: "KPI bucket",
 };
 const PD_WIDTHS: Record<string, number> = {
   _select: 36,
@@ -196,10 +234,14 @@ export default function ProgramDetailPage() {
   const [, params] = useRoute("/programs/:id");
   const id = Number(params?.id);
   const canEdit = useCanEdit();
+  const isAdmin = useIsAdmin();
   const qc = useQueryClient();
   const { toast } = useToast();
   const [includeExited, setIncludeExited] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [moreFields, setMoreFields] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [lifePreview, setLifePreview] = useState<any>(null);
   const [docsFor, setDocsFor] = useState<ProgramCar | null>(null);
   const [historyFor, setHistoryFor] = useState<ProgramCar | null>(null);
   const [tab, setTab] = useState("cars");
@@ -316,9 +358,9 @@ export default function ProgramDetailPage() {
   } = useColumnPrefs(`program_cars_${Number.isFinite(id) ? id : 0}`, PD_EMPTY_COLS);
   const displayKeys = useMemo(() => {
     const pinnedStart = canEdit ? ["_select", "car", "complete"] : ["car", "complete"];
-    const movable = [...PD_CORE, ...defs.map((d) => `cf:${d.field_key}`)];
+    const movable = [...PD_CORE, ...(moreFields ? defs.map((d) => `cf:${d.field_key}`) : [])];
     return [...pinnedStart, ...mergeColOrder(movable, colOrder), "_actions"];
-  }, [canEdit, defs, colOrder]);
+  }, [canEdit, defs, colOrder, moreFields]);
   const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "complete" && k !== "_actions");
   const draftedCars = useMemo(
     () => cars.map((c) => applyCarDraft(c, carDrafts[c.id], shops)),
@@ -350,9 +392,13 @@ export default function ProgramDetailPage() {
     setCarSaving(true);
     setCarSaveError(null);
     try {
-      await Promise.all(
-        entries.map(([linkId, body]) => apiRequest("PATCH", `/api/programs/${id}/cars/${linkId}`, body)),
-      );
+      for (const [linkId, body] of entries) {
+        const prev = await apiRequest("POST", `/api/programs/${id}/cars/patch/preview`, {
+          link_ids: [Number(linkId)],
+          updates: body,
+        }).then((r) => r.json());
+        await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, { preview_token: prev.preview_token });
+      }
       setCarDrafts({});
       setCarSavedFlash(true);
       window.setTimeout(() => setCarSavedFlash(false), 2500);
@@ -439,13 +485,56 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1 text-center">
             <Checkbox
-              checked={Boolean(c.completed)}
-              disabled={!canEdit || exited}
-              onCheckedChange={(v) => queueCarPatch(c.id, { completed: v === true })}
-              aria-label={`Mark ${label} complete in this program`}
+              checked={Boolean(c.outcome_reached_at || c.completed)}
+              disabled={!canEdit || exited || c.railcar?.active !== true}
+              onCheckedChange={(v) => queueCarPatch(c.id, { outcome_reached: v === true })}
+              aria-label={`Mark ${label} outcome reached`}
             />
           </td>
         );
+      case "active":
+        return (
+          <td key={key} className="px-2 py-1">{c.railcar?.active === true ? "Yes" : "No"}</td>
+        );
+      case "milestone":
+        return (
+          <td key={key} className="px-2 py-1">
+            <CellInput
+              readOnly={!canEdit || exited || c.railcar?.active !== true}
+              value={c.milestone ?? ""}
+              onSave={(v) => queueCarPatch(c.id, { milestone: v })}
+            />
+          </td>
+        );
+      case "milestone_at":
+        return (
+          <td key={key} className="px-2 py-1">
+            <CellInput
+              readOnly={!canEdit || exited || c.railcar?.active !== true}
+              value={c.milestone_at ? String(c.milestone_at).slice(0, 10) : ""}
+              onSave={(v) => queueCarPatch(c.id, { milestone_at: v })}
+            />
+          </td>
+        );
+      case "notes":
+        return (
+          <td key={key} className="px-2 py-1 overflow-hidden">
+            <CellInput
+              readOnly={!canEdit || exited || c.railcar?.active !== true}
+              value={c.status ?? c.notes ?? ""}
+              onSave={(v) => queueCarPatch(c.id, { status: v })}
+            />
+          </td>
+        );
+      case "commitment":
+        return (
+          <td key={key} className="px-2 py-1">
+            {c.open_commitment?.name ?? "—"}
+            {c.in_multiple_programs ? <div className="text-[10px] text-umler-amber">In 2 programs</div> : null}
+          </td>
+        );
+      case "kpi":
+        return <td key={key} className="px-2 py-1">{c.kpi?.derived_status ?? "—"}</td>;
       case "status":
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">
@@ -544,7 +633,10 @@ export default function ProgramDetailPage() {
                   });
                   if (!ok) return;
                   if (carDrafts[c.id] && !window.confirm("This car has unsaved edits. Remove anyway?")) return;
-                  await apiRequest("DELETE", `/api/programs/${id}/cars/${c.id}`);
+                  const prev = await apiRequest("POST", `/api/programs/${id}/cars/remove/preview`, {
+                    link_ids: [c.id],
+                  }).then((r) => r.json());
+                  await apiRequest("POST", `/api/programs/${id}/cars/remove/apply`, { preview_token: prev.preview_token });
                   setCarDrafts((prev) => {
                     if (!prev[c.id]) return prev;
                     const next = { ...prev };
@@ -568,10 +660,6 @@ export default function ProgramDetailPage() {
 
   async function saveHeader() {
     if (!header || !canEdit) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(header.target_completion_date || "")) {
-      toast({ title: "Target completion date is required", variant: "destructive" });
-      return;
-    }
     await patchProgram.mutateAsync({
       entity: header.entity || null,
       account_manager: header.account_manager.trim() || null,
@@ -583,6 +671,9 @@ export default function ProgramDetailPage() {
       closed_date: header.closed_date || null,
       tags: header.tags.split(",").map((t) => t.trim()).filter(Boolean),
       category_id: header.category_id ? Number(header.category_id) : null,
+      type: header.type || null,
+      type_other: header.type === "Other" ? header.type_other.trim() || null : null,
+      pending_note: header.pending_note.trim() || null,
     });
     setSavedFlash(true);
     toast({ title: "Saved" });
@@ -653,19 +744,45 @@ export default function ProgramDetailPage() {
           >
             {categoryShortName(catName) || "Uncategorized"}
           </span>
-          {canEdit ? (
-            <Select value={program.status} onValueChange={(v) => patchProgram.mutate({ status: v }, { onSuccess: () => toast({ title: "Saved" }) })}>
-              <SelectTrigger className="h-8 w-32 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(["open", "on_hold", "complete"] as const).map((s) => (
-                  <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", STATUS_BADGE[program.status])}>
-              {STATUS_LABEL[program.status]}
+          {(() => {
+            const lc = (program.progress?.lifecycle ?? overlayLifecycle(program)) as ProgramLifecycle;
+            return (
+              <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", LIFECYCLE_BADGE[lc])}>
+                {LIFECYCLE_LABEL[lc]}
+              </span>
+            );
+          })()}
+          {program.progress && (
+            <span className="text-xs text-muted-foreground">
+              {program.progress.done ?? 0} of {program.progress.total_open_links ?? 0} done · {program.progress.remaining ?? 0} remaining
             </span>
+          )}
+          {program.progress?.ready_to_close && (
+            <span className="text-xs text-umler-teal font-medium">All cars done – close or note what's pending</span>
+          )}
+          {canEdit && (program.progress?.lifecycle ?? overlayLifecycle(program)) === "active" && (
+            <Button size="sm" variant="outline" onClick={async () => {
+              const p = await apiRequest("POST", `/api/programs/${id}/close/preview`).then((r) => r.json());
+              setLifePreview({ ...p, applyPath: `/api/programs/${id}/close/apply` });
+            }}>Close</Button>
+          )}
+          {canEdit && (program.progress?.lifecycle ?? overlayLifecycle(program)) === "draft" && (
+            <Button size="sm" variant="outline" onClick={async () => {
+              const p = await apiRequest("POST", `/api/programs/${id}/activate/preview`).then((r) => r.json());
+              setLifePreview({ ...p, applyPath: `/api/programs/${id}/activate/apply` });
+            }}>Activate</Button>
+          )}
+          {isAdmin && (program.progress?.lifecycle ?? overlayLifecycle(program)) === "draft" && (
+            <Button size="sm" variant="outline" onClick={async () => {
+              const p = await apiRequest("POST", `/api/programs/${id}/cancel/preview`).then((r) => r.json());
+              setLifePreview({ ...p, applyPath: `/api/programs/${id}/cancel/apply` });
+            }}>Cancel</Button>
+          )}
+          {isAdmin && (program.progress?.lifecycle ?? overlayLifecycle(program)) === "closed" && (
+            <Button size="sm" variant="outline" onClick={async () => {
+              const p = await apiRequest("POST", `/api/programs/${id}/reopen/preview`).then((r) => r.json());
+              setLifePreview({ ...p, applyPath: `/api/programs/${id}/reopen/apply` });
+            }}>Reopen</Button>
           )}
         </div>
 
@@ -679,6 +796,18 @@ export default function ProgramDetailPage() {
         />
 
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
+          <HeaderField label="Type">
+            <Select value={header.type || "none"} onValueChange={(v) => setHeader({ ...header, type: v === "none" ? "" : v })}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">—</SelectItem>
+                {PROGRAM_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </HeaderField>
+          <HeaderField label="Pending note">
+            <Input className="h-8 text-xs" value={header.pending_note} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, pending_note: e.target.value })} placeholder="awaiting legal docs" />
+          </HeaderField>
           <HeaderField label="Category">
             <Select value={header.category_id || "none"} onValueChange={(v) => setHeader({ ...header, category_id: v === "none" ? "" : v })}>
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -754,7 +883,8 @@ export default function ProgramDetailPage() {
 
         <Tabs value={tab} onValueChange={setTab} className="flex-1 min-h-0 flex flex-col">
           <TabsList className="shrink-0 self-start">
-            <TabsTrigger value="cars">Cars in Program</TabsTrigger>
+            <TabsTrigger value="cars">Cars</TabsTrigger>
+            <TabsTrigger value="milestones">Milestones</TabsTrigger>
             <TabsTrigger value="docs">Documents</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
           </TabsList>
@@ -778,9 +908,16 @@ export default function ProgramDetailPage() {
               {carSavedFlash && !gridDirty ? <span className="text-xs text-emerald-400">Saved</span> : null}
               {carSaveError ? <span className="text-xs text-destructive">{carSaveError}</span> : null}
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Checkbox checked={showCompleted} onCheckedChange={(v) => setShowCompleted(v === true)} />
+                Show completed ({sortedCars.filter((c) => isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed })).length})
+              </label>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Checkbox checked={includeExited} onCheckedChange={(v) => setIncludeExited(v === true)} />
                 Show exited cars
               </label>
+              <Button size="sm" variant="ghost" onClick={() => setMoreFields((v) => !v)}>
+                {moreFields ? "Hide extra fields" : "More fields"}
+              </Button>
               <span className="text-xs text-muted-foreground ml-auto">
                 {sortedCars.filter((c) => !c.completed).length} open
                 {sortedCars.some((c) => c.completed) ? ` · ${sortedCars.filter((c) => c.completed).length} complete` : ""}
@@ -800,10 +937,11 @@ export default function ProgramDetailPage() {
                     confirmLabel: "Apply",
                   });
                   if (!ok) return;
-                  await apiRequest("POST", `/api/programs/${id}/cars/bulk`, {
+                  const prev = await apiRequest("POST", `/api/programs/${id}/cars/patch/preview`, {
                     link_ids: Array.from(selected),
                     updates,
-                  });
+                  }).then((r) => r.json());
+                  await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, { preview_token: prev.preview_token });
                   setCarDrafts((prev) => {
                     const next = { ...prev };
                     for (const linkId of selected) delete next[linkId];
@@ -844,7 +982,7 @@ export default function ProgramDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedCars.map((c) => {
+                  {sortedCars.filter((c) => showCompleted || includeExited || !isCarDone({ active: c.railcar?.active, outcome_reached_at: c.outcome_reached_at, completed: c.completed })).map((c) => {
                     const label = carLabelOf(c);
                     const exited = Boolean(c.exited_date);
                     const done = Boolean(c.completed);
@@ -870,6 +1008,14 @@ export default function ProgramDetailPage() {
               </div>
             </div>
           </TabsContent>
+          <TabsContent value="milestones" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
+            <p className="text-xs text-muted-foreground mb-2">Suggested for this type. Optional — never enforced.</p>
+            <div className="flex flex-wrap gap-2">
+              {(isProgramType(header.type) ? MILESTONES_BY_TYPE[header.type as ProgramType] : ["Started", "Done"]).map((m) => (
+                <span key={m} className="text-xs px-2 py-1 rounded border border-border">{m}</span>
+              ))}
+            </div>
+          </TabsContent>
           <TabsContent value="docs" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             <ProgramDocsPanel
               listUrl={`/api/programs/${id}/documents`}
@@ -893,6 +1039,20 @@ export default function ProgramDetailPage() {
           qc.invalidateQueries({ queryKey: carsKey });
           qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
           qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
+        }}
+      />
+      <ProgramPreviewDialog
+        open={Boolean(lifePreview)}
+        title="Program change"
+        preview={lifePreview}
+        onClose={() => setLifePreview(null)}
+        onApply={async () => {
+          if (!lifePreview?.preview_token || !lifePreview?.applyPath) return;
+          await apiRequest("POST", lifePreview.applyPath, { preview_token: lifePreview.preview_token });
+          setLifePreview(null);
+          qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+          qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
+          toast({ title: "Applied" });
         }}
       />
 
@@ -1234,15 +1394,13 @@ function AddCarsDialog({
     if (!picked.length) return;
     setPending(true);
     try {
-      const res = await apiRequest("POST", `/api/programs/${programId}/cars`, {
+      const preview = await apiRequest("POST", `/api/programs/${programId}/cars/preview`, {
         railcar_ids: picked.map((c) => c.id),
-      });
-      const out = await res.json();
-      const added = (out.added ?? []).length;
-      const skipped = (out.skipped ?? []).length;
+      }).then((r) => r.json());
+      await apiRequest("POST", `/api/programs/${programId}/cars/apply`, { preview_token: preview.preview_token });
       toast({
-        title: `${added} car${added === 1 ? "" : "s"} added`,
-        description: skipped ? `${skipped} already in this program` : undefined,
+        title: `${(preview.matched ?? []).length} car(s) added`,
+        description: preview.inactive?.length ? `${preview.inactive.length} inactive skipped` : undefined,
       });
       setPicked([]);
       onAdded();

@@ -13,6 +13,7 @@ import {
 } from "./commitment";
 import {
   overlayLifecycle,
+  isArrivedMilestone,
   isProgramType,
   type ProgramLifecycle,
   type ProgramType,
@@ -23,7 +24,11 @@ import {
   shouldCreateProgramCommitment,
   type CommitmentType,
 } from "@shared/commitment";
-import { logProgramActivity, resolveProgramCars } from "./programs";
+import {
+  appendProgramCarMilestone,
+  logProgramActivity,
+  resolveProgramCars,
+} from "./programs";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -409,13 +414,7 @@ export async function applyRemoveProgramCars(token: string, actor: string) {
   });
 }
 
-export async function previewPatchProgramCars(
-  programId: number,
-  body: { link_ids: number[]; updates: Record<string, unknown> },
-) {
-  const program = await loadProgramRow(programId);
-  assertWritable(program, "patch cars");
-  const ids = [...new Set((body.link_ids ?? []).map(Number).filter((n) => n > 0))];
+async function classifyPatchLinks(programId: number, ids: number[]) {
   const { data: links, error } = await supabaseAdmin
     .from("program_cars")
     .select("id, railcar_id, exited_date, railcar:railcars(id, active, reporting_marks, car_number)")
@@ -430,17 +429,50 @@ export async function previewPatchProgramCars(
     if (rc?.active === true && !l.exited_date) writable.push(row);
     else readonly_inactive.push(row);
   }
+  return { writable, readonly_inactive };
+}
+
+export async function previewPatchProgramCars(
+  programId: number,
+  body: { link_ids?: number[]; updates?: Record<string, unknown>; items?: { link_id: number; updates: Record<string, unknown> }[] },
+) {
+  const program = await loadProgramRow(programId);
+  assertWritable(program, "patch cars");
+  const items = Array.isArray(body.items)
+    ? body.items
+        .map((it) => ({ link_id: Number(it.link_id), updates: it.updates && typeof it.updates === "object" ? it.updates : {} }))
+        .filter((it) => it.link_id > 0)
+    : [];
+  if (items.length) {
+    const ids = [...new Set(items.map((it) => it.link_id))];
+    const classified = await classifyPatchLinks(programId, ids);
+    const byId = new Map(classified.writable.map((r) => [r.link_id, r]));
+    const snapshot = {
+      action: "save_cars",
+      program_id: programId,
+      items: items.filter((it) => byId.has(it.link_id)).map((it) => ({
+        ...byId.get(it.link_id)!,
+        updates: it.updates,
+      })),
+      writable: classified.writable,
+      readonly_inactive: classified.readonly_inactive,
+    };
+    return { preview_token: await putPreview("program", snapshot), ...snapshot };
+  }
+  const ids = [...new Set((body.link_ids ?? []).map(Number).filter((n) => n > 0))];
+  const classified = await classifyPatchLinks(programId, ids);
   const snapshot = {
     action: "patch_cars",
     program_id: programId,
     updates: body.updates ?? {},
-    writable,
-    readonly_inactive,
+    ...classified,
   };
   return { preview_token: await putPreview("program", snapshot), ...snapshot };
 }
 
-function patchColumns(updates: Record<string, unknown>) {
+const COMPLETE_CF = "__complete";
+
+function patchColumns(updates: Record<string, unknown>, prior: Record<string, unknown> | null) {
   const out: Record<string, unknown> = {};
   if (updates.milestone !== undefined) out.milestone = updates.milestone === "" ? null : String(updates.milestone);
   if (updates.milestone_at !== undefined) {
@@ -449,15 +481,50 @@ function patchColumns(updates: Record<string, unknown>) {
   }
   if (updates.status !== undefined) out.status = updates.status === "" ? null : String(updates.status);
   if (updates.notes !== undefined) out.notes = updates.notes === "" ? null : updates.notes;
+  if (updates.flag_tag !== undefined) out.flag_tag = updates.flag_tag === "" ? null : String(updates.flag_tag);
   if (updates.shop_id !== undefined) out.shop_id = updates.shop_id == null || updates.shop_id === "" ? null : Number(updates.shop_id);
   if (updates.scrap_yard_id !== undefined) {
     out.scrap_yard_id = updates.scrap_yard_id == null || updates.scrap_yard_id === "" ? null : Number(updates.scrap_yard_id);
+  }
+  if (updates.repair_cost_total !== undefined) {
+    const n = updates.repair_cost_total === "" || updates.repair_cost_total == null ? null : Number(updates.repair_cost_total);
+    out.repair_cost_total = n != null && Number.isFinite(n) ? n : null;
   }
   if (updates.outcome_reached === true || updates.outcome_reached === "true") {
     out.outcome_reached_at = todayIso();
   }
   if (updates.outcome_reached === false || updates.outcome_reached === "false") {
     out.outcome_reached_at = null;
+  }
+  if (updates.completed !== undefined) {
+    const on = updates.completed === true || updates.completed === "true" || updates.completed === 1 || updates.completed === "1";
+    out.completed = on;
+    out.completed_at = on ? new Date().toISOString() : null;
+    if (on && out.outcome_reached_at === undefined && !prior?.outcome_reached_at) {
+      out.outcome_reached_at = todayIso();
+    }
+    if (!on && updates.outcome_reached === undefined) {
+      out.outcome_reached_at = null;
+    }
+    const prevCf =
+      prior?.custom_fields && typeof prior.custom_fields === "object"
+        ? (prior.custom_fields as Record<string, unknown>)
+        : {};
+    out.custom_fields = { ...prevCf, [COMPLETE_CF]: on };
+  }
+  if (updates.custom_fields && typeof updates.custom_fields === "object") {
+    const prev =
+      (out.custom_fields && typeof out.custom_fields === "object"
+        ? out.custom_fields
+        : prior?.custom_fields && typeof prior.custom_fields === "object"
+          ? prior.custom_fields
+          : {}) as Record<string, unknown>;
+    out.custom_fields = { ...prev, ...(updates.custom_fields as object) };
+  }
+  const nextMilestone = (out.milestone !== undefined ? out.milestone : prior?.milestone) as string | null;
+  if (isArrivedMilestone(nextMilestone) && out.outcome_reached_at === undefined && !prior?.outcome_reached_at) {
+    const d = out.milestone_at != null ? String(out.milestone_at).slice(0, 10) : todayIso();
+    out.outcome_reached_at = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayIso();
   }
   return out;
 }
@@ -472,72 +539,101 @@ function commitmentPatch(updates: Record<string, unknown>): { type: CommitmentTy
   return { type: type as CommitmentType, name };
 }
 
+async function applyOneCarUpdates(
+  program: { id: number },
+  row: { link_id: number; railcar_id: number },
+  updates: Record<string, unknown>,
+  actor: string,
+): Promise<{ wrote: boolean; commitment: boolean }> {
+  const commitment = commitmentPatch(updates ?? {});
+  const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", row.railcar_id).maybeSingle();
+  if (car?.active !== true) return { wrote: false, commitment: false };
+  const { data: prior, error: priorErr } = await supabaseAdmin
+    .from("program_cars")
+    .select("*")
+    .eq("id", row.link_id)
+    .maybeSingle();
+  if (priorErr) throw priorErr;
+  const cols = patchColumns(updates ?? {}, prior ?? {});
+  let wrote = false;
+  if (Object.keys(cols).length) {
+    const { data, error } = await supabaseAdmin
+      .from("program_cars")
+      .update(cols)
+      .eq("id", row.link_id)
+      .eq("program_id", program.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    const keys = Object.keys(cols);
+    await logProgramActivity({
+      program_id: program.id,
+      action: "car_patched",
+      actor,
+      program_car_id: row.link_id,
+      railcar_id: row.railcar_id,
+      detail: cols,
+      before: pickRow(prior, keys),
+      after: pickRow(data, keys),
+    });
+    const mile = cols.milestone != null ? String(cols.milestone) : null;
+    if (mile) {
+      const d = cols.milestone_at != null ? String(cols.milestone_at).slice(0, 10) : todayIso();
+      await appendProgramCarMilestone({
+        programCarId: row.link_id,
+        milestone: mile,
+        milestoneDate: /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayIso(),
+        actor,
+      });
+    }
+    wrote = true;
+  }
+  if (commitment) {
+    await upsertOpenCommitment(
+      Number(row.railcar_id),
+      { type: commitment.type, name: commitment.name, program_id: program.id },
+      actor,
+    );
+    await logProgramActivity({
+      program_id: program.id,
+      action: "commitment_set",
+      actor,
+      program_car_id: row.link_id,
+      railcar_id: row.railcar_id,
+      detail: { type: commitment.type, name: commitment.name },
+      before: {},
+      after: { type: commitment.type, name: commitment.name },
+    });
+    wrote = true;
+  }
+  return { wrote, commitment: Boolean(commitment) };
+}
+
 export async function applyPatchProgramCars(token: string, actor: string) {
   return withChangeGroupResult(actor, async () => {
-  const preview = await getPreview("program", token);
-  if (preview.action !== "patch_cars") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
-  const program = await loadProgramRow(Number(preview.program_id));
-  assertWritable(program, "patch cars");
-  const cols = patchColumns(preview.updates ?? {});
-  const commitment = commitmentPatch(preview.updates ?? {});
-  let updated = 0;
-  let commitments_written = 0;
-  for (const row of preview.writable ?? []) {
-    const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", row.railcar_id).maybeSingle();
-    if (car?.active !== true) continue;
-    if (!Object.keys(cols).length && !commitment) continue;
-    let wrote = false;
-    if (Object.keys(cols).length) {
-      const { data: prior, error: priorErr } = await supabaseAdmin
-        .from("program_cars")
-        .select("*")
-        .eq("id", row.link_id)
-        .maybeSingle();
-      if (priorErr) throw priorErr;
-      const { data, error } = await supabaseAdmin
-        .from("program_cars")
-        .update(cols)
-        .eq("id", row.link_id)
-        .eq("program_id", program.id)
-        .select("*")
-        .single();
-      if (error) throw error;
-      const keys = Object.keys(cols);
-      await logProgramActivity({
-        program_id: program.id,
-        action: "car_patched",
-        actor,
-        program_car_id: row.link_id,
-        railcar_id: row.railcar_id,
-        detail: cols,
-        before: pickRow(prior, keys),
-        after: pickRow(data, keys),
-      });
-      wrote = true;
+    const preview = await getPreview("program", token);
+    if (preview.action !== "patch_cars" && preview.action !== "save_cars") {
+      throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
     }
-    if (commitment) {
-      await upsertOpenCommitment(
-        Number(row.railcar_id),
-        { type: commitment.type, name: commitment.name, program_id: program.id },
-        actor,
-      );
-      await logProgramActivity({
-        program_id: program.id,
-        action: "commitment_set",
-        actor,
-        program_car_id: row.link_id,
-        railcar_id: row.railcar_id,
-        detail: { type: commitment.type, name: commitment.name },
-        before: {},
-        after: { type: commitment.type, name: commitment.name },
-      });
-      commitments_written += 1;
-      wrote = true;
+    const program = await loadProgramRow(Number(preview.program_id));
+    assertWritable(program, "patch cars");
+    let updated = 0;
+    let commitments_written = 0;
+    if (preview.action === "save_cars") {
+      for (const row of preview.items ?? []) {
+        const result = await applyOneCarUpdates(program, row, row.updates ?? {}, actor);
+        if (result.wrote) updated += 1;
+        if (result.commitment) commitments_written += 1;
+      }
+    } else {
+      for (const row of preview.writable ?? []) {
+        const result = await applyOneCarUpdates(program, row, preview.updates ?? {}, actor);
+        if (result.wrote) updated += 1;
+        if (result.commitment) commitments_written += 1;
+      }
     }
-    if (wrote) updated += 1;
-  }
-  await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
-  return { preview, updated, commitments_written };
+    await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
+    return { preview, updated, commitments_written };
   });
 }
 

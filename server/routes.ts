@@ -93,6 +93,8 @@ import {
   parseStatus,
   resolveProgramCars,
   logProgramActivity,
+  listProgramCarMilestones,
+  matchProgramCarsPaste,
 } from "./programs";
 import { assignmentRentStartOnMove } from "@shared/commitment";
 import { registerCommitmentRoutes, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
@@ -113,6 +115,7 @@ import {
   previewPatchProgramCars,
   previewRemoveProgramCars,
 } from "./program-previews";
+import { applyPutOnRent, previewPutOnRent } from "./program-put-on-rent";
 import { registerRentStartRoutes } from "./rent-start";
 import { registerRentStopRoutes } from "./rent-stops";
 import { registerKpiCarRoutes } from "./kpi-cars";
@@ -6111,6 +6114,34 @@ export async function registerRoutes(
       const actor = await requireWrite(req, res);
       if (!actor) return;
       res.json(await applyPatchProgramCars(String(req.body?.preview_token ?? ""), actor));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/programs/:id/cars/match", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await matchProgramCarsPaste(Number(req.params.id), String(req.body?.text ?? req.body?.paste ?? "")));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.get("/api/programs/:id/cars/:linkId/milestones", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await listProgramCarMilestones(Number(req.params.id), Number(req.params.linkId)));
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/programs/:id/cars/put-on-rent/preview", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      res.json(await previewPutOnRent(Number(req.params.id), req.body ?? {}));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cars/put-on-rent/apply", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await applyPutOnRent(String(req.body?.preview_token ?? ""), actor));
     } catch (err) { errHandler(res, err); }
   });
 

@@ -1,8 +1,10 @@
 import { splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
+import type { ActivityEntityType } from "@shared/change-log";
+import { currentChangeGroup } from "./change-log";
 import { supabaseAdmin } from "./supabase";
 
-export type ActivityEntityType = "railcar" | "rider";
+export type { ActivityEntityType };
 
 export type ActivityRow = {
   entity_type: ActivityEntityType;
@@ -16,6 +18,13 @@ export type ActivityRow = {
   occurred_at?: string;
   source_table?: string | null;
   source_id?: number | null;
+  change_group?: string | null;
+  table_name?: string | null;
+  row_pk?: number | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  undoable?: boolean;
+  undo_of?: number | null;
 };
 
 function carNumberVariants(n: string): string[] {
@@ -42,6 +51,13 @@ export async function logActivity(row: ActivityRow): Promise<void> {
     occurred_at: row.occurred_at ?? new Date().toISOString(),
     source_table: row.source_table ?? null,
     source_id: row.source_id ?? null,
+    change_group: row.change_group ?? currentChangeGroup(),
+    table_name: row.table_name ?? null,
+    row_pk: row.row_pk ?? null,
+    before: row.before ?? null,
+    after: row.after ?? null,
+    undoable: row.undoable ?? true,
+    undo_of: row.undo_of ?? null,
   };
   const { error } = await supabaseAdmin.from("activity_log").insert(payload);
   if (error) console.log(`[activity] log skipped: ${error.message}`);

@@ -65,7 +65,9 @@ import { buildLeaseReport } from "./lease-export";
 import { commitMarkContacts, previewMarkContacts } from "./mark-contacts-import";
 import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts, createCompany, updateCompany, deleteCompany, getCompanyContact, createCompanyContact, updateCompanyContact, deleteCompanyContact, listContactLeaseLinks, listCompanyLeaseLinks, listLeaseContactLinks, createContactLeaseLink, deleteContactLeaseLink, listContactsForRider, createContactOnRider, promoteLegacyRiderContacts, listAllDirectoryLeasePeople, listDirectoryPeopleForAccount, listLeaseLinkGaps, linkLesseeCompanyToLease, linkUniqueUnmatchedLesseeCompanies, unmatchedLesseeExportCsv } from "./directory";
 import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates, dedupSummary } from "./directory-dedup";
+import { pickRow } from "@shared/change-log";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
+import { recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
   applyCarStatusChange,
@@ -1413,12 +1415,14 @@ export async function registerRoutes(
       if (idsRaw.length > 20_000) {
         return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
       }
-      const result = await applyCarStatusChange({
-        ids: idsRaw,
-        status,
-        reason,
-        userId: writerId,
-      });
+      const result = await withChangeGroupResult(writerId, async () =>
+        applyCarStatusChange({
+          ids: idsRaw,
+          status,
+          reason,
+          userId: writerId,
+        }),
+      );
       res.json({ ok: true, ...result, status });
     } catch (err: any) {
       if (err?.status === 400) return res.status(400).json({ message: err.message });
@@ -1458,18 +1462,39 @@ export async function registerRoutes(
       const needs_completion = req.body?.needs_completion === true;
       const uniqueIds = [...new Set(idsRaw)];
       const CHUNK = 200;
-      let updated = 0;
-      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
-        const slice = uniqueIds.slice(i, i + CHUNK);
-        const { data, error } = await supabase
-          .from("railcars")
-          .update({ needs_completion })
-          .in("id", slice)
-          .select("id");
-        if (error) throw error;
-        updated += data?.length ?? 0;
-      }
-      res.json({ ok: true, updated, needs_completion });
+      const result = await withChangeGroupResult(writerId, async () => {
+        let updated = 0;
+        for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+          const slice = uniqueIds.slice(i, i + CHUNK);
+          const { data: priors, error: pErr } = await supabase
+            .from("railcars")
+            .select("id, needs_completion")
+            .in("id", slice);
+          if (pErr) throw pErr;
+          const { data, error } = await supabase
+            .from("railcars")
+            .update({ needs_completion })
+            .in("id", slice)
+            .select("id");
+          if (error) throw error;
+          updated += data?.length ?? 0;
+          for (const prior of priors ?? []) {
+            await recordChange({
+              table: "railcars",
+              pk: Number(prior.id),
+              before: pickRow(prior, ["needs_completion"]),
+              after: { needs_completion },
+              action: "needs_completion",
+              entity_type: "railcar",
+              entity_id: Number(prior.id),
+              railcar_id: Number(prior.id),
+              actor: writerId,
+            });
+          }
+        }
+        return { ok: true as const, updated, needs_completion };
+      });
+      res.json(result);
     } catch (err) {
       errHandler(res, err);
     }
@@ -1500,18 +1525,39 @@ export async function registerRoutes(
       }
       const uniqueIds = [...new Set(idsRaw)];
       const CHUNK = 200;
-      let updated = 0;
-      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
-        const slice = uniqueIds.slice(i, i + CHUNK);
-        const { data, error } = await supabase
-          .from("railcars")
-          .update({ entity })
-          .in("id", slice)
-          .select("id");
-        if (error) throw error;
-        updated += data?.length ?? 0;
-      }
-      res.json({ ok: true, updated, entity });
+      const result = await withChangeGroupResult(writerId, async () => {
+        let updated = 0;
+        for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+          const slice = uniqueIds.slice(i, i + CHUNK);
+          const { data: priors, error: pErr } = await supabase
+            .from("railcars")
+            .select("id, entity")
+            .in("id", slice);
+          if (pErr) throw pErr;
+          const { data, error } = await supabase
+            .from("railcars")
+            .update({ entity })
+            .in("id", slice)
+            .select("id");
+          if (error) throw error;
+          updated += data?.length ?? 0;
+          for (const prior of priors ?? []) {
+            await recordChange({
+              table: "railcars",
+              pk: Number(prior.id),
+              before: pickRow(prior, ["entity"]),
+              after: { entity },
+              action: "entity",
+              entity_type: "railcar",
+              entity_id: Number(prior.id),
+              railcar_id: Number(prior.id),
+              actor: writerId,
+            });
+          }
+        }
+        return { ok: true as const, updated, entity };
+      });
+      res.json(result);
     } catch (err) {
       errHandler(res, err);
     }
@@ -1531,8 +1577,11 @@ export async function registerRoutes(
       const raw = req.body?.ops_flag;
       const ops_flag = raw == null || String(raw).trim() === "" ? null : String(raw).trim().slice(0, 80);
       const uniqueIds = [...new Set(idsRaw)];
-      const updated = await persistOpsFlag(uniqueIds, ops_flag);
-      res.json({ ok: true, updated, ops_flag });
+      const result = await withChangeGroupResult(writerId, async () => {
+        const updated = await persistOpsFlag(uniqueIds, ops_flag);
+        return { ok: true as const, updated, ops_flag };
+      });
+      res.json(result);
     } catch (err) {
       errHandler(res, err);
     }
@@ -1734,15 +1783,16 @@ export async function registerRoutes(
       delete updateRow.active_status;
       delete updateRow.active_source;
 
+      const { data: priorRow, error: priorErr } = await supabase
+        .from("railcars")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (priorErr) throw priorErr;
+      priorStatus = priorRow?.status;
+      priorActive = priorRow?.active;
+
       if (parsed.status !== undefined) {
-        const { data: current, error: curErr } = await supabase
-          .from("railcars")
-          .select("status, active")
-          .eq("id", id)
-          .single();
-        if (curErr) throw curErr;
-        priorStatus = current?.status;
-        priorActive = current?.active;
         try {
           assertInactivePatchAllowed({
             currentStatus: priorStatus,
@@ -1757,30 +1807,46 @@ export async function registerRoutes(
         Object.assign(updateRow, patchFieldsForStatusChange(priorStatus, String(parsed.status ?? "")));
       }
 
-      const { data, error } = await supabase
-        .from("railcars")
-        .update(updateRow)
-        .eq("id", id)
-        .select()
-        .single();
-      if (error) throw error;
+      const patched = await withChangeGroupResult(writerId, async () => {
+        const { data, error } = await supabase
+          .from("railcars")
+          .update(updateRow)
+          .eq("id", id)
+          .select()
+          .single();
+        if (error) throw error;
 
-      if (parsed.status !== undefined && updateRow.active !== undefined && priorActive !== updateRow.active) {
-        await syncCurrentAssignmentHistoryActive(id, updateRow.active === true);
-      }
-
-      if (crossedInactive && String(inactiveReason ?? "").trim()) {
-        await writeCarStatusHistoryRow({
-          carId: id,
-          fromStatus: priorStatus,
-          toStatus: String((updateRow.status as string) ?? parsed.status),
-          reason: String(inactiveReason),
-          userId: writerId,
+        const patchKeys = Object.keys(updateRow);
+        await recordChange({
+          table: "railcars",
+          pk: id,
+          before: pickRow(priorRow, patchKeys),
+          after: pickRow(data, patchKeys),
+          action: "railcar_patch",
+          entity_type: "railcar",
+          entity_id: id,
+          railcar_id: id,
+          actor: writerId,
         });
-      }
 
-      if (flag !== undefined) await persistOpsFlag([id], flag);
-      res.json(hydrateOpsFlag({ ...data, ops_flag: flag !== undefined ? flag : (data as any).ops_flag }));
+        if (parsed.status !== undefined && updateRow.active !== undefined && priorActive !== updateRow.active) {
+          await syncCurrentAssignmentHistoryActive(id, updateRow.active === true);
+        }
+
+        if (crossedInactive && String(inactiveReason ?? "").trim()) {
+          await writeCarStatusHistoryRow({
+            carId: id,
+            fromStatus: priorStatus,
+            toStatus: String((updateRow.status as string) ?? parsed.status),
+            reason: String(inactiveReason),
+            userId: writerId,
+          });
+        }
+
+        if (flag !== undefined) await persistOpsFlag([id], flag);
+        return hydrateOpsFlag({ ...data, ops_flag: flag !== undefined ? flag : (data as any).ops_flag });
+      });
+      res.json(patched);
     } catch (err) {
       errHandler(res, err);
     }
@@ -1821,15 +1887,30 @@ export async function registerRoutes(
         return res.status(400).json({ message: out?.error || "Remark failed" });
       }
       const row = out.results?.[0] ?? {};
-      res.json({
-        ok: true,
-        old_id: row.old_id,
-        new_id: row.new_id,
-        old_car_initial: row.old_car_initial,
-        old_car_number: row.old_car_number,
-        new_car_initial: row.new_car_initial,
-        new_car_number: row.new_car_number,
+      const payload = await withChangeGroupResult(writerId, async () => {
+        await recordNonUndoable({
+          table: "railcars",
+          pk: Number(row.old_id ?? id),
+          action: "mark_change",
+          entity_type: "railcar",
+          entity_id: Number(row.new_id ?? row.old_id ?? id),
+          railcar_id: Number(row.new_id ?? id),
+          actor: writerId,
+          reason: "remarks retire the old railcar row and create a new id via remark_railcars RPC; Phase 1 cannot restore identity in place",
+          detail: { old_id: row.old_id, new_id: row.new_id },
+        });
+        return {
+          ok: true as const,
+          undoable: false as const,
+          old_id: row.old_id,
+          new_id: row.new_id,
+          old_car_initial: row.old_car_initial,
+          old_car_number: row.old_car_number,
+          new_car_initial: row.new_car_initial,
+          new_car_number: row.new_car_number,
+        };
       });
+      res.json(payload);
     } catch (err) { errHandler(res, err); }
   });
 
@@ -1874,7 +1955,23 @@ export async function registerRoutes(
         }
         return res.status(400).json({ message: out?.error || "Remark failed" });
       }
-      res.json({ ok: true, results: out.results ?? [] });
+      const payload = await withChangeGroupResult(writerId, async () => {
+        for (const row of (out.results ?? []) as Array<Record<string, unknown>>) {
+          await recordNonUndoable({
+            table: "railcars",
+            pk: Number(row.old_id ?? 0) || null,
+            action: "mark_change",
+            entity_type: "railcar",
+            entity_id: Number(row.new_id ?? row.old_id ?? 0),
+            railcar_id: Number(row.new_id ?? row.old_id ?? 0) || null,
+            actor: writerId,
+            reason: "remarks retire the old railcar row and create a new id via remark_railcars RPC; Phase 1 cannot restore identity in place",
+            detail: { old_id: row.old_id, new_id: row.new_id },
+          });
+        }
+        return { ok: true as const, undoable: false as const, results: out.results ?? [] };
+      });
+      res.json(payload);
     } catch (err) { errHandler(res, err); }
   });
 
@@ -2302,105 +2399,153 @@ export async function registerRoutes(
 
       const historyRows: any[] = [];
       const movedAt = effectiveDateToTimestamp(effective_date);
+      const actor = moved_by ?? req.authUser?.email ?? "system";
 
-      for (const carId of car_ids) {
-        const prev = currentByCar.get(carId);
-        const fromRiderId = prev?.rider_id ?? null;
-        const fromFleet = prev?.fleet_name ?? null;
-        const targetFleet = olLessee ?? typedLessee ?? fromFleet;
-        const rent = assignmentRentStartOnMove({
-          fromRiderId,
-          toRiderId: to_rider_id,
-          prevDate: prev?.rent_start_date ?? null,
-          prevSetBy: prev?.rent_start_set_by ?? null,
-          prevSetAt: prev?.rent_start_set_at ?? null,
-          dateSupplied,
-          suppliedDate: rent_start_date ?? null,
-          actor: moved_by ?? "system",
-          movedAt,
-        });
-        const histReason = rent.priorDateNote
-          ? [reason, `prior rent_start_date ${rent.priorDateNote}`].filter(Boolean).join("; ")
-          : reason ?? null;
+      const moveResult = await withChangeGroupResult(writerId, async () => {
+        for (const carId of car_ids) {
+          const prev = currentByCar.get(carId);
+          const fromRiderId = prev?.rider_id ?? null;
+          const fromFleet = prev?.fleet_name ?? null;
+          const targetFleet = olLessee ?? typedLessee ?? fromFleet;
+          const rent = assignmentRentStartOnMove({
+            fromRiderId,
+            toRiderId: to_rider_id,
+            prevDate: prev?.rent_start_date ?? null,
+            prevSetBy: prev?.rent_start_set_by ?? null,
+            prevSetAt: prev?.rent_start_set_at ?? null,
+            dateSupplied,
+            suppliedDate: rent_start_date ?? null,
+            actor: moved_by ?? "system",
+            movedAt,
+          });
+          const histReason = rent.priorDateNote
+            ? [reason, `prior rent_start_date ${rent.priorDateNote}`].filter(Boolean).join("; ")
+            : reason ?? null;
 
-        if (prev) {
-          const { error: uErr } = await supabase
-            .from("railcar_assignments")
-            .update({
-              rider_id: to_rider_id,
-              fleet_name: targetFleet,
-              assigned_at: movedAt,
-              rent_start_date: rent.rent_start_date,
-              rent_start_set_by: rent.rent_start_set_by,
-              rent_start_set_at: rent.rent_start_set_at,
-            })
-            .eq("id", prev.id);
-          if (uErr) throw uErr;
-          await pointCurrentAssignmentAt(supabase, [{ id: prev.id, railcar_id: carId }]);
-        } else {
-          const { data: ins, error: iErr } = await supabase
-            .from("railcar_assignments")
-            .insert({
+          const assignAfter = {
+            rider_id: to_rider_id,
+            fleet_name: targetFleet,
+            assigned_at: movedAt,
+            rent_start_date: rent.rent_start_date,
+            rent_start_set_by: rent.rent_start_set_by,
+            rent_start_set_at: rent.rent_start_set_at,
+          };
+
+          if (prev) {
+            const { error: uErr } = await supabase
+              .from("railcar_assignments")
+              .update(assignAfter)
+              .eq("id", prev.id);
+            if (uErr) throw uErr;
+            await pointCurrentAssignmentAt(supabase, [{ id: prev.id, railcar_id: carId }]);
+            await recordChange({
+              table: "railcar_assignments",
+              pk: Number(prev.id),
+              before: pickRow(prev, [
+                "rider_id",
+                "fleet_name",
+                "rent_start_date",
+                "rent_start_set_by",
+                "rent_start_set_at",
+              ]),
+              after: assignAfter,
+              action: "reassignment",
+              entity_type: "railcar",
+              entity_id: carId,
               railcar_id: carId,
               rider_id: to_rider_id,
-              fleet_name: targetFleet,
-              assigned_at: movedAt,
-              rent_start_date: rent.rent_start_date,
-              rent_start_set_by: rent.rent_start_set_by,
-              rent_start_set_at: rent.rent_start_set_at,
-            })
-            .select("id, railcar_id")
-            .single();
-          if (iErr) throw iErr;
-          await pointCurrentAssignmentAt(supabase, ins ? [ins] : []);
-        }
+              actor,
+            });
+          } else {
+            const { data: ins, error: iErr } = await supabase
+              .from("railcar_assignments")
+              .insert({
+                railcar_id: carId,
+                ...assignAfter,
+              })
+              .select("id, railcar_id")
+              .single();
+            if (iErr) throw iErr;
+            await pointCurrentAssignmentAt(supabase, ins ? [ins] : []);
+            await recordChange({
+              table: "railcar_assignments",
+              pk: ins?.id != null ? Number(ins.id) : null,
+              before: {},
+              after: { railcar_id: carId, ...assignAfter },
+              action: "reassignment",
+              entity_type: "railcar",
+              entity_id: carId,
+              railcar_id: carId,
+              rider_id: to_rider_id,
+              actor,
+            });
+          }
 
-        const carPatch = railcarIdentityPatch(identity, targetFleet);
-        const { error: carErr } = await supabase.from("railcars").update(carPatch).eq("id", carId);
-        if (carErr) throw carErr;
-
-        historyRows.push({
-          railcar_id: carId,
-          from_rider_id: fromRiderId,
-          to_rider_id: to_rider_id,
-          from_fleet_name: fromFleet,
-          to_fleet_name: targetFleet,
-          moved_at: movedAt,
-          moved_by: moved_by ?? "system",
-          reason: histReason,
-        });
-      }
-
-      if (historyRows.length) {
-        const { data: insertedHist, error: hErr } = await supabase
-          .from("assignment_history")
-          .insert(historyRows)
-          .select("id, railcar_id, from_rider_id, to_rider_id, from_fleet_name, to_fleet_name, moved_at, moved_by, reason");
-        if (hErr) throw hErr;
-        const actor = moved_by ?? req.authUser?.email ?? "system";
-        for (const h of insertedHist ?? []) {
-          await logActivity({
-            entity_type: "railcar",
-            entity_id: h.railcar_id,
-            railcar_id: h.railcar_id,
-            rider_id: h.to_rider_id ?? null,
+          const carPatch = railcarIdentityPatch(identity, targetFleet);
+          const identKeys = Object.keys(carPatch);
+          const { data: carPrior, error: carPriorErr } = await supabase
+            .from("railcars")
+            .select("id, lessee_name, rider_external_id, assignment_label, lease_type")
+            .eq("id", carId)
+            .maybeSingle();
+          if (carPriorErr) throw carPriorErr;
+          const { error: carErr } = await supabase.from("railcars").update(carPatch).eq("id", carId);
+          if (carErr) throw carErr;
+          await recordChange({
+            table: "railcars",
+            pk: carId,
+            before: pickRow(carPrior, identKeys),
+            after: pickRow({ ...(carPrior ?? {}), ...carPatch }, identKeys),
             action: "reassignment",
+            entity_type: "railcar",
+            entity_id: carId,
+            railcar_id: carId,
             actor,
-            detail: {
-              from_rider_id: h.from_rider_id,
-              to_rider_id: h.to_rider_id,
-              from_fleet: h.from_fleet_name,
-              to_fleet: h.to_fleet_name,
-              reason: h.reason,
-            },
-            occurred_at: h.moved_at,
-            source_table: "assignment_history",
-            source_id: h.id,
+          });
+
+          historyRows.push({
+            railcar_id: carId,
+            from_rider_id: fromRiderId,
+            to_rider_id: to_rider_id,
+            from_fleet_name: fromFleet,
+            to_fleet_name: targetFleet,
+            moved_at: movedAt,
+            moved_by: moved_by ?? "system",
+            reason: histReason,
           });
         }
-      }
 
-      res.json({ ok: true, moved: car_ids.length });
+        if (historyRows.length) {
+          const { data: insertedHist, error: hErr } = await supabase
+            .from("assignment_history")
+            .insert(historyRows)
+            .select("id, railcar_id, from_rider_id, to_rider_id, from_fleet_name, to_fleet_name, moved_at, moved_by, reason");
+          if (hErr) throw hErr;
+          for (const h of insertedHist ?? []) {
+            await logActivity({
+              entity_type: "railcar",
+              entity_id: h.railcar_id,
+              railcar_id: h.railcar_id,
+              rider_id: h.to_rider_id ?? null,
+              action: "reassignment",
+              actor,
+              detail: {
+                from_rider_id: h.from_rider_id,
+                to_rider_id: h.to_rider_id,
+                from_fleet: h.from_fleet_name,
+                to_fleet: h.to_fleet_name,
+                reason: h.reason,
+              },
+              occurred_at: h.moved_at,
+              source_table: "assignment_history",
+              source_id: h.id,
+            });
+          }
+        }
+
+        return { ok: true as const, moved: car_ids.length };
+      });
+      res.json(moveResult);
     } catch (err) {
       errHandler(res, err);
     }
@@ -2997,14 +3142,29 @@ export async function registerRoutes(
       }
 
       const totalSubmitted = rows.length;
-      res.json({
-        ok: true,
-        imported: importedCount,
-        assigned: assignments.length,
-        mlas_created: mlasCreated,
-        riders_created: ridersCreated,
-        skipped: totalSubmitted - importedCount,
+      const payload = await withChangeGroupResult(writerId, async () => {
+        await recordNonUndoable({
+          table: "railcars",
+          pk: null,
+          action: "import_commit",
+          entity_type: "railcar",
+          entity_id: 0,
+          railcar_id: null,
+          actor: writerId,
+          reason: "import commit writes many rows; Phase 1 cannot snapshot every imported row",
+          detail: { imported: importedCount, assigned: assignments.length },
+        });
+        return {
+          ok: true as const,
+          undoable: false as const,
+          imported: importedCount,
+          assigned: assignments.length,
+          mlas_created: mlasCreated,
+          riders_created: ridersCreated,
+          skipped: totalSubmitted - importedCount,
+        };
       });
+      res.json(payload);
     } catch (err) { errHandler(res, err); }
   });
 
@@ -3146,11 +3306,25 @@ export async function registerRoutes(
         confirmProductionImport: confirmProductionImport === true,
         progress: (phase) => emit({ type: "progress", phase }),
       });
+      const wrapped = await withChangeGroupResult(writerId, async () => {
+        await recordNonUndoable({
+          table: "railcars",
+          pk: null,
+          action: "vcf_import",
+          entity_type: "railcar",
+          entity_id: 0,
+          railcar_id: null,
+          actor: writerId,
+          reason: "VCF import writes many rows; Phase 1 cannot snapshot every imported row",
+          detail: result as Record<string, unknown>,
+        });
+        return { ...(result as object), undoable: false as const };
+      });
       if (stream) {
-        emit({ type: "done", result });
+        emit({ type: "done", result: wrapped });
         res.end();
       } else {
-        res.json(result);
+        res.json(wrapped);
       }
     } catch (err) {
       const extra =
@@ -3582,11 +3756,25 @@ export async function registerRoutes(
         integrityPass: integrityChecks.filter((c) => !c.pass).length === 0,
       }));
 
+      const wrapped = await withChangeGroupResult(writerId, async () => {
+        await recordNonUndoable({
+          table: "railcars",
+          pk: null,
+          action: "financial_import",
+          entity_type: "railcar",
+          entity_id: 0,
+          railcar_id: null,
+          actor: writerId,
+          reason: "financial import writes many rows; Phase 1 cannot snapshot every imported row",
+          detail: { snapshotMonth: month, carsUpdated, summaryRowsWritten: inserted },
+        });
+        return { ...payload, undoable: false as const };
+      });
       if (stream) {
-        emit({ type: "done", result: payload });
+        emit({ type: "done", result: wrapped });
         res.end();
       } else {
-        res.json(payload);
+        res.json(wrapped);
       }
     } catch (err) {
       if (stream && res.headersSent) {
@@ -3794,13 +3982,28 @@ export async function registerRoutes(
         .update({ car_count: inserted })
         .eq("id", batch.id);
 
-      res.json({
-        ok: true,
-        inserted,
-        skipped_exists: review.skipped_exists,
-        skipped_invalid: review.skipped_invalid,
-        batch: { ...batch, car_count: inserted },
+      const payload = await withChangeGroupResult(writerId, async () => {
+        await recordNonUndoable({
+          table: "railcars",
+          pk: null,
+          action: "acquisitions_import",
+          entity_type: "railcar",
+          entity_id: 0,
+          railcar_id: null,
+          actor: writerId,
+          reason: "acquisition import writes many rows; Phase 1 cannot snapshot every imported row",
+          detail: { inserted, batch_id: batch.id },
+        });
+        return {
+          ok: true as const,
+          undoable: false as const,
+          inserted,
+          skipped_exists: review.skipped_exists,
+          skipped_invalid: review.skipped_invalid,
+          batch: { ...batch, car_count: inserted },
+        };
       });
+      res.json(payload);
     } catch (err) {
       const msg = String((err as any)?.message ?? err ?? "");
       if (/acquisition_batch|needs_completion|purchase_price/i.test(msg) && /does not exist|schema cache/i.test(msg)) {
@@ -4386,18 +4589,25 @@ export async function registerRoutes(
         .select()
         .single();
       if (error) throw error;
-      await logActivity({
-        entity_type: "railcar",
-        entity_id: Number(car_id),
-        railcar_id: Number(car_id),
-        action: "rent_event",
-        actor: created_by,
-        detail: { event_type, event_date, reason: reason.trim() },
-        occurred_at: `${event_date}T12:00:00.000Z`,
-        source_table: "rent_events",
-        source_id: data?.id ?? null,
+      const payload = await withChangeGroupResult(created_by, async () => {
+        await recordChange({
+          table: "rent_events",
+          pk: data?.id != null ? Number(data.id) : null,
+          before: {},
+          after: data ?? {},
+          action: "rent_event",
+          entity_type: "railcar",
+          entity_id: Number(car_id),
+          railcar_id: Number(car_id),
+          actor: created_by,
+          detail: { event_type, event_date, reason: reason.trim() },
+          occurred_at: `${event_date}T12:00:00.000Z`,
+          source_table: "rent_events",
+          source_id: data?.id != null ? Number(data.id) : null,
+        });
+        return data;
       });
-      res.json(data);
+      res.json(payload);
     } catch (err) { errHandler(res, err); }
   });
 
@@ -5676,7 +5886,7 @@ export async function registerRoutes(
       const userId = await requireWrite(req, res);
       if (!userId) return;
       const id = Number(req.params.id);
-      const { data: before } = await supabaseAdmin.from("programs").select("status, name").eq("id", id).maybeSingle();
+      const { data: before } = await supabaseAdmin.from("programs").select("*").eq("id", id).maybeSingle();
       const updates: any = { updated_at: new Date().toISOString() };
       if (req.body.name !== undefined) updates.name = String(req.body.name).trim();
       if (req.body.description !== undefined) updates.description = req.body.description || null;
@@ -5698,17 +5908,44 @@ export async function registerRoutes(
       if (req.body.pending_note !== undefined) updates.pending_note = req.body.pending_note || null;
       if (req.body.opened_date !== undefined) updates.opened_date = req.body.opened_date || null;
       if (req.body.closed_date !== undefined) updates.closed_date = req.body.closed_date || null;
-      const { data, error } = await supabaseAdmin.from("programs").update(updates).eq("id", id).select().single();
-      if (error) throw error;
-      if (before && updates.status && updates.status !== before.status) {
-        await logProgramActivity({
-          program_id: id,
-          action: "status_changed",
+      const patched = await withChangeGroupResult(userId, async () => {
+        const { data, error } = await supabaseAdmin.from("programs").update(updates).eq("id", id).select().single();
+        if (error) throw error;
+        const keys = Object.keys(updates).filter((k) => k !== "updated_at");
+        await recordChange({
+          table: "programs",
+          pk: id,
+          before: pickRow(before, keys),
+          after: pickRow(data, keys),
+          action: "program_patch",
+          entity_type: "program",
+          entity_id: id,
           actor: userId,
-          detail: { from: before.status, to: updates.status },
         });
-      }
-      res.json(data);
+        if (before && updates.status && updates.status !== before.status) {
+          await logProgramActivity({
+            program_id: id,
+            action: "status_changed",
+            actor: userId,
+            detail: { from: before.status, to: updates.status },
+            before: { status: before.status },
+            after: { status: updates.status },
+          });
+        }
+        const otherKeys = keys.filter((k) => k !== "status");
+        if (before && otherKeys.length) {
+          await logProgramActivity({
+            program_id: id,
+            action: "program_updated",
+            actor: userId,
+            detail: { fields: otherKeys },
+            before: pickRow(before, otherKeys),
+            after: pickRow(data, otherKeys),
+          });
+        }
+        return data;
+      });
+      res.json(patched);
     } catch (err) { errHandler(res, err); }
   });
 
@@ -6293,7 +6530,21 @@ export async function registerRoutes(
       if (!Array.isArray(rows) || rows.length === 0)
         return res.status(400).json({ message: "No rows provided" });
       const result = await commitMarkContacts(rows);
-      res.json(result);
+      const payload = await withChangeGroupResult(writerId, async () => {
+        await recordNonUndoable({
+          table: "companies",
+          pk: null,
+          action: "mark_contacts_import",
+          entity_type: "railcar",
+          entity_id: 0,
+          railcar_id: null,
+          actor: writerId,
+          reason: "mark-contacts import writes many rows; Phase 1 cannot snapshot every imported row",
+          detail: result as Record<string, unknown>,
+        });
+        return { ...(result as object), undoable: false as const };
+      });
+      res.json(payload);
     } catch (err) { errHandler(res, err); }
   });
 

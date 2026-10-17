@@ -132,7 +132,9 @@ export function ConfirmActionHost() {
         <AlertDialogHeader>
           <AlertDialogTitle>{pending?.title ?? ""}</AlertDialogTitle>
           {pending?.description ? (
-            <AlertDialogDescription>{pending.description}</AlertDialogDescription>
+            <AlertDialogDescription className="whitespace-pre-wrap">
+              {pending.description}
+            </AlertDialogDescription>
           ) : (
             <AlertDialogDescription className="sr-only">Confirm this action</AlertDialogDescription>
           )}

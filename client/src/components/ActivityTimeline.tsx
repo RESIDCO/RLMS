@@ -7,6 +7,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { UndoLastChange } from "@/components/UndoLastChange";
 
 export type ActivityEvent = {
   id: number;
@@ -135,7 +136,10 @@ export default function ActivityTimeline({
     <div className={compact ? "pt-1" : "mt-6 border-t border-border pt-5"}>
       <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{title}</div>
-        <div className="text-xs text-muted-foreground font-mono-num">{events.length} events</div>
+        <div className="flex items-center gap-2">
+          {canEdit && railcarId ? <UndoLastChange railcarId={railcarId} /> : null}
+          <div className="text-xs text-muted-foreground font-mono-num">{events.length} events</div>
+        </div>
       </div>
       {showSearchHint && (
         <p className="text-xs text-muted-foreground mb-3">

@@ -1,7 +1,7 @@
 import { splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import type { ActivityEntityType } from "@shared/change-log";
-import { currentChangeGroup } from "./change-log";
+import { currentChangeGroup, recordChange, withChangeGroupResult } from "./change-log";
 import { supabaseAdmin } from "./supabase";
 
 export type { ActivityEntityType };
@@ -320,25 +320,53 @@ export async function addNote(opts: {
 }): Promise<any> {
   const body = String(opts.body ?? "").trim();
   if (!body) throw Object.assign(new Error("Note text is required"), { status: 400 });
+  const actor = opts.actor ?? null;
   const occurred_at = new Date().toISOString();
+
+  if (opts.entity_type === "railcar") {
+    return withChangeGroupResult(actor || "system", async () => {
+      const { data: prior, error: priorErr } = await supabaseAdmin
+        .from("railcars")
+        .select("id, notes")
+        .eq("id", opts.entity_id)
+        .single();
+      if (priorErr) throw priorErr;
+      const { error: updErr } = await supabaseAdmin
+        .from("railcars")
+        .update({ notes: body })
+        .eq("id", opts.entity_id);
+      if (updErr) throw updErr;
+      const rec = await recordChange({
+        table: "railcars",
+        pk: opts.entity_id,
+        before: { notes: prior.notes },
+        after: { notes: body },
+        action: "note",
+        entity_type: "railcar",
+        entity_id: opts.entity_id,
+        railcar_id: opts.entity_id,
+        actor,
+        force: true,
+        detail: { body },
+        occurred_at,
+      });
+      return { id: rec?.id ?? null, action: "note" };
+    });
+  }
+
   const insert: Record<string, unknown> = {
     entity_type: opts.entity_type,
     entity_id: opts.entity_id,
     action: "note",
-    actor: opts.actor ?? null,
+    actor,
     detail: { body },
     source: "ui",
     occurred_at,
-    railcar_id: opts.entity_type === "railcar" ? opts.entity_id : null,
-    rider_id: opts.entity_type === "rider" ? opts.entity_id : null,
+    railcar_id: null,
+    rider_id: opts.entity_id,
   };
   const { data, error } = await supabaseAdmin.from("activity_log").insert(insert).select().single();
   if (error) throw error;
-
-  if (opts.entity_type === "railcar") {
-    await supabaseAdmin.from("railcars").update({ notes: body }).eq("id", opts.entity_id);
-  } else {
-    await supabaseAdmin.from("riders").update({ notes: body }).eq("id", opts.entity_id);
-  }
+  await supabaseAdmin.from("riders").update({ notes: body }).eq("id", opts.entity_id);
   return data;
 }

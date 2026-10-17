@@ -102,7 +102,7 @@ CREATE OR REPLACE FUNCTION public.rlms_derived_fleet_status(
   p_sold boolean,
   p_off_rent boolean,
   p_on_ol boolean,
-  p_has_idle_plan boolean
+  p_has_open_commitment boolean
 ) RETURNS text
 LANGUAGE sql
 IMMUTABLE
@@ -110,7 +110,7 @@ AS $$
   SELECT CASE
     WHEN p_sold THEN 'Sold'
     WHEN NOT p_off_rent THEN 'Leased'
-    WHEN coalesce(p_has_idle_plan, false) THEN 'Idle'
+    WHEN coalesce(p_has_open_commitment, false) THEN 'Idle'
     ELSE 'Unassigned'
   END;
 $$;
@@ -222,3 +222,6 @@ SELECT
   v.rider_id
 FROM public.v_rlms_car_kpi v
 WHERE v.active IS TRUE;
+
+GRANT SELECT ON public.v_kpi_preview_retag TO authenticated, service_role;
+GRANT SELECT ON public.v_rlms_kpi_car_rows TO authenticated, service_role;

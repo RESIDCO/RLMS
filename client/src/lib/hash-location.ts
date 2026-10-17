@@ -49,6 +49,41 @@ export function parseHashSearch(hash: string): URLSearchParams {
   return new URLSearchParams(i >= 0 ? withoutHash.slice(i + 1) : "");
 }
 
+/** Query string after `?` (no leading `?`) for a `from=` param. */
+export function encodeHashFrom(query: string): string {
+  const raw = String(query ?? "");
+  const q = raw.startsWith("?") ? raw.slice(1) : raw;
+  return encodeURIComponent(q);
+}
+
+/** Inverse of encodeHashFrom. URLSearchParams.get("from") already applies this once. */
+export function decodeHashFrom(from: string | null | undefined): string {
+  const raw = String(from ?? "");
+  if (!raw) return "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+export function programsPathFromQuery(from: string | null | undefined): string {
+  const q = from ?? "";
+  return q ? `/programs?${q}` : "/programs";
+}
+
+export function programPathWithFrom(id: number, listQuery: string): string {
+  const encoded = encodeHashFrom(listQuery);
+  return encoded ? `/programs/${id}?from=${encoded}` : `/programs/${id}`;
+}
+
+export function carPathFromProgram(carId: number, programId: number, programQuery: string): string {
+  const parts = [`from_program=${encodeURIComponent(String(programId))}`];
+  const encoded = encodeHashFrom(programQuery);
+  if (encoded) parts.push(`from=${encoded}`);
+  return `/cars/${carId}?${parts.join("&")}`;
+}
+
 export function hashSearchParams(): URLSearchParams {
   if (typeof window === "undefined") return new URLSearchParams();
   return parseHashSearch(window.location.hash);

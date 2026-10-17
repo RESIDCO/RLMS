@@ -89,7 +89,21 @@ export default function CarDetailPage() {
     (lesseeP?.ol ? decodeURIComponent(lesseeP.ol) : null) ||
     (entityP?.ol ? decodeURIComponent(entityP.ol) : null);
   const lessee = r?.lessee_name || (lesseeP?.lessee ? decodeURIComponent(lesseeP.lessee) : null);
-  const fromRaw = new URLSearchParams(searchQs.replace(/^\?/, "")).get("from");
+  const hashParams = new URLSearchParams(searchQs.replace(/^\?/, ""));
+  const fromProgramId = Number(hashParams.get("from_program"));
+  const fromProgramQuery = hashParams.get("from");
+  const fromProgramHref =
+    Number.isFinite(fromProgramId) && fromProgramId > 0
+      ? fromProgramQuery
+        ? `/programs/${fromProgramId}?${fromProgramQuery}`
+        : `/programs/${fromProgramId}`
+      : null;
+  const { data: fromProgram } = useQuery<{ name?: string }>({
+    queryKey: ["/api/programs", fromProgramId],
+    queryFn: () => apiRequest("GET", `/api/programs/${fromProgramId}`).then((res) => res.json()),
+    enabled: fromProgramHref != null,
+  });
+  const fromRaw = fromProgramHref ? null : hashParams.get("from");
   let fromPath: string | null = null;
   let fromKpiTitle: string | null = null;
   if (fromRaw) {
@@ -102,7 +116,9 @@ export default function CarDetailPage() {
     }
   }
   const crumbs: { href?: string; label: string }[] = [{ href: "/", label: "Dashboard" }];
-  if (fromPath && fromKpiTitle) {
+  if (fromProgramHref) {
+    crumbs.push({ href: fromProgramHref, label: fromProgram?.name ?? "Program" });
+  } else if (fromPath && fromKpiTitle) {
     crumbs.push({ href: fromPath, label: fromKpiTitle });
   } else if (fromLessee && lesseeP) {
     const L = decodeURIComponent(lesseeP.lessee);
@@ -153,6 +169,17 @@ export default function CarDetailPage() {
         }
       />
       <div className="px-4 sm:px-8 py-5 max-w-5xl">
+        {fromProgramHref && (
+          <div className="mb-3">
+            <Link
+              href={fromProgramHref}
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
+              data-testid="link-back-to-program"
+            >
+              ‹ Back to {fromProgram?.name ?? "program"}
+            </Link>
+          </div>
+        )}
         {fromPath && (
           <div className="mb-3">
             <Link

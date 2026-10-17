@@ -25,10 +25,13 @@ export function coalesceViewName(raw: unknown): string {
   return s || DEFAULT_VIEW_NAME;
 }
 
+export type PrefsSort = { key: string; dir: "asc" | "desc" };
+
 export type PrefsPayload = {
   cols: string[];
   order?: string[];
   widths?: Record<string, number>;
+  sort?: PrefsSort | null;
 };
 
 export function parsePrefsPayload(raw: unknown): PrefsPayload | null {
@@ -52,7 +55,13 @@ export function parsePrefsPayload(raw: unknown): PrefsPayload | null {
       if (typeof v === "number" && Number.isFinite(v)) widths[k] = v;
     }
   }
-  return { cols, order, widths };
+  let sort: PrefsSort | null = null;
+  if (o.sort && typeof o.sort === "object" && !Array.isArray(o.sort)) {
+    const key = String((o.sort as Record<string, unknown>).key ?? "").trim();
+    const dir = (o.sort as Record<string, unknown>).dir === "desc" ? "desc" : "asc";
+    if (key) sort = { key, dir };
+  }
+  return { cols, order, widths, sort };
 }
 
 /** `cols=all` → full allow-list. Missing → fallback. Else intersection in requested order. */

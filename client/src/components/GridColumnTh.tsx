@@ -13,6 +13,8 @@ export function GridColumnTh({
   children,
   onResize,
   onMove,
+  onSort,
+  sortDir,
 }: {
   colKey: string;
   listKey?: string;
@@ -23,6 +25,8 @@ export function GridColumnTh({
   children: ReactNode;
   onResize?: (key: string, width: number) => void;
   onMove?: (fromKey: string, toKey: string) => void;
+  onSort?: (key: string) => void;
+  sortDir?: "asc" | "desc" | null;
 }) {
   const startX = useRef(0);
   const startW = useRef(width ?? minWidth);
@@ -79,7 +83,21 @@ export function GridColumnTh({
       )}
     >
       <span className="inline-flex items-center gap-1 min-w-0">
-        {children}
+        {onSort ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-0.5 hover:text-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSort(colKey);
+            }}
+          >
+            {children}
+            {sortDir === "asc" ? " ↑" : sortDir === "desc" ? " ↓" : ""}
+          </button>
+        ) : (
+          children
+        )}
         {listKey ? <ColumnHelp listKey={listKey} colKey={colKey} /> : null}
       </span>
       {onResize && (

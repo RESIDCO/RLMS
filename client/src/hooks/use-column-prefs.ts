@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth, useIsAdmin } from "@/lib/AuthContext";
-import { coalesceViewName, normalizeListKey, type PrefsPayload } from "@shared/column-views";
+import { coalesceViewName, normalizeListKey, parsePrefsPayload, type PrefsPayload, type PrefsSort } from "@shared/column-views";
 
 const DEBOUNCE_MS = 800;
 
@@ -14,6 +14,7 @@ type Cached = {
   cols: Set<string>;
   order: string[];
   widths: Record<string, number>;
+  sort: PrefsSort | null;
 };
 
 export type TableViewMeta = {
@@ -24,37 +25,18 @@ export type TableViewMeta = {
 };
 
 function parseStored(raw: unknown): Cached | null {
-  if (raw == null) return null;
-  if (Array.isArray(raw)) {
-    return {
-      cols: new Set(raw.filter((x): x is string => typeof x === "string")),
-      order: [],
-      widths: {},
-    };
-  }
-  if (typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const colsSrc = Array.isArray(o.cols)
-    ? o.cols
-    : Array.isArray(o.visible_cols)
-      ? o.visible_cols
-      : null;
-  if (!colsSrc) return null;
-  const cols = new Set(colsSrc.filter((x): x is string => typeof x === "string"));
-  const order = Array.isArray(o.order)
-    ? o.order.filter((x): x is string => typeof x === "string")
-    : [];
-  const widths: Record<string, number> = {};
-  if (o.widths && typeof o.widths === "object" && !Array.isArray(o.widths)) {
-    for (const [k, v] of Object.entries(o.widths as Record<string, unknown>)) {
-      if (typeof v === "number" && Number.isFinite(v)) widths[k] = v;
-    }
-  }
-  return { cols, order, widths };
+  const parsed = parsePrefsPayload(raw);
+  if (!parsed) return null;
+  return {
+    cols: new Set(parsed.cols),
+    order: parsed.order ?? [],
+    widths: parsed.widths ?? {},
+    sort: parsed.sort ?? null,
+  };
 }
 
 function toPayload(next: Cached): PrefsPayload {
-  return { cols: Array.from(next.cols), order: next.order, widths: next.widths };
+  return { cols: Array.from(next.cols), order: next.order, widths: next.widths, sort: next.sort ?? null };
 }
 
 const memCache = new Map<string, Cached>();
@@ -70,21 +52,23 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   const [visibleCols, setVisibleCols] = useState<Set<string>>(defaultCols);
   const [colOrder, setColOrderState] = useState<string[]>([]);
   const [colWidths, setColWidthsState] = useState<Record<string, number>>({});
+  const [sort, setSortState] = useState<PrefsSort | null>(null);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [viewName, setViewName] = useState("Default");
   const [views, setViews] = useState<TableViewMeta[]>([]);
   const [sharedDefault, setSharedDefault] = useState<Cached | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef<Cached>({ cols: defaultCols, order: [], widths: {} });
-  latest.current = { cols: visibleCols, order: colOrder, widths: colWidths };
+  const latest = useRef<Cached>({ cols: defaultCols, order: [], widths: {}, sort: null });
+  latest.current = { cols: visibleCols, order: colOrder, widths: colWidths, sort };
   const viewNameRef = useRef(viewName);
   viewNameRef.current = viewName;
 
   const applyCached = useCallback((parsed: Cached | null) => {
-    const next = parsed ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number> };
+    const next = parsed ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number>, sort: null };
     setVisibleCols(next.cols);
     setColOrderState(next.order);
     setColWidthsState(next.widths);
+    setSortState(next.sort ?? null);
     latest.current = next;
   }, [defaultCols]);
 
@@ -152,7 +136,7 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   );
 
   const resetCols = useCallback(() => {
-    const next = sharedDefault ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number> };
+    const next = sharedDefault ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number>, sort: null };
     applyCached(next);
     persist(next);
   }, [sharedDefault, defaultCols, persist, applyCached]);
@@ -171,6 +155,15 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
       const widths = { ...latest.current.widths, [key]: width };
       const next = { ...latest.current, widths };
       setColWidthsState(widths);
+      persist(next);
+    },
+    [persist],
+  );
+
+  const setSort = useCallback(
+    (nextSort: PrefsSort | null) => {
+      const next = { ...latest.current, sort: nextSort };
+      setSortState(nextSort);
       persist(next);
     },
     [persist],
@@ -296,6 +289,8 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
     setColOrder,
     colWidths,
     setColWidth,
+    sort,
+    setSort,
     viewName,
     views,
     selectView,

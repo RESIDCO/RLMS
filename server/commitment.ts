@@ -218,6 +218,87 @@ export async function setCommitment(
   return data;
 }
 
+/** Create or overwrite the open commitment, including on-rent program cars. */
+export async function upsertOpenCommitment(
+  railcarId: number,
+  body: {
+    type: CommitmentType;
+    name: string;
+    program_id?: number | null;
+  },
+  actor: string,
+) {
+  const name = String(body.name ?? "").trim();
+  if (!isCommitmentType(body.type) || !name) {
+    throw Object.assign(new Error("type and name required"), { status: 400 });
+  }
+  const { data: car, error: cErr } = await supabaseAdmin
+    .from("railcars")
+    .select("id, active")
+    .eq("id", railcarId)
+    .maybeSingle();
+  if (cErr) throw cErr;
+  if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
+  if (car.active !== true) throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
+
+  const existing = await openCommitment(railcarId);
+  const now = new Date().toISOString();
+  if (existing) {
+    const patch: Record<string, unknown> = {
+      type: body.type,
+      name,
+      set_by: actor,
+      set_at: now,
+    };
+    if (body.program_id !== undefined) patch.program_id = body.program_id;
+    const { data, error } = await supabaseAdmin
+      .from("car_commitments")
+      .update(patch)
+      .eq("id", existing.id)
+      .is("cleared_at", null)
+      .select()
+      .single();
+    if (error) throw error;
+    await recordChange({
+      table: "car_commitments",
+      pk: Number(existing.id),
+      before: pickRow(existing, ["type", "name", "program_id", "set_by"]),
+      after: pickRow(data, ["type", "name", "program_id", "set_by"]),
+      action: "commitment_set",
+      entity_type: "railcar",
+      entity_id: railcarId,
+      railcar_id: railcarId,
+      actor,
+    });
+    return data;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("car_commitments")
+    .insert({
+      railcar_id: railcarId,
+      type: body.type,
+      name,
+      program_id: body.program_id ?? null,
+      set_by: actor,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  await recordChange({
+    table: "car_commitments",
+    pk: Number(data.id),
+    before: {},
+    after: data,
+    action: "commitment_set",
+    entity_type: "railcar",
+    entity_id: railcarId,
+    railcar_id: railcarId,
+    actor,
+  });
+  return data;
+}
+
 export async function clearCommitment(railcarId: number, actor: string) {
   const existing = await openCommitment(railcarId);
   if (!existing) return null;

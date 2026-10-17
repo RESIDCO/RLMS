@@ -127,11 +127,13 @@ const NAMESPACED: ColumnDictEntry[] = [
   d("program_cars:active", "Active", "Whether the linked car is in the active fleet.", "railcars.active", "From the linked railcar, not the program row."),
   d("program_cars:milestone", "Milestone", "Optional milestone on this car in the program.", "program_cars.milestone", "Staff-entered; never enforced."),
   d("program_cars:milestone_at", "Milestone date", "Date of the current milestone.", "program_cars.milestone_at", "Staff-entered."),
-  d("program_cars:notes", "Notes", "Notes on this car in the program.", "program_cars.notes", "Staff-entered on the program-car row."),
+  d("program_cars:notes", "Notes", "Program note on this car (not the status field).", "program_cars.notes", "Staff-entered on the program-car row. Bulk field is labeled Program note."),
+  d("program_cars:status", "Status", "Program-car status (shop progress, not fleet status).", "program_cars.status", "Staff-entered on the program-car row."),
   d("program_cars:shop", "Shop / yard", "Shop or yard assigned for this program car.", "program_cars.shop_id → shops", "Link to shops."),
   d("program_cars:commitment", "Commitment", "Open Commitment on this car, if any.", "car_commitments", "Open commitment for the linked railcar."),
   d("program_cars:kpi", "KPI bucket", "Which dashboard KPI list this car currently falls in.", "calculated", "Same KPI rules as the dashboard (off rent, idle, unassigned, sold, etc.)."),
   d("program_cars:car", "Car", "Car in this program.", "program_cars.railcar_id → railcars", "Marks + number of the linked railcar."),
+  d("program_cars:complete", "Outcome", "Whether this program car reached its outcome.", "program_cars.outcome_reached_at / completed", "Staff-marked on the program-car row."),
   d("browse_ol_list:ol", "OL / Rider", "Operating or finance lease (rider) in this group.", "riders.rider_external_id / rider_name", "Group row’s OL code; name shown under the code when different."),
 ];
 
@@ -178,6 +180,7 @@ export const RENDERED_COLUMNS: Record<string, readonly string[]> = {
     "active",
     "milestone",
     "milestone_at",
+    "status",
     "notes",
     "shop",
     "commitment",

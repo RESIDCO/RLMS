@@ -1,0 +1,44 @@
+program_id,program_car_id,marks,car_number,status,notes_unchanged,commitment_type,destination,action
+7,123,TFOX,002006,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,124,TFOX,002023,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,126,TFOX,002063,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,127,TFOX,002105,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,128,TFOX,002107,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,129,TFOX,002138,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,130,TFOX,002150,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,134,TFOX,002233,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,136,TFOX,002243,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,137,TFOX,002249,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,140,TFOX,002283,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,144,TFOX,002332,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,147,TFOX,002343,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,149,TFOX,002351,COMPLETE - Arrived Lessee,Complete Group For Metalico,scrap,Metalico,preview_only
+7,132,TFOX,002216,Enroute to Lessee Destination,Complete Group For Metalico,scrap,Metalico,preview_only
+7,139,TFOX,002271,Enroute to Lessee Destination,Complete Group For Metalico,scrap,Metalico,preview_only
+7,142,TFOX,002308,Enroute to Lessee Destination,Complete Group For Metalico,scrap,Metalico,preview_only
+7,145,TFOX,002334,Enroute to Lessee Destination,Complete Group For Metalico,scrap,Metalico,preview_only
+7,150,TFOX,002359,Enroute to Lessee Destination,Complete Group For Metalico,scrap,Metalico,preview_only
+7,161,TFOX,002159,Enroute to Lessee Destination,Complete Group For Metalico,scrap,Metalico,preview_only
+7,120,TFOX,009615,Awaiting Estimate,Scrap,scrap,Scrap,preview_only
+7,121,TFOX,009616,Awaiting dispo & BRC,Scrap,scrap,Scrap,preview_only
+7,122,TFOX,009634,Awaiting Estimate,Scrap,scrap,Scrap,preview_only
+7,154,TFOX,009620,Awaiting Estimate,Scrap,scrap,Scrap,preview_only
+7,160,TFOX,009647,Awaiting Estimate,Scrap,scrap,Scrap,preview_only
+7,152,TFOX,002019,Awaiting Release,,scrap,Consolidated Scrap,preview_only
+7,125,TFOX,002035,Awaiting Estimate,,scrap,Consolidated Scrap,preview_only
+7,155,TFOX,002156,Enroute to Lessee Destination,,scrap,Consolidated Scrap,preview_only
+7,156,TFOX,002157,Enroute to Lessee Destination,,scrap,Consolidated Scrap,preview_only
+7,131,TFOX,002182,Awaiting Release,,scrap,Consolidated Scrap,preview_only
+7,151,TFOX,002187,Awaiting Release,,scrap,Consolidated Scrap,preview_only
+7,133,TFOX,002225,Awaiting Estimate,,scrap,Consolidated Scrap,preview_only
+7,135,TFOX,002238,Awaiting Estimate,,scrap,Consolidated Scrap,preview_only
+7,162,TFOX,002248,Enroute to Lessee Destination,,scrap,Consolidated Scrap,preview_only
+7,138,TFOX,002264,Awaiting Estimate,,scrap,Consolidated Scrap,preview_only
+7,141,TFOX,002304,Awaiting Estimate,,scrap,Consolidated Scrap,preview_only
+7,157,TFOX,002306,Enroute to Lessee Destination,,scrap,Consolidated Scrap,preview_only
+7,143,TFOX,002315,Awaiting Release,,scrap,Consolidated Scrap,preview_only
+7,158,TFOX,002318,Enroute to Lessee Destination,,scrap,Consolidated Scrap,preview_only
+7,153,TFOX,002339,Awaiting Release,,scrap,Consolidated Scrap,preview_only
+7,146,TFOX,002342,Awaiting Release,,scrap,Consolidated Scrap,preview_only
+7,148,TFOX,002347,Awaiting Estimate,,scrap,Consolidated Scrap,preview_only
+7,159,TFOX,002358,Enroute to Lessee Destination,,scrap,Consolidated Scrap,preview_only

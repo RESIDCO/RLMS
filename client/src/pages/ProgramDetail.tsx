@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
+import { offerUndoToast } from "@/lib/undo";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { ProgramPreviewDialog } from "@/components/ProgramPreviewDialog";
 import PageHeader from "@/components/PageHeader";
@@ -540,13 +541,19 @@ export default function ProgramDetailPage() {
         preview_token: prev.preview_token,
       }).then((r) => r.json());
       const u = Number(applied.updated ?? n);
-      toast({
-        title: `Saved ${u} program car${u === 1 ? "" : "s"}`,
-        description:
-          applied.commitments_written > 0
-            ? `${applied.commitments_written} commitment${applied.commitments_written === 1 ? "" : "s"} written`
-            : undefined,
+      offerUndoToast({
+        ...applied,
+        change_group: applied.change_group,
       });
+      if (!applied.change_group) {
+        toast({
+          title: `Saved ${u} program car${u === 1 ? "" : "s"}`,
+          description:
+            applied.commitments_written > 0
+              ? `${applied.commitments_written} commitment${applied.commitments_written === 1 ? "" : "s"} written`
+              : undefined,
+        });
+      }
       await Promise.all([
         qc.invalidateQueries({ queryKey: carsKey }),
         qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true }),

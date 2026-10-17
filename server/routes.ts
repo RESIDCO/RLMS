@@ -5975,7 +5975,8 @@ export async function registerRoutes(
         }
         return data;
       });
-      res.json(await getProgram(id) ?? patched);
+      const row = await getProgram(id);
+      res.json({ ...(row ?? patched), change_group: patched.change_group });
     } catch (err) { errHandler(res, err); }
   });
 

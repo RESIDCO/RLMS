@@ -5830,12 +5830,9 @@ export async function registerRoutes(
       if (scopeAll) {
         ids = (await listPrograms()).map((p: any) => Number(p.id));
       }
-      const includeExited = scopeAll
-        ? req.query.include_exited !== "0" && req.query.include_exited !== "false"
-        : req.query.include_exited === "1" || req.query.include_exited === "true";
       const { buffer, filename } = await buildProgramReport({
         programIds: ids,
-        includeExited,
+        includeExited: true,
         filename: scopeAll ? masterReportFilename() : undefined,
         cols: req.query.cols,
       });
@@ -5863,10 +5860,9 @@ export async function registerRoutes(
   app.get("/api/programs/:id/export", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
-      const includeExited = req.query.include_exited === "1" || req.query.include_exited === "true";
       const { buffer, filename } = await buildProgramReport({
         programIds: [Number(req.params.id)],
-        includeExited,
+        includeExited: true,
         cols: req.query.cols,
       });
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

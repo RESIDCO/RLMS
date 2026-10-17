@@ -119,9 +119,9 @@ const NAMESPACED: ColumnDictEntry[] = [
   d("programs:title", "Title", "Program name.", "programs.name", "Stored program title."),
   d("programs:type", "Type", "Work type (Return, Remark, Acquisition, Quals, etc.).", "programs.type", "Stored type, or inferred from category when type is blank."),
   d("programs:lifecycle", "Lifecycle", "Draft, active, closed, or cancelled.", "calculated", "Closed if closed_date is set; otherwise stored lifecycle (default active)."),
-  d("programs:progress", "Progress", "Cars finished vs still open on this program.", "calculated", "Done / open-link count from program cars (inactive, outcome, or complete = done)."),
+  d("programs:progress", "Progress", "Share of program cars at Program done (end result reached).", "calculated", "Program done = On rent, Scrapped, Sold, Stored, or inactive. Work done is not counted as done."),
   d("programs:target", "Target date", "When the program is supposed to be finished.", "programs.target_completion_date", "Stored target. Past due with remaining cars is Stale."),
-  d("programs:ready", "Ready", "Active program with no remaining open cars — ready to review/close.", "calculated", "Ready to close when lifecycle is active and remaining = 0."),
+  d("programs:ready", "Ready", "Active program with every car at Program done — ready to review/close.", "calculated", "Ready to close when lifecycle is active and remaining (not Program done) = 0."),
   d("programs:owner", "Owner", "Account manager for the program.", "programs.account_manager", "Stored on the program."),
   d("programs:entity", "Entity", "Residco book this program is for.", "programs.entity", "Stored on the program."),
   d("program_cars:active", "Active", "Whether the linked car is in the active fleet.", "railcars.active", "From the linked railcar, not the program row."),
@@ -133,7 +133,14 @@ const NAMESPACED: ColumnDictEntry[] = [
   d("program_cars:commitment", "Commitment", "Open Commitment on this car, if any.", "car_commitments", "Open commitment for the linked railcar."),
   d("program_cars:kpi", "KPI bucket", "Which dashboard KPI list this car currently falls in.", "calculated", "Same KPI rules as the dashboard (off rent, idle, unassigned, sold, etc.)."),
   d("program_cars:car", "Car", "Car in this program.", "program_cars.railcar_id → railcars", "Marks + number of the linked railcar."),
-  d("program_cars:complete", "Outcome", "Whether this program car reached its outcome.", "program_cars.outcome_reached_at / completed", "Staff-marked on the program-car row."),
+  d("program_cars:complete", "Outcome", "Legacy outcome checkbox. Progress uses Completion / Program done instead.", "program_cars.outcome_reached_at / completed", "Staff-marked. Not the same as Program done."),
+  d(
+    "program_cars:completion",
+    "Completion",
+    "Where this car sits on the program: Not started, In progress, Work done (work finished, still awaiting destination), or Program done (On rent, Scrapped, Sold, Stored, or inactive).",
+    "calculated from program_car_milestones",
+    "Program done if the car is inactive or the trail has On rent, Scrapped, Sold, or Stored. Work done if the trail has Work complete and not yet Program done. In progress if any other milestone or status is set. Otherwise Not started.",
+  ),
   d("browse_ol_list:ol", "OL / Rider", "Operating or finance lease (rider) in this group.", "riders.rider_external_id / rider_name", "Group row’s OL code; name shown under the code when different."),
 ];
 
@@ -150,7 +157,7 @@ export const KPI_REASON_VALUES: Record<string, ColumnDictEntry> = Object.fromEnt
     d("EA/EX/xOL", "EA / EX / xOL", "Rider code is an expiration/exit style ID, treated as off rent.", "calculated", "Current rider matches EA, EX, or xOL."),
     d("x-lessee", "x-lessee", "Lessee or assignment label is an x-name, treated as off rent.", "calculated", "Lessee or assignment label starts with x (or (x)."),
     d("open Commitment", "Open commitment", "Off rent with a staff Commitment (program, deal, scrap, or other).", "car_commitments", "Open (not cleared) row on car_commitments."),
-    d("program", "Program", "Car is on an open program.", "program_cars", "Active program membership (in_open_program)."),
+    d("program", "Program", "Car is on an open program that is not yet Program done.", "program_cars", "Active program membership excluding Program done cars (in_open_program)."),
     d("Going On Lease", "Going on lease", "Car is in the Going On Lease path (implicit commitment / rent start).", "calculated", "going_on_lease flag from KPI rules."),
   ].map((e) => [e.key, e]),
 );
@@ -177,6 +184,7 @@ export const RENDERED_COLUMNS: Record<string, readonly string[]> = {
   program_cars: [
     "car",
     "complete",
+    "completion",
     "active",
     "milestone",
     "milestone_at",

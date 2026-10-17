@@ -14,8 +14,10 @@ import {
   xLesseeName,
   type CommitmentType,
 } from "@shared/commitment";
+import { pickRow } from "@shared/change-log";
 import { fetchAllRows } from "./fetch-all";
 import { logActivity } from "./activity-log";
+import { recordChange, withChangeGroupResult } from "./change-log";
 import { annotateKpiDelta } from "./kpi-delta";
 import { formatCarId } from "@shared/residco-import";
 
@@ -169,11 +171,23 @@ export async function setCommitment(
     });
   }
   if (existing && opts?.overwrite) {
+    const cleared_at = new Date().toISOString();
     const { error } = await supabaseAdmin
       .from("car_commitments")
-      .update({ cleared_at: new Date().toISOString(), cleared_by: actor })
+      .update({ cleared_at, cleared_by: actor })
       .eq("id", existing.id);
     if (error) throw error;
+    await recordChange({
+      table: "car_commitments",
+      pk: Number(existing.id),
+      before: pickRow(existing, ["cleared_at", "cleared_by"]),
+      after: { cleared_at, cleared_by: actor },
+      action: "commitment_clear",
+      entity_type: "railcar",
+      entity_id: railcarId,
+      railcar_id: railcarId,
+      actor,
+    });
   }
   const { data, error } = await supabaseAdmin
     .from("car_commitments")
@@ -189,6 +203,17 @@ export async function setCommitment(
     .select()
     .single();
   if (error) throw error;
+  await recordChange({
+    table: "car_commitments",
+    pk: Number(data.id),
+    before: {},
+    after: data,
+    action: "commitment_set",
+    entity_type: "railcar",
+    entity_id: railcarId,
+    railcar_id: railcarId,
+    actor,
+  });
   await recomputeStatus(railcarId);
   return data;
 }
@@ -196,13 +221,25 @@ export async function setCommitment(
 export async function clearCommitment(railcarId: number, actor: string) {
   const existing = await openCommitment(railcarId);
   if (!existing) return null;
+  const cleared_at = new Date().toISOString();
   const { data, error } = await supabaseAdmin
     .from("car_commitments")
-    .update({ cleared_at: new Date().toISOString(), cleared_by: actor })
+    .update({ cleared_at, cleared_by: actor })
     .eq("id", existing.id)
     .select()
     .single();
   if (error) throw error;
+  await recordChange({
+    table: "car_commitments",
+    pk: Number(existing.id),
+    before: pickRow(existing, ["cleared_at", "cleared_by"]),
+    after: pickRow(data, ["cleared_at", "cleared_by"]),
+    action: "commitment_clear",
+    entity_type: "railcar",
+    entity_id: railcarId,
+    railcar_id: railcarId,
+    actor,
+  });
   await recomputeStatus(railcarId);
   return data;
 }
@@ -377,38 +414,40 @@ export async function previewBulkCommitment(
 }
 
 export async function applyBulkCommitment(previewToken: string, actor: string) {
-  const preview = await getPreview("commitment", previewToken);
-  if (preview.action === "clear") {
-    const ids = (preview.matched ?? []).map((m: any) => m.id);
-    const cleared = [];
-    for (const id of ids) {
-      const row = await clearCommitment(id, actor);
-      if (row) cleared.push(row);
+  return withChangeGroupResult(actor, async () => {
+    const preview = await getPreview("commitment", previewToken);
+    if (preview.action === "clear") {
+      const ids = (preview.matched ?? []).map((m: any) => m.id);
+      const cleared = [];
+      for (const id of ids) {
+        const row = await clearCommitment(id, actor);
+        if (row) cleared.push(row);
+      }
+      return { preview, cleared: cleared.length };
     }
-    return { preview, cleared: cleared.length };
-  }
-  if (!preview.type || !String(preview.name ?? "").trim()) {
-    throw Object.assign(new Error("type and name required"), { status: 400 });
-  }
-  const eligible = (preview.matched ?? []).filter((m: any) => !m.commitment || preview.overwrite);
-  const skipped = (preview.matched ?? []).filter((m: any) => m.commitment && !preview.overwrite);
-  const set = [];
-  for (const m of eligible) {
-    const row = await setCommitment(
-      m.id,
-      {
-        type: preview.type,
-        name: preview.name,
-        program_id: preview.program_id,
-        target_date: preview.target_date,
-        note: preview.note,
-      },
-      actor,
-      { overwrite: true },
-    );
-    set.push(row);
-  }
-  return { preview, set: set.length, skipped: skipped.length, rejected_on_rent: (preview.on_rent ?? []).length };
+    if (!preview.type || !String(preview.name ?? "").trim()) {
+      throw Object.assign(new Error("type and name required"), { status: 400 });
+    }
+    const eligible = (preview.matched ?? []).filter((m: any) => !m.commitment || preview.overwrite);
+    const skipped = (preview.matched ?? []).filter((m: any) => m.commitment && !preview.overwrite);
+    const set = [];
+    for (const m of eligible) {
+      const row = await setCommitment(
+        m.id,
+        {
+          type: preview.type,
+          name: preview.name,
+          program_id: preview.program_id,
+          target_date: preview.target_date,
+          note: preview.note,
+        },
+        actor,
+        { overwrite: true },
+      );
+      set.push(row);
+    }
+    return { preview, set: set.length, skipped: skipped.length, rejected_on_rent: (preview.on_rent ?? []).length };
+  });
 }
 
 function eaNameFromOl(ol: string | null | undefined): string | null {
@@ -503,97 +542,156 @@ export async function previewBulkReturn(
 }
 
 export async function applyBulkReturn(previewToken: string, actor: string) {
-  const preview = await getPreview("return", previewToken);
-  const moved = [];
-  const failed = [];
-  for (const row of preview.rows ?? []) {
-    if (!row.eligible) continue;
-    if (!row.to_rider_id) {
-      failed.push({ ...row, error: "EA rider not found" });
-      continue;
-    }
-    const { assignment: prev, error: aErr } = await (async () => {
-      const { data, error } = await supabaseAdmin
-        .from("railcar_assignments")
-        .select("id, rider_id, fleet_name")
-        .eq("railcar_id", row.id)
-        .order("id", { ascending: false })
-        .limit(1);
-      return { assignment: (data ?? [])[0] ?? null, error };
-    })();
-    if (aErr) {
-      failed.push({ ...row, error: aErr.message });
-      continue;
-    }
-    const targetFleet = row.to_label;
-    if (prev) {
-      const { error } = await supabaseAdmin
-        .from("railcar_assignments")
-        .update({
-          rider_id: row.to_rider_id,
-          fleet_name: targetFleet,
-          assigned_at: new Date().toISOString(),
-          rent_start_date: null,
-          rent_start_set_by: null,
-          rent_start_set_at: null,
-        })
-        .eq("id", prev.id);
-      if (error) {
-        failed.push({ ...row, error: error.message });
+  return withChangeGroupResult(actor, async () => {
+    const preview = await getPreview("return", previewToken);
+    const moved = [];
+    const failed = [];
+    for (const row of preview.rows ?? []) {
+      if (!row.eligible) continue;
+      if (!row.to_rider_id) {
+        failed.push({ ...row, error: "EA rider not found" });
         continue;
       }
-    } else {
-      const { error } = await supabaseAdmin.from("railcar_assignments").insert({
-        railcar_id: row.id,
+      const { assignment: prev, error: aErr } = await (async () => {
+        const { data, error } = await supabaseAdmin
+          .from("railcar_assignments")
+          .select("id, rider_id, fleet_name, rent_start_date, rent_start_set_by, rent_start_set_at")
+          .eq("railcar_id", row.id)
+          .order("id", { ascending: false })
+          .limit(1);
+        return { assignment: (data ?? [])[0] ?? null, error };
+      })();
+      if (aErr) {
+        failed.push({ ...row, error: aErr.message });
+        continue;
+      }
+      const { data: carPrior, error: carPriorErr } = await supabaseAdmin
+        .from("railcars")
+        .select("id, rider_external_id, assignment_label, lessee_name")
+        .eq("id", row.id)
+        .maybeSingle();
+      if (carPriorErr) {
+        failed.push({ ...row, error: carPriorErr.message });
+        continue;
+      }
+      const targetFleet = row.to_label;
+      const assignAfter = {
         rider_id: row.to_rider_id,
         fleet_name: targetFleet,
         assigned_at: new Date().toISOString(),
         rent_start_date: null,
-      });
-      if (error) {
-        failed.push({ ...row, error: error.message });
+        rent_start_set_by: null,
+        rent_start_set_at: null,
+      };
+      if (prev) {
+        const { error } = await supabaseAdmin
+          .from("railcar_assignments")
+          .update(assignAfter)
+          .eq("id", prev.id);
+        if (error) {
+          failed.push({ ...row, error: error.message });
+          continue;
+        }
+        await recordChange({
+          table: "railcar_assignments",
+          pk: Number(prev.id),
+          before: pickRow(prev, ["rider_id", "fleet_name", "rent_start_date", "rent_start_set_by", "rent_start_set_at"]),
+          after: assignAfter,
+          action: "bulk_return",
+          entity_type: "railcar",
+          entity_id: Number(row.id),
+          railcar_id: Number(row.id),
+          actor,
+        });
+      } else {
+        const { data: ins, error } = await supabaseAdmin.from("railcar_assignments").insert({
+          railcar_id: row.id,
+          rider_id: row.to_rider_id,
+          fleet_name: targetFleet,
+          assigned_at: assignAfter.assigned_at,
+          rent_start_date: null,
+        }).select("id").single();
+        if (error) {
+          failed.push({ ...row, error: error.message });
+          continue;
+        }
+        await recordChange({
+          table: "railcar_assignments",
+          pk: ins?.id != null ? Number(ins.id) : null,
+          before: {},
+          after: { railcar_id: row.id, rider_id: row.to_rider_id, fleet_name: targetFleet, rent_start_date: null },
+          action: "bulk_return",
+          entity_type: "railcar",
+          entity_id: Number(row.id),
+          railcar_id: Number(row.id),
+          actor,
+        });
+      }
+      const { data: hist, error: hErr } = await supabaseAdmin.from("assignment_history").insert({
+        railcar_id: row.id,
+        from_rider_id: prev?.rider_id ?? null,
+        to_rider_id: row.to_rider_id,
+        from_fleet_name: prev?.fleet_name ?? null,
+        to_fleet_name: targetFleet,
+        moved_at: new Date().toISOString(),
+        moved_by: actor,
+        reason: "Bulk return OL → EA",
+      }).select().single();
+      if (hErr) {
+        failed.push({ ...row, error: `assignment_history: ${hErr.message}` });
         continue;
       }
-    }
-    const { error: hErr } = await supabaseAdmin.from("assignment_history").insert({
-      railcar_id: row.id,
-      from_rider_id: prev?.rider_id ?? null,
-      to_rider_id: row.to_rider_id,
-      from_fleet_name: prev?.fleet_name ?? null,
-      to_fleet_name: targetFleet,
-      moved_at: new Date().toISOString(),
-      moved_by: actor,
-      reason: "Bulk return OL → EA",
-    });
-    if (hErr) {
-      failed.push({ ...row, error: `assignment_history: ${hErr.message}` });
-      continue;
-    }
-    const { error: uErr } = await supabaseAdmin
-      .from("railcars")
-      .update({
+      await recordChange({
+        table: "assignment_history",
+        pk: hist?.id != null ? Number(hist.id) : null,
+        before: {},
+        after: hist ?? {},
+        action: "bulk_return",
+        entity_type: "railcar",
+        entity_id: Number(row.id),
+        railcar_id: Number(row.id),
+        actor,
+        source_table: "assignment_history",
+        source_id: hist?.id != null ? Number(hist.id) : null,
+      });
+      const carAfter = {
         rider_external_id: row.to_link,
         assignment_label: targetFleet,
         lessee_name: row.to_label,
-      })
-      .eq("id", row.id);
-    if (uErr) {
-      failed.push({ ...row, error: uErr.message });
-      continue;
-    }
-    if (preview.commitment) {
-      try {
-        await setCommitment(row.id, preview.commitment, actor, { overwrite: Boolean(preview.commitment.overwrite) });
-      } catch (e: any) {
-        failed.push({ ...row, error: e.message });
+      };
+      const { error: uErr } = await supabaseAdmin
+        .from("railcars")
+        .update(carAfter)
+        .eq("id", row.id);
+      if (uErr) {
+        failed.push({ ...row, error: uErr.message });
         continue;
       }
-    } else {
-      await recomputeStatus(row.id);
+      await recordChange({
+        table: "railcars",
+        pk: Number(row.id),
+        before: pickRow(carPrior, ["rider_external_id", "assignment_label", "lessee_name"]),
+        after: carAfter,
+        action: "bulk_return",
+        entity_type: "railcar",
+        entity_id: Number(row.id),
+        railcar_id: Number(row.id),
+        actor,
+      });
+      if (preview.commitment) {
+        try {
+          await setCommitment(row.id, preview.commitment, actor, { overwrite: Boolean(preview.commitment.overwrite) });
+        } catch (e: any) {
+          failed.push({ ...row, error: e.message });
+          continue;
+        }
+      } else {
+        await recomputeStatus(row.id);
+      }
+      moved.push(row.id);
     }
-    moved.push(row.id);
-  }
-  return { preview, moved: moved.length, failed };
+    return { preview, moved: moved.length, failed };
+  });
 }
 
 export async function listStale() {
@@ -668,43 +766,14 @@ export async function listWatch() {
   });
 }
 
-export async function closeProgram(programId: number, actor: string) {
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: prog, error: pErr } = await supabaseAdmin.from("programs").select("*").eq("id", programId).maybeSingle();
-  if (pErr) throw pErr;
-  if (!prog) throw Object.assign(new Error("Program not found"), { status: 404 });
-  await supabaseAdmin
-    .from("programs")
-    .update({ closed_date: today, status: "closed", updated_at: new Date().toISOString() })
-    .eq("id", programId);
-  const { data: cars } = await supabaseAdmin
-    .from("program_cars")
-    .select("id, railcar_id")
-    .eq("program_id", programId)
-    .is("exited_date", null);
-  if (cars?.length) {
-    await supabaseAdmin
-      .from("program_cars")
-      .update({ exited_date: today })
-      .eq("program_id", programId)
-      .is("exited_date", null);
-  }
-  const { data: commits } = await supabaseAdmin
-    .from("car_commitments")
-    .select("id, railcar_id")
-    .eq("program_id", programId)
-    .is("cleared_at", null);
-  for (const c of commits ?? []) {
-    await supabaseAdmin
-      .from("car_commitments")
-      .update({ cleared_at: new Date().toISOString(), cleared_by: actor })
-      .eq("id", c.id);
-    await recomputeStatus(c.railcar_id);
-  }
-  return { closed: true, cars_exited: cars?.length ?? 0, commitments_cleared: commits?.length ?? 0 };
-}
-
 export async function extendCommitment(id: number, target_date: string, note: string | null, actor: string) {
+  const { data: prior, error: pErr } = await supabaseAdmin
+    .from("car_commitments")
+    .select("*")
+    .eq("id", id)
+    .is("cleared_at", null)
+    .maybeSingle();
+  if (pErr) throw pErr;
   const { data, error } = await supabaseAdmin
     .from("car_commitments")
     .update({
@@ -718,6 +787,17 @@ export async function extendCommitment(id: number, target_date: string, note: st
     .select()
     .single();
   if (error) throw error;
+  await recordChange({
+    table: "car_commitments",
+    pk: id,
+    before: pickRow(prior, ["target_date", "note", "set_by", "set_at"]),
+    after: pickRow(data, ["target_date", "note", "set_by", "set_at"]),
+    action: "commitment_extend",
+    entity_type: "railcar",
+    entity_id: Number(data.railcar_id),
+    railcar_id: Number(data.railcar_id),
+    actor,
+  });
   return data;
 }
 
@@ -774,44 +854,76 @@ export async function applyMarkSold(
   actor: string,
   opts: { sold_to?: string | null; effective_date?: string | null },
 ) {
-  const preview = await getPreview("sold", previewToken);
-  const movedAt = opts.effective_date
-    ? `${String(opts.effective_date).slice(0, 10)}T12:00:00.000Z`
-    : new Date().toISOString();
-  let updated = 0;
-  for (const car of preview.cars ?? []) {
-    const id = car.id;
-    const soldTo = opts.sold_to ?? car.proposed_sold_to ?? car.sold_to ?? null;
-    const patch: Record<string, unknown> = {
-      fleet_status: "Sold",
-      fleet_status_source: "manual",
-    };
-    if (soldTo) patch.sold_to = soldTo;
-    const { error } = await supabaseAdmin.from("railcars").update(patch).eq("id", id).eq("active", true);
-    if (error) throw error;
-    const { assignment } = await latestAssignment(id);
-    const { error: hErr } = await supabaseAdmin.from("assignment_history").insert({
-      railcar_id: id,
-      from_rider_id: assignment?.rider_id ?? null,
-      to_rider_id: assignment?.rider_id ?? null,
-      from_fleet_name: assignment?.fleet_name ?? null,
-      to_fleet_name: assignment?.fleet_name ?? null,
-      moved_at: movedAt,
-      moved_by: actor,
-      reason: "Rental status set to Sold",
-    });
-    if (hErr) throw hErr;
-    await logActivity({
-      entity_type: "railcar",
-      entity_id: id,
-      action: "marked_sold",
-      actor,
-      railcar_id: id,
-      detail: { preview_token: previewToken, sold_to: soldTo, active_unchanged: true },
-    });
-    updated += 1;
-  }
-  return { preview, updated, fleet_status: "Sold" };
+  return withChangeGroupResult(actor, async () => {
+    const preview = await getPreview("sold", previewToken);
+    const movedAt = opts.effective_date
+      ? `${String(opts.effective_date).slice(0, 10)}T12:00:00.000Z`
+      : new Date().toISOString();
+    let updated = 0;
+    for (const car of preview.cars ?? []) {
+      const id = car.id;
+      const soldTo = opts.sold_to ?? car.proposed_sold_to ?? car.sold_to ?? null;
+      const { data: prior, error: pErr } = await supabaseAdmin
+        .from("railcars")
+        .select("id, fleet_status, fleet_status_source, sold_to")
+        .eq("id", id)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      const patch: Record<string, unknown> = {
+        fleet_status: "Sold",
+        fleet_status_source: "manual",
+      };
+      if (soldTo) patch.sold_to = soldTo;
+      const { error } = await supabaseAdmin.from("railcars").update(patch).eq("id", id).eq("active", true);
+      if (error) throw error;
+      await recordChange({
+        table: "railcars",
+        pk: Number(id),
+        before: pickRow(prior, ["fleet_status", "fleet_status_source", "sold_to"]),
+        after: { ...pickRow(prior, ["fleet_status", "fleet_status_source", "sold_to"]), ...patch },
+        action: "marked_sold",
+        entity_type: "railcar",
+        entity_id: Number(id),
+        railcar_id: Number(id),
+        actor,
+      });
+      const { assignment } = await latestAssignment(id);
+      const { data: hist, error: hErr } = await supabaseAdmin.from("assignment_history").insert({
+        railcar_id: id,
+        from_rider_id: assignment?.rider_id ?? null,
+        to_rider_id: assignment?.rider_id ?? null,
+        from_fleet_name: assignment?.fleet_name ?? null,
+        to_fleet_name: assignment?.fleet_name ?? null,
+        moved_at: movedAt,
+        moved_by: actor,
+        reason: "Rental status set to Sold",
+      }).select().single();
+      if (hErr) throw hErr;
+      await recordChange({
+        table: "assignment_history",
+        pk: hist?.id != null ? Number(hist.id) : null,
+        before: {},
+        after: hist ?? {},
+        action: "marked_sold",
+        entity_type: "railcar",
+        entity_id: Number(id),
+        railcar_id: Number(id),
+        actor,
+        source_table: "assignment_history",
+        source_id: hist?.id != null ? Number(hist.id) : null,
+      });
+      await logActivity({
+        entity_type: "railcar",
+        entity_id: id,
+        action: "marked_sold",
+        actor,
+        railcar_id: id,
+        detail: { preview_token: previewToken, sold_to: soldTo, active_unchanged: true },
+      });
+      updated += 1;
+    }
+    return { preview, updated, fleet_status: "Sold" };
+  });
 }
 
 export async function previewRemoveSold(idsRaw: number[], bucket?: string | null) {
@@ -833,33 +945,53 @@ export async function previewRemoveSold(idsRaw: number[], bucket?: string | null
 }
 
 export async function applyRemoveSold(previewToken: string, actor: string) {
-  const preview = await getPreview("unsold", previewToken);
-  let updated = 0;
-  for (const id of preview.ids ?? []) {
-    const { error } = await supabaseAdmin
-      .from("railcars")
-      .update({ fleet_status: "Leased", fleet_status_source: "manual" })
-      .eq("id", id)
-      .eq("active", true)
-      .eq("fleet_status", "Sold");
-    if (error) throw error;
-    await supabaseAdmin.from("assignment_history").insert({
-      railcar_id: id,
-      moved_at: new Date().toISOString(),
-      moved_by: actor,
-      reason: "Sold tag removed (preview sign-off)",
-    });
-    await logActivity({
-      entity_type: "railcar",
-      entity_id: id,
-      action: "sold_tag_removed",
-      actor,
-      railcar_id: id,
-      detail: { preview_token: previewToken },
-    });
-    updated += 1;
-  }
-  return { preview, updated };
+  return withChangeGroupResult(actor, async () => {
+    const preview = await getPreview("unsold", previewToken);
+    let updated = 0;
+    for (const id of preview.ids ?? []) {
+      const { data: prior, error: pErr } = await supabaseAdmin
+        .from("railcars")
+        .select("id, fleet_status, fleet_status_source, sold_to")
+        .eq("id", id)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      const patch = { fleet_status: "Leased", fleet_status_source: "manual" };
+      const { error } = await supabaseAdmin
+        .from("railcars")
+        .update(patch)
+        .eq("id", id)
+        .eq("active", true)
+        .eq("fleet_status", "Sold");
+      if (error) throw error;
+      await recordChange({
+        table: "railcars",
+        pk: Number(id),
+        before: pickRow(prior, ["fleet_status", "fleet_status_source", "sold_to"]),
+        after: { ...pickRow(prior, ["fleet_status", "fleet_status_source", "sold_to"]), ...patch },
+        action: "sold_tag_removed",
+        entity_type: "railcar",
+        entity_id: Number(id),
+        railcar_id: Number(id),
+        actor,
+      });
+      await supabaseAdmin.from("assignment_history").insert({
+        railcar_id: id,
+        moved_at: new Date().toISOString(),
+        moved_by: actor,
+        reason: "Sold tag removed (preview sign-off)",
+      });
+      await logActivity({
+        entity_type: "railcar",
+        entity_id: id,
+        action: "sold_tag_removed",
+        actor,
+        railcar_id: id,
+        detail: { preview_token: previewToken },
+      });
+      updated += 1;
+    }
+    return { preview, updated };
+  });
 }
 
 export async function previewClassifySale(
@@ -967,35 +1099,55 @@ export async function previewOl2144RtexBuyer() {
 }
 
 export async function applyOl2144RtexBuyer(previewToken: string, actor: string) {
-  const preview = await getPreview("buyer", previewToken);
-  let updated = 0;
-  for (const id of preview.ids ?? []) {
-    const { data, error } = await supabaseAdmin
-      .from("railcars")
-      .update({ sold_to: preview.buyer ?? "RTEX" })
-      .eq("id", id)
-      .eq("active", true)
-      .eq("fleet_status", "Sold")
-      .select("id");
-    if (error) throw error;
-    if (!data?.length) continue;
-    await supabaseAdmin.from("assignment_history").insert({
-      railcar_id: id,
-      moved_at: new Date().toISOString(),
-      moved_by: actor,
-      reason: "Buyer set to RTEX (preview sign-off)",
-    });
-    await logActivity({
-      entity_type: "railcar",
-      entity_id: id,
-      action: "buyer_set",
-      actor,
-      railcar_id: id,
-      detail: { buyer: preview.buyer ?? "RTEX", preview_token: previewToken, active_unchanged: true },
-    });
-    updated += 1;
-  }
-  return { preview, updated };
+  return withChangeGroupResult(actor, async () => {
+    const preview = await getPreview("buyer", previewToken);
+    let updated = 0;
+    for (const id of preview.ids ?? []) {
+      const { data: prior, error: pErr } = await supabaseAdmin
+        .from("railcars")
+        .select("id, sold_to")
+        .eq("id", id)
+        .maybeSingle();
+      if (pErr) throw pErr;
+      const sold_to = preview.buyer ?? "RTEX";
+      const { data, error } = await supabaseAdmin
+        .from("railcars")
+        .update({ sold_to })
+        .eq("id", id)
+        .eq("active", true)
+        .eq("fleet_status", "Sold")
+        .select("id");
+      if (error) throw error;
+      if (!data?.length) continue;
+      await recordChange({
+        table: "railcars",
+        pk: Number(id),
+        before: pickRow(prior, ["sold_to"]),
+        after: { sold_to },
+        action: "buyer_set",
+        entity_type: "railcar",
+        entity_id: Number(id),
+        railcar_id: Number(id),
+        actor,
+      });
+      await supabaseAdmin.from("assignment_history").insert({
+        railcar_id: id,
+        moved_at: new Date().toISOString(),
+        moved_by: actor,
+        reason: "Buyer set to RTEX (preview sign-off)",
+      });
+      await logActivity({
+        entity_type: "railcar",
+        entity_id: id,
+        action: "buyer_set",
+        actor,
+        railcar_id: id,
+        detail: { buyer: sold_to, preview_token: previewToken, active_unchanged: true },
+      });
+      updated += 1;
+    }
+    return { preview, updated };
+  });
 }
 
 export function registerCommitmentRoutes(
@@ -1043,17 +1195,19 @@ export function registerCommitmentRoutes(
       if (!isCommitmentType(req.body?.type) || !String(req.body?.name ?? "").trim()) {
         return res.status(400).json({ message: "type and name required" });
       }
-      const row = await setCommitment(
-        id,
-        {
-          type: req.body.type,
-          name: req.body.name,
-          program_id: req.body.program_id ?? null,
-          target_date: req.body.target_date ?? null,
-          note: req.body.note ?? null,
-        },
-        actor,
-        { overwrite: Boolean(req.body.overwrite) },
+      const row = await withChangeGroupResult(actor, () =>
+        setCommitment(
+          id,
+          {
+            type: req.body.type,
+            name: req.body.name,
+            program_id: req.body.program_id ?? null,
+            target_date: req.body.target_date ?? null,
+            note: req.body.note ?? null,
+          },
+          actor,
+          { overwrite: Boolean(req.body.overwrite) },
+        ),
       );
       res.json(row);
     } catch (e) {
@@ -1065,8 +1219,11 @@ export function registerCommitmentRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      const row = await clearCommitment(Number(req.params.id), actor);
-      res.json({ cleared: Boolean(row), commitment: row });
+      const row = await withChangeGroupResult(actor, async () => {
+        const cleared = await clearCommitment(Number(req.params.id), actor);
+        return { cleared: Boolean(cleared), commitment: cleared };
+      });
+      res.json(row);
     } catch (e) {
       errHandler(res, e);
     }
@@ -1151,7 +1308,9 @@ export function registerCommitmentRoutes(
       if (!actor) return;
       const date = String(req.body?.target_date ?? "").slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ message: "target_date required" });
-      res.json(await extendCommitment(Number(req.params.id), date, req.body?.note ?? null, actor));
+      res.json(await withChangeGroupResult(actor, () =>
+        extendCommitment(Number(req.params.id), date, req.body?.note ?? null, actor),
+      ));
     } catch (e) {
       errHandler(res, e);
     }
@@ -1163,7 +1322,9 @@ export function registerCommitmentRoutes(
       if (!actor) return;
       const { data } = await supabaseAdmin.from("car_commitments").select("railcar_id").eq("id", Number(req.params.id)).maybeSingle();
       if (!data) return res.status(404).json({ message: "Not found" });
-      res.json({ cleared: await clearCommitment(data.railcar_id, actor) });
+      res.json(await withChangeGroupResult(actor, async () => ({
+        cleared: await clearCommitment(data.railcar_id, actor),
+      })));
     } catch (e) {
       errHandler(res, e);
     }

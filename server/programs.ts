@@ -13,6 +13,8 @@ import {
   type ProgramStatus,
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
+import { pickRow } from "@shared/change-log";
+import { recordChange } from "./change-log";
 
 const PROGRAM_LIST_SELECT = `
 id, name, description, status, lifecycle, type, type_other, pending_note, cancelled_at,
@@ -55,6 +57,8 @@ export async function logProgramActivity(row: {
   program_car_id?: number | null;
   railcar_id?: number | null;
   detail?: Record<string, unknown>;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
 }) {
   const { error } = await supabaseAdmin.from("program_activity").insert({
     program_id: row.program_id,
@@ -65,6 +69,21 @@ export async function logProgramActivity(row: {
     detail: row.detail ?? {},
   });
   if (error) console.log(`[programs] activity log skipped: ${error.message}`);
+  const entity_type = row.program_car_id ? "program_car" : "program";
+  const entity_id = row.program_car_id ?? row.program_id;
+  await recordChange({
+    table: row.program_car_id ? "program_cars" : "programs",
+    pk: entity_id,
+    before: row.before ?? {},
+    after: row.after ?? {},
+    action: row.action,
+    entity_type,
+    entity_id,
+    railcar_id: row.railcar_id ?? null,
+    actor: row.actor,
+    detail: row.detail,
+    force: !row.before && !row.after,
+  });
 }
 
 function mapProgramList(p: any) {
@@ -383,6 +402,18 @@ export async function patchProgramCar(
     ({ data, error } = await runUpdate(fallback, CAR_SELECT_NO_COMPLETED));
   }
   if (error) throw error;
+  const changed = Object.keys(updates);
+  await recordChange({
+    table: "program_cars",
+    pk: linkId,
+    before: pickRow(existing, changed),
+    after: pickRow(data, changed),
+    action: "program_car_patch",
+    entity_type: "program_car",
+    entity_id: linkId,
+    railcar_id: existing.railcar_id,
+    actor,
+  });
   if (updates.status !== undefined) {
     const from = existing.status ?? null;
     const to = updates.status ?? null;
@@ -394,6 +425,8 @@ export async function patchProgramCar(
         program_car_id: linkId,
         railcar_id: existing.railcar_id,
         detail: { from, to },
+        before: { status: from },
+        after: { status: to },
       });
     }
   }
@@ -405,6 +438,21 @@ export async function patchProgramCar(
       program_car_id: linkId,
       railcar_id: existing.railcar_id,
       detail: { completed: updates.completed },
+      before: { completed: existing.completed ?? false },
+      after: { completed: updates.completed },
+    });
+  }
+  const otherKeys = changed.filter((k) => k !== "status" && k !== "completed" && k !== "completed_at");
+  if (otherKeys.length) {
+    await logProgramActivity({
+      program_id: programId,
+      action: "car_patched",
+      actor,
+      program_car_id: linkId,
+      railcar_id: existing.railcar_id,
+      detail: { fields: otherKeys },
+      before: pickRow(existing, otherKeys),
+      after: pickRow(data, otherKeys),
     });
   }
   await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", programId);

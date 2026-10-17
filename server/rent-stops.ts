@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { supabaseAdmin } from "./supabase";
 import { getPreview, putPreview } from "./commitment";
-import { logActivity } from "./activity-log";
+import { recordChange, withChangeGroupResult } from "./change-log";
 import { parseCarListText } from "@shared/commitment";
 import { formatCarId } from "@shared/residco-import";
 import { annotateKpiDelta } from "./kpi-delta";
@@ -105,16 +105,20 @@ async function setAbatement(railcarId: number, body: any, actor: string) {
     .select()
     .single();
   if (error) throw error;
-  await logActivity({
+  await recordChange({
+    table: "car_rent_stops",
+    pk: Number(data.id),
+    before: {},
+    after: data,
+    action: "rent_stop_abatement",
     entity_type: "railcar",
     entity_id: railcarId,
     railcar_id: railcarId,
-    action: "rent_stop_abatement",
     actor,
     detail: { type: "Abatement", stop_date: stopDate, reason, expected_resume_date: body.expected_resume_date || null },
     source: "ui",
     source_table: "car_rent_stops",
-    source_id: data.id,
+    source_id: Number(data.id),
   });
   return data;
 }
@@ -133,16 +137,20 @@ async function resumeStop(railcarId: number, actor: string, resumeDate?: string)
     .select()
     .single();
   if (error) throw error;
-  await logActivity({
+  await recordChange({
+    table: "car_rent_stops",
+    pk: Number(existing.id),
+    before: { actual_resume_date: existing.actual_resume_date ?? null },
+    after: { actual_resume_date: date },
+    action: "rent_stop_resume",
     entity_type: "railcar",
     entity_id: railcarId,
     railcar_id: railcarId,
-    action: "rent_stop_resume",
     actor,
     detail: { from: existing.type, actual_resume_date: date, stop_id: existing.id },
     source: "ui",
     source_table: "car_rent_stops",
-    source_id: existing.id,
+    source_id: Number(existing.id),
   });
   return data;
 }
@@ -161,6 +169,19 @@ async function convertToOffRent(railcarId: number, actor: string, body: any) {
     .update({ actual_resume_date: today, created_by: actor })
     .eq("id", existing.id);
   if (closeErr) throw closeErr;
+  await recordChange({
+    table: "car_rent_stops",
+    pk: Number(existing.id),
+    before: { actual_resume_date: existing.actual_resume_date ?? null },
+    after: { actual_resume_date: today },
+    action: "rent_stop_convert_off_rent",
+    entity_type: "railcar",
+    entity_id: railcarId,
+    railcar_id: railcarId,
+    actor,
+    source_table: "car_rent_stops",
+    source_id: Number(existing.id),
+  });
   const assignment = await latestAssignment(railcarId);
   const { data, error } = await supabaseAdmin
     .from("car_rent_stops")
@@ -182,16 +203,20 @@ async function convertToOffRent(railcarId: number, actor: string, body: any) {
     .select()
     .single();
   if (error) throw error;
-  await logActivity({
+  await recordChange({
+    table: "car_rent_stops",
+    pk: Number(data.id),
+    before: {},
+    after: data,
+    action: "rent_stop_convert_off_rent",
     entity_type: "railcar",
     entity_id: railcarId,
     railcar_id: railcarId,
-    action: "rent_stop_convert_off_rent",
     actor,
     detail: { converted_from_id: existing.id, new_id: data.id, assignment_unchanged: true },
     source: "ui",
     source_table: "car_rent_stops",
-    source_id: data.id,
+    source_id: Number(data.id),
   });
   return data;
 }
@@ -214,7 +239,7 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await setAbatement(Number(req.params.id), req.body ?? {}, actor));
+      res.json(await withChangeGroupResult(actor, () => setAbatement(Number(req.params.id), req.body ?? {}, actor)));
     } catch (e) {
       errHandler(res, e);
     }
@@ -224,7 +249,7 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await resumeStop(Number(req.params.id), actor, req.body?.actual_resume_date));
+      res.json(await withChangeGroupResult(actor, () => resumeStop(Number(req.params.id), actor, req.body?.actual_resume_date)));
     } catch (e) {
       errHandler(res, e);
     }
@@ -234,7 +259,7 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await convertToOffRent(Number(req.params.id), actor, req.body ?? {}));
+      res.json(await withChangeGroupResult(actor, () => convertToOffRent(Number(req.params.id), actor, req.body ?? {})));
     } catch (e) {
       errHandler(res, e);
     }
@@ -296,14 +321,17 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      const snap = await getPreview("rent_stop", String(req.body?.preview_token ?? ""));
-      const written: any[] = [];
-      for (const row of snap.toWrite ?? []) {
-        if (snap.action === "resume") written.push(await resumeStop(row.id, actor, snap.body?.actual_resume_date));
-        else if (snap.action === "convert") written.push(await convertToOffRent(row.id, actor, snap.body ?? {}));
-        else written.push(await setAbatement(row.id, snap.body ?? {}, actor));
-      }
-      res.json({ written: written.length });
+      const result = await withChangeGroupResult(actor, async () => {
+        const snap = await getPreview("rent_stop", String(req.body?.preview_token ?? ""));
+        const written: any[] = [];
+        for (const row of snap.toWrite ?? []) {
+          if (snap.action === "resume") written.push(await resumeStop(row.id, actor, snap.body?.actual_resume_date));
+          else if (snap.action === "convert") written.push(await convertToOffRent(row.id, actor, snap.body ?? {}));
+          else written.push(await setAbatement(row.id, snap.body ?? {}, actor));
+        }
+        return { written: written.length };
+      });
+      res.json(result);
     } catch (e) {
       errHandler(res, e);
     }

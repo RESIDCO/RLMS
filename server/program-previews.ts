@@ -1,5 +1,7 @@
+import { pickRow } from "@shared/change-log";
 import { supabaseAdmin } from "./supabase";
 import { annotateKpiDelta } from "./kpi-delta";
+import { recordChange, withChangeGroupResult } from "./change-log";
 import { formatCarId } from "@shared/residco-import";
 import {
   getPreview,
@@ -108,17 +110,31 @@ async function syncProgramCommitment(railcarId: number, actor: string) {
       return { skipped: "already_pointed" as const, in_programs: links.length };
     }
     if (existing.type === "program") {
+      const after = {
+        program_id: earliest.program_id,
+        name: prog?.name ?? existing.name,
+        target_date: prog?.target_completion_date ?? existing.target_date,
+      };
       await supabaseAdmin
         .from("car_commitments")
         .update({
-          program_id: earliest.program_id,
-          name: prog?.name ?? existing.name,
-          target_date: prog?.target_completion_date ?? existing.target_date,
+          ...after,
           set_by: actor,
           set_at: new Date().toISOString(),
         })
         .eq("id", existing.id)
         .is("cleared_at", null);
+      await recordChange({
+        table: "car_commitments",
+        pk: Number(existing.id),
+        before: pickRow(existing, ["program_id", "name", "target_date"]),
+        after,
+        action: "commitment_repoint",
+        entity_type: "railcar",
+        entity_id: railcarId,
+        railcar_id: railcarId,
+        actor,
+      });
       return { repointed: true as const, program_id: earliest.program_id, in_programs: links.length };
     }
     return { skipped: "other_commitment" as const, in_programs: links.length };
@@ -238,6 +254,7 @@ export async function previewAddProgramCars(
 }
 
 export async function applyAddProgramCars(token: string, actor: string) {
+  return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
   if (preview.action !== "add_cars") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   const program = await loadProgramRow(Number(preview.program_id));
@@ -278,6 +295,8 @@ export async function applyAddProgramCars(token: string, actor: string) {
       actor,
       program_car_id: link.id,
       railcar_id: link.railcar_id,
+      before: {},
+      after: { id: link.id, railcar_id: link.railcar_id, joined_date: today },
     });
     if (program.overlay_lifecycle === "active") {
       await syncProgramCommitment(link.railcar_id, actor);
@@ -286,6 +305,7 @@ export async function applyAddProgramCars(token: string, actor: string) {
   }
   await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
   return { preview, added: added.length };
+  });
 }
 
 export async function previewRemoveProgramCars(
@@ -337,6 +357,7 @@ export async function previewRemoveProgramCars(
 }
 
 export async function applyRemoveProgramCars(token: string, actor: string) {
+  return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
   if (preview.action !== "remove_cars") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   const program = await loadProgramRow(Number(preview.program_id));
@@ -345,6 +366,11 @@ export async function applyRemoveProgramCars(token: string, actor: string) {
   let updated = 0;
   for (const row of preview.rows ?? []) {
     if (!row.active) continue;
+    const { data: prior } = await supabaseAdmin
+      .from("program_cars")
+      .select("*")
+      .eq("id", row.link_id)
+      .maybeSingle();
     const { data, error } = await supabaseAdmin
       .from("program_cars")
       .update({
@@ -355,7 +381,7 @@ export async function applyRemoveProgramCars(token: string, actor: string) {
       .eq("id", row.link_id)
       .eq("program_id", program.id)
       .is("exited_date", null)
-      .select("id, railcar_id")
+      .select("id, railcar_id, exited_date, exit_reason")
       .maybeSingle();
     if (error) throw error;
     if (!data) continue;
@@ -366,12 +392,15 @@ export async function applyRemoveProgramCars(token: string, actor: string) {
       program_car_id: data.id,
       railcar_id: data.railcar_id,
       detail: { exited_date: today, reason: preview.reason ?? null },
+      before: pickRow(prior, ["exited_date", "exit_reason"]),
+      after: pickRow(data, ["exited_date", "exit_reason"]),
     });
     await syncProgramCommitment(data.railcar_id, actor);
     updated += 1;
   }
   await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
   return { preview, updated };
+  });
 }
 
 export async function previewPatchProgramCars(
@@ -428,6 +457,7 @@ function patchColumns(updates: Record<string, unknown>) {
 }
 
 export async function applyPatchProgramCars(token: string, actor: string) {
+  return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
   if (preview.action !== "patch_cars") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   const program = await loadProgramRow(Number(preview.program_id));
@@ -438,8 +468,21 @@ export async function applyPatchProgramCars(token: string, actor: string) {
     const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", row.railcar_id).maybeSingle();
     if (car?.active !== true) continue;
     if (!Object.keys(cols).length) continue;
-    const { error } = await supabaseAdmin.from("program_cars").update(cols).eq("id", row.link_id).eq("program_id", program.id);
+    const { data: prior, error: priorErr } = await supabaseAdmin
+      .from("program_cars")
+      .select("*")
+      .eq("id", row.link_id)
+      .maybeSingle();
+    if (priorErr) throw priorErr;
+    const { data, error } = await supabaseAdmin
+      .from("program_cars")
+      .update(cols)
+      .eq("id", row.link_id)
+      .eq("program_id", program.id)
+      .select("*")
+      .single();
     if (error) throw error;
+    const keys = Object.keys(cols);
     await logProgramActivity({
       program_id: program.id,
       action: "car_patched",
@@ -447,11 +490,14 @@ export async function applyPatchProgramCars(token: string, actor: string) {
       program_car_id: row.link_id,
       railcar_id: row.railcar_id,
       detail: cols,
+      before: pickRow(prior, keys),
+      after: pickRow(data, keys),
     });
     updated += 1;
   }
   await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
   return { preview, updated };
+  });
 }
 
 export async function previewCloseProgram(programId: number) {
@@ -489,6 +535,7 @@ export async function previewCloseProgram(programId: number) {
 }
 
 export async function applyCloseProgram(token: string, actor: string) {
+  return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
   if (preview.action !== "close") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   const program = await loadProgramRow(Number(preview.program_id));
@@ -505,25 +552,57 @@ export async function applyCloseProgram(token: string, actor: string) {
     })
     .eq("id", program.id);
   if (error) throw error;
+  await recordChange({
+    table: "programs",
+    pk: Number(program.id),
+    before: pickRow(program, ["lifecycle", "closed_date"]),
+    after: { lifecycle: "closed", closed_date: today },
+    action: "closed",
+    entity_type: "program",
+    entity_id: Number(program.id),
+    actor,
+  });
   const { data: commits } = await supabaseAdmin
     .from("car_commitments")
-    .select("id, railcar_id")
+    .select("id, railcar_id, cleared_at, cleared_by")
     .eq("program_id", program.id)
     .is("cleared_at", null);
+  const commitmentIds: number[] = [];
   for (const c of commits ?? []) {
+    const cleared_at = new Date().toISOString();
     await supabaseAdmin
       .from("car_commitments")
-      .update({ cleared_at: new Date().toISOString(), cleared_by: actor })
+      .update({ cleared_at, cleared_by: actor })
       .eq("id", c.id);
+    commitmentIds.push(Number(c.id));
+    await recordChange({
+      table: "car_commitments",
+      pk: Number(c.id),
+      before: pickRow(c, ["cleared_at", "cleared_by"]),
+      after: { cleared_at, cleared_by: actor },
+      action: "commitment_clear",
+      entity_type: "railcar",
+      entity_id: Number(c.railcar_id),
+      railcar_id: Number(c.railcar_id),
+      actor,
+    });
     await syncProgramCommitment(c.railcar_id, actor);
   }
   await logProgramActivity({
     program_id: program.id,
     action: "closed",
     actor,
-    detail: { closed_date: today, commitments_released: commits?.length ?? 0, links_kept: true },
+    detail: {
+      closed_date: today,
+      commitments_released: commits?.length ?? 0,
+      commitment_ids: commitmentIds,
+      links_kept: true,
+    },
+    before: pickRow(program, ["lifecycle", "closed_date"]),
+    after: { lifecycle: "closed", closed_date: today },
   });
   return { preview, closed: true, commitments_released: commits?.length ?? 0 };
+  });
 }
 
 export async function previewActivateProgram(programId: number) {
@@ -553,34 +632,57 @@ export async function previewActivateProgram(programId: number) {
 }
 
 export async function applyActivateProgram(token: string, actor: string) {
+  return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
   if (preview.action !== "activate" && preview.action !== "reopen") {
     throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   }
   const program = await loadProgramRow(Number(preview.program_id));
+  const after = {
+    lifecycle: "active",
+    closed_date: null,
+    cancelled_at: null,
+    cancelled_by: null,
+  };
   const { error } = await supabaseAdmin
     .from("programs")
     .update({
-      lifecycle: "active",
-      closed_date: null,
-      cancelled_at: null,
-      cancelled_by: null,
+      ...after,
       updated_at: new Date().toISOString(),
     })
     .eq("id", program.id);
   if (error) throw error;
+  await recordChange({
+    table: "programs",
+    pk: Number(program.id),
+    before: pickRow(program, ["lifecycle", "closed_date", "cancelled_at", "cancelled_by"]),
+    after,
+    action: preview.action,
+    entity_type: "program",
+    entity_id: Number(program.id),
+    actor,
+  });
   let created = 0;
+  const commitmentIds: number[] = [];
   for (const id of preview.commitment_ids ?? []) {
     const r = await syncProgramCommitment(Number(id), actor);
-    if ((r as any).created) created += 1;
+    if ((r as any).created) {
+      created += 1;
+      commitmentIds.push(Number(id));
+    } else if ((r as any).repointed) {
+      commitmentIds.push(Number(id));
+    }
   }
   await logProgramActivity({
     program_id: program.id,
     action: preview.action,
     actor,
-    detail: { commitments_created: created },
+    detail: { commitments_created: created, commitment_ids: commitmentIds },
+    before: pickRow(program, ["lifecycle", "closed_date", "cancelled_at", "cancelled_by"]),
+    after,
   });
   return { preview, lifecycle: "active", commitments_created: created };
+  });
 }
 
 export async function previewCancelProgram(programId: number) {
@@ -593,24 +695,45 @@ export async function previewCancelProgram(programId: number) {
 }
 
 export async function applyCancelProgram(token: string, actor: string) {
+  return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
   if (preview.action !== "cancel") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   const program = await loadProgramRow(Number(preview.program_id));
   if (program.overlay_lifecycle !== "draft") {
     throw Object.assign(new Error("Cancel is draft-only"), { status: 400 });
   }
+  const after = {
+    lifecycle: "cancelled",
+    cancelled_at: new Date().toISOString(),
+    cancelled_by: actorUuid(actor),
+  };
   const { error } = await supabaseAdmin
     .from("programs")
     .update({
-      lifecycle: "cancelled",
-      cancelled_at: new Date().toISOString(),
-      cancelled_by: actorUuid(actor),
+      ...after,
       updated_at: new Date().toISOString(),
     })
     .eq("id", program.id);
   if (error) throw error;
-  await logProgramActivity({ program_id: program.id, action: "cancelled", actor });
+  await recordChange({
+    table: "programs",
+    pk: Number(program.id),
+    before: pickRow(program, ["lifecycle", "cancelled_at", "cancelled_by"]),
+    after,
+    action: "cancelled",
+    entity_type: "program",
+    entity_id: Number(program.id),
+    actor,
+  });
+  await logProgramActivity({
+    program_id: program.id,
+    action: "cancelled",
+    actor,
+    before: pickRow(program, ["lifecycle", "cancelled_at", "cancelled_by"]),
+    after,
+  });
   return { preview, cancelled: true };
+  });
 }
 
 export async function previewCommitmentBackfill() {
@@ -634,21 +757,39 @@ export async function previewCommitmentBackfill() {
 }
 
 export async function applyCommitmentBackfill(token: string, actor: string) {
+  return withChangeGroupResult(actor, async () => {
   const preview = await getPreview("program", token);
   if (preview.action !== "backfill") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   let created = 0;
   for (const row of preview.rows ?? []) {
     if (!row.needs_commitment) continue;
-    const r = await syncProgramCommitment(Number(row.railcar_id), actor);
+    const railcarId = Number(row.railcar_id);
+    const r = await syncProgramCommitment(railcarId, actor);
     if ((r as any).created) created += 1;
+    if ((r as any).created || (r as any).repointed || (r as any).cleared) {
+      await recordChange({
+        table: "railcars",
+        pk: railcarId,
+        before: {},
+        after: r as Record<string, unknown>,
+        action: "commitment_backfill",
+        entity_type: "railcar",
+        entity_id: railcarId,
+        railcar_id: railcarId,
+        actor,
+        force: true,
+      });
+    }
   }
   return { preview, created };
+  });
 }
 
 export async function createProgramV2(
   body: Record<string, unknown>,
   actor: string,
-): Promise<{ program: any; add_preview?: any }> {
+): Promise<{ program: any; add_preview?: any; change_group: string }> {
+  return withChangeGroupResult(actor, async () => {
   const name = String(body.name ?? body.title ?? "").trim();
   if (!name) throw Object.assign(new Error("Title is required"), { status: 400 });
   const draft = body.as_draft === true || body.lifecycle === "draft";
@@ -674,11 +815,23 @@ export async function createProgramV2(
     .select()
     .single();
   if (error) throw error;
+  await recordChange({
+    table: "programs",
+    pk: Number(data.id),
+    before: {},
+    after: data,
+    action: "created",
+    entity_type: "program",
+    entity_id: Number(data.id),
+    actor,
+  });
   await logProgramActivity({
     program_id: data.id,
     action: "created",
     actor,
     detail: { name, lifecycle: data.lifecycle },
+    before: {},
+    after: { id: data.id, name, lifecycle: data.lifecycle },
   });
   let add_preview;
   const ids = Array.isArray(body.railcar_ids) ? body.railcar_ids : [];
@@ -687,6 +840,7 @@ export async function createProgramV2(
     add_preview = await previewAddProgramCars(data.id, { railcar_ids: ids, text });
   }
   return { program: data, add_preview };
+  });
 }
 
 export type { ProgramType };

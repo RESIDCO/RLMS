@@ -1,5 +1,4 @@
-import { supabaseAdmin } from "./supabase";
-import { logActivity } from "./activity-log";
+import { pickRow } from "@shared/change-log";
 import {
   crossesInactiveBoundary,
   fieldsForCarStatusSave,
@@ -7,6 +6,10 @@ import {
   isInactiveCarStatus,
   type CarStatusHistoryEventType,
 } from "@shared/car-lifecycle-status";
+import { recordChange } from "./change-log";
+import { supabaseAdmin } from "./supabase";
+
+const STATUS_TRIAD_KEYS = ["status", "active", "active_status", "active_source", "fleet_status"];
 
 export type ApplyCarStatusResult = {
   updated: number;
@@ -34,18 +37,29 @@ export async function syncCurrentAssignmentHistoryActive(
 ): Promise<void> {
   const { data: openRows, error } = await supabaseAdmin
     .from("assignment_history")
-    .select("id, start_date")
+    .select("id, active, start_date")
     .eq("railcar_id", railcarId)
     .is("end_date", null)
     .order("start_date", { ascending: false });
   if (error) throw error;
   if (!openRows?.length) return;
-  const targetId = openRows[0].id;
+  const target = openRows[0];
+  const targetId = target.id;
   const { error: uErr } = await supabaseAdmin
     .from("assignment_history")
     .update({ active })
     .eq("id", targetId);
   if (uErr) throw uErr;
+  await recordChange({
+    table: "assignment_history",
+    pk: Number(targetId),
+    before: pickRow(target, ["active"]),
+    after: { active },
+    action: "status_change",
+    entity_type: "railcar",
+    entity_id: railcarId,
+    railcar_id: railcarId,
+  });
 }
 
 function triadAlreadyMatches(
@@ -79,11 +93,25 @@ export async function applyCarStatusChange(opts: {
   );
   if (!uniqueIds.length) throw Object.assign(new Error("ids required"), { status: 400 });
 
-  const { data: cars, error: cErr } = await supabaseAdmin
-    .from("railcars")
-    .select("id, status, active, active_status")
-    .in("id", uniqueIds);
-  if (cErr) throw cErr;
+  let cars: any[] | null = null;
+  {
+    const withFleet = await supabaseAdmin
+      .from("railcars")
+      .select("id, status, active, active_status, active_source, fleet_status")
+      .in("id", uniqueIds);
+    if (withFleet.error && /fleet_status/i.test(withFleet.error.message)) {
+      const withoutFleet = await supabaseAdmin
+        .from("railcars")
+        .select("id, status, active, active_status, active_source")
+        .in("id", uniqueIds);
+      if (withoutFleet.error) throw withoutFleet.error;
+      cars = withoutFleet.data ?? [];
+    } else if (withFleet.error) {
+      throw withFleet.error;
+    } else {
+      cars = withFleet.data ?? [];
+    }
+  }
 
   const byId = new Map((cars ?? []).map((c: any) => [Number(c.id), c]));
   const reason = String(opts.reason ?? "").trim();
@@ -124,6 +152,20 @@ export async function applyCarStatusChange(opts: {
     const { error: uErr } = await supabaseAdmin.from("railcars").update(patch).eq("id", id);
     if (uErr) throw uErr;
     updated += 1;
+    await recordChange({
+      table: "railcars",
+      pk: id,
+      before: pickRow(car, STATUS_TRIAD_KEYS),
+      after: pickRow({ ...car, ...patch }, STATUS_TRIAD_KEYS),
+      action: "status_change",
+      entity_type: "railcar",
+      entity_id: id,
+      railcar_id: id,
+      actor: created_by,
+      source_table: "railcars",
+      source_id: null,
+      detail: { from: fromStatus, to: patch.status, reason: reason || null },
+    });
 
     if (car.active !== patch.active) {
       await syncCurrentAssignmentHistoryActive(id, patch.active);
@@ -149,11 +191,26 @@ export async function applyCarStatusChange(opts: {
     if (hErr) throw hErr;
     history_written = inserted?.length ?? historyRows.length;
     for (const h of inserted ?? []) {
-      await logActivity({
-        entity_type: "railcar",
-        entity_id: h.car_id,
-        railcar_id: h.car_id,
+      const car = byId.get(Number(h.car_id));
+      await recordChange({
+        table: "car_status_history",
+        pk: Number(h.id),
+        before: {
+          ...pickRow(car, STATUS_TRIAD_KEYS),
+          from_status: h.from_status,
+          to_status: h.from_status,
+        },
+        after: {
+          status: h.to_status,
+          from_status: h.from_status,
+          to_status: h.to_status,
+          event_type: h.event_type,
+          reason: h.reason,
+        },
         action: "status_change",
+        entity_type: "railcar",
+        entity_id: Number(h.car_id),
+        railcar_id: Number(h.car_id),
         actor: h.created_by,
         detail: {
           event_type: h.event_type,
@@ -163,7 +220,7 @@ export async function applyCarStatusChange(opts: {
         },
         occurred_at: h.created_at,
         source_table: "car_status_history",
-        source_id: h.id,
+        source_id: Number(h.id),
       });
     }
   }
@@ -213,11 +270,15 @@ export async function writeCarStatusHistoryRow(opts: {
     to_status: opts.toStatus,
   }).select("id, created_at").single();
   if (error) throw error;
-  await logActivity({
+  await recordChange({
+    table: "car_status_history",
+    pk: data?.id != null ? Number(data.id) : null,
+    before: { status: opts.fromStatus ?? null, from_status: opts.fromStatus ?? null },
+    after: { status: opts.toStatus, to_status: opts.toStatus, reason: opts.reason.trim() },
+    action: "status_change",
     entity_type: "railcar",
     entity_id: opts.carId,
     railcar_id: opts.carId,
-    action: "status_change",
     actor: created_by,
     detail: {
       event_type: inactiveBoundaryEventType(opts.toStatus),
@@ -227,7 +288,7 @@ export async function writeCarStatusHistoryRow(opts: {
     },
     occurred_at: data?.created_at,
     source_table: "car_status_history",
-    source_id: data?.id ?? null,
+    source_id: data?.id != null ? Number(data.id) : null,
   });
 }
 

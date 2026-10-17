@@ -13,6 +13,7 @@ import {
   isProgramStatus,
   isWorkCompleteMilestone,
   parseCarPasteList,
+  percentFromProgress,
   reportFilename,
   trailDate,
   type ProgramFieldDef,
@@ -239,7 +240,10 @@ export async function listPrograms() {
   const byProg = new Map((progress ?? []).map((r: any) => [Number(r.program_id), r]));
   return (q.data ?? [])
     .map(mapProgramList)
-    .map((p: any) => ({ ...p, progress: byProg.get(Number(p.id)) ?? null }))
+    .map((p: any) => {
+      const progress = byProg.get(Number(p.id)) ?? null;
+      return { ...p, progress, percent_complete: percentFromProgress(progress) };
+    })
     .sort((a, b) => Number(a.progress?.lifecycle === "closed") - Number(b.progress?.lifecycle === "closed"));
 }
 
@@ -283,7 +287,14 @@ export async function getProgram(id: number) {
   const account = Array.isArray(data.account) ? data.account[0] ?? null : data.account ?? null;
   const field_defs = data.category_id ? await listFieldDefs(Number(data.category_id)) : [];
   const { data: progress } = await supabaseAdmin.from("v_program_progress").select("*").eq("program_id", id).maybeSingle();
-  return { ...data, category, account, field_defs, progress: progress ?? null };
+  return {
+    ...data,
+    category,
+    account,
+    field_defs,
+    progress: progress ?? null,
+    percent_complete: percentFromProgress(progress),
+  };
 }
 
 export async function listProgramCars(programId: number, includeExited: boolean) {
@@ -384,6 +395,8 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
       status: r.status,
       milestone: r.milestone,
       milestones: trail,
+      outcome_reached_at: r.outcome_reached_at,
+      completed: r.completed,
     });
     return {
       ...r,

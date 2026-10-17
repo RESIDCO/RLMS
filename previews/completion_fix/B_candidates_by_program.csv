@@ -1,0 +1,16 @@
+program_id,name,type,cars,proposed_rule
+9,345-cars xTrinity cars,New Assignment,306,On rent only if current lease/lessee differs from source OL; not Scrap
+8,xOL2526 - Solvay Return,Sale,117,On rent only if current lease/lessee differs from source OL; not Scrap
+14,OL2405 - The Andersons,Repair,108,On rent only if current lease/lessee differs from source OL; not Scrap
+15,OL1241 - Dow,Repair,80,On rent only if current lease/lessee differs from source OL; not Scrap
+21,OL1940 - West Plains,Scrap,70,never On rent for Scrap-type
+10,EA2330 - xMidwest Railcar MCEX,New Assignment,39,On rent only if current lease/lessee differs from source OL; not Scrap
+19,OL1801 & 1818 - OXY,Scrap,22,never On rent for Scrap-type
+1,CP ACQUISITION - 60 4750's,Acquisition,16,On rent only if current lease/lessee differs from source OL; not Scrap
+20,xOL2312 - xScoular,New Assignment,14,On rent only if current lease/lessee differs from source OL; not Scrap
+17,OL1826 - Ingevity,Scrap,13,never On rent for Scrap-type
+6,OL2420 - NLD to Scotwood,Return,13,On rent only if current lease/lessee differs from source OL; not Scrap
+3,OL1964 - Oxy Return,Return,5,On rent only if current lease/lessee differs from source OL; not Scrap
+13,OL1716 - Southwest Salt,Scrap,1,never On rent for Scrap-type
+12,OL1937 - Hutchinson Transport,Scrap,1,never On rent for Scrap-type
+16,OL1806 - Olin - Scrap,Scrap,1,never On rent for Scrap-type

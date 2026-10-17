@@ -1,0 +1,21 @@
+program_car_id,program_id,reporting_marks,car_number,lessee_name,rider_external_id,on_rent,outcome_reached_at,complete_flag,status,proposed_action,proposed_milestone,proposed_date,note
+90,5,TFOX,088003,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+98,5,TFOX,088004,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+83,5,TFOX,088008,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503
+93,5,TFOX,088031,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+95,5,TFOX,088034,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+85,5,TFOX,088036,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503
+91,5,TFOX,088039,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+92,5,TFOX,088042,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+94,5,TFOX,088045,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+84,5,TFOX,088051,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503
+99,5,TFOX,088057,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+97,5,TFOX,088058,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+96,5,TFOX,088060,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+81,5,TFOX,088063,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503
+82,5,TFOX,088066,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503
+88,5,TFOX,088068,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503
+86,5,TFOX,088069,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503
+89,5,TFOX,088093,IDLE (xAxiall),EA1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; ask Stored vs On rent
+80,5,TFOX,088098,Washington Penn,OL1503,false,2026-10-17,false,Arrived Lessee Destination,none,,2026-10-17,outcome_reached_at; still on OL1503
+87,5,TFOX,088100,Washington Penn,OL1503,false,,true,Arrived Lessee Destination,none,,,legacy __complete; still on OL1503

@@ -66,6 +66,7 @@ import { commitMarkContacts, previewMarkContacts } from "./mark-contacts-import"
 import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts, createCompany, updateCompany, deleteCompany, getCompanyContact, createCompanyContact, updateCompanyContact, deleteCompanyContact, listContactLeaseLinks, listCompanyLeaseLinks, listLeaseContactLinks, createContactLeaseLink, deleteContactLeaseLink, listContactsForRider, createContactOnRider, promoteLegacyRiderContacts, listAllDirectoryLeasePeople, listDirectoryPeopleForAccount, listLeaseLinkGaps, linkLesseeCompanyToLease, linkUniqueUnmatchedLesseeCompanies, unmatchedLesseeExportCsv } from "./directory";
 import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates, dedupSummary } from "./directory-dedup";
 import { pickRow } from "@shared/change-log";
+import { diffProgramPatch } from "@shared/program-patch";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
 import { recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
@@ -5886,31 +5887,19 @@ export async function registerRoutes(
       if (!userId) return;
       const id = Number(req.params.id);
       const { data: before } = await supabaseAdmin.from("programs").select("*").eq("id", id).maybeSingle();
-      const updates: any = { updated_at: new Date().toISOString() };
-      if (req.body.name !== undefined) updates.name = String(req.body.name).trim();
-      if (req.body.description !== undefined) updates.description = req.body.description || null;
-      if (req.body.status !== undefined) updates.status = parseStatus(req.body.status, before?.status ?? "open");
-      if (req.body.category_id !== undefined) updates.category_id = Number(req.body.category_id) || null;
-      if (req.body.tags !== undefined) updates.tags = Array.isArray(req.body.tags) ? req.body.tags : null;
-      if (req.body.entity !== undefined) updates.entity = req.body.entity || null;
-      if (req.body.account_manager !== undefined) updates.account_manager = req.body.account_manager || null;
-      if (req.body.account_id !== undefined) {
-        updates.account_id = req.body.account_id ? Number(req.body.account_id) : null;
+      if (!before) return res.status(404).json({ error: "Program not found" });
+      const body = { ...(req.body ?? {}) };
+      if (body.status !== undefined) body.status = parseStatus(body.status, before.status ?? "open");
+      const changed = diffProgramPatch(before as Record<string, unknown>, body);
+      if (!Object.keys(changed).length) {
+        const row = await getProgram(id);
+        return res.json(row);
       }
-      if (req.body.status_narrative !== undefined) updates.status_narrative = req.body.status_narrative || null;
-      if (req.body.target_completion_date !== undefined) {
-        const targetDate = String(req.body.target_completion_date ?? "").slice(0, 10);
-        updates.target_completion_date = /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : null;
-      }
-      if (req.body.type !== undefined) updates.type = req.body.type || null;
-      if (req.body.type_other !== undefined) updates.type_other = req.body.type_other || null;
-      if (req.body.pending_note !== undefined) updates.pending_note = req.body.pending_note || null;
-      if (req.body.opened_date !== undefined) updates.opened_date = req.body.opened_date || null;
-      if (req.body.closed_date !== undefined) updates.closed_date = req.body.closed_date || null;
+      const updates: Record<string, unknown> = { ...changed, updated_at: new Date().toISOString() };
       const patched = await withChangeGroupResult(userId, async () => {
         const { data, error } = await supabaseAdmin.from("programs").update(updates).eq("id", id).select().single();
         if (error) throw error;
-        const keys = Object.keys(updates).filter((k) => k !== "updated_at");
+        const keys = Object.keys(changed);
         await recordChange({
           table: "programs",
           pk: id,
@@ -5921,18 +5910,18 @@ export async function registerRoutes(
           entity_id: id,
           actor: userId,
         });
-        if (before && updates.status && updates.status !== before.status) {
+        if (changed.status !== undefined && changed.status !== before.status) {
           await logProgramActivity({
             program_id: id,
             action: "status_changed",
             actor: userId,
-            detail: { from: before.status, to: updates.status },
+            detail: { from: before.status, to: changed.status },
             before: { status: before.status },
-            after: { status: updates.status },
+            after: { status: changed.status },
           });
         }
         const otherKeys = keys.filter((k) => k !== "status");
-        if (before && otherKeys.length) {
+        if (otherKeys.length) {
           await logProgramActivity({
             program_id: id,
             action: "program_updated",
@@ -5944,7 +5933,7 @@ export async function registerRoutes(
         }
         return data;
       });
-      res.json(patched);
+      res.json(await getProgram(id) ?? patched);
     } catch (err) { errHandler(res, err); }
   });
 

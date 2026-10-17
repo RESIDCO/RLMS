@@ -361,7 +361,9 @@ export function StaleCommitmentsPage() {
             <span>{p.name} · {p.target_completion_date}</span>
             {canEdit && (
               <Button size="sm" variant="outline" onClick={async () => {
-                await apiRequest("POST", `/api/programs/${p.id}/close`);
+                const preview = await apiRequest("POST", `/api/programs/${p.id}/close/preview`).then((r) => r.json());
+                if (!window.confirm(`Close ${p.name}? Releases ${preview.commitments_released?.length ?? 0} Commitment(s). Links stay.`)) return;
+                await apiRequest("POST", `/api/programs/${p.id}/close/apply`, { preview_token: preview.preview_token });
                 qc.invalidateQueries({ queryKey: ["/api/commitments/stale"] });
                 toast({ title: "Program closed" });
               }}>Close program</Button>

@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
 import { formatCarId } from "@shared/residco-import";
+import { overlayLifecycle } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { KpiCarSheet } from "@/pages/KpiCarSheet";
 
@@ -133,8 +134,21 @@ export function KpiCarListPage() {
   const [selectAllMatching, setSelectAllMatching] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<
-    "commitment" | "clear_commitment" | "rent_start" | "sold" | "unsold" | "classify_external" | "classify_intercompany" | null
+    "commitment" | "clear_commitment" | "rent_start" | "sold" | "unsold" | "classify_external" | "classify_intercompany" | "add_program" | null
   >(null);
+  const [programId, setProgramId] = useState("");
+  const { data: programOpts = [] } = useQuery<{ id: number; name: string; progress?: { lifecycle?: string }; lifecycle?: string; closed_date?: string | null }[]>({
+    queryKey: ["/api/programs"],
+    queryFn: () => apiRequest("GET", "/api/programs").then((r) => r.json()),
+    enabled: bulk === "add_program",
+  });
+  const activeProgramOpts = useMemo(
+    () =>
+      programOpts.filter(
+        (p) => (p.progress?.lifecycle ?? overlayLifecycle(p)) === "active",
+      ),
+    [programOpts],
+  );
   const [preview, setPreview] = useState<any>(null);
   const [commitType, setCommitType] = useState<CommitmentType>("deal");
   const [commitName, setCommitName] = useState("");
@@ -200,6 +214,10 @@ export function KpiCarListPage() {
           class: bulk === "classify_external" ? "external" : "intercompany",
         })).json();
       }
+      if (bulk === "add_program") {
+        if (!programId) throw new Error("Pick a program");
+        return (await apiRequest("POST", `/api/programs/${programId}/cars/preview`, { railcar_ids: ids })).json();
+      }
       return (await apiRequest("POST", "/api/commitments/bulk/preview", {
           ids,
           action: bulk === "clear_commitment" ? "clear" : "set",
@@ -221,6 +239,9 @@ export function KpiCarListPage() {
       if (bulk === "sold") return (await apiRequest("POST", "/api/railcars/sold/apply", { preview_token: token })).json();
       if (bulk === "unsold") return (await apiRequest("POST", "/api/railcars/unsold/apply", { preview_token: token })).json();
       if (bulk === "rent_start") return (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: token })).json();
+      if (bulk === "add_program") {
+        return (await apiRequest("POST", `/api/programs/${programId}/cars/apply`, { preview_token: token })).json();
+      }
       if (bulk === "classify_external" || bulk === "classify_intercompany") {
         return (await apiRequest("POST", "/api/sale-class/apply", { preview_token: token })).json();
       }
@@ -356,6 +377,7 @@ export function KpiCarListPage() {
                 <SelectItem value="unsold">Remove Sold tag</SelectItem>
                 <SelectItem value="classify_external">Classify External</SelectItem>
                 <SelectItem value="classify_intercompany">Classify Intercompany</SelectItem>
+                <SelectItem value="add_program">Add to program…</SelectItem>
               </SelectContent>
             </Select>
             {bulk === "commitment" && (
@@ -369,6 +391,17 @@ export function KpiCarListPage() {
                 <Input placeholder="Name" value={commitName} onChange={(e) => setCommitName(e.target.value)} className="w-36" />
                 <Input type="date" value={target} onChange={(e) => setTarget(e.target.value)} />
               </>
+            )}
+            {bulk === "add_program" && (
+              <Select value={programId || "none"} onValueChange={(v) => setProgramId(v === "none" ? "" : v)}>
+                <SelectTrigger className="w-56"><SelectValue placeholder="Program" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Pick program</SelectItem>
+                  {activeProgramOpts.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
             {bulk === "rent_start" && (
               <>

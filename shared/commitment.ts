@@ -204,3 +204,29 @@ export function isOnRentOlRider(rider: string | null | undefined): boolean {
   if (!s) return false;
   return /^(OL|FL)[0-9]/.test(s) && !/^X(OL|FL)/.test(s);
 }
+
+export type OpenProgramLink = {
+  program_id: number;
+  joined_date?: string | null;
+  id?: number | null;
+  link_id?: number | null;
+};
+
+/** Earliest-joined open program wins when a car sits on more than one. */
+export function pickEarliestOpenProgram<T extends OpenProgramLink>(links: T[]): T | null {
+  if (!links.length) return null;
+  return [...links].sort((a, b) => {
+    const da = String(a.joined_date ?? "9999-12-31").slice(0, 10);
+    const db = String(b.joined_date ?? "9999-12-31").slice(0, 10);
+    if (da !== db) return da.localeCompare(db);
+    return Number(a.id ?? a.link_id ?? 0) - Number(b.id ?? b.link_id ?? 0);
+  })[0];
+}
+
+export function shouldCreateProgramCommitment(row: {
+  active?: boolean | null;
+  is_op?: boolean | null;
+  off_rent?: boolean | null;
+}): boolean {
+  return row.active === true && row.is_op === true && row.off_rent === true;
+}

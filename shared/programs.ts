@@ -3,6 +3,115 @@ import { splitCarNumber } from "./residco-import";
 export const PROGRAM_STATUSES = ["open", "on_hold", "complete"] as const;
 export type ProgramStatus = (typeof PROGRAM_STATUSES)[number];
 
+export const PROGRAM_LIFECYCLES = ["draft", "active", "closed", "cancelled"] as const;
+export type ProgramLifecycle = (typeof PROGRAM_LIFECYCLES)[number];
+
+export const PROGRAM_TYPES = [
+  "Acquisition",
+  "Return",
+  "Sale",
+  "New Assignment",
+  "Scrap",
+  "Repair",
+  "Inspection",
+  "Quals",
+  "Lining/Cleaning",
+  "Other",
+] as const;
+export type ProgramType = (typeof PROGRAM_TYPES)[number];
+
+export const PROGRAM_TYPE_FROM_CATEGORY: Record<string, ProgramType> = {
+  Acquisition: "Acquisition",
+  EOLR: "Return",
+  NLD: "New Assignment",
+  Sale: "Sale",
+  Scrap: "Scrap",
+  Remark: "Repair",
+  Qualifications: "Quals",
+  Inspection: "Inspection",
+  Other: "Other",
+};
+
+export const MILESTONES_BY_TYPE: Record<ProgramType, string[]> = {
+  Acquisition: ["Inspect", "Qualify", "Deliver"],
+  Return: ["Off lease", "Inspect", "Shop", "Ready"],
+  Sale: ["Listed", "Offer", "Closed"],
+  "New Assignment": ["Qualify", "Deliver", "On rent"],
+  Scrap: ["Move to yard", "Scrapped"],
+  Repair: ["Shop in", "Work complete", "Shop out"],
+  Inspection: ["Scheduled", "Inspected"],
+  Quals: ["Qualify", "Certified"],
+  "Lining/Cleaning": ["Shop in", "Lined/cleaned", "Shop out"],
+  Other: ["Started", "Done"],
+};
+
+export const LIFECYCLE_LABEL: Record<ProgramLifecycle, string> = {
+  draft: "Draft",
+  active: "Active",
+  closed: "Closed",
+  cancelled: "Cancelled",
+};
+
+export const LIFECYCLE_BADGE: Record<ProgramLifecycle, string> = {
+  draft: "bg-muted text-muted-foreground border-border",
+  active: "bg-umler-teal/15 text-umler-teal border-umler-teal/30",
+  closed: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+  cancelled: "bg-umler-signal/15 text-umler-signal border-umler-signal/30",
+};
+
+export function isProgramType(v: string): v is ProgramType {
+  return (PROGRAM_TYPES as readonly string[]).includes(v);
+}
+
+export function isProgramLifecycle(v: string): v is ProgramLifecycle {
+  return (PROGRAM_LIFECYCLES as readonly string[]).includes(v);
+}
+
+/** Display overlay: closed_date wins. Stored draft/cancelled kept. Else active. */
+export function overlayLifecycle(row: {
+  closed_date?: string | null;
+  lifecycle?: string | null;
+}): ProgramLifecycle {
+  if (row.closed_date) return "closed";
+  const lc = String(row.lifecycle ?? "").trim();
+  if (lc === "draft" || lc === "cancelled") return lc;
+  return "active";
+}
+
+export function displayTypeFromCategory(categoryName: string | null | undefined): ProgramType | null {
+  const n = String(categoryName ?? "").trim();
+  if (!n) return null;
+  if (n.toLowerCase().startsWith("acquisition")) return "Acquisition";
+  if (n.toUpperCase().startsWith("EOLR")) return "Return";
+  if (n.toUpperCase().startsWith("NLD")) return "New Assignment";
+  if (n.toLowerCase().startsWith("sale")) return "Sale";
+  if (n.toLowerCase().startsWith("scrap")) return "Scrap";
+  if (n.toLowerCase().startsWith("remark")) return "Repair";
+  if (n.toLowerCase().startsWith("qualif")) return "Quals";
+  if (n.toLowerCase().startsWith("inspection")) return "Inspection";
+  if (n.toLowerCase().startsWith("other")) return "Other";
+  return null;
+}
+
+export function isCarDone(row: {
+  active?: boolean | null;
+  outcome_reached_at?: string | null;
+  completed?: boolean | null;
+}): boolean {
+  return row.active === false || Boolean(row.outcome_reached_at) || row.completed === true;
+}
+
+export function readyToClose(row: { lifecycle: string; remaining: number; total_open_links: number }): boolean {
+  return row.lifecycle === "active" && row.remaining === 0 && row.total_open_links > 0;
+}
+
+export function isProgramStale(row: { lifecycle: string; target_completion_date?: string | null }, asOf = new Date()): boolean {
+  if (row.lifecycle !== "active") return false;
+  const d = String(row.target_completion_date ?? "").slice(0, 10);
+  if (!d) return true;
+  return d < asOf.toISOString().slice(0, 10);
+}
+
 export const PROGRAM_DOC_CATEGORIES = [
   { value: "sow", label: "SOW" },
   { value: "car_drawing", label: "Car Drawing" },

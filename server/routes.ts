@@ -79,11 +79,8 @@ import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import { applyCarFinancialsFromSummary, loadFinancialSummaryRows } from "./refresh-car-financials";
 import { assertRailcarImporterPatch, assertRiderImporterPatch } from "@shared/rider-import-guard";
 import {
-  addCarsToProgram,
   buildProgramReport,
-  bulkPatchProgramCars,
   carProgramHistory,
-  exitCarFromProgram,
   getProgram,
   listActivity,
   listCategories,
@@ -92,12 +89,28 @@ import {
   listStatusOptions,
   olProgramHistory,
   parseStatus,
-  patchProgramCar,
   resolveProgramCars,
   logProgramActivity,
 } from "./programs";
 import { assignmentRentStartOnMove } from "@shared/commitment";
-import { registerCommitmentRoutes, ensureProgramCommitment, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
+import { registerCommitmentRoutes, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
+import {
+  applyActivateProgram,
+  applyAddProgramCars,
+  applyCancelProgram,
+  applyCloseProgram,
+  applyCommitmentBackfill,
+  applyPatchProgramCars,
+  applyRemoveProgramCars,
+  createProgramV2,
+  previewActivateProgram,
+  previewAddProgramCars,
+  previewCancelProgram,
+  previewCloseProgram,
+  previewCommitmentBackfill,
+  previewPatchProgramCars,
+  previewRemoveProgramCars,
+} from "./program-previews";
 import { registerRentStartRoutes } from "./rent-start";
 import { registerKpiCarRoutes } from "./kpi-cars";
 import { statusFromAssignmentLink } from "@shared/commitment";
@@ -1020,6 +1033,11 @@ export async function registerRoutes(
       const sqlActiveCars = fleetKpis
         ? Math.max(0, fleetKpis.total_fleet - (Number(sqlKpis.off_rent) || 0))
         : jsActiveCars;
+      const { count: staleProgramN } = await supabaseAdmin
+        .from("v_program_progress")
+        .select("program_id", { count: "exact", head: true })
+        .eq("stale", true);
+      const staleProgramCount = Number(staleProgramN) || 0;
       if (fleetKpis && fleetKpis.leased_only !== sqlActiveCars) {
         console.warn("[dashboard] Active Cars mismatch", { leased_only: fleetKpis.leased_only, byFormula: sqlActiveCars });
       } else if (!fleetKpis && activeAssignments !== jsActiveCars) {
@@ -1071,7 +1089,7 @@ export async function registerRoutes(
               going_on_lease_cars: Number(sqlKpis.going_on_lease_cars) || 0,
               going_on_lease_earliest_end: sqlKpis.going_on_lease_earliest_end ?? null,
               stale_commitments: Number(sqlKpis.stale_commitments) || 0,
-              stale_programs: Number(sqlKpis.stale_programs) || 0,
+              stale_programs: staleProgramCount,
               idle_on_ol_review: Number(sqlKpis.idle_on_ol_review) || 0,
               awaiting_rent_start: Number(sqlKpis.awaiting_rent_start) || 0,
               shop_conflict: Number(sqlKpis.shop_conflict) || 0,
@@ -5520,6 +5538,51 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
+  app.get("/api/programs/commitments/backfill", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const preview = await previewCommitmentBackfill();
+      if (String(req.query.format ?? "") === "csv") {
+        const headers = [
+          "railcar_id",
+          "reporting_marks",
+          "car_number",
+          "program_id",
+          "program_name",
+          "needs_commitment",
+          "in_multiple_programs",
+          "open_program_count",
+        ];
+        const lines = [
+          headers.join(","),
+          ...preview.rows.map((r: any) =>
+            headers.map((h) => `"${String(r[h] ?? "").replace(/"/g, '""')}"`).join(","),
+          ),
+        ];
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", 'attachment; filename="program_commitment_backfill.csv"');
+        res.send(lines.join("\n") + "\n");
+        return;
+      }
+      res.json(preview);
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/programs/commitments/backfill/preview", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      res.json(await previewCommitmentBackfill());
+    } catch (err) { errHandler(res, err); }
+  });
+
+  app.post("/api/programs/commitments/backfill/apply", async (req, res) => {
+    try {
+      const actor = await requireAdmin(req, res);
+      if (!actor) return;
+      res.json(await applyCommitmentBackfill(String(req.body?.preview_token ?? ""), actor));
+    } catch (err) { errHandler(res, err); }
+  });
+
   app.get("/api/programs/shops", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
@@ -5614,37 +5677,7 @@ export async function registerRoutes(
     try {
       const userId = await requireWrite(req, res);
       if (!userId) return;
-      const name = String(req.body.name ?? "").trim();
-      if (!name) return res.status(400).json({ error: "Name is required" });
-      const categoryId = Number(req.body.category_id);
-      if (!Number.isFinite(categoryId) || categoryId <= 0) {
-        return res.status(400).json({ error: "Category is required" });
-      }
-      const targetDate = String(req.body.target_completion_date ?? "").slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-        return res.status(400).json({ error: "target_completion_date is required" });
-      }
-      const status = parseStatus(req.body.status, "open");
-      const { data, error } = await supabase
-        .from("programs")
-        .insert({
-          name,
-          description: req.body.description || null,
-          status,
-          category_id: categoryId,
-          tags: Array.isArray(req.body.tags) ? req.body.tags : null,
-          entity: req.body.entity || null,
-          account_manager: req.body.account_manager || null,
-          account_id: req.body.account_id ? Number(req.body.account_id) : null,
-          status_narrative: req.body.status_narrative || null,
-          target_completion_date: targetDate,
-          created_by: userId,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      await logProgramActivity({ program_id: data.id, action: "created", actor: userId, detail: { name, status } });
-      res.json(data);
+      res.json(await createProgramV2(req.body ?? {}, userId));
     } catch (err) { errHandler(res, err); }
   });
 
@@ -5691,11 +5724,11 @@ export async function registerRoutes(
       if (req.body.status_narrative !== undefined) updates.status_narrative = req.body.status_narrative || null;
       if (req.body.target_completion_date !== undefined) {
         const targetDate = String(req.body.target_completion_date ?? "").slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-          return res.status(400).json({ error: "target_completion_date is required" });
-        }
-        updates.target_completion_date = targetDate;
+        updates.target_completion_date = /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : null;
       }
+      if (req.body.type !== undefined) updates.type = req.body.type || null;
+      if (req.body.type_other !== undefined) updates.type_other = req.body.type_other || null;
+      if (req.body.pending_note !== undefined) updates.pending_note = req.body.pending_note || null;
       if (req.body.opened_date !== undefined) updates.opened_date = req.body.opened_date || null;
       if (req.body.closed_date !== undefined) updates.closed_date = req.body.closed_date || null;
       const { data, error } = await supabaseAdmin.from("programs").update(updates).eq("id", id).select().single();
@@ -5712,17 +5745,62 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  app.delete("/api/programs/:id", async (req, res) => {
+  app.delete("/api/programs/:id", async (_req, res) => {
+    res.status(405).json({ error: "Hard delete removed. Cancel a draft instead." });
+  });
+
+  app.post("/api/programs/:id/close/preview", async (req, res) => {
     try {
       if (!(await requireWrite(req, res))) return;
-      const id = Number(req.params.id);
-      const { data: docs } = await supabase.from("program_documents").select("storage_path").eq("program_id", id);
-      if (docs && docs.length > 0) {
-        await supabaseAdmin.storage.from(STORAGE_BUCKET).remove(docs.map((d: any) => d.storage_path));
-      }
-      const { error } = await supabase.from("programs").delete().eq("id", id);
-      if (error) throw error;
-      res.json({ ok: true });
+      res.json(await previewCloseProgram(Number(req.params.id)));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/close/apply", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await applyCloseProgram(String(req.body?.preview_token ?? ""), actor));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/activate/preview", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      res.json(await previewActivateProgram(Number(req.params.id)));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/activate/apply", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await applyActivateProgram(String(req.body?.preview_token ?? ""), actor));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/reopen/preview", async (req, res) => {
+    try {
+      const admin = await requireAdmin(req, res);
+      if (!admin) return;
+      res.json(await previewActivateProgram(Number(req.params.id)));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/reopen/apply", async (req, res) => {
+    try {
+      const admin = await requireAdmin(req, res);
+      if (!admin) return;
+      res.json(await applyActivateProgram(String(req.body?.preview_token ?? ""), admin));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cancel/preview", async (req, res) => {
+    try {
+      const admin = await requireAdmin(req, res);
+      if (!admin) return;
+      res.json(await previewCancelProgram(Number(req.params.id)));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cancel/apply", async (req, res) => {
+    try {
+      const admin = await requireAdmin(req, res);
+      if (!admin) return;
+      res.json(await applyCancelProgram(String(req.body?.preview_token ?? ""), admin));
     } catch (err) { errHandler(res, err); }
   });
 
@@ -5789,60 +5867,59 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  app.post("/api/programs/:id/cars", async (req, res) => {
+  app.post("/api/programs/:id/cars", async (_req, res) => {
+    res.status(405).json({ error: "Use /cars/preview then /cars/apply" });
+  });
+  app.post("/api/programs/:id/cars/preview", async (req, res) => {
     try {
-      const userId = await requireWrite(req, res);
-      if (!userId) return;
-      const { railcar_ids } = req.body;
-      if (!Array.isArray(railcar_ids) || railcar_ids.length === 0) {
-        return res.status(400).json({ error: "railcar_ids required" });
-      }
-      const added = await addCarsToProgram(Number(req.params.id), railcar_ids, userId);
-      const { data: prog } = await supabaseAdmin.from("programs").select("id, name, status, closed_date").eq("id", Number(req.params.id)).maybeSingle();
-      if (prog && !prog.closed_date && !["closed", "complete", "completed"].includes(String(prog.status ?? "").toLowerCase())) {
-        for (const row of added.added ?? []) {
-          try {
-            await ensureProgramCommitment(row.railcar_id, { id: prog.id, name: prog.name }, userId);
-          } catch (e: any) {
-            console.warn("[programs] commitment on add skipped:", e?.message ?? e);
-          }
-        }
-      }
-      res.json(added);
+      if (!(await requireWrite(req, res))) return;
+      res.json(await previewAddProgramCars(Number(req.params.id), req.body ?? {}));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cars/apply", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await applyAddProgramCars(String(req.body?.preview_token ?? ""), actor));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cars/remove/preview", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      res.json(await previewRemoveProgramCars(Number(req.params.id), req.body ?? {}));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cars/remove/apply", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await applyRemoveProgramCars(String(req.body?.preview_token ?? ""), actor));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cars/patch/preview", async (req, res) => {
+    try {
+      if (!(await requireWrite(req, res))) return;
+      res.json(await previewPatchProgramCars(Number(req.params.id), req.body ?? {}));
+    } catch (err) { errHandler(res, err); }
+  });
+  app.post("/api/programs/:id/cars/patch/apply", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await applyPatchProgramCars(String(req.body?.preview_token ?? ""), actor));
     } catch (err) { errHandler(res, err); }
   });
 
-  app.post("/api/programs/:id/cars/bulk", async (req, res) => {
-    try {
-      const userId = await requireWrite(req, res);
-      if (!userId) return;
-      const linkIds = Array.isArray(req.body.link_ids) ? req.body.link_ids : [];
-      const updates = req.body.updates && typeof req.body.updates === "object" ? req.body.updates : null;
-      if (!linkIds.length || !updates) {
-        return res.status(400).json({ error: "link_ids and updates required" });
-      }
-      res.json(await bulkPatchProgramCars(Number(req.params.id), linkIds, updates, userId));
-    } catch (err) { errHandler(res, err); }
+  app.post("/api/programs/:id/cars/bulk", async (_req, res) => {
+    res.status(405).json({ error: "Use /cars/patch/preview then /cars/patch/apply" });
   });
 
-  app.patch("/api/programs/:id/cars/:linkId", async (req, res) => {
-    try {
-      const userId = await requireWrite(req, res);
-      if (!userId) return;
-      const row = await patchProgramCar(Number(req.params.id), Number(req.params.linkId), req.body, userId);
-      if (!row) return res.status(404).json({ error: "Car link not found" });
-      res.json(row);
-    } catch (err) { errHandler(res, err); }
+  app.patch("/api/programs/:id/cars/:linkId", async (_req, res) => {
+    res.status(405).json({ error: "Use /cars/patch/preview then /cars/patch/apply" });
   });
 
-  app.delete("/api/programs/:id/cars/:linkId", async (req, res) => {
-    try {
-      const userId = await requireWrite(req, res);
-      if (!userId) return;
-      const row = await exitCarFromProgram(Number(req.params.id), Number(req.params.linkId), userId);
-      if (!row) return res.status(404).json({ error: "Car link not found" });
-      res.json(row);
-    } catch (err) { errHandler(res, err); }
+  app.delete("/api/programs/:id/cars/:linkId", async (_req, res) => {
+    res.status(405).json({ error: "Use /cars/remove/preview then /cars/remove/apply" });
   });
 
   app.get("/api/programs/:id/activity", async (req, res) => {

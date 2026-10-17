@@ -10,6 +10,7 @@ import {
   isOnOl,
   isOnRentOlRider,
   parseCarListText,
+  shouldCreateProgramCommitment,
   xLesseeName,
   type CommitmentType,
 } from "@shared/commitment";
@@ -20,7 +21,7 @@ import { formatCarId } from "@shared/residco-import";
 
 const RECOMPUTE_STATUS = process.env.RLMS_RECOMPUTE_FLEET_STATUS === "1";
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
-export type PreviewKind = "commitment" | "return" | "sold" | "rent_start" | "unsold" | "classify" | "buyer";
+export type PreviewKind = "commitment" | "return" | "sold" | "rent_start" | "unsold" | "classify" | "buyer" | "program";
 const previewStore = new Map<string, { kind: PreviewKind; expires: number; snapshot: any }>();
 
 export async function purgeExpiredPreviews() {
@@ -206,15 +207,22 @@ export async function clearCommitment(railcarId: number, actor: string) {
   return data;
 }
 
-export async function ensureProgramCommitment(railcarId: number, program: { id: number; name: string }, actor: string) {
-  const { rider, assignment } = await linkForCar(railcarId);
+export async function ensureProgramCommitment(railcarId: number, program: { id: number; name: string; target_completion_date?: string | null }, actor: string) {
   const { data: car } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", railcarId).maybeSingle();
-  if (!(await offRentOf(car, rider?.rider_name, assignment))) return { skipped: "on_rent" as const };
+  if (!car || car.active !== true) return { skipped: "inactive" as const };
+  const { data: kpi } = await supabaseAdmin
+    .from("v_rlms_kpi_car_rows")
+    .select("railcar_id, active, is_op, off_rent")
+    .eq("railcar_id", railcarId)
+    .maybeSingle();
+  if (!shouldCreateProgramCommitment(kpi ?? { active: car.active, is_op: false, off_rent: false })) {
+    return { skipped: "not_off_rent_op" as const };
+  }
   const existing = await openCommitment(railcarId);
   if (existing) return { skipped: "already_committed" as const, existing };
   await setCommitment(
     railcarId,
-    { type: "program", name: program.name, program_id: program.id },
+    { type: "program", name: program.name, program_id: program.id, target_date: program.target_completion_date ?? null },
     actor,
     { overwrite: false },
   );
@@ -1370,13 +1378,7 @@ export function registerCommitmentRoutes(
     }
   });
 
-  app.post("/api/programs/:id/close", async (req, res) => {
-    try {
-      const actor = await requireWrite(req, res);
-      if (!actor) return;
-      res.json(await closeProgram(Number(req.params.id), actor));
-    } catch (e) {
-      errHandler(res, e);
-    }
+  app.post("/api/programs/:id/close", async (_req, res) => {
+    res.status(405).json({ error: "Use POST /api/programs/:id/close/preview then /close/apply. Links are kept." });
   });
 }

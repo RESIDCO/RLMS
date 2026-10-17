@@ -37,10 +37,18 @@ ok(columnLabel("kpi_cars", "derived_status") === "KPI status", "derived_status l
 ok(columnLabel("kpi_cars", "current_lease") === "Current lease", "current_lease label");
 ok(columnLabel("kpi_cars", "reason") === "Why in KPI", "reason label");
 ok(
-  getColumn("kpi_cars", "derived_status")!.meaning.includes("calculated by RLMS, not typed in"),
-  "derived_status meaning",
+  getColumn("kpi_cars", "derived_status")!.meaning.includes("Going On Lease"),
+  "derived_status meaning includes Going On Lease",
+);
+ok(
+  getColumn("kpi_cars", "derived_status")!.meaning.includes("rent start blank counts as on rent"),
+  "derived_status meaning blank rent start",
 );
 ok(getColumn("kpi_cars", "derived_status")!.source === "calculated", "derived_status source");
+ok(
+  getColumn("kpi_cars", "rent_start_date")!.source === "railcar_assignments.rent_start_date",
+  "rent start source",
+);
 
 ok(!!getKpiReason("open Commitment"), "reason value: open Commitment");
 ok(!!getKpiReason("Sold – needs tag"), "reason value: Sold – needs tag");

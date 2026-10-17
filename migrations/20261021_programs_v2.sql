@@ -212,6 +212,11 @@ WHERE rc.active IS TRUE
     OR m.railcar_id IS NOT NULL
   );
 
+REVOKE ALL ON public.v_program_type_map FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.v_program_lifecycle FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.v_program_progress FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.v_program_open_links FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.v_program_commitment_backfill FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.v_program_type_map TO authenticated, service_role;
 GRANT SELECT ON public.v_program_lifecycle TO authenticated, service_role;
 GRANT SELECT ON public.v_program_progress TO authenticated, service_role;

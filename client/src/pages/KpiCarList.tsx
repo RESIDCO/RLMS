@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
 import { formatCarId } from "@shared/residco-import";
+import { overlayLifecycle } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { KpiCarSheet } from "@/pages/KpiCarSheet";
 
@@ -136,11 +137,18 @@ export function KpiCarListPage() {
     "commitment" | "clear_commitment" | "rent_start" | "sold" | "unsold" | "classify_external" | "classify_intercompany" | "add_program" | null
   >(null);
   const [programId, setProgramId] = useState("");
-  const { data: programOpts = [] } = useQuery<{ id: number; name: string }[]>({
+  const { data: programOpts = [] } = useQuery<{ id: number; name: string; progress?: { lifecycle?: string }; lifecycle?: string; closed_date?: string | null }[]>({
     queryKey: ["/api/programs"],
     queryFn: () => apiRequest("GET", "/api/programs").then((r) => r.json()),
     enabled: bulk === "add_program",
   });
+  const activeProgramOpts = useMemo(
+    () =>
+      programOpts.filter(
+        (p) => (p.progress?.lifecycle ?? overlayLifecycle(p)) === "active",
+      ),
+    [programOpts],
+  );
   const [preview, setPreview] = useState<any>(null);
   const [commitType, setCommitType] = useState<CommitmentType>("deal");
   const [commitName, setCommitName] = useState("");
@@ -389,7 +397,7 @@ export function KpiCarListPage() {
                 <SelectTrigger className="w-56"><SelectValue placeholder="Program" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Pick program</SelectItem>
-                  {programOpts.map((p) => (
+                  {activeProgramOpts.map((p) => (
                     <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>

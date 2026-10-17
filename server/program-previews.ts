@@ -492,6 +492,9 @@ export async function applyCloseProgram(token: string, actor: string) {
   const preview = await getPreview("program", token);
   if (preview.action !== "close") throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
   const program = await loadProgramRow(Number(preview.program_id));
+  if (program.overlay_lifecycle !== "active") {
+    throw Object.assign(new Error("Program is no longer active"), { status: 400 });
+  }
   const today = todayIso();
   const { error } = await supabaseAdmin
     .from("programs")

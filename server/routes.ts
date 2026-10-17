@@ -1031,6 +1031,11 @@ export async function registerRoutes(
       const sqlActiveCars = fleetKpis
         ? Math.max(0, fleetKpis.total_fleet - (Number(sqlKpis.off_rent) || 0))
         : jsActiveCars;
+      const { count: staleProgramN } = await supabaseAdmin
+        .from("v_program_progress")
+        .select("program_id", { count: "exact", head: true })
+        .eq("stale", true);
+      const staleProgramCount = Number(staleProgramN) || 0;
       if (fleetKpis && fleetKpis.leased_only !== sqlActiveCars) {
         console.warn("[dashboard] Active Cars mismatch", { leased_only: fleetKpis.leased_only, byFormula: sqlActiveCars });
       } else if (!fleetKpis && activeAssignments !== jsActiveCars) {
@@ -1082,7 +1087,7 @@ export async function registerRoutes(
               going_on_lease_cars: Number(sqlKpis.going_on_lease_cars) || 0,
               going_on_lease_earliest_end: sqlKpis.going_on_lease_earliest_end ?? null,
               stale_commitments: Number(sqlKpis.stale_commitments) || 0,
-              stale_programs: Number(sqlKpis.stale_programs) || 0,
+              stale_programs: staleProgramCount,
               idle_on_ol_review: Number(sqlKpis.idle_on_ol_review) || 0,
               awaiting_rent_start: Number(sqlKpis.awaiting_rent_start) || 0,
               shop_conflict: Number(sqlKpis.shop_conflict) || 0,
@@ -5551,7 +5556,7 @@ export async function registerRoutes(
 
   app.post("/api/programs/commitments/backfill/apply", async (req, res) => {
     try {
-      const actor = await requireWrite(req, res);
+      const actor = await requireAdmin(req, res);
       if (!actor) return;
       res.json(await applyCommitmentBackfill(String(req.body?.preview_token ?? ""), actor));
     } catch (err) { errHandler(res, err); }

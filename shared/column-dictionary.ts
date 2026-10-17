@@ -133,13 +133,13 @@ const NAMESPACED: ColumnDictEntry[] = [
   d("program_cars:commitment", "Commitment", "Open Commitment on this car, if any.", "car_commitments", "Open commitment for the linked railcar."),
   d("program_cars:kpi", "KPI bucket", "Which dashboard KPI list this car currently falls in.", "calculated", "Same KPI rules as the dashboard (off rent, idle, unassigned, sold, etc.)."),
   d("program_cars:car", "Car", "Car in this program.", "program_cars.railcar_id → railcars", "Marks + number of the linked railcar."),
-  d("program_cars:complete", "Outcome", "Legacy outcome checkbox. Progress uses Completion / Program done instead.", "program_cars.outcome_reached_at / completed", "Staff-marked. Not the same as Program done."),
+  d("program_cars:complete", "Outcome", "Complete checkbox / outcome date. Counts as Program done.", "program_cars.outcome_reached_at / custom_fields.__complete", "Staff-marked. Same signal as pre-#15 progress done."),
   d(
     "program_cars:completion",
     "Completion",
-    "Where this car sits on the program: Not started, In progress, Work done (work finished, still awaiting destination), or Program done (On rent, Scrapped, Sold, Stored, or inactive).",
-    "calculated from program_car_milestones",
-    "Program done if the car is inactive or the trail has On rent, Scrapped, Sold, or Stored. Work done if the trail has Work complete and not yet Program done. In progress if any other milestone or status is set. Otherwise Not started.",
+    "Where this car sits on the program: Not started, In progress, Work done (work finished, still awaiting destination), or Program done (On rent, Scrapped, Sold, Stored, inactive, Complete checkbox, or outcome date).",
+    "calculated from program_car_milestones / program_cars",
+    "Program done if the car is inactive, the Complete checkbox / outcome date is set, or the trail has On rent, Scrapped, Sold, or Stored. Status text alone is not done. Work done if the trail has Work complete and not yet Program done.",
   ),
   d("browse_ol_list:ol", "OL / Rider", "Operating or finance lease (rider) in this group.", "riders.rider_external_id / rider_name", "Group row’s OL code; name shown under the code when different."),
 ];

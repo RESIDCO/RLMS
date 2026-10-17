@@ -56,6 +56,7 @@ import {
   type ProgramType,
 } from "@shared/programs";
 import { COMMITMENT_TYPES } from "@shared/commitment";
+import { diffProgramPatch } from "@shared/program-patch";
 
 type Category = { id: number; name: string };
 type StatusOption = { id: number; value: string; sort_order: number };
@@ -161,7 +162,7 @@ function headerFrom(p: Program): HeaderDraft {
     closed_date: p.closed_date?.slice(0, 10) ?? "",
     tags: (p.tags ?? []).join(", "),
     category_id: p.category_id != null ? String(p.category_id) : "",
-    type: p.type ?? p.progress?.display_type ?? "",
+    type: p.type ?? "",
     type_other: p.type_other ?? "",
     pending_note: p.pending_note ?? "",
   };
@@ -248,6 +249,8 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
     status: next.status,
     milestone: next.milestone,
     milestones: car.trail,
+    outcome_reached_at: next.outcome_reached_at,
+    completed: next.completed,
   });
   return next;
 }
@@ -881,22 +884,25 @@ export default function ProgramDetailPage() {
   }
 
   async function saveHeader() {
-    if (!header || !canEdit) return;
-    await patchProgram.mutateAsync({
+    if (!header || !program || !canEdit) return;
+    const body = diffProgramPatch(program as unknown as Record<string, unknown>, {
       entity: header.entity || null,
       account_manager: header.account_manager.trim() || null,
       account_id: header.account_id,
       description: header.description.trim() || null,
       status_narrative: header.status_narrative,
-      opened_date: header.opened_date || null,
       target_completion_date: header.target_completion_date || null,
-      closed_date: header.closed_date || null,
       tags: header.tags.split(",").map((t) => t.trim()).filter(Boolean),
       category_id: header.category_id ? Number(header.category_id) : null,
       type: header.type || null,
       type_other: header.type === "Other" ? header.type_other.trim() || null : null,
       pending_note: header.pending_note.trim() || null,
     });
+    if (!Object.keys(body).length) {
+      toast({ title: "No changes" });
+      return;
+    }
+    await patchProgram.mutateAsync(body);
     setSavedFlash(true);
     toast({ title: "Saved" });
     window.setTimeout(() => setSavedFlash(false), 2500);
@@ -911,6 +917,8 @@ export default function ProgramDetailPage() {
         status: c.status,
         milestone: c.milestone,
         milestones: c.trail,
+        outcome_reached_at: c.outcome_reached_at,
+        completed: c.completed,
       });
       if (!levelFilter.has(level)) return false;
       return true;
@@ -1135,13 +1143,16 @@ export default function ProgramDetailPage() {
             </div>
           </HeaderField>
           <HeaderField label="Opened">
-            <Input className="h-8 text-xs" type="date" value={header.opened_date} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, opened_date: e.target.value })} />
+            <Input className="h-8 text-xs" type="date" value={header.opened_date} readOnly />
           </HeaderField>
           <HeaderField label="Target">
             <Input className="h-8 text-xs" type="date" value={header.target_completion_date} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, target_completion_date: e.target.value })} />
+            {header.target_completion_date && header.target_completion_date < new Date().toISOString().slice(0, 10) ? (
+              <div className="text-[10px] text-umler-amber mt-0.5">Past date: program will show as stale</div>
+            ) : null}
           </HeaderField>
           <HeaderField label="Closed">
-            <Input className="h-8 text-xs" type="date" value={header.closed_date} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, closed_date: e.target.value })} />
+            <Input className="h-8 text-xs" type="date" value={header.closed_date} readOnly />
           </HeaderField>
           <HeaderField label="Tags">
             <Input className="h-8 text-xs" value={header.tags} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, tags: e.target.value })} placeholder="NLD, Sale" />

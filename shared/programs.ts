@@ -98,8 +98,12 @@ export function deriveCompletionLevel(row: {
   status?: string | null;
   milestone?: string | null;
   milestones?: { milestone?: string | null }[] | null;
+  outcome_reached_at?: string | null;
+  completed?: boolean | null;
 }): CompletionLevel {
   if (row.active === false) return "program_done";
+  if (row.completed === true) return "program_done";
+  if (String(row.outcome_reached_at ?? "").trim()) return "program_done";
   const names = [
     ...(row.milestones ?? []).map((m) => m.milestone),
     row.milestone,
@@ -108,6 +112,16 @@ export function deriveCompletionLevel(row: {
   if (names.some((n) => isWorkCompleteMilestone(n))) return "work_done";
   if (names.length || String(row.status ?? "").trim()) return "in_progress";
   return "not_started";
+}
+
+export function percentFromProgress(progress: {
+  done?: number | null;
+  total_open_links?: number | null;
+} | null | undefined): number | null {
+  const total = Number(progress?.total_open_links ?? 0);
+  const done = Number(progress?.done ?? 0);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return Math.round((100 * done) / total);
 }
 
 export function trailDate(

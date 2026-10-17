@@ -40,6 +40,7 @@ ok(KPI_DRILL_TILES.find((t) => t.bucket === "sold_tag_suspect")?.expectedCount =
 ok(KPI_DRILL_TILES.find((t) => t.bucket === "sold_missing_buyer")?.expectedCount === 1, "sold_missing_buyer 1");
 ok(KPI_DRILL_TILES.find((t) => t.bucket === "sale_unclear")?.expectedCount === 0, "sale_unclear 0");
 ok(KPI_DRILL_TILES.find((t) => t.bucket === "leased_off_rent")?.expectedCount === 90, "leased_off_rent 90");
+ok(KPI_DRILL_TILES.find((t) => t.bucket === "rental_abatement")?.expectedCount === 0, "rental_abatement 0 until first apply");
 ok(!KPI_DRILL_TILES.some((t) => t.bucket === "idle_on_ol"), "idle_on_ol merged into awaiting");
 
 console.log(`${passed} passed, ${failed} failed`);

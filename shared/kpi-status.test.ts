@@ -2,6 +2,7 @@
 /** Run: npx tsx shared/kpi-status.test.ts */
 
 import { derivedAgreesWithDashboard, derivedKpiStatus, dashboardIdle, dashboardUnassigned } from "./kpi-status";
+import { kpiBucketsForRow } from "./kpi-buckets";
 
 let passed = 0;
 let failed = 0;
@@ -43,6 +44,23 @@ ok(derivedAgreesWithDashboard(avail), "Available agrees");
 
 const onRent = { is_op: true, off_rent: false };
 ok(derivedKpiStatus(onRent) === "Leased" && derivedAgreesWithDashboard(onRent), "on rent agrees");
+
+const abate = {
+  active: true,
+  is_op: true,
+  is_sold: false,
+  off_rent: false,
+  on_ol: true,
+  on_rent: false,
+  open_abatement: true,
+  in_open_program: true,
+};
+ok(derivedKpiStatus(abate) === "Leased", "open abatement is not Idle");
+ok(!dashboardIdle(abate), "open abatement is not dashboard Idle");
+ok(!kpiBucketsForRow(abate).includes("on_rent"), "open abatement excluded from on_rent");
+ok(!kpiBucketsForRow(abate).includes("idle"), "open abatement not Idle bucket");
+ok(!kpiBucketsForRow(abate).includes("unassigned"), "open abatement not Unassigned");
+ok(kpiBucketsForRow(abate).includes("rental_abatement"), "open abatement bucket");
 
 const sixGol = Array.from({ length: 6 }, () => gol);
 const idleRest = Array.from({ length: 243 }, () => ({ is_op: true, off_rent: true, has_open_commitment: true as const }));

@@ -40,6 +40,7 @@ import {
   BulkCommitmentPage,
   BulkReturnPage,
   BulkRentStartPage,
+  BulkRentStopsPage,
   StaleCommitmentsPage,
   LeaseEndedWatchPage,
   KpiCarListPage,
@@ -114,6 +115,7 @@ function AppRouter() {
       <Route path="/commitments/bulk" component={BulkCommitmentPage} />
       <Route path="/commitments/stale" component={StaleCommitmentsPage} />
       <Route path="/rent-start/bulk" component={BulkRentStartPage} />
+      <Route path="/rent-stops/bulk" component={BulkRentStopsPage} />
       <Route path="/rent-start/awaiting">{() => <RentStartWatchPage kind="awaiting" />}</Route>
       <Route path="/rent-start/shop">{() => <RentStartWatchPage kind="shop" />}</Route>
       <Route path="/rent-start/future">{() => <RentStartWatchPage kind="future" />}</Route>

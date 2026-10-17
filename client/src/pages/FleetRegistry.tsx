@@ -8,6 +8,7 @@ import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRai
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-status";
 import { CommitmentPanel } from "@/pages/CommitmentOps";
+import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { ReassignCarForm } from "@/components/ReassignCarForm";
@@ -2222,7 +2223,11 @@ export function CarDetail({
         </div>
       )}
 
-      {/* ── Rental Abatement / Rent Status ── */}
+      <div className="mt-6">
+        <RentStopsCard carId={carId} canEdit={allowEdits} />
+      </div>
+
+      {/* ── Legacy rent_events log (unchanged; not car_rent_stops) ── */}
       <div className="mt-6 border-t border-border pt-5">
         <div className="flex items-center justify-between mb-3">
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">

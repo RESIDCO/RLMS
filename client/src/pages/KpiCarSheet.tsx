@@ -19,6 +19,7 @@ import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { kpiBucketTitle } from "@shared/kpi-buckets";
 import { formatCarId } from "@shared/residco-import";
 import { carPath } from "@/lib/browse-nav";
+import { RentStopsCard } from "@/components/RentStopsCard";
 
 function KpiDeltaBlock({ delta }: { delta: any[] | undefined }) {
   if (!delta?.length) return null;
@@ -170,6 +171,8 @@ export function KpiCarSheet({
                 Edit assignment on car page
               </Link>
             </div>
+
+            <RentStopsCard carId={row.railcar_id} canEdit={canEdit} />
 
             {canEdit && (
               <>

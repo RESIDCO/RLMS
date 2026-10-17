@@ -8,7 +8,7 @@ import { formatCarId } from "@shared/residco-import";
 import { loadKpiCarRow } from "./kpi-delta";
 
 const ROW_COLS =
-  "railcar_id, active, car, reporting_marks, car_number, entity, status_tag, derived_status, current_lease, lessee, legal_owner, buyer, commitment, rent_start_date, last_ol, reason, sale_class, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, lease_status, master_lease_id, rider_id";
+  "railcar_id, active, car, reporting_marks, car_number, entity, status_tag, derived_status, current_lease, lessee, legal_owner, buyer, commitment, rent_start_date, last_ol, reason, sale_class, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, lease_status, master_lease_id, rider_id, open_abatement, rent_stop_type, stop_date, expected_resume_date, rent_stop_reason";
 
 function withFormattedCar<T extends { car?: string | null; reporting_marks?: string | null; car_number?: string | null }>(row: T): T {
   return { ...row, car: formatCarId(row) };
@@ -38,7 +38,8 @@ function applyBucket(q: any, bucket: string) {
       .eq("awaiting_rent_start", false);
   }
   if (bucket === "op") return q.eq("is_op", true);
-  if (bucket === "on_rent") return q.eq("is_op", true).eq("off_rent", false);
+  if (bucket === "on_rent") return q.eq("is_op", true).eq("off_rent", false).eq("open_abatement", false);
+  if (bucket === "rental_abatement") return q.eq("is_op", true).eq("open_abatement", true);
   if (bucket === "idle_on_ol") return q.eq("is_op", true).eq("status_tag", "Idle").eq("on_ol", true);
   if (bucket === "awaiting_rent_start") return q.eq("is_op", true).eq("awaiting_rent_start", true);
   if (bucket === "leased_off_rent") return q.eq("is_op", true).eq("off_rent", true).eq("status_tag", "Leased");

@@ -405,6 +405,88 @@ export function LeaseEndedWatchPage() {
 
 export { KpiCarListPage } from "@/pages/KpiCarList";
 
+export function BulkRentStopsPage() {
+  const canEdit = useCanEdit();
+  const { toast } = useToast();
+  const [text, setText] = useState("");
+  const [action, setAction] = useState("abatement");
+  const [stopDate, setStopDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState("quality repair");
+  const [preview, setPreview] = useState<any>(null);
+  const runPreview = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("POST", "/api/rent-stops/bulk/preview", {
+        text,
+        action,
+        stop_date: stopDate,
+        reason,
+      })).json(),
+    onSuccess: setPreview,
+    onError: (e: Error) => toast({ title: "Preview failed", description: e.message, variant: "destructive" }),
+  });
+  const apply = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("POST", "/api/rent-stops/bulk/apply", { preview_token: preview?.preview_token })).json(),
+    onSuccess: (d) => toast({ title: "Applied", description: `${d.written} rows written` }),
+    onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
+  });
+  return (
+    <div>
+      <PageHeader title="Bulk rent stops" subtitle="Active cars only. Preview first. Abatement stays on the OL; convert to off rent does not end the assignment." />
+      <div className="p-6 space-y-4 max-w-4xl">
+        <PasteBox onText={setText} />
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <Label>Action</Label>
+            <Select value={action} onValueChange={setAction}>
+              <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="abatement">Set abatement</SelectItem>
+                <SelectItem value="resume">Resume</SelectItem>
+                <SelectItem value="convert">Convert to off rent</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Stop date</Label>
+            <Input type="date" value={stopDate} onChange={(e) => setStopDate(e.target.value)} />
+          </div>
+          <div>
+            <Label>Reason</Label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+          </div>
+          {canEdit && <Button disabled={runPreview.isPending} onClick={() => runPreview.mutate()}>Preview</Button>}
+          {canEdit && preview?.preview_token && (
+            <Button disabled={apply.isPending} onClick={() => apply.mutate()}>Apply preview</Button>
+          )}
+        </div>
+        {preview && (
+          <div className="text-sm space-y-2">
+            <div>To write {preview.to_write?.length ?? 0} · rejected {preview.rejected?.length ?? 0}</div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th>Car</th><th>OL</th><th>Lessee</th><th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(preview.to_write ?? []).map((r: any) => (
+                  <tr key={r.id} className="border-t border-border/40">
+                    <td className="font-mono">{r.car}</td>
+                    <td>{r.ol}</td>
+                    <td>{r.lessee}</td>
+                    <td>{r.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function BulkRentStartPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();

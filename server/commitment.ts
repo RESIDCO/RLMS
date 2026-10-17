@@ -21,7 +21,7 @@ import { formatCarId } from "@shared/residco-import";
 
 const RECOMPUTE_STATUS = process.env.RLMS_RECOMPUTE_FLEET_STATUS === "1";
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
-export type PreviewKind = "commitment" | "return" | "sold" | "rent_start" | "unsold" | "classify" | "buyer" | "program";
+export type PreviewKind = "commitment" | "return" | "sold" | "rent_start" | "unsold" | "classify" | "buyer" | "program" | "rent_stop";
 const previewStore = new Map<string, { kind: PreviewKind; expires: number; snapshot: any }>();
 
 export async function purgeExpiredPreviews() {

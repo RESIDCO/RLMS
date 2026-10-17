@@ -12,6 +12,7 @@ import {
   type ProgramFieldDef,
   type ProgramStatus,
 } from "@shared/programs";
+import { whitelistExportCols } from "@shared/column-views";
 
 const PROGRAM_LIST_SELECT = `
 id, name, description, status, lifecycle, type, type_other, pending_note, cancelled_at,
@@ -704,6 +705,7 @@ export async function buildProgramReport(opts: {
   programIds: number[];
   includeExited: boolean;
   filename?: string;
+  cols?: unknown;
 }): Promise<{ buffer: Buffer; filename: string }> {
   const ids = [...new Set(opts.programIds.filter((id) => Number.isFinite(id)))];
   if (!ids.length) throw new Error("Select at least one program");
@@ -748,17 +750,28 @@ export async function buildProgramReport(opts: {
     });
 
     const sheet = wb.addWorksheet(excelSheetName(p.name, usedNames));
-    const headers = [
-      ...coreCarColumns().map((c) => c.label),
-      ...usedDefs.map((d) => d.label),
-    ];
+    const core = coreCarColumns();
+    const cfKeys = usedDefs.map((d) => `cf:${d.field_key}`);
+    const allowed = [...core.map((c) => c.key), ...cfKeys];
+    const fallback = allowed;
+    const keys = whitelistExportCols(allowed, opts.cols, fallback);
+    const labelFor = (key: string) => {
+      const c = core.find((x) => x.key === key);
+      if (c) return c.label;
+      const d = usedDefs.find((x) => `cf:${x.field_key}` === key);
+      return d?.label ?? key;
+    };
+    const headers = keys.map(labelFor);
     sheet.addRow(headers);
     sheet.getRow(1).font = { bold: true };
     for (const car of cars) {
-      const vals = [
-        ...coreCarColumns().map((c) => carExportValue(car, c.key)),
-        ...usedDefs.map((d) => formatCustomField(car.custom_fields?.[d.field_key], d.field_type)),
-      ];
+      const vals = keys.map((key) => {
+        if (key.startsWith("cf:")) {
+          const d = usedDefs.find((x) => `cf:${x.field_key}` === key);
+          return d ? formatCustomField(car.custom_fields?.[d.field_key], d.field_type) : "";
+        }
+        return carExportValue(car, key);
+      });
       sheet.addRow(vals);
     }
     sheet.columns.forEach((col) => {

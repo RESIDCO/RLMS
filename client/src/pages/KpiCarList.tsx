@@ -20,6 +20,10 @@ import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
+import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { mergeColOrder } from "@/lib/grid-columns";
+import { colsQuery } from "@shared/column-views";
 import { formatCarId } from "@shared/residco-import";
 import { overlayLifecycle } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
@@ -72,6 +76,81 @@ function kpiCheckClass(selected = false) {
     ? "bg-muted/40 group-hover/kpirow:bg-muted/40"
     : "bg-background group-hover/kpirow:bg-muted/20";
   return `sticky left-0 z-10 ${fill}`;
+}
+
+const KPI_DEFAULT_COLS = new Set<string>(KPI_SORT_COLS);
+const KPI_PICKER_COLS = KPI_SORT_COLS.map((key) => ({ key, label: key, pinned: key === "car" }));
+
+function KpiCell({
+  col,
+  r,
+  rowSelected,
+  listPathWithoutCar,
+  sheetPushedRef,
+  setParams,
+}: {
+  col: (typeof KPI_SORT_COLS)[number];
+  r: Row;
+  rowSelected: boolean;
+  listPathWithoutCar: string;
+  sheetPushedRef: { current: boolean };
+  setParams: (patch: Record<string, string | null>, resetPage?: boolean) => void;
+}) {
+  const style = { minWidth: KPI_COL_LAYOUT[col].minWidth };
+  if (col === "car") {
+    return (
+      <td className={kpiTdClass("car", rowSelected)} style={style}>
+        <button
+          type="button"
+          className="underline whitespace-nowrap"
+          onClick={() => {
+            sessionStorage.setItem(`rlms:kpi-scroll:${listPathWithoutCar}`, String(window.scrollY));
+            sheetPushedRef.current = true;
+            setParams({ car: String(r.railcar_id) }, false);
+          }}
+        >
+          {formatCarId(r)}
+        </button>
+      </td>
+    );
+  }
+  if (col === "current_lease") {
+    return (
+      <td className={kpiTdClass("current_lease")} style={style} title={r.current_lease ?? undefined}>
+        {r.current_lease ? (
+          <span className="inline-flex items-center gap-1 max-w-full">
+            <button
+              type="button"
+              className="underline truncate"
+              title={r.current_lease}
+              onClick={() => setParams({ lease: r.current_lease })}
+            >
+              {r.current_lease}
+            </button>
+            <Link href={olPath(r.current_lease)} title="Open in Browse" className="text-muted-foreground hover:text-primary shrink-0">
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+          </span>
+        ) : "—"}
+      </td>
+    );
+  }
+  const value =
+    col === "entity" ? r.entity :
+    col === "status_tag" ? r.status_tag :
+    col === "derived_status" ? r.derived_status :
+    col === "lessee" ? r.lessee :
+    col === "legal_owner" ? r.legal_owner :
+    col === "buyer" ? r.buyer :
+    col === "commitment" ? r.commitment :
+    col === "rent_start_date" ? r.rent_start_date :
+    col === "last_ol" ? r.last_ol :
+    r.reason;
+  return (
+    <td className={kpiTdClass(col)} style={style} title={value ?? undefined}>
+      {value ?? "—"}
+    </td>
+  );
 }
 
 export function KpiCarListPage() {
@@ -283,9 +362,17 @@ export function KpiCarListPage() {
     }));
   }, [rows, group, groups]);
 
+  const colPrefs = useColumnPrefs("kpi_cars", KPI_DEFAULT_COLS);
+  const kpiCols = useMemo(() => {
+    const movable = KPI_SORT_COLS.filter((c) => c !== "car");
+    const ordered = mergeColOrder([...movable], colPrefs.colOrder).filter((c) => colPrefs.visibleCols.has(c));
+    return ["car" as const, ...(ordered as typeof movable)];
+  }, [colPrefs.visibleCols, colPrefs.colOrder]);
+
   const exportHref = (format: "csv" | "xlsx") => {
     const p = new URLSearchParams(listQs);
     p.set("format", format);
+    p.set("cols", colsQuery(kpiCols));
     return `/api/kpi/cars/export?${p.toString()}`;
   };
 
@@ -305,6 +392,7 @@ export function KpiCarListPage() {
             <Button variant="outline" size="sm" onClick={() => downloadXlsx(exportHref("xlsx"), `RLMS_${bucket}.xlsx`)}>
               Export XLSX
             </Button>
+            <ColumnPicker columns={KPI_PICKER_COLS} prefs={colPrefs} />
           </div>
         }
       />
@@ -467,7 +555,7 @@ export function KpiCarListPage() {
                       }}
                     />
                   </th>
-                  {KPI_SORT_COLS.map((col) => (
+                  {kpiCols.map((col) => (
                     <th key={col} className={kpiThClass(col)} style={{ minWidth: KPI_COL_LAYOUT[col].minWidth }}>
                       <button type="button" className="hover:underline" onClick={() => toggleSort(col)}>
                         {col}{sort === col ? (dir === "asc" ? " ↑" : " ↓") : ""}
@@ -483,7 +571,7 @@ export function KpiCarListPage() {
                     <Fragment key={g.key || "all"}>
                       {group ? (
                         <tr key={`g-${g.key}`} className="bg-muted/40">
-                          <td colSpan={13} className="py-1.5">
+                          <td colSpan={1 + kpiCols.length} className="py-1.5">
                             <button
                               type="button"
                               className="inline-flex items-center gap-1 font-medium"
@@ -520,50 +608,17 @@ export function KpiCarListPage() {
                                 }}
                               />
                             </td>
-                            <td className={kpiTdClass("car", rowSelected)} style={{ minWidth: KPI_COL_LAYOUT.car.minWidth }}>
-                              <button
-                                type="button"
-                                className="underline whitespace-nowrap"
-                                onClick={() => {
-                                  sessionStorage.setItem(`rlms:kpi-scroll:${listPathWithoutCar}`, String(window.scrollY));
-                                  sheetPushedRef.current = true;
-                                  setParams({ car: String(r.railcar_id) }, false);
-                                }}
-                              >
-                                {formatCarId(r)}
-                              </button>
-                            </td>
-                            <td className={kpiTdClass("entity")} style={{ minWidth: KPI_COL_LAYOUT.entity.minWidth }}>{r.entity ?? "—"}</td>
-                            <td className={kpiTdClass("status_tag")} style={{ minWidth: KPI_COL_LAYOUT.status_tag.minWidth }}>{r.status_tag ?? "—"}</td>
-                            <td className={kpiTdClass("derived_status")} style={{ minWidth: KPI_COL_LAYOUT.derived_status.minWidth }}>{r.derived_status ?? "—"}</td>
-                            <td className={kpiTdClass("current_lease")} style={{ minWidth: KPI_COL_LAYOUT.current_lease.minWidth }} title={r.current_lease ?? undefined}>
-                              {r.current_lease ? (
-                                <span className="inline-flex items-center gap-1 max-w-full">
-                                  <button
-                                    type="button"
-                                    className="underline truncate"
-                                    title={r.current_lease}
-                                    onClick={() => setParams({ lease: r.current_lease })}
-                                  >
-                                    {r.current_lease}
-                                  </button>
-                                  <Link
-                                    href={olPath(r.current_lease)}
-                                    title="Open in Browse"
-                                    className="text-muted-foreground hover:text-primary shrink-0"
-                                  >
-                                    <ExternalLink className="h-3.5 w-3.5" />
-                                  </Link>
-                                </span>
-                              ) : "—"}
-                            </td>
-                            <td className={kpiTdClass("lessee")} style={{ minWidth: KPI_COL_LAYOUT.lessee.minWidth }} title={r.lessee ?? undefined}>{r.lessee ?? "—"}</td>
-                            <td className={kpiTdClass("legal_owner")} style={{ minWidth: KPI_COL_LAYOUT.legal_owner.minWidth }}>{r.legal_owner ?? "—"}</td>
-                            <td className={kpiTdClass("buyer")} style={{ minWidth: KPI_COL_LAYOUT.buyer.minWidth }}>{r.buyer ?? "—"}</td>
-                            <td className={kpiTdClass("commitment")} style={{ minWidth: KPI_COL_LAYOUT.commitment.minWidth }} title={r.commitment ?? undefined}>{r.commitment ?? "—"}</td>
-                            <td className={kpiTdClass("rent_start_date")} style={{ minWidth: KPI_COL_LAYOUT.rent_start_date.minWidth }}>{r.rent_start_date ?? "—"}</td>
-                            <td className={kpiTdClass("last_ol")} style={{ minWidth: KPI_COL_LAYOUT.last_ol.minWidth }}>{r.last_ol ?? "—"}</td>
-                            <td className={kpiTdClass("reason")} style={{ minWidth: KPI_COL_LAYOUT.reason.minWidth }}>{r.reason ?? "—"}</td>
+                            {kpiCols.map((col) => (
+                              <KpiCell
+                                key={col}
+                                col={col}
+                                r={r}
+                                rowSelected={rowSelected}
+                                listPathWithoutCar={listPathWithoutCar}
+                                sheetPushedRef={sheetPushedRef}
+                                setParams={setParams}
+                              />
+                            ))}
                           </tr>
                           );
                         })}

@@ -1,4 +1,4 @@
-import { Search as SearchIcon, Loader2, X, Pencil, History, Columns3, ChevronLeft, ChevronRight, Download, User } from "lucide-react";
+import { Search as SearchIcon, Loader2, X, Pencil, History, ChevronLeft, ChevronRight, Download, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
 import { carListSearchTokens } from "@shared/programs";
@@ -10,15 +10,6 @@ import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { carPath, historyPath, openAppTab } from "@/lib/browse-nav";
 import { contactsDirectoryPath } from "@/lib/directory-nav";
 import {
@@ -36,6 +27,7 @@ import { formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { downloadRailcarsCsv } from "@/lib/railcar-csv";
 import { useToast } from "@/hooks/use-toast";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { useQuery } from "@tanstack/react-query";
@@ -228,16 +220,14 @@ export default function SearchPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pageSize = 75;
 
+  const colPrefs = useColumnPrefs("search_results", SEARCH_DEFAULT_COLS);
   const {
     visibleCols: visibleColsRaw,
-    toggleCol,
-    resetCols,
-    prefsLoaded,
     colOrder,
     setColOrder,
     colWidths,
     setColWidth,
-  } = useColumnPrefs("search_results", SEARCH_DEFAULT_COLS);
+  } = colPrefs;
   const visibleCols = visibleColsRaw as Set<OptCol>;
 
   const isPaste = Boolean(committed && carListSearchTokens(committed));
@@ -415,7 +405,9 @@ export default function SearchPage() {
           ),
         );
       }
-      downloadRailcarsCsv(rows, filename);
+      downloadRailcarsCsv(rows, filename, {
+        keys: [...PINNED_START, ...CORE_MOVABLE, ...OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => c.key)],
+      });
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message ?? "Could not export search results", variant: "destructive" });
     } finally {
@@ -626,38 +618,7 @@ export default function SearchPage() {
       {committed && (
         <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 pb-4 max-w-[1400px] w-full mx-auto gap-3">
           <div className="shrink-0 flex flex-wrap items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-                  <Columns3 className="h-3.5 w-3.5" />
-                  Columns
-                  {!prefsLoaded ? (
-                    <span className="h-3.5 w-3.5 rounded-full bg-muted animate-pulse" />
-                  ) : visibleCols.size > 0 ? (
-                    <span className="ml-0.5 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none">
-                      {visibleCols.size}
-                    </span>
-                  ) : null}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">Optional columns</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {OPT_COLS.map(({ key, label }) => (
-                  <DropdownMenuCheckboxItem key={key} checked={visibleCols.has(key)} onCheckedChange={() => toggleCol(key)}>
-                    {label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-                {visibleCols.size > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-xs text-muted-foreground" onClick={() => resetCols()}>
-                      Reset to default
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ColumnPicker columns={OPT_COLS} prefs={colPrefs} />
             {totalCount > 0 && (
               <Button
                 type="button"

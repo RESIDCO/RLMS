@@ -9,7 +9,7 @@ import { formatCalendarDate } from "@shared/lease-authority";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
-import { ChevronRight, Columns3, Download } from "lucide-react";
+import { ChevronRight, Download } from "lucide-react";
 import {
   ENTITY_SLUGS,
   entityOlCarPath,
@@ -28,16 +28,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
 
@@ -151,10 +143,8 @@ function CarTable({
     onToggleAll: () => void;
   };
 }) {
-  const { visibleCols, toggleCol, resetCols, prefsLoaded } = useColumnPrefs(
-    "browse_car_list",
-    BROWSE_CAR_DEFAULT_COLS,
-  );
+  const colPrefs = useColumnPrefs("browse_car_list", BROWSE_CAR_DEFAULT_COLS);
+  const { visibleCols } = colPrefs;
   const show = (key: string) => visibleCols.has(key);
   const ids = cars.map((c) => c.id);
   const allOn = Boolean(selection && ids.length > 0 && ids.every((id) => selection.selected.has(id)));
@@ -162,44 +152,7 @@ function CarTable({
   return (
     <div className="space-y-2">
       <div className="flex justify-end">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-              <Columns3 className="h-3.5 w-3.5" />
-              Columns
-              {!prefsLoaded ? (
-                <span className="h-3.5 w-3.5 rounded-full bg-muted animate-pulse" />
-              ) : visibleCols.size > 0 ? (
-                <span className="ml-0.5 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none">
-                  {visibleCols.size}
-                </span>
-              ) : null}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Optional columns
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {BROWSE_CAR_OPT_COLS.map(({ key, label }) => (
-              <DropdownMenuCheckboxItem
-                key={key}
-                checked={visibleCols.has(key)}
-                onCheckedChange={() => toggleCol(key)}
-              >
-                {label}
-              </DropdownMenuCheckboxItem>
-            ))}
-            {visibleCols.size > 0 && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-xs text-muted-foreground" onClick={() => resetCols()}>
-                  Reset to default
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <ColumnPicker columns={[...BROWSE_CAR_OPT_COLS]} prefs={colPrefs} />
       </div>
       <div className="rounded-xl border border-card-border bg-card overflow-hidden">
         <div className="overflow-x-auto">

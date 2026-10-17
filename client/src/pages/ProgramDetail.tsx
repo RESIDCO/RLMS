@@ -24,6 +24,8 @@ import { navigateHash } from "@/lib/hash-location";
 import { cn } from "@/lib/utils";
 import { Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { colsQuery } from "@shared/column-views";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import {
@@ -189,8 +191,8 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   return next;
 }
 
-const PD_EMPTY_COLS = new Set<string>();
 const PD_CORE = ["active", "milestone", "milestone_at", "notes", "shop", "commitment", "kpi"] as const;
+const PD_DEFAULT_COLS = new Set<string>(PD_CORE);
 const PD_LABELS: Record<string, string> = {
   car: "Car",
   complete: "Outcome",
@@ -350,17 +352,22 @@ export default function ProgramDetailPage() {
 
   const defs = program?.field_defs ?? [];
   const catName = program?.category?.name ?? "";
+  const colPrefs = useColumnPrefs("program_cars", PD_DEFAULT_COLS);
   const {
+    visibleCols,
     colOrder,
     setColOrder,
     colWidths,
     setColWidth,
-  } = useColumnPrefs(`program_cars_${Number.isFinite(id) ? id : 0}`, PD_EMPTY_COLS);
+  } = colPrefs;
   const displayKeys = useMemo(() => {
     const pinnedStart = canEdit ? ["_select", "car", "complete"] : ["car", "complete"];
-    const movable = [...PD_CORE, ...(moreFields ? defs.map((d) => `cf:${d.field_key}`) : [])];
+    const movable = [
+      ...PD_CORE.filter((k) => visibleCols.has(k)),
+      ...(moreFields ? defs.map((d) => `cf:${d.field_key}`) : []),
+    ];
     return [...pinnedStart, ...mergeColOrder(movable, colOrder), "_actions"];
-  }, [canEdit, defs, colOrder, moreFields]);
+  }, [canEdit, defs, colOrder, moreFields, visibleCols]);
   const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "complete" && k !== "_actions");
   const draftedCars = useMemo(
     () => cars.map((c) => applyCarDraft(c, carDrafts[c.id], shops)),
@@ -724,7 +731,19 @@ export default function ProgramDetailPage() {
               variant="outline"
               onClick={async () => {
                 try {
-                  await downloadReport(`/api/programs/${id}/export?include_exited=${includeExited ? "1" : "0"}`);
+                  const exportKeys = [
+                    "marks",
+                    "car_number",
+                    ...displayKeys.flatMap((k) => {
+                      if (k === "complete") return ["completed"];
+                      if (k === "notes" || k === "shop") return [k];
+                      if (k.startsWith("cf:")) return [k];
+                      return [];
+                    }),
+                  ];
+                  await downloadReport(
+                    `/api/programs/${id}/export?include_exited=${includeExited ? "1" : "0"}&cols=${encodeURIComponent(colsQuery(exportKeys))}`,
+                  );
                 } catch (e: any) {
                   toast({ title: "Export failed", description: e.message, variant: "destructive" });
                 }
@@ -918,6 +937,10 @@ export default function ProgramDetailPage() {
               <Button size="sm" variant="ghost" onClick={() => setMoreFields((v) => !v)}>
                 {moreFields ? "Hide extra fields" : "More fields"}
               </Button>
+              <ColumnPicker
+                columns={PD_CORE.map((key) => ({ key, label: PD_LABELS[key] ?? key }))}
+                prefs={colPrefs}
+              />
               <span className="text-xs text-muted-foreground ml-auto">
                 {sortedCars.filter((c) => !c.completed).length} open
                 {sortedCars.some((c) => c.completed) ? ` · ${sortedCars.filter((c) => c.completed).length} complete` : ""}

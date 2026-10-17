@@ -13,6 +13,9 @@ import { useToast } from "@/hooks/use-toast";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import PageHeader from "@/components/PageHeader";
 import { FolderOpen, Plus, Download, FileSpreadsheet } from "lucide-react";
+import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { mergeColOrder } from "@/lib/grid-columns";
 import { cn } from "@/lib/utils";
 import { openAppTab, programPath, programsListPath } from "@/lib/browse-nav";
 import { hashSearchParams, navigateHash } from "@/lib/hash-location";
@@ -67,6 +70,18 @@ function statusFromHash(): string {
   return LIFE_FILTERS.has(s) ? s : "active";
 }
 
+const PROGRAM_LIST_COLS: { key: string; label: string; pinned?: boolean }[] = [
+  { key: "title", label: "Title", pinned: true },
+  { key: "type", label: "Type" },
+  { key: "lifecycle", label: "Lifecycle" },
+  { key: "progress", label: "Progress" },
+  { key: "target", label: "Target date" },
+  { key: "ready", label: "Ready" },
+  { key: "owner", label: "Owner" },
+  { key: "entity", label: "Entity" },
+];
+const PROGRAM_LIST_DEFAULT = new Set(PROGRAM_LIST_COLS.map((c) => c.key));
+
 export default function ProgramsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -79,6 +94,12 @@ export default function ProgramsPage() {
   const [managerFilter, setManagerFilter] = useState("all");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
+  const colPrefs = useColumnPrefs("programs", PROGRAM_LIST_DEFAULT);
+  const programColKeys = useMemo(() => {
+    const movable = PROGRAM_LIST_COLS.filter((c) => !c.pinned && colPrefs.visibleCols.has(c.key)).map((c) => c.key);
+    return ["title", ...mergeColOrder(movable, colPrefs.colOrder)];
+  }, [colPrefs.visibleCols, colPrefs.colOrder]);
+  const showProg = (key: string) => programColKeys.includes(key);
 
   const { data: programs = [], isLoading } = useQuery<ProgramRow[]>({
     queryKey: ["/api/programs"],
@@ -259,6 +280,7 @@ export default function ProgramsPage() {
               </SelectContent>
             </Select>
           )}
+          <ColumnPicker columns={[...PROGRAM_LIST_COLS]} prefs={colPrefs} />
         </div>
 
         {isLoading ? (
@@ -277,14 +299,14 @@ export default function ProgramsPage() {
               <thead className="sticky top-0 z-10 bg-card text-[11px] uppercase tracking-wider text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))] [&>tr>th]:bg-card">
                 <tr>
                   <th className="w-10 px-3 py-2" />
-                  <th className="text-left px-3 py-2 font-medium">Title</th>
-                  <th className="text-left px-3 py-2 font-medium">Type</th>
-                  <th className="text-left px-3 py-2 font-medium">Lifecycle</th>
-                  <th className="text-left px-3 py-2 font-medium">Progress</th>
-                  <th className="text-left px-3 py-2 font-medium">Target date</th>
-                  <th className="text-left px-3 py-2 font-medium">Ready</th>
-                  <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Owner</th>
-                  <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Entity</th>
+                  {showProg("title") && <th className="text-left px-3 py-2 font-medium">Title</th>}
+                  {showProg("type") && <th className="text-left px-3 py-2 font-medium">Type</th>}
+                  {showProg("lifecycle") && <th className="text-left px-3 py-2 font-medium">Lifecycle</th>}
+                  {showProg("progress") && <th className="text-left px-3 py-2 font-medium">Progress</th>}
+                  {showProg("target") && <th className="text-left px-3 py-2 font-medium">Target date</th>}
+                  {showProg("ready") && <th className="text-left px-3 py-2 font-medium">Ready</th>}
+                  {showProg("owner") && <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Owner</th>}
+                  {showProg("entity") && <th className="text-left px-3 py-2 font-medium hidden md:table-cell">Entity</th>}
                 </tr>
               </thead>
               <tbody>
@@ -303,34 +325,44 @@ export default function ProgramsPage() {
                       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         <Checkbox checked={selected.has(p.id)} onCheckedChange={() => toggle(p.id)} aria-label={`Select ${p.name}`} />
                       </td>
+                      {showProg("title") && (
                       <td className="px-3 py-2">
                         <div className="font-medium">{p.name}</div>
                       </td>
-                      <td className="px-3 py-2 text-sm">{p.progress?.display_type ?? p.type ?? "—"}</td>
+                      )}
+                      {showProg("type") && <td className="px-3 py-2 text-sm">{p.progress?.display_type ?? p.type ?? "—"}</td>}
+                      {showProg("lifecycle") && (
                       <td className="px-3 py-2">
                         <span className={cn("text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border", LIFECYCLE_BADGE[lc])}>
                           {LIFECYCLE_LABEL[lc]}
                         </span>
                       </td>
+                      )}
+                      {showProg("progress") && (
                       <td className="px-3 py-2 min-w-[8rem]">
                         <div className="h-1.5 rounded bg-muted overflow-hidden">
                           <div className="h-full bg-umler-teal" style={{ width: `${pct}%` }} />
                         </div>
                         <div className="text-[11px] text-muted-foreground mt-0.5">{done}/{total}</div>
                       </td>
+                      )}
+                      {showProg("target") && (
                       <td className="px-3 py-2 text-xs">
                         {target || "—"}
                         {p.progress?.stale ? (
                           <span className="ml-1 text-[10px] uppercase tracking-wide text-umler-amber">Stale</span>
                         ) : null}
                       </td>
+                      )}
+                      {showProg("ready") && (
                       <td className="px-3 py-2">
                         {p.progress?.ready_to_close ? (
                           <span className="text-[10px] uppercase tracking-wide font-semibold text-umler-teal">Ready</span>
                         ) : "—"}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground hidden lg:table-cell">{p.account_manager ?? "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{p.entity ?? "—"}</td>
+                      )}
+                      {showProg("owner") && <td className="px-3 py-2 text-muted-foreground hidden lg:table-cell">{p.account_manager ?? "—"}</td>}
+                      {showProg("entity") && <td className="px-3 py-2 text-muted-foreground hidden md:table-cell">{p.entity ?? "—"}</td>}
                     </tr>
                   );
                 })}

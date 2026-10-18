@@ -27,24 +27,24 @@ console.error(`Sheet: ${sheetName} · rows: ${rows.length}`);
 
 const existingKeys = new Set<string>();
 const url = process.env.SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-if (url && key) {
-  const sb = createClient(url, key);
-  const { data, error } = await sb.from("railcars").select("car_initial, car_number, reporting_marks");
-  if (error) {
-    console.error("Warn: could not load existing railcars:", error.message);
-  } else {
-    for (const r of data ?? []) {
-      const initial = String(r.car_initial || r.reporting_marks || "")
-        .trim()
-        .toUpperCase();
-      const num = String(r.car_number ?? "").trim();
-      if (initial || num) existingKeys.add(`${initial}|${num}`);
-    }
-    console.error(`Existing cars in DB: ${existingKeys.size}`);
-  }
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!url || !key) {
+  console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  process.exit(1);
+}
+const sb = createClient(url, key);
+const { data, error } = await sb.from("railcars").select("car_initial, car_number, reporting_marks");
+if (error) {
+  console.error("Warn: could not load existing railcars:", error.message);
 } else {
-  console.error("No Supabase env — treating all cars as new");
+  for (const r of data ?? []) {
+    const initial = String(r.car_initial || r.reporting_marks || "")
+      .trim()
+      .toUpperCase();
+    const num = String(r.car_number ?? "").trim();
+    if (initial || num) existingKeys.add(`${initial}|${num}`);
+  }
+  console.error(`Existing cars in DB: ${existingKeys.size}`);
 }
 
 const review = buildVcfReview(rows, existingKeys);

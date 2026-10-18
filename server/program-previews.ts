@@ -1,4 +1,4 @@
-import { pickRow } from "@shared/change-log";
+import { changedKeys, pickRow } from "@shared/change-log";
 import { supabaseAdmin } from "./supabase";
 import { annotateKpiDelta } from "./kpi-delta";
 import { recordChange, withChangeGroupResult } from "./change-log";
@@ -555,8 +555,10 @@ async function applyOneCarUpdates(
     .maybeSingle();
   if (priorErr) throw priorErr;
   const cols = patchColumns(updates ?? {}, prior ?? {});
+  const keys = Object.keys(cols);
+  const diff = changedKeys(pickRow(prior, keys), pickRow({ ...(prior ?? {}), ...cols }, keys));
   let wrote = false;
-  if (Object.keys(cols).length) {
+  if (Object.keys(diff.before).length) {
     const { data, error } = await supabaseAdmin
       .from("program_cars")
       .update(cols)
@@ -565,28 +567,32 @@ async function applyOneCarUpdates(
       .select("*")
       .single();
     if (error) throw error;
-    const keys = Object.keys(cols);
     await logProgramActivity({
       program_id: program.id,
       action: "car_patched",
       actor,
       program_car_id: row.link_id,
       railcar_id: row.railcar_id,
-      detail: cols,
-      before: pickRow(prior, keys),
+      detail: diff.after,
+      before: diff.before,
       after: pickRow(data, keys),
     });
-    const mile = cols.milestone != null ? String(cols.milestone) : null;
+    wrote = true;
+  }
+  const mileRaw = cols.milestone !== undefined ? cols.milestone : updates.milestone;
+  const dateRaw = cols.milestone_at !== undefined ? cols.milestone_at : updates.milestone_at;
+  if (mileRaw !== undefined || dateRaw !== undefined) {
+    const mile = String(mileRaw ?? prior?.milestone ?? "").trim();
+    const d = String(dateRaw ?? prior?.milestone_at ?? todayIso()).slice(0, 10);
     if (mile) {
-      const d = cols.milestone_at != null ? String(cols.milestone_at).slice(0, 10) : todayIso();
-      await appendProgramCarMilestone({
+      const trail = await appendProgramCarMilestone({
         programCarId: row.link_id,
         milestone: mile,
         milestoneDate: /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayIso(),
         actor,
       });
+      if (trail && (trail as { inserted?: boolean }).inserted) wrote = true;
     }
-    wrote = true;
   }
   if (commitment) {
     await upsertOpenCommitment(
@@ -601,8 +607,6 @@ async function applyOneCarUpdates(
       program_car_id: row.link_id,
       railcar_id: row.railcar_id,
       detail: { type: commitment.type, name: commitment.name },
-      before: {},
-      after: { type: commitment.type, name: commitment.name },
     });
     wrote = true;
   }
@@ -610,7 +614,7 @@ async function applyOneCarUpdates(
 }
 
 export async function applyPatchProgramCars(token: string, actor: string) {
-  return withChangeGroupResult(actor, async () => {
+  const payload = await withChangeGroupResult(actor, async () => {
     const preview = await getPreview("program", token);
     if (preview.action !== "patch_cars" && preview.action !== "save_cars") {
       throw Object.assign(new Error("Wrong preview kind"), { status: 400 });
@@ -632,9 +636,17 @@ export async function applyPatchProgramCars(token: string, actor: string) {
         if (result.commitment) commitments_written += 1;
       }
     }
-    await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
-    return { preview, updated, commitments_written };
+    if (updated > 0 || commitments_written > 0) {
+      await supabaseAdmin.from("programs").update({ updated_at: new Date().toISOString() }).eq("id", program.id);
+    }
+    const no_changes = updated === 0 && commitments_written === 0;
+    return { preview, updated, commitments_written, no_changes };
   });
+  if (payload.no_changes) {
+    const { change_group: _unused, ...rest } = payload;
+    return { ...rest, no_changes: true as const };
+  }
+  return payload;
 }
 
 export async function previewCloseProgram(programId: number) {

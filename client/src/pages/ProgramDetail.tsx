@@ -540,20 +540,11 @@ export default function ProgramDetailPage() {
       const applied = await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, {
         preview_token: prev.preview_token,
       }).then((r) => r.json());
-      const u = Number(applied.updated ?? n);
       offerUndoToast({
         ...applied,
         change_group: applied.change_group,
+        no_changes: applied.no_changes === true || Number(applied.updated ?? 0) === 0,
       });
-      if (!applied.change_group) {
-        toast({
-          title: `Saved ${u} program car${u === 1 ? "" : "s"}`,
-          description:
-            applied.commitments_written > 0
-              ? `${applied.commitments_written} commitment${applied.commitments_written === 1 ? "" : "s"} written`
-              : undefined,
-        });
-      }
       await Promise.all([
         qc.invalidateQueries({ queryKey: carsKey }),
         qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true }),

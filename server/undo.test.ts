@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx server/undo.test.ts */
 
-import { currentMatchesAfter, nonUndoableMessage } from "@shared/undo";
+import { currentMatchesAfter, isUndoAllowedTable, nonUndoableMessage, opOf } from "@shared/undo";
 
 let passed = 0;
 let failed = 0;
@@ -22,6 +22,22 @@ ok(currentMatchesAfter({ entity: "Main" }, { entity: "Main" }), "no conflict whe
 
 ok(nonUndoableMessage("change-number").includes("Remarks"), "remark path refused");
 ok(nonUndoableMessage("import_commit").includes("Imports"), "import path refused");
+
+ok(isUndoAllowedTable("program_car_milestones"), "per-path: milestone table allowed");
+ok(
+  opOf({
+    id: 1,
+    change_group: "g",
+    table_name: "program_car_milestones",
+    row_pk: 99,
+    before: {},
+    after: { milestone: "Arrived", milestone_date: "2026-10-17" },
+    detail: { op: "insert" },
+  }) === "insert",
+  "per-path: milestone change is an undoable insert",
+);
+ok(isUndoAllowedTable("program_cars"), "per-path: notes/status on program_cars");
+ok(isUndoAllowedTable("car_commitments"), "per-path: commitment");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

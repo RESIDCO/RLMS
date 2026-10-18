@@ -122,6 +122,7 @@ import { registerRentStartRoutes } from "./rent-start";
 import { registerRentStopRoutes } from "./rent-stops";
 import { registerRailcarBulkRoutes } from "./railcar-bulk";
 import { registerKpiCarRoutes } from "./kpi-cars";
+import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } from "./lease-mgmt";
 import { registerColumnPrefRoutes } from "./column-prefs";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
@@ -401,6 +402,7 @@ export async function registerRoutes(
   registerRentStopRoutes(app, requireWrite);
   registerRailcarBulkRoutes(app, requireWrite);
   registerKpiCarRoutes(app);
+  registerLeaseMgmtRoutes(app, requireWrite);
 
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
@@ -425,6 +427,10 @@ export async function registerRoutes(
       delete mlaRow.account_id;
       if (mlaRow.lease_type != null && String(mlaRow.lease_type).trim() === "") {
         mlaRow.lease_type = null;
+      }
+      assertNewLesseeName(mlaRow.lessee ?? mlaRow.lease_number);
+      for (const rp of riderPayloads ?? []) {
+        assertNewRiderNumber(rp.rider?.rider_name ?? rp.rider?.schedule_number);
       }
       mlaRow.account_id = await ensureAccountForLessee(mlaRow.lessee ?? null);
       const { data: newMla, error: mlaErr } = await supabase
@@ -2118,6 +2124,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertMasterLeaseSchema.parse(req.body);
+      assertNewLesseeName(parsed.lessee ?? parsed.lease_number);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...MASTER_LEASE_DATE_KEYS]);
       if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
         parsed.lease_type = null;
@@ -2292,6 +2299,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const parsed = insertRiderSchema.parse(req.body);
+      assertNewRiderNumber(parsed.rider_name);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RIDER_DATE_KEYS]);
       delete (parsed as { account_manager?: unknown }).account_manager;
       delete (parsed as { status_tag?: unknown }).status_tag;

@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit } from "@/lib/AuthContext";
+import { isPlaceholderLessee, isStandardRiderNumber } from "@shared/lease-mgmt";
 import type { RailcarWithAssignment } from "@shared/schema";
 import { wizardRiderContactBody } from "@shared/directory-contacts";
 import { normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
@@ -515,8 +516,8 @@ export default function LeaseWizard() {
   }
 
   // ── Validation ────────────────────────────────────────────────────────────
-  const step1Valid = mla.lease_number.trim().length > 0 && mla.lessee.trim().length > 0;
-  const step2Valid = riders.every((r) => r.rider_name.trim().length > 0);
+  const step1Valid = mla.lease_number.trim().length > 0 && mla.lessee.trim().length > 0 && !isPlaceholderLessee(mla.lessee) && !isPlaceholderLessee(mla.lease_number);
+  const step2Valid = riders.every((r) => isStandardRiderNumber(r.rider_name.trim().toUpperCase()));
   const step3Valid = riders.every((r) =>
     r.new_cars.every((c) => c.car_number.trim().length > 0)
   );
@@ -592,7 +593,7 @@ export default function LeaseWizard() {
     <div>
       <PageHeader
         title="New Lease Setup"
-        subtitle="Create a master lease, add riders, assign cars, and optionally a lessee contact"
+        subtitle="Create a lessee, add OL/EA riders, assign cars. Placeholder Idle/x- names are not allowed."
         actions={
           <Button variant="secondary" onClick={() => navigate("/leases")}>
             <X className="h-4 w-4 mr-1" /> Cancel
@@ -609,7 +610,7 @@ export default function LeaseWizard() {
             <div className="rounded-lg border border-card-border bg-card p-6 space-y-4">
               <div className="flex items-center gap-2 mb-1">
                 <FileText className="h-4 w-4 text-primary" />
-                <h2 className="text-sm font-semibold">Master Lease Agreement</h2>
+                <h2 className="text-sm font-semibold">Lessee</h2>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -627,6 +628,9 @@ export default function LeaseWizard() {
                 <div>
                   <Label>Lessee <span className="text-destructive">*</span></Label>
                   <Input placeholder="Company name" value={mla.lessee} onChange={(e) => setMla({ ...mla, lessee: e.target.value })} />
+                  {isPlaceholderLessee(mla.lessee) ? (
+                    <p className="text-xs text-destructive mt-1">Placeholder names (x…, IDLE, Available, Unassigned) cannot be created.</p>
+                  ) : null}
                 </div>
                 <div>
                   <Label>Lease Type</Label>
@@ -701,12 +705,15 @@ export default function LeaseWizard() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Rider Name <span className="text-destructive">*</span></Label>
+                  <Label>OL / EA number <span className="text-destructive">*</span></Label>
                   <Input
-                    placeholder="e.g. Schedule 001 — Exxon Mobile"
+                    placeholder="OL2543"
                     value={activeRider.rider_name}
                     onChange={(e) => updateRider(activeRiderIdx, { rider_name: e.target.value })}
                   />
+                  {activeRider.rider_name.trim() && !isStandardRiderNumber(activeRider.rider_name.trim().toUpperCase()) ? (
+                    <p className="text-xs text-destructive mt-1">Must match OL#### or EA#### (year + running number, not month).</p>
+                  ) : null}
                 </div>
                 <div>
                   <Label>Schedule Number</Label>

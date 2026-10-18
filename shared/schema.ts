@@ -14,6 +14,10 @@ export type MasterLease = {
   effective_date: string | null;
   sold_to: string | null;          // buyer company if this MLA was sold/transferred
   notes: string | null;
+  mla_number?: string | null;
+  mla_doc_url?: string | null;
+  is_placeholder?: boolean;
+  merged_into_id?: number | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -56,6 +60,14 @@ export type Rider = {
    * One-time load — importers must never write it.
    */
   owner_entity?: string | null;
+  lifecycle_status?: "active" | "off_lease_pending_remarketing" | "closed" | null;
+  number_digits?: string | null;
+  off_lease_at?: string | null;
+  closed_at?: string | null;
+  successor_rider_id?: number | null;
+  merged_into_rider_id?: number | null;
+  contract_doc_url?: string | null;
+  sublessee?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -173,6 +185,8 @@ export type RailcarAssignment = {
   sub_lease_number: string | null;
   sublease_expiration_date: string | null;
   assigned_at: string;
+  assignment_status?: "on_lease" | "off_lease_pending_remarketing" | null;
+  sublessee?: string | null;
 };
 
 export type RiderContact = {

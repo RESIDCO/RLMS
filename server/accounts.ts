@@ -2,6 +2,7 @@ import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { assertAccountImporterPatch } from "@shared/rider-import-guard";
 import { countActiveCarsByRiderId } from "./rider-car-counts";
+import { isPlaceholderLessee } from "@shared/lease-mgmt";
 
 export type Account = {
   id: number;
@@ -138,6 +139,11 @@ export async function updateAccount(
 export async function ensureAccountForLessee(lessee: string | null | undefined): Promise<number | null> {
   const name = String(lessee ?? "").trim();
   if (!name) return null;
+  if (isPlaceholderLessee(name)) {
+    const err = new Error("Placeholder lessees (x…, IDLE, Available, Unassigned) cannot be created");
+    (err as any).status = 400;
+    throw err;
+  }
   const payload = { name };
   assertAccountImporterPatch(payload);
 

@@ -12,6 +12,9 @@ import Dashboard from "@/pages/Dashboard";
 import FleetRegistry from "@/pages/FleetRegistry";
 import UmlerQueue from "@/pages/railcars/UmlerQueue";
 import LeaseManagement from "@/pages/LeaseManagement";
+import LeaseMgmtHome from "@/pages/leases/LeaseMgmtHome";
+import LesseePage from "@/pages/leases/LesseePage";
+import RiderPage from "@/pages/leases/RiderPage";
 import MoveCars from "@/pages/MoveCars";
 import HistoryPage from "@/pages/History";
 import SearchPage from "@/pages/Search";
@@ -102,7 +105,10 @@ function AppRouter() {
       <Route path="/account-transitions" component={AccountTransitions} />
       <Route path="/territory-map" component={TerritoryMap} />
       <Route path="/all-cars" component={RedirectAllCars} />
-      <Route path="/leases" component={LeaseManagement} />
+      <Route path="/leases-legacy" component={LeaseManagement} />
+      <Route path="/leases/lessee/:id" component={LesseePage} />
+      <Route path="/leases/rider/:id" component={RiderPage} />
+      <Route path="/leases" component={LeaseMgmtHome} />
       <Route path="/lease-wizard" component={LeaseWizard} />
       <Route path="/move" component={MoveCars} />
       <Route path="/history" component={HistoryPage} />

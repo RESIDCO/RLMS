@@ -7,6 +7,7 @@ import {
   createQuickDealInMemory,
   dedupProspectsInMemory,
   emptyPartyMemory,
+  markProspectCompanyCustomerInMemory,
   promoteCompanyInMemory,
   searchPartiesInMemory,
   type PartyMemory,
@@ -115,6 +116,59 @@ ok(
 const dedup = dedupProspectsInMemory(seed(), "GATX Owner", ["GATX"]);
 ok(dedup.some((row) => row.source === "umler" && row.reporting_marks.includes("GATX")), "UMLER hit keeps the mark");
 ok(dedupProspectsInMemory(seed(), "", []).length === 0, "blank name does not match everything");
+
+function linkedCompany(relationship: string): PartyMemory {
+  const memory = emptyPartyMemory();
+  memory.seq = 30;
+  memory.accounts.push({ id: 1, name: "Won Prospect", account_manager: null });
+  memory.companies.push({
+    id: 2,
+    name: "Won Prospect",
+    account_id: 1,
+    relationship_type: relationship,
+    status: "target",
+    source: "crm_quick_create",
+    reporting_marks: [],
+    merged_into_id: null,
+  });
+  return memory;
+}
+
+const wonDb = linkedCompany("prospect");
+ok(
+  markProspectCompanyCustomerInMemory(wonDb, 1, "won", { previousStage: "proposal", isProspect: true }),
+  "winning a prospect deal updates the linked company",
+);
+ok(wonDb.companies[0]?.relationship_type === "customer", "linked company relationship is customer");
+const companyLog = wonDb.log.filter((row) => row.table === "companies");
+ok(
+  companyLog.length === 1 && companyLog[0]?.op === "update" && companyLog[0].after.relationship_type === "customer",
+  "change capture logs the company update",
+);
+ok(
+  companyLog[0]?.before.relationship_type === "prospect" && !("updated_at" in companyLog[0].after) && !("search_vector" in companyLog[0].after),
+  "company update diff keeps the old relationship and drops noise",
+);
+ok(
+  !markProspectCompanyCustomerInMemory(wonDb, 1, "won-again", { previousStage: "won", isProspect: true }) &&
+    wonDb.log.filter((row) => row.table === "companies").length === 1,
+  "an already-won deal does not rewrite the company",
+);
+
+const clientDeal = linkedCompany("prospect");
+ok(
+  !markProspectCompanyCustomerInMemory(clientDeal, 1, "client", { previousStage: "proposal", isProspect: false }) &&
+    clientDeal.companies[0]?.relationship_type === "prospect" &&
+    clientDeal.log.length === 0,
+  "a client win leaves the company relationship alone",
+);
+
+const alreadyCustomer = linkedCompany("customer");
+ok(
+  !markProspectCompanyCustomerInMemory(alreadyCustomer, 1, "customer", { previousStage: null, isProspect: true }) &&
+    alreadyCustomer.log.length === 0,
+  "a company that is already a customer is not logged again",
+);
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

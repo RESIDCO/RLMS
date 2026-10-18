@@ -1425,7 +1425,7 @@ function EditCompanyDialog({
   const [priority, setPriority] = useState(company.priority_tier || "");
   const [status, setStatus] = useState(company.status || "target");
   const [busy, setBusy] = useState(false);
-  const isCustomer = company.relationship_type === "customer" || company.account_id != null;
+  const isCustomer = company.relationship_type === "customer";
 
   useEffect(() => {
     setName(company.name);
@@ -1462,7 +1462,7 @@ function EditCompanyDialog({
             <Select value={relationship} onValueChange={setRelationship} disabled={isCustomer}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {(isCustomer ? ["customer"] : ["unclassified", "prospect", "lessor", "railroad", "vendor", "other"]).map((r) => (
+                {(isCustomer ? ["customer"] : ["unclassified", "prospect", "lessor", "railroad", "broker", "vendor", "other"]).map((r) => (
                   <SelectItem key={r} value={r}>{r}</SelectItem>
                 ))}
               </SelectContent>

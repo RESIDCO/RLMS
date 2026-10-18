@@ -21,6 +21,7 @@ import {
   normalizeTags,
   remarketRiderUrl,
   renewalAutoNotes,
+  wonProspectBecomesCustomer,
   wonProspectNextStep,
   wonReletNeedsRemarket,
   wonRiderBelongsToAccount,
@@ -784,6 +785,46 @@ async function finishOpportunity(row: OpportunityRow): Promise<OpportunityRow> {
   };
 }
 
+/** Winning a prospect deal makes the linked directory company a customer, in this change group. */
+async function markLinkedProspectCompanyCustomer(
+  accountId: number,
+  stage: string,
+  previousStage: string | null,
+  actor: string,
+): Promise<void> {
+  if (stage !== "won" || previousStage === "won") return;
+  const isProspect = await accountIsProspect(accountId);
+  if (!isProspect) return;
+  const { data, error } = await supabaseAdmin
+    .from("companies")
+    .select("*")
+    .eq("account_id", accountId)
+    .is("merged_into_id", null)
+    .limit(1);
+  if (error) throw error;
+  const before = (data?.[0] ?? null) as Record<string, unknown> | null;
+  if (!before) return;
+  const relationshipType = before.relationship_type == null ? null : String(before.relationship_type);
+  if (!wonProspectBecomesCustomer({ stage, previousStage, isProspect, relationshipType })) return;
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from("companies")
+    .update({ relationship_type: "customer" })
+    .eq("id", before.id)
+    .select("*")
+    .single();
+  if (updateErr) throw updateErr;
+  await recordChange({
+    table: "companies",
+    pk: Number(before.id),
+    before: changeCaptureRow(before),
+    after: changeCaptureRow(updated as Record<string, unknown>),
+    action: "update_company",
+    entity_type: "company",
+    entity_id: Number(before.id),
+    actor,
+  });
+}
+
 async function assertWonRiderOnAccount(wonRiderId: number | null, accountId: number) {
   if (!wonRiderId) return;
   const ctx = await riderContext(wonRiderId);
@@ -1023,6 +1064,7 @@ export async function createOpportunity(body: Record<string, unknown>, actor: st
       const desired = await materializeContacts(accountId, drafts, actor, account.contactId);
       await replaceOpportunityContacts(Number(data.id), desired, actor);
     }
+    await markLinkedProspectCompanyCustomer(accountId, stage, null, actor);
     return finishOpportunity(mapOpportunity(data as Record<string, unknown>));
   });
   return result;
@@ -1099,6 +1141,7 @@ export async function patchOpportunity(
       const desired = await materializeContacts(Number(before.account_id), readContacts(body.contacts), actor, null);
       await replaceOpportunityContacts(id, desired, actor);
     }
+    await markLinkedProspectCompanyCustomer(Number(before.account_id), stage, String(before.stage), actor);
     return finishOpportunity(mapOpportunity(data as Record<string, unknown>));
   });
   return result;

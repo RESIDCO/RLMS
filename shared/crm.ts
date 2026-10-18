@@ -567,6 +567,20 @@ export function wonProspectNextStep(input: {
   return "setup_lessee";
 }
 
+/**
+ * A prospect deal marked Won makes the linked directory company a customer.
+ * Already-won deals and companies that are already customers stay as they are.
+ */
+export function wonProspectBecomesCustomer(input: {
+  stage: string | null | undefined;
+  previousStage: string | null | undefined;
+  isProspect: boolean;
+  relationshipType: string | null | undefined;
+}): boolean {
+  if (!input.isProspect || input.stage !== "won" || input.previousStage === "won") return false;
+  return input.relationshipType !== "customer";
+}
+
 export function wonRiderBelongsToAccount(riderAccountId: number | null | undefined, accountId: number): boolean {
   return riderAccountId != null && riderAccountId === accountId;
 }

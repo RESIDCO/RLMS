@@ -21,6 +21,7 @@ import {
   renewalAutoNotes,
   renewalExclusion,
   type RenewalRiderInput,
+  wonProspectBecomesCustomer,
   wonProspectNextStep,
   wonReletNeedsRemarket,
 } from "./crm";
@@ -160,6 +161,11 @@ ok(contactBelongsToAccount(9, 9) && !contactBelongsToAccount(8, 9) && !contactBe
 ok(wonProspectNextStep({ type: "new_business", stage: "won", isProspect: true }) === "setup_lessee", "won prospect next step");
 ok(wonProspectNextStep({ type: "renewal", stage: "won", isProspect: true }) === null, "won renewal is not lessee setup");
 ok(wonProspectNextStep({ type: "expansion", stage: "won", isProspect: false }) === null, "client win does not ask for setup");
+ok(wonProspectBecomesCustomer({ stage: "won", previousStage: "proposal", isProspect: true, relationshipType: "prospect" }), "won prospect company becomes a customer");
+ok(!wonProspectBecomesCustomer({ stage: "won", previousStage: "won", isProspect: true, relationshipType: "prospect" }), "already-won deal does not convert again");
+ok(!wonProspectBecomesCustomer({ stage: "proposal", previousStage: "identified", isProspect: true, relationshipType: "prospect" }), "open stage does not convert the company");
+ok(!wonProspectBecomesCustomer({ stage: "won", previousStage: null, isProspect: false, relationshipType: "prospect" }), "client win does not convert the company");
+ok(!wonProspectBecomesCustomer({ stage: "won", previousStage: null, isProspect: true, relationshipType: "customer" }), "customer company is left as a customer");
 const capture = changeCaptureRow({ name: "Acme", updated_at: "now", search_vector: "vec", notes_search_vector: "n" });
 ok(capture.name === "Acme" && !("updated_at" in capture) && !("search_vector" in capture) && !("notes_search_vector" in capture), "capture row drops noise");
 const contactDiff = diffOpportunityContacts(
@@ -170,6 +176,7 @@ ok(contactDiff.deleteIds.join(",") === "1" && contactDiff.insert[0]?.role === "b
 
 const migration = readFileSync(resolve(process.cwd(), "migrations/20261111_crm_p1_1.sql"), "utf8");
 ok(migration.includes("btrim(a.name) ~ '^x[A-Z0-9&]'") && migration.includes("btrim(a.name) ~* '^(idle|available|unassigned)'"), "party search name guard matches isPlaceholderLessee");
+ok(migration.includes("Must stay in sync with isPlaceholderLessee in shared/lease-mgmt.ts"), "party search guard stays in sync with isPlaceholderLessee");
 ok(migration.indexOf("create table crm_umler_owner_ref") < migration.indexOf("function public.crm_prospect_dedup"), "dedup function is created after the umler table");
 ok(migration.includes("'referenced since'"), "undo returns referenced since");
 const undoFn = migration.slice(migration.indexOf("FUNCTION public.rlms_undo_change_group"));

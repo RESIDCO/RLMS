@@ -59,6 +59,9 @@ create index on opportunity_contacts (contact_id);
 
 -- C) One search view for the picker (read-only).
 -- email is extra so the API can match a contact address; it is not a response field.
+-- The placeholder-name guard in each branch of v_crm_party_search (btrim, then
+-- case-sensitive ^x[A-Z0-9&], or idle/available/unassigned in any case) must stay
+-- in sync with isPlaceholderLessee in shared/lease-mgmt.ts.
 create or replace view v_crm_party_search as
 with lessee as (
   select ml.account_id,
@@ -90,10 +93,12 @@ from accounts a
 left join lessee le on le.account_id = a.id
 left join companies co on co.account_id = a.id and co.merged_into_id is null
 where coalesce(le.all_ph,false) = false
+  -- Must stay in sync with isPlaceholderLessee in shared/lease-mgmt.ts.
   and (le.account_id is not null or not (btrim(a.name) ~ '^x[A-Z0-9&]' or btrim(a.name) ~* '^(idle|available|unassigned)'))
 union all
 select 'company', c.id, null, c.id, null, c.name, 'company', c.reporting_marks, null, null::text
 from companies c where c.account_id is null and c.merged_into_id is null
+  -- Must stay in sync with isPlaceholderLessee in shared/lease-mgmt.ts.
   and not (btrim(c.name) ~ '^x[A-Z0-9&]' or btrim(c.name) ~* '^(idle|available|unassigned)')
 union all
 select 'contact', cc.id, c.account_id, c.id, cc.id, cc.name || ' — ' || c.name, 'contact', c.reporting_marks, null, cc.email
@@ -101,6 +106,7 @@ from company_contacts cc join companies c on c.id = cc.company_id
 left join lessee le on le.account_id = c.account_id
 where c.merged_into_id is null
   and (c.account_id is null or c.account_id not in (select account_id from lessee where all_ph))
+  -- Must stay in sync with isPlaceholderLessee in shared/lease-mgmt.ts.
   and not (
     coalesce(le.has_real, false) = false
     and (btrim(c.name) ~ '^x[A-Z0-9&]' or btrim(c.name) ~* '^(idle|available|unassigned)')

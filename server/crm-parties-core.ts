@@ -7,6 +7,7 @@ import {
   nameSimilarity,
   parseReportingMarks,
   PARTY_KIND_RANK,
+  wonProspectBecomesCustomer,
   type PartyKind,
 } from "@shared/crm";
 import { isPlaceholderLessee } from "@shared/lease-mgmt";
@@ -457,6 +458,31 @@ export function resolvePartyInMemory(
     return { ...promoted, contact_id: contact.id };
   }
   throw httpError(400, "Invalid party");
+}
+
+/** Marking a prospect deal Won sets the linked company's relationship to customer. */
+export function markProspectCompanyCustomerInMemory(
+  db: PartyMemory,
+  accountId: number,
+  group: string,
+  input: { previousStage: string | null; isProspect: boolean },
+): boolean {
+  const company = companyForAccount(db, accountId);
+  if (!company) return false;
+  if (
+    !wonProspectBecomesCustomer({
+      stage: "won",
+      previousStage: input.previousStage,
+      isProspect: input.isProspect,
+      relationshipType: company.relationship_type,
+    })
+  ) {
+    return false;
+  }
+  const before = { ...company };
+  company.relationship_type = "customer";
+  logChange(db, group, "companies", company.id, "update", before, { ...company, updated_at: "noise", search_vector: "noise" });
+  return true;
 }
 
 export function ensureCustomerCompanyInMemory(db: PartyMemory, accountId: number, group: string): MemoryCompany {

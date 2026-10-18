@@ -8,34 +8,54 @@ const RENDER_API = import.meta.env.VITE_API_BASE as string | undefined;
 const PROXY_API = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 const API_BASE = RENDER_API || PROXY_API;
 
-function parseErrorBody(status: number, text: string): string {
-  const body = (text || "").trim();
-  try {
-    const parsed = JSON.parse(body) as { message?: string; error?: string };
-    const msg = parsed?.message || parsed?.error;
-    if (msg) return msg;
-  } catch {
-    /* not JSON */
+export class ApiError extends Error {
+  status: number;
+  body: Record<string, unknown>;
+
+  constructor(status: number, message: string, body: Record<string, unknown> = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
   }
-  return body || `Request failed (${status})`;
+}
+
+function parseErrorPayload(status: number, text: string): { message: string; body: Record<string, unknown> } {
+  const raw = (text || "").trim();
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const message =
+      typeof parsed.message === "string"
+        ? parsed.message
+        : typeof parsed.error === "string"
+          ? parsed.error
+          : raw || `Request failed (${status})`;
+    return { message, body: parsed };
+  } catch {
+    return { message: raw || `Request failed (${status})`, body: {} };
+  }
 }
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    const parsed = parseErrorPayload(res.status, text);
     if (res.status === 413) {
-      throw new Error(
-        parseErrorBody(res.status, text) ||
-          "This file is too large to send as JSON (HTTP 413). Drop the Excel/CSV so the server can parse it."
+      throw new ApiError(
+        res.status,
+        parsed.message || "This file is too large to send as JSON (HTTP 413). Drop the Excel/CSV so the server can parse it.",
+        parsed.body,
       );
     }
     if (res.status === 502 || res.status === 503 || res.status === 504) {
-      throw new Error(
-        parseErrorBody(res.status, text) ||
-          `preview failed: the server stopped while reading the file (HTTP ${res.status}). Often out of memory or a request timeout — retry after the slimmer parser is live.`
+      throw new ApiError(
+        res.status,
+        parsed.message ||
+          `preview failed: the server stopped while reading the file (HTTP ${res.status}). Often out of memory or a request timeout — retry after the slimmer parser is live.`,
+        parsed.body,
       );
     }
-    throw new Error(parseErrorBody(res.status, text));
+    throw new ApiError(res.status, parsed.message, parsed.body);
   }
 }
 

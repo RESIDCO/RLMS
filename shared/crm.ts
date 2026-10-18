@@ -1,3 +1,5 @@
+import { isPlaceholderLessee } from "./lease-mgmt";
+
 /**
  * CRM Phase 1 types and pure rules.
  * Renewal selection matches the generator: an active rider (see isActiveRider),
@@ -28,8 +30,66 @@ export const OPPORTUNITY_STAGES = [
 ] as const;
 export type OpportunityStage = (typeof OPPORTUNITY_STAGES)[number];
 
-export const OPPORTUNITY_SOURCES = ["auto_expiry", "manual", "trinity", "handoff", "umler"] as const;
+export const OPPORTUNITY_SOURCES = ["auto_expiry", "manual", "trinity", "handoff", "umler", "referral", "inbound"] as const;
 export type OpportunitySource = (typeof OPPORTUNITY_SOURCES)[number];
+
+export const OPPORTUNITY_SOURCE_LABEL: Record<OpportunitySource, string> = {
+  auto_expiry: "Auto expiry",
+  manual: "Manual",
+  trinity: "Trinity book",
+  handoff: "Handoff",
+  umler: "UMLER prospecting",
+  referral: "Referral",
+  inbound: "Inbound",
+};
+
+/** Sources offered when someone types a deal. Generated renewals keep auto_expiry. */
+export const MANUAL_OPPORTUNITY_SOURCES = ["manual", "trinity", "referral", "inbound", "umler", "handoff"] as const;
+
+export const LESSEE_ROLES = ["lessee", "sublessee"] as const;
+export type LesseeRole = (typeof LESSEE_ROLES)[number];
+
+export const OPPORTUNITY_CONTACT_ROLES = ["primary", "decision_maker", "influencer", "billing", "contact"] as const;
+export type OpportunityContactRole = (typeof OPPORTUNITY_CONTACT_ROLES)[number];
+
+export const OPPORTUNITY_CONTACT_ROLE_LABEL: Record<OpportunityContactRole, string> = {
+  primary: "Primary",
+  decision_maker: "Decision maker",
+  influencer: "Influencer",
+  billing: "Billing",
+  contact: "Contact",
+};
+
+/** Quick-create types. Values are companies.relationship_type. */
+export const PROSPECT_COMPANY_TYPES = [
+  { value: "prospect", label: "Shipper/lessee" },
+  { value: "railroad", label: "Railroad" },
+  { value: "lessor", label: "Lessor/competitor" },
+  { value: "broker", label: "Broker" },
+  { value: "other", label: "Other" },
+] as const;
+export type ProspectCompanyType = (typeof PROSPECT_COMPANY_TYPES)[number]["value"];
+
+export const PARTY_KINDS = ["client", "prospect", "former", "company", "contact"] as const;
+export type PartyKind = (typeof PARTY_KINDS)[number];
+
+export const PARTY_KIND_LABEL: Record<PartyKind, string> = {
+  client: "Client",
+  prospect: "Prospect",
+  former: "Former client",
+  company: "Company",
+  contact: "Contact",
+};
+
+export const PARTY_KIND_RANK: Record<PartyKind, number> = {
+  client: 1,
+  prospect: 2,
+  former: 3,
+  company: 4,
+  contact: 5,
+};
+
+export const CAR_TYPE_SUGGESTIONS = ["Covered Hopper", "Tank", "Box", "Gondola", "Flat", "Autorack", "Centerbeam", "Hopper"] as const;
 
 export const LOSS_REASONS = [
   "rate",
@@ -100,7 +160,12 @@ export type OpportunityRow = {
   sublessee_note: string | null;
   competitor: string | null;
   loss_reason: LossReason | null;
+  lessee_role: LesseeRole;
+  tags: string[];
+  referral_note: string | null;
   notes: string | null;
+  account_name?: string | null;
+  next_step?: "setup_lessee" | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -398,3 +463,182 @@ export type Account360Payload = {
   timeline: Account360TimelineItem[];
   transition: { id: number; status: string | null } | null;
 };
+
+export type AwaitingLesseeRow = {
+  opportunity_id: number;
+  account_id: number;
+  account_name: string;
+  type: OpportunityType;
+  closed_at: string | null;
+  aged: boolean;
+  owner: string | null;
+};
+
+export type OpportunityContactLink = {
+  id?: number;
+  contact_id: number;
+  role: string;
+};
+
+export type OpportunityContactRow = {
+  id: number;
+  opportunity_id: number;
+  contact_id: number;
+  role: OpportunityContactRole;
+  name: string | null;
+  email: string | null;
+};
+
+const LESSEE_ROLE_SET = new Set<string>(LESSEE_ROLES);
+const CONTACT_ROLE_SET = new Set<string>(OPPORTUNITY_CONTACT_ROLES);
+const PROSPECT_TYPE_SET = new Set<string>(PROSPECT_COMPANY_TYPES.map((row) => row.value));
+
+export function isLesseeRole(value: unknown): value is LesseeRole {
+  return typeof value === "string" && LESSEE_ROLE_SET.has(value);
+}
+
+export function isOpportunityContactRole(value: unknown): value is OpportunityContactRole {
+  return typeof value === "string" && CONTACT_ROLE_SET.has(value);
+}
+
+export function isProspectCompanyType(value: unknown): value is ProspectCompanyType {
+  return typeof value === "string" && PROSPECT_TYPE_SET.has(value);
+}
+
+/**
+ * Picker kind for an account. Placeholder buckets are excluded.
+ * A real lessee flagged is_placeholder is excluded even when the name would pass.
+ * A name with no lessee is excluded only when isPlaceholderLessee says so
+ * (Xcel Energy and DTE stay visible).
+ */
+export function classifyAccountParty(input: {
+  hasLessee: boolean;
+  allPlaceholderLessee: boolean;
+  isClient: boolean;
+  name: string;
+}): PartyKind | "excluded" {
+  if (input.hasLessee && input.allPlaceholderLessee) return "excluded";
+  if (!input.hasLessee && isPlaceholderLessee(input.name)) return "excluded";
+  if (!input.hasLessee) return "prospect";
+  if (input.isClient) return "client";
+  return "former";
+}
+
+export function parseReportingMarks(raw: unknown): string[] {
+  const items = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[,\s]+/) : [];
+  const marks: string[] = [];
+  for (const item of items) {
+    const mark = String(item).trim().toUpperCase();
+    if (!mark || marks.includes(mark)) continue;
+    marks.push(mark);
+  }
+  return marks;
+}
+
+export type TagNormalizeResult = { ok: true; tags: string[] } | { ok: false; error: string };
+
+/** Trim, lowercase, unique. At most 10 tags, each at most 30 characters. */
+export function normalizeTags(raw: unknown): TagNormalizeResult {
+  if (raw == null) return { ok: true, tags: [] };
+  const items = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : null;
+  if (!items) return { ok: false, error: "Tags must be a list" };
+  const tags: string[] = [];
+  for (const item of items) {
+    const tag = String(item).trim().toLowerCase();
+    if (!tag) continue;
+    if (tag.length > 30) return { ok: false, error: "Each tag must be 30 characters or fewer" };
+    if (!tags.includes(tag)) tags.push(tag);
+  }
+  if (tags.length > 10) return { ok: false, error: "At most 10 tags" };
+  return { ok: true, tags };
+}
+
+export function contactBelongsToAccount(contactCompanyAccountId: number | null | undefined, accountId: number): boolean {
+  return contactCompanyAccountId != null && contactCompanyAccountId === accountId;
+}
+
+export function wonProspectNextStep(input: {
+  type: string | null | undefined;
+  stage: string | null | undefined;
+  isProspect: boolean;
+}): "setup_lessee" | null {
+  if (!input.isProspect || input.stage !== "won") return null;
+  if (input.type !== "new_business" && input.type !== "expansion") return null;
+  return "setup_lessee";
+}
+
+export function wonRiderBelongsToAccount(riderAccountId: number | null | undefined, accountId: number): boolean {
+  return riderAccountId != null && riderAccountId === accountId;
+}
+
+const AWAITING_LESSEE_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function isAwaitingLesseeAged(closedAt: string | null | undefined, nowMs = Date.now()): boolean {
+  if (!closedAt) return false;
+  const closed = new Date(closedAt).getTime();
+  if (!Number.isFinite(closed)) return false;
+  return nowMs - closed > AWAITING_LESSEE_MS;
+}
+
+/** Drop trigger-maintained columns so undo diffs stay about the edit itself. */
+export function changeCaptureRow(row: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!row) return out;
+  for (const [key, value] of Object.entries(row)) {
+    if (key === "updated_at" || key === "search_vector" || key.endsWith("_search_vector")) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+export function diffOpportunityContacts(
+  before: OpportunityContactLink[],
+  after: OpportunityContactLink[],
+): { deleteIds: number[]; insert: { contact_id: number; role: string }[] } {
+  const beforeByContact = new Map(before.map((row) => [row.contact_id, row]));
+  const deleteIds: number[] = [];
+  const insert: { contact_id: number; role: string }[] = [];
+  for (const row of before) {
+    if (row.id == null) continue;
+    const next = after.find((item) => item.contact_id === row.contact_id);
+    if (!next || next.role !== row.role) deleteIds.push(row.id);
+  }
+  for (const row of after) {
+    const prev = beforeByContact.get(row.contact_id);
+    if (!prev || prev.role !== row.role) insert.push({ contact_id: row.contact_id, role: row.role });
+  }
+  return { deleteIds, insert };
+}
+
+export function exactNameMatch<T extends { name: string }>(rows: T[], name: string): T | null {
+  const want = name.trim().toLowerCase();
+  if (!want) return null;
+  return rows.find((row) => row.name.trim().toLowerCase() === want) ?? null;
+}
+
+/** Bigram Dice coefficient, close enough to pg_trgm for the in-memory party tests. */
+export function nameSimilarity(left: string, right: string): number {
+  const a = left.trim().toLowerCase();
+  const b = right.trim().toLowerCase();
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const grams = (value: string) => {
+    const counts = new Map<string, number>();
+    const padded = `  ${value} `;
+    for (let i = 0; i < padded.length - 2; i += 1) {
+      const gram = padded.slice(i, i + 3);
+      counts.set(gram, (counts.get(gram) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const ag = grams(a);
+  const bg = grams(b);
+  let aCount = 0;
+  let bCount = 0;
+  let shared = 0;
+  for (const count of Array.from(ag.values())) aCount += count;
+  for (const count of Array.from(bg.values())) bCount += count;
+  for (const [gram, count] of Array.from(ag.entries())) shared += Math.min(count, bg.get(gram) ?? 0);
+  if (aCount + bCount === 0) return 0;
+  return (2 * shared) / (aCount + bCount);
+}

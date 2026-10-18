@@ -7,7 +7,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import ActivityDialog from "@/components/crm/ActivityDialog";
 import FinanceLeaseTag from "@/components/crm/FinanceLeaseTag";
+import ContactOpportunities from "@/components/crm/ContactOpportunities";
 import OpportunityDialog from "@/components/crm/OpportunityDialog";
+import SetupLesseeNote from "@/components/crm/SetupLesseeNote";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { contactsDirectoryPath } from "@/lib/directory-nav";
 import { accountListPath, readAccountMgmtListState } from "@/lib/account-mgmt-nav";
@@ -67,6 +69,7 @@ export default function Account360Page() {
     return <div className="p-8 text-sm text-destructive">{error instanceof Error ? error.message : "Account unavailable"}</div>;
   }
 
+  const awaitingSetup = data.account.kind === "prospect" && data.opportunities.some((row) => row.stage === "won" && (row.type === "new_business" || row.type === "expansion"));
   const maxBar = Math.max(1, ...data.expiry_bars.map((bar) => bar.cars));
   const managers = Array.from(new Set([...(amOptions.data ?? []), data.account.account_manager ?? ""].filter(Boolean))).sort();
   const back = accountListPath(readAccountMgmtListState());
@@ -75,7 +78,7 @@ export default function Account360Page() {
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title={data.account.name}
-        subtitle={data.account.kind === "client" ? "Client" : "Prospect"}
+        subtitle={awaitingSetup ? "Won – awaiting setup" : data.account.kind === "client" ? "Client" : "Prospect"}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" asChild>
@@ -88,9 +91,10 @@ export default function Account360Page() {
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-4">
+        {awaitingSetup ? <SetupLesseeNote accountId={id} accountName={data.account.name} /> : null}
         <div className="flex flex-wrap items-end gap-4 text-sm">
           <span className={`rounded px-2 py-0.5 text-xs ${data.account.kind === "client" ? "bg-sky-500/15 text-sky-800" : "bg-amber-500/15 text-amber-800"}`}>
-            {data.account.kind === "client" ? "Client" : "Prospect"}
+            {awaitingSetup ? "Won – awaiting setup" : data.account.kind === "client" ? "Client" : "Prospect"}
           </span>
           <label className="text-xs text-muted-foreground">
             Account manager
@@ -201,6 +205,7 @@ export default function Account360Page() {
                         {person.name}
                       </Link>
                       <span className="text-muted-foreground"> {[person.title, person.email, person.phone].filter(Boolean).join(" · ")}</span>
+                      <div className="mt-1"><ContactOpportunities contactId={person.id} /></div>
                     </li>
                   ))}
                 </ul>

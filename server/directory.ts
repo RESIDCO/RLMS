@@ -218,7 +218,7 @@ export async function directoryFacets() {
   );
 }
 
-const REL_TYPES = new Set(["unclassified", "prospect", "lessor", "railroad", "vendor", "other", "customer"]);
+const REL_TYPES = new Set(["unclassified", "prospect", "lessor", "railroad", "vendor", "other", "customer", "broker"]);
 const STATUSES = new Set(["target", "contacted", "in_discussion", "lost", "won"]);
 const TIERS = new Set(["A", "B", "C", "D"]);
 

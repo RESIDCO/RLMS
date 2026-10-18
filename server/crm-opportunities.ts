@@ -3,18 +3,29 @@ import { recordChange, withChangeGroup, withChangeGroupResult } from "./change-l
 import { CrmHttpError } from "./crm-error";
 import { supabaseAdmin } from "./supabase";
 import {
+  changeCaptureRow,
+  contactBelongsToAccount,
+  diffOpportunityContacts,
   isActiveRider,
+  isAwaitingLesseeAged,
+  isLesseeRole,
   isLossReason,
   isOpenStage,
+  isOpportunityContactRole,
   isOpportunitySource,
   isOpportunityStage,
   isOpportunityType,
   isRenewalCandidate,
   lostNeedsReason,
   mostCommonValue,
+  normalizeTags,
   remarketRiderUrl,
   renewalAutoNotes,
+  wonProspectNextStep,
   wonReletNeedsRemarket,
+  wonRiderBelongsToAccount,
+  type AwaitingLesseeRow,
+  type OpportunityContactRow,
   type OpportunityRow,
   type OpportunitySource,
   type OpportunityStage,
@@ -23,6 +34,7 @@ import {
   type RenewalRunResult,
   type WatchRow,
 } from "@shared/crm";
+import { createCrmProspect, ensureCompanyForAccount, resolveCrmParty } from "./crm-parties";
 
 type RiderFact = {
   id: number;
@@ -113,6 +125,9 @@ function mapOpportunity(row: Record<string, unknown>): OpportunityRow {
     sublessee_note: textOrNull(row.sublessee_note),
     competitor: textOrNull(row.competitor),
     loss_reason: isLossReason(row.loss_reason) ? row.loss_reason : null,
+    lessee_role: isLesseeRole(row.lessee_role) ? row.lessee_role : "lessee",
+    tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag)) : [],
+    referral_note: textOrNull(row.referral_note),
     notes: row.notes == null ? null : String(row.notes),
     created_by: textOrNull(row.created_by),
     created_at: String(row.created_at ?? ""),
@@ -385,7 +400,7 @@ export async function generateRenewals(opts: { months: number; dryRun: boolean; 
         table: "opportunities",
         pk: Number(data.id),
         before: {},
-        after: data,
+        after: changeCaptureRow(data as Record<string, unknown>),
         action: "create_opportunity",
         entity_type: "opportunity",
         entity_id: Number(data.id),
@@ -435,6 +450,7 @@ export async function listOpportunityWatch(): Promise<{
   check_date: WatchRow[];
   off_lease: WatchRow[];
   unclassified: WatchRow[];
+  awaiting_lessee: AwaitingLesseeRow[];
   returns_watch_url: string;
 }> {
   const today = utcToday();
@@ -535,8 +551,47 @@ export async function listOpportunityWatch(): Promise<{
     check_date: checkDate,
     off_lease: offLease,
     unclassified,
+    awaiting_lessee: await listAwaitingLessee(),
     returns_watch_url: "#/returns/watch",
   };
+}
+
+async function listAwaitingLessee(): Promise<AwaitingLesseeRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("opportunities")
+    .select("id, account_id, type, stage, closed_at, owner")
+    .eq("stage", "won")
+    .in("type", ["new_business", "expansion"])
+    .order("closed_at", { ascending: true })
+    .limit(500);
+  if (error) throw error;
+  const rows = data ?? [];
+  const accountIds = Array.from(new Set(rows.map((row) => Number(row.account_id)).filter((id) => id > 0)));
+  if (!accountIds.length) return [];
+  const [{ data: lessees, error: lesseeErr }, { data: accounts, error: accountErr }] = await Promise.all([
+    supabaseAdmin.from("v_crm_lessee_account").select("account_id").in("account_id", accountIds),
+    supabaseAdmin.from("accounts").select("id, name").in("id", accountIds),
+  ]);
+  if (lesseeErr) throw lesseeErr;
+  if (accountErr) throw accountErr;
+  const linked = new Set((lessees ?? []).map((row) => Number(row.account_id)));
+  const names = new Map((accounts ?? []).map((row) => [Number(row.id), String(row.name ?? "")]));
+  const awaiting: AwaitingLesseeRow[] = [];
+  for (const row of rows) {
+    const accountId = Number(row.account_id);
+    if (linked.has(accountId)) continue;
+    const closedAt = row.closed_at == null ? null : String(row.closed_at);
+    awaiting.push({
+      opportunity_id: Number(row.id),
+      account_id: accountId,
+      account_name: names.get(accountId) ?? `Account ${accountId}`,
+      type: String(row.type) as OpportunityType,
+      closed_at: closedAt,
+      aged: isAwaitingLesseeAged(closedAt),
+      owner: textOrNull(row.owner),
+    });
+  }
+  return awaiting;
 }
 
 export type OpportunityFilters = {
@@ -546,6 +601,9 @@ export type OpportunityFilters = {
   stage?: string;
   type?: string;
   open?: boolean;
+  contact_id?: number;
+  company_id?: number;
+  tag?: string;
 };
 
 export async function listOpportunities(filters: OpportunityFilters): Promise<OpportunityRow[]> {
@@ -557,9 +615,32 @@ export async function listOpportunities(filters: OpportunityFilters): Promise<Op
   if (filters.stage) query = query.eq("stage", filters.stage);
   if (filters.type) query = query.eq("type", filters.type);
   if (filters.open) query = query.not("stage", "in", "(won,lost)");
+  if (filters.tag) query = query.contains("tags", [filters.tag.trim().toLowerCase()]);
+  if (filters.company_id) {
+    const { data: company, error: companyErr } = await supabaseAdmin
+      .from("companies")
+      .select("id, account_id")
+      .eq("id", filters.company_id)
+      .maybeSingle();
+    if (companyErr) throw companyErr;
+    if (!company) return [];
+    const linkedAccount = positiveInt(company.account_id);
+    if (linkedAccount) query = query.or(`company_id.eq.${filters.company_id},account_id.eq.${linkedAccount}`);
+    else query = query.eq("company_id", filters.company_id);
+  }
+  if (filters.contact_id) {
+    const { data: links, error: linkErr } = await supabaseAdmin
+      .from("opportunity_contacts")
+      .select("opportunity_id")
+      .eq("contact_id", filters.contact_id);
+    if (linkErr) throw linkErr;
+    const ids = (links ?? []).map((row) => Number(row.opportunity_id)).filter((id) => id > 0);
+    if (!ids.length) return [];
+    query = query.in("id", ids);
+  }
   const { data, error } = await query;
   if (error) throw error;
-  return attachRiderNames((data ?? []).map((row) => mapOpportunity(row as Record<string, unknown>)));
+  return attachAccountNames(await attachRiderNames((data ?? []).map((row) => mapOpportunity(row as Record<string, unknown>))));
 }
 
 async function loadRiderNames(ids: number[]): Promise<Map<number, string | null>> {
@@ -572,6 +653,15 @@ async function loadRiderNames(ids: number[]): Promise<Map<number, string | null>
     for (const row of data ?? []) names.set(Number(row.id), textOrNull(row.rider_name));
   }
   return names;
+}
+
+async function attachAccountNames(rows: OpportunityRow[]): Promise<OpportunityRow[]> {
+  const ids = Array.from(new Set(rows.map((row) => row.account_id).filter((id) => id > 0)));
+  if (!ids.length) return rows;
+  const { data, error } = await supabaseAdmin.from("accounts").select("id, name").in("id", ids);
+  if (error) throw error;
+  const names = new Map((data ?? []).map((row) => [Number(row.id), String(row.name ?? "")]));
+  return rows.map((row) => ({ ...row, account_name: names.get(row.account_id) ?? null }));
 }
 
 async function attachRiderNames(rows: OpportunityRow[]): Promise<OpportunityRow[]> {
@@ -636,55 +726,281 @@ function cleanWrite(body: Record<string, unknown>, partial: boolean): Record<str
     else take("loss_reason", body.loss_reason);
   }
   if (!partial || "notes" in body) take("notes", body.notes == null ? null : String(body.notes));
+  if (!partial || "lessee_role" in body) {
+    const role = body.lessee_role == null || body.lessee_role === "" ? "lessee" : body.lessee_role;
+    if (!isLesseeRole(role)) throw httpError(400, "Invalid lessee role");
+    take("lessee_role", role);
+    if (role === "lessee") out.sublessee_note = null;
+  }
+  if (!partial || "tags" in body) {
+    const tags = normalizeTags(body.tags ?? []);
+    if (!tags.ok) throw httpError(400, tags.error);
+    take("tags", tags.tags);
+  }
+  if (!partial || "referral_note" in body) take("referral_note", textOrNull(body.referral_note));
   if (!partial || "won_rider_id" in body) take("won_rider_id", positiveInt(body.won_rider_id));
   if (!partial || "master_lease_id" in body) take("master_lease_id", positiveInt(body.master_lease_id));
   if (!partial || "rider_id" in body) take("rider_id", positiveInt(body.rider_id));
   return out;
 }
 
-export async function createOpportunity(body: Record<string, unknown>, actor: string): Promise<OpportunityRow & { change_group: string }> {
-  const accountId = positiveInt(body.account_id);
-  if (!accountId) throw httpError(400, "account_id is required");
-  const { data: account, error: accountErr } = await supabaseAdmin
-    .from("accounts")
-    .select("id, account_manager")
-    .eq("id", accountId)
-    .maybeSingle();
-  if (accountErr) throw accountErr;
-  if (!account) throw httpError(400, "Account not found");
+type ContactDraft = {
+  contact_id?: number;
+  role?: string;
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  title?: string | null;
+};
 
-  const patch = cleanWrite({ ...body, stage: body.stage ?? "identified", source: body.source ?? "manual" }, false);
-  let masterLeaseId = positiveInt(patch.master_lease_id);
-  const riderId = positiveInt(patch.rider_id);
-  if (riderId) {
-    const ctx = await riderContext(riderId);
-    masterLeaseId = ctx.master_lease_id;
-    if (ctx.account_id != null && ctx.account_id !== accountId) {
-      throw httpError(400, "Rider belongs to a different account");
-    }
+function readContacts(raw: unknown): ContactDraft[] {
+  if (!Array.isArray(raw)) throw httpError(400, "contacts must be a list");
+  return raw.map((item) => {
+    if (!item || typeof item !== "object") throw httpError(400, "Invalid contact");
+    const row = item as Record<string, unknown>;
+    return {
+      contact_id: positiveInt(row.contact_id) ?? undefined,
+      role: textOrNull(row.role) ?? undefined,
+      name: textOrNull(row.name) ?? undefined,
+      email: textOrNull(row.email),
+      phone: textOrNull(row.phone),
+      title: textOrNull(row.title),
+    };
+  });
+}
+
+async function accountIsProspect(accountId: number): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from("v_crm_lessee_account").select("account_id").eq("account_id", accountId).limit(1);
+  if (error) throw error;
+  return (data ?? []).length === 0;
+}
+
+async function finishOpportunity(row: OpportunityRow): Promise<OpportunityRow> {
+  const [named] = await attachAccountNames([row]);
+  const isProspect = await accountIsProspect(named.account_id);
+  return {
+    ...named,
+    next_step: wonProspectNextStep({ type: named.type, stage: named.stage, isProspect }),
+  };
+}
+
+async function assertWonRiderOnAccount(wonRiderId: number | null, accountId: number) {
+  if (!wonRiderId) return;
+  const ctx = await riderContext(wonRiderId);
+  if (!wonRiderBelongsToAccount(ctx.account_id, accountId)) {
+    throw httpError(400, "won_rider_id must be a rider of this account");
   }
-  if (!("owner" in body) || textOrNull(body.owner) == null) {
-    patch.owner = textOrNull(account.account_manager);
+}
+
+async function assertCompanyOnAccount(companyId: number | null, accountId: number) {
+  if (!companyId) return;
+  const { data, error } = await supabaseAdmin.from("companies").select("id, account_id").eq("id", companyId).maybeSingle();
+  if (error) throw error;
+  if (!data) throw httpError(400, "Company not found");
+  if (positiveInt(data.account_id) !== accountId) throw httpError(400, "Company belongs to a different account");
+}
+
+async function assertContactOnAccount(contactId: number, accountId: number) {
+  const { data, error } = await supabaseAdmin.from("company_contacts").select("id, company_id").eq("id", contactId).maybeSingle();
+  if (error) throw error;
+  if (!data) throw httpError(400, "Contact not found");
+  const { data: company, error: companyErr } = await supabaseAdmin
+    .from("companies")
+    .select("id, account_id")
+    .eq("id", data.company_id)
+    .maybeSingle();
+  if (companyErr) throw companyErr;
+  if (!contactBelongsToAccount(positiveInt(company?.account_id), accountId)) {
+    throw httpError(400, "Contact must belong to this account");
   }
-  patch.account_id = accountId;
-  patch.master_lease_id = masterLeaseId;
-  patch.rider_id = riderId;
-  patch.created_by = actor;
-  const stage = String(patch.stage);
-  const loss = textOrNull(patch.loss_reason);
-  if (lostNeedsReason(stage, loss)) throw httpError(400, "Lost opportunities require a loss_reason");
-  if (String(patch.type) === "renewal" && stage === "won" && !dateOnly(patch.new_expiry_date)) {
-    throw httpError(400, "Won renewal requires new_expiry_date");
+}
+
+async function createContactOnAccount(accountId: number, draft: ContactDraft, actor: string): Promise<number> {
+  const name = textOrNull(draft.name);
+  if (!name) throw httpError(400, "Contact needs an id or a name");
+  const companyId = await ensureCompanyForAccount(accountId, actor);
+  const { data, error } = await supabaseAdmin
+    .from("company_contacts")
+    .insert({
+      company_id: companyId,
+      name,
+      email: draft.email ?? null,
+      phone: draft.phone ?? null,
+      title: draft.title ?? null,
+      source: "crm_quick_create",
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  await recordChange({
+    table: "company_contacts",
+    pk: Number(data.id),
+    before: {},
+    after: changeCaptureRow(data as Record<string, unknown>),
+    action: "create_contact",
+    entity_type: "company_contact",
+    entity_id: Number(data.id),
+    actor,
+  });
+  return Number(data.id);
+}
+
+async function materializeContacts(
+  accountId: number,
+  drafts: ContactDraft[],
+  actor: string,
+  primaryId: number | null,
+): Promise<{ contact_id: number; role: string }[]> {
+  const desired: { contact_id: number; role: string }[] = [];
+  for (const draft of drafts) {
+    const role = draft.role ?? "contact";
+    if (!isOpportunityContactRole(role)) throw httpError(400, "Invalid contact role");
+    const contactId = draft.contact_id ?? (await createContactOnAccount(accountId, draft, actor));
+    if (draft.contact_id) await assertContactOnAccount(contactId, accountId);
+    if (!desired.some((row) => row.contact_id === contactId)) desired.push({ contact_id: contactId, role });
   }
-  if (stage === "won" || stage === "lost") patch.closed_at = new Date().toISOString();
-  if (wonReletNeedsRemarket({ type: String(patch.type), stage, won_rider_id: positiveInt(patch.won_rider_id) })) {
-    throw httpError(409, "Run remarket in Lease Management", {
-      needs_remarket: true,
-      rider_url: remarketRiderUrl(riderId),
+  if (primaryId && !desired.some((row) => row.contact_id === primaryId)) {
+    await assertContactOnAccount(primaryId, accountId);
+    desired.unshift({ contact_id: primaryId, role: "primary" });
+  }
+  return desired;
+}
+
+async function replaceOpportunityContacts(
+  opportunityId: number,
+  desired: { contact_id: number; role: string }[],
+  actor: string,
+) {
+  const { data, error } = await supabaseAdmin.from("opportunity_contacts").select("*").eq("opportunity_id", opportunityId);
+  if (error) throw error;
+  const before = (data ?? []).map((row) => ({
+    id: Number(row.id),
+    contact_id: Number(row.contact_id),
+    role: String(row.role),
+    raw: row as Record<string, unknown>,
+  }));
+  const plan = diffOpportunityContacts(before, desired);
+  for (const id of plan.deleteIds) {
+    const row = before.find((item) => item.id === id);
+    const { error: delErr } = await supabaseAdmin.from("opportunity_contacts").delete().eq("id", id);
+    if (delErr) throw delErr;
+    await recordChange({
+      table: "opportunity_contacts",
+      pk: id,
+      before: changeCaptureRow(row?.raw),
+      after: {},
+      action: "delete_opportunity_contact",
+      entity_type: "opportunity_contact",
+      entity_id: id,
+      actor,
     });
   }
+  for (const item of plan.insert) {
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from("opportunity_contacts")
+      .insert({ opportunity_id: opportunityId, contact_id: item.contact_id, role: item.role })
+      .select("*")
+      .single();
+    if (insErr) throw insErr;
+    await recordChange({
+      table: "opportunity_contacts",
+      pk: Number(inserted.id),
+      before: {},
+      after: changeCaptureRow(inserted as Record<string, unknown>),
+      action: "create_opportunity_contact",
+      entity_type: "opportunity_contact",
+      entity_id: Number(inserted.id),
+      actor,
+    });
+  }
+}
 
+async function resolveDealAccount(body: Record<string, unknown>, actor: string): Promise<{
+  accountId: number;
+  accountName: string;
+  manager: string | null;
+  contactId: number | null;
+  companyId: number | null;
+}> {
+  const direct = positiveInt(body.account_id);
+  if (direct) {
+    const { data, error } = await supabaseAdmin.from("accounts").select("id, name, account_manager").eq("id", direct).maybeSingle();
+    if (error) throw error;
+    if (!data) throw httpError(400, "Account not found");
+    return {
+      accountId: direct,
+      accountName: String(data.name ?? ""),
+      manager: textOrNull(data.account_manager),
+      contactId: null,
+      companyId: null,
+    };
+  }
+  if (body.prospect && typeof body.prospect === "object") {
+    const created = await createCrmProspect(body.prospect as Record<string, unknown>, actor);
+    return {
+      accountId: created.account_id,
+      accountName: created.name,
+      manager: null,
+      contactId: created.contact_id,
+      companyId: created.company_id,
+    };
+  }
+  if (body.party && typeof body.party === "object") {
+    const resolved = await resolveCrmParty(body.party as { entity?: unknown; entity_id?: unknown }, actor);
+    const { data, error } = await supabaseAdmin
+      .from("accounts")
+      .select("id, account_manager")
+      .eq("id", resolved.account_id)
+      .maybeSingle();
+    if (error) throw error;
+    return {
+      accountId: resolved.account_id,
+      accountName: resolved.name,
+      manager: textOrNull(data?.account_manager),
+      contactId: resolved.contact_id,
+      companyId: resolved.company_id,
+    };
+  }
+  throw httpError(400, "account_id is required");
+}
+
+export async function createOpportunity(body: Record<string, unknown>, actor: string): Promise<OpportunityRow & { change_group: string }> {
   const result = await withChangeGroupResult(actor, async () => {
+    const account = await resolveDealAccount(body, actor);
+    const accountId = account.accountId;
+    const patch = cleanWrite({ ...body, stage: body.stage ?? "identified", source: body.source ?? "manual" }, false);
+    let masterLeaseId = positiveInt(patch.master_lease_id);
+    const riderId = positiveInt(patch.rider_id);
+    if (riderId) {
+      const ctx = await riderContext(riderId);
+      masterLeaseId = ctx.master_lease_id;
+      if (ctx.account_id != null && ctx.account_id !== accountId) {
+        throw httpError(400, "Rider belongs to a different account");
+      }
+    }
+    if (!("owner" in body) || textOrNull(body.owner) == null) patch.owner = account.manager;
+    patch.account_id = accountId;
+    patch.master_lease_id = masterLeaseId;
+    patch.rider_id = riderId;
+    patch.created_by = actor;
+    if (!positiveInt(patch.company_id) && account.companyId) patch.company_id = account.companyId;
+    await assertCompanyOnAccount(positiveInt(patch.company_id), accountId);
+    const stage = String(patch.stage);
+    const loss = textOrNull(patch.loss_reason);
+    if (lostNeedsReason(stage, loss)) throw httpError(400, "Lost opportunities require a loss_reason");
+    if (String(patch.type) === "renewal" && stage === "won" && !dateOnly(patch.new_expiry_date)) {
+      throw httpError(400, "Won renewal requires new_expiry_date");
+    }
+    if (stage === "won" || stage === "lost") patch.closed_at = new Date().toISOString();
+    const wonRiderId = positiveInt(patch.won_rider_id);
+    if (wonReletNeedsRemarket({ type: String(patch.type), stage, won_rider_id: wonRiderId })) {
+      throw httpError(409, "Run remarket in Lease Management", {
+        needs_remarket: true,
+        rider_url: remarketRiderUrl(riderId),
+      });
+    }
+    await assertWonRiderOnAccount(wonRiderId, accountId);
+
     const { data, error } = await supabaseAdmin.from("opportunities").insert(patch).select("*").single();
     if (error) {
       if (error.code === "23514") throw httpError(400, "Lost opportunities require a loss_reason");
@@ -694,7 +1010,7 @@ export async function createOpportunity(body: Record<string, unknown>, actor: st
       table: "opportunities",
       pk: Number(data.id),
       before: {},
-      after: data,
+      after: changeCaptureRow(data as Record<string, unknown>),
       action: "create_opportunity",
       entity_type: "opportunity",
       entity_id: Number(data.id),
@@ -702,7 +1018,12 @@ export async function createOpportunity(body: Record<string, unknown>, actor: st
       actor,
       detail: { type: data.type, stage: data.stage },
     });
-    return mapOpportunity(data as Record<string, unknown>);
+    if ("contacts" in body || account.contactId) {
+      const drafts = "contacts" in body ? readContacts(body.contacts) : [];
+      const desired = await materializeContacts(accountId, drafts, actor, account.contactId);
+      await replaceOpportunityContacts(Number(data.id), desired, actor);
+    }
+    return finishOpportunity(mapOpportunity(data as Record<string, unknown>));
   });
   return result;
 }
@@ -745,6 +1066,8 @@ export async function patchOpportunity(
       rider_url: remarketRiderUrl(riderId),
     });
   }
+  await assertWonRiderOnAccount(wonRiderId, Number(before.account_id));
+  if ("company_id" in patch) await assertCompanyOnAccount(positiveInt(patch.company_id), Number(before.account_id));
   if ((stage === "won" || stage === "lost") && before.stage !== stage) {
     patch.closed_at = new Date().toISOString();
   }
@@ -763,8 +1086,8 @@ export async function patchOpportunity(
     await recordChange({
       table: "opportunities",
       pk: id,
-      before,
-      after: data,
+      before: changeCaptureRow(before as Record<string, unknown>),
+      after: changeCaptureRow(data as Record<string, unknown>),
       action: "update_opportunity",
       entity_type: "opportunity",
       entity_id: id,
@@ -772,7 +1095,83 @@ export async function patchOpportunity(
       actor,
       detail: { type: data.type, stage: data.stage },
     });
-    return mapOpportunity(data as Record<string, unknown>);
+    if ("contacts" in body) {
+      const desired = await materializeContacts(Number(before.account_id), readContacts(body.contacts), actor, null);
+      await replaceOpportunityContacts(id, desired, actor);
+    }
+    return finishOpportunity(mapOpportunity(data as Record<string, unknown>));
+  });
+  return result;
+}
+
+export async function listOpportunityContacts(opportunityId: number): Promise<OpportunityContactRow[]> {
+  if (!Number.isFinite(opportunityId) || opportunityId <= 0) throw httpError(400, "Invalid opportunity");
+  const { data, error } = await supabaseAdmin
+    .from("opportunity_contacts")
+    .select("id, opportunity_id, contact_id, role")
+    .eq("opportunity_id", opportunityId)
+    .order("id", { ascending: true });
+  if (error) throw error;
+  const rows = data ?? [];
+  const ids = rows.map((row) => Number(row.contact_id));
+  const names = new Map<number, { name: string | null; email: string | null }>();
+  if (ids.length) {
+    const { data: people, error: peopleErr } = await supabaseAdmin.from("company_contacts").select("id, name, email").in("id", ids);
+    if (peopleErr) throw peopleErr;
+    for (const person of people ?? []) names.set(Number(person.id), { name: textOrNull(person.name), email: textOrNull(person.email) });
+  }
+  return rows.map((row) => {
+    const person = names.get(Number(row.contact_id));
+    const role = isOpportunityContactRole(row.role) ? row.role : "contact";
+    return {
+      id: Number(row.id),
+      opportunity_id: Number(row.opportunity_id),
+      contact_id: Number(row.contact_id),
+      role,
+      name: person?.name ?? null,
+      email: person?.email ?? null,
+    };
+  });
+}
+
+export async function addOpportunityContact(
+  opportunityId: number,
+  body: Record<string, unknown>,
+  actor: string,
+): Promise<OpportunityContactRow & { change_group: string }> {
+  const { data: opp, error } = await supabaseAdmin.from("opportunities").select("id, account_id").eq("id", opportunityId).maybeSingle();
+  if (error) throw error;
+  if (!opp) throw httpError(404, "Opportunity not found");
+  const result = await withChangeGroupResult(actor, async () => {
+    const desiredNow = await listOpportunityContacts(opportunityId);
+    const added = await materializeContacts(Number(opp.account_id), readContacts([body]), actor, null);
+    const merged = [
+      ...desiredNow.map((row) => ({ contact_id: row.contact_id, role: row.role })),
+      ...added.filter((row) => !desiredNow.some((item) => item.contact_id === row.contact_id)),
+    ];
+    await replaceOpportunityContacts(opportunityId, merged, actor);
+    const rows = await listOpportunityContacts(opportunityId);
+    const match = rows.find((row) => row.contact_id === added[0]?.contact_id);
+    if (!match) throw httpError(400, "Contact was not added");
+    return match;
+  });
+  return result;
+}
+
+export async function deleteOpportunityContact(
+  opportunityId: number,
+  contactId: number,
+  actor: string,
+): Promise<{ ok: true; change_group: string }> {
+  const rows = await listOpportunityContacts(opportunityId);
+  if (!rows.some((row) => row.contact_id === contactId)) throw httpError(404, "Contact not on this opportunity");
+  const result = await withChangeGroupResult(actor, async () => {
+    await replaceOpportunityContacts(
+      opportunityId,
+      rows.filter((row) => row.contact_id !== contactId).map((row) => ({ contact_id: row.contact_id, role: row.role })),
+      actor,
+    );
+    return { ok: true as const };
   });
   return result;
 }

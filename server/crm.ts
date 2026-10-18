@@ -3,10 +3,14 @@ import { requireUser, requireWrite } from "./auth";
 import { getAccount360, listCrmSummary } from "./account-360";
 import { createCrmActivity, listCrmActivities, patchCrmActivity } from "./crm-activities";
 import { CrmHttpError } from "./crm-error";
+import { createCrmProspect, dedupCrmProspects, searchCrmParties } from "./crm-parties";
 import {
+  addOpportunityContact,
   createOpportunity,
+  deleteOpportunityContact,
   generateRenewals,
   listOpportunities,
+  listOpportunityContacts,
   listOpportunityWatch,
   patchOpportunity,
 } from "./crm-opportunities";
@@ -92,8 +96,72 @@ export function registerCrmRoutes(app: Express) {
           stage: queryText(req.query.stage),
           type: queryText(req.query.type),
           open: req.query.open === "1" || req.query.open === "true",
+          contact_id: queryInt(req.query.contact_id),
+          company_id: queryInt(req.query.company_id),
+          tag: queryText(req.query.tag),
         }),
       );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.get("/api/crm/parties", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const limit = queryInt(req.query.limit) ?? 20;
+      res.json(await searchCrmParties(queryText(req.query.q) ?? "", limit));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.get("/api/crm/prospect-dedup", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const marks = queryText(req.query.marks);
+      res.json(await dedupCrmProspects(queryText(req.query.name) ?? "", marks ? marks.split(",") : []));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.post("/api/crm/prospects", async (req, res) => {
+    try {
+      const user = await actor(req, res, true);
+      if (!user) return;
+      const row = await createCrmProspect((req.body ?? {}) as Record<string, unknown>, user);
+      res.status(201).json(row);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.get("/api/opportunities/:id/contacts", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await listOpportunityContacts(Number(req.params.id)));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.post("/api/opportunities/:id/contacts", async (req, res) => {
+    try {
+      const user = await actor(req, res, true);
+      if (!user) return;
+      const row = await addOpportunityContact(Number(req.params.id), (req.body ?? {}) as Record<string, unknown>, user);
+      res.status(201).json(row);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.delete("/api/opportunities/:id/contacts/:contactId", async (req, res) => {
+    try {
+      const user = await actor(req, res, true);
+      if (!user) return;
+      res.json(await deleteOpportunityContact(Number(req.params.id), Number(req.params.contactId), user));
     } catch (err) {
       sendError(res, err);
     }

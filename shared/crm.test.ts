@@ -1,18 +1,27 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/crm.test.ts */
 
-import { isUndoAllowedTable, UNDO_ALLOWED_TABLES } from "./undo";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { isPlaceholderLessee } from "./lease-mgmt";
+import { isUndoAllowedTable, REFERENCED_SINCE_MESSAGE, finalizeUndoPreview, referencedSinceBlocksUndo, undoApplyOrder, UNDO_ALLOWED_TABLES } from "./undo";
 import {
   addMonthsIso,
+  changeCaptureRow,
+  classifyAccountParty,
+  contactBelongsToAccount,
+  diffOpportunityContacts,
   FINANCE_LEASE_TAG,
   financeLeaseTag,
   isActiveRider,
   isRenewalCandidate,
   lostNeedsReason,
   mostCommonValue,
+  normalizeTags,
   renewalAutoNotes,
   renewalExclusion,
   type RenewalRiderInput,
+  wonProspectNextStep,
   wonReletNeedsRemarket,
 } from "./crm";
 
@@ -130,6 +139,60 @@ ok(isUndoAllowedTable("opportunities"), "opportunities undoable");
 ok(isUndoAllowedTable("crm_activities"), "crm_activities undoable");
 ok(UNDO_ALLOWED_TABLES.includes("attachments"), "attachments remains on the allowlist");
 ok(UNDO_ALLOWED_TABLES.indexOf("attachments") < UNDO_ALLOWED_TABLES.indexOf("opportunities"), "CRM tables appended after attachments");
+for (const table of ["accounts", "companies", "company_contacts", "opportunity_contacts"]) {
+  ok(isUndoAllowedTable(table), `${table} undoable`);
+}
+
+ok(!isPlaceholderLessee("Xcel Energy"), "Xcel Energy is not a placeholder");
+ok(!isPlaceholderLessee("DTE"), "DTE is not a placeholder");
+ok(isPlaceholderLessee("xIngevity") && isPlaceholderLessee("IDLE - x") && isPlaceholderLessee("available") && isPlaceholderLessee("Unassigned"), "placeholder names excluded");
+ok(classifyAccountParty({ hasLessee: true, allPlaceholderLessee: false, isClient: true, name: "Xcel Energy" }) === "client", "Xcel client stays in the picker");
+ok(classifyAccountParty({ hasLessee: false, allPlaceholderLessee: false, isClient: false, name: "DTE" }) === "prospect", "DTE prospect stays in the picker");
+ok(classifyAccountParty({ hasLessee: false, allPlaceholderLessee: false, isClient: false, name: "xIngevity" }) === "excluded", "xIngevity excluded");
+ok(classifyAccountParty({ hasLessee: true, allPlaceholderLessee: true, isClient: false, name: "IDLE - x" }) === "excluded", "placeholder lessee excluded");
+ok(classifyAccountParty({ hasLessee: true, allPlaceholderLessee: false, isClient: false, name: "Georgia Pacific" }) === "former", "former client");
+
+const tags = normalizeTags(["  Fleet ", "fleet", "Hoppers"]);
+ok(tags.ok && tags.tags.join(",") === "fleet,hoppers", "tags trimmed and unique");
+ok(!normalizeTags(["x".repeat(31)]).ok, "tag length rejected");
+ok(!normalizeTags(Array.from({ length: 11 }, (_, i) => `t${i}`)).ok, "tag count rejected");
+ok(contactBelongsToAccount(9, 9) && !contactBelongsToAccount(8, 9) && !contactBelongsToAccount(null, 9), "contact belongs to the same account");
+ok(wonProspectNextStep({ type: "new_business", stage: "won", isProspect: true }) === "setup_lessee", "won prospect next step");
+ok(wonProspectNextStep({ type: "renewal", stage: "won", isProspect: true }) === null, "won renewal is not lessee setup");
+ok(wonProspectNextStep({ type: "expansion", stage: "won", isProspect: false }) === null, "client win does not ask for setup");
+const capture = changeCaptureRow({ name: "Acme", updated_at: "now", search_vector: "vec", notes_search_vector: "n" });
+ok(capture.name === "Acme" && !("updated_at" in capture) && !("search_vector" in capture) && !("notes_search_vector" in capture), "capture row drops noise");
+const contactDiff = diffOpportunityContacts(
+  [{ id: 1, contact_id: 4, role: "primary" }],
+  [{ contact_id: 4, role: "billing" }],
+);
+ok(contactDiff.deleteIds.join(",") === "1" && contactDiff.insert[0]?.role === "billing", "role change deletes then inserts");
+
+const migration = readFileSync(resolve(process.cwd(), "migrations/20261111_crm_p1_1.sql"), "utf8");
+ok(migration.includes("btrim(a.name) ~ '^x[A-Z0-9&]'") && migration.includes("btrim(a.name) ~* '^(idle|available|unassigned)'"), "party search name guard matches isPlaceholderLessee");
+ok(migration.indexOf("create table crm_umler_owner_ref") < migration.indexOf("function public.crm_prospect_dedup"), "dedup function is created after the umler table");
+ok(migration.includes("'referenced since'"), "undo returns referenced since");
+const undoFn = migration.slice(migration.indexOf("FUNCTION public.rlms_undo_change_group"));
+ok(undoFn.indexOf("'referenced since'") < undoFn.indexOf("restored := restored + 1"), "referenced since is decided before any restore");
+for (const table of ["attachments", "opportunities", "crm_activities", "accounts", "companies", "company_contacts", "opportunity_contacts"]) {
+  ok(undoFn.includes(`'${table}'`), `${table} stays in the undo function`);
+}
+for (const entity of ["railcar", "rider", "program", "program_car", "master_lease", "account", "opportunity", "crm_activity", "company", "company_contact", "opportunity_contact"]) {
+  ok(migration.includes(`'${entity}'`), `entity type ${entity} kept`);
+}
+ok(!migration.includes("isCrmPlaceholderName"), "migration does not invent a second name helper");
+
+const quickOrder = undoApplyOrder([
+  { id: 1, table: "accounts" },
+  { id: 2, table: "companies" },
+  { id: 3, table: "company_contacts" },
+  { id: 4, table: "opportunities" },
+  { id: 5, table: "opportunity_contacts" },
+]).map((row) => row.table);
+ok(quickOrder.join(",") === "opportunity_contacts,opportunities,company_contacts,companies,accounts", "quick-create undo deletes children first");
+ok(referencedSinceBlocksUndo({ table: "accounts", op: "insert", outside: true }), "outside reference blocks account undo");
+const refused = finalizeUndoPreview({ conflicts: [], referencedSince: true });
+ok(!refused.ok && refused.status === 409 && refused.message === REFERENCED_SINCE_MESSAGE, "preview refuses with referenced since");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -38,7 +38,10 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import NotesSaveField from "@/components/NotesSaveField";
 import ContactLeaseLinks from "@/components/ContactLeaseLinks";
-import { usePermissions } from "@/lib/AuthContext";
+import { useCanEdit, usePermissions } from "@/lib/AuthContext";
+import OpportunityDialog from "@/components/crm/OpportunityDialog";
+import ContactOpportunities, { CompanyOpportunities } from "@/components/crm/ContactOpportunities";
+import type { PartySelection } from "@/components/crm/PartyPicker";
 import { useToast } from "@/hooks/use-toast";
 import SearchableSelect from "@/components/SearchableSelect";
 import { confirmDelete } from "@/components/ConfirmActionDialog";
@@ -178,6 +181,13 @@ type ContactDetail = {
   agent_home_company_id?: number | null;
   company?: CompanyDetail | null;
 };
+
+function companySheetBadge(detail: { account_id: number | null; relationship_type: string | null }): DirectoryBadge {
+  if (detail.relationship_type === "prospect") return "prospect";
+  if (detail.relationship_type === "lessor" || detail.relationship_type === "railroad" || detail.relationship_type === "broker") return "lessor";
+  if (detail.account_id) return "customer";
+  return "unclassified";
+}
 
 const BADGE: Record<DirectoryBadge, { label: string; cls: string }> = {
   customer: { label: "Customer", cls: "bg-umler-teal/15 text-umler-teal border-umler-teal/30" },
@@ -342,6 +352,8 @@ export default function Contacts() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const { canEditContacts, canDeleteContacts } = usePermissions();
+  const canEditDeals = useCanEdit();
+  const [dealParty, setDealParty] = useState<PartySelection | null>(null);
   const boot = useMemo(() => readDirectoryNavState(), []);
   const [viewMode, setViewMode] = useState<"company" | "people">(boot.people ? "people" : "company");
   const [searchInput, setSearchInput] = useState(boot.q);
@@ -723,14 +735,7 @@ export default function Contacts() {
                       Part of {detail.family_parent.name}
                     </button>
                   )}
-                  <DirectoryBadgeChip
-                    badge={
-                      detail.account_id ? "customer"
-                        : detail.relationship_type === "prospect" ? "prospect"
-                        : detail.relationship_type === "lessor" || detail.relationship_type === "railroad" ? "lessor"
-                        : "unclassified"
-                    }
-                  />
+                  <DirectoryBadgeChip badge={companySheetBadge(detail)} />
                   <span>{detail.source}</span>
                   {detail.priority_tier ? <span>· {detail.priority_tier}</span> : null}
                   {detail.status ? <span>· {detail.status}</span> : null}
@@ -741,6 +746,7 @@ export default function Contacts() {
                   Open account →
                 </Link>
               ) : null}
+              <div className="mt-4"><CompanyOpportunities companyId={detail.id} /></div>
               {canEditContacts && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditCompanyOpen(true)}>
@@ -749,8 +755,36 @@ export default function Contacts() {
                   <Button size="sm" className="gap-1" onClick={() => setAddContactOpen(true)}>
                     <Plus className="h-3.5 w-3.5" /> Add contact
                   </Button>
+                  {canEditDeals ? (
+                    <Button size="sm" variant="outline" onClick={() => setDealParty({
+                      entity: "company",
+                      entity_id: detail.id,
+                      account_id: detail.account_id,
+                      company_id: detail.id,
+                      contact_id: null,
+                      label: detail.name,
+                      kind: detail.account_id == null ? "company" : detail.relationship_type === "prospect" ? "prospect" : "client",
+                    })}>
+                      + Opportunity
+                    </Button>
+                  ) : null}
                 </div>
               )}
+              {canEditDeals && !canEditContacts ? (
+                <div className="mt-3">
+                  <Button size="sm" variant="outline" onClick={() => setDealParty({
+                    entity: "company",
+                    entity_id: detail.id,
+                    account_id: detail.account_id,
+                    company_id: detail.id,
+                    contact_id: null,
+                    label: detail.name,
+                    kind: detail.account_id == null ? "company" : detail.relationship_type === "prospect" ? "prospect" : "client",
+                  })}>
+                    + Opportunity
+                  </Button>
+                </div>
+              ) : null}
               <div className="mt-4 space-y-6 text-sm">
                 {detail.reporting_marks && detail.reporting_marks.length > 0 && (
                   <div>
@@ -861,6 +895,16 @@ export default function Contacts() {
               }}
               onOpenCompany={(id) => { setContactId(null); setCompanyId(id); }}
               onSaved={invalidateDir}
+              canAddOpportunity={canEditDeals}
+              onAddOpportunity={() => setDealParty({
+                entity: "contact",
+                entity_id: person.id,
+                account_id: person.company?.account_id ?? null,
+                company_id: person.company_id,
+                contact_id: person.id,
+                label: person.name,
+                kind: "contact",
+              })}
             />
           )}
         </SheetContent>
@@ -886,6 +930,12 @@ export default function Contacts() {
           setCompanyId(cid);
           setContactId(id);
         }}
+      />
+      <OpportunityDialog
+        open={dealParty != null}
+        onOpenChange={(next) => { if (!next) setDealParty(null); }}
+        canWrite={canEditDeals}
+        partyPreset={dealParty}
       />
       {detail && (
         <EditCompanyDialog
@@ -969,6 +1019,8 @@ function ContactDetailSheet({
   onBackToCompany,
   onOpenCompany,
   onSaved,
+  canAddOpportunity,
+  onAddOpportunity,
 }: {
   person: ContactDetail;
   canEdit: boolean;
@@ -976,6 +1028,8 @@ function ContactDetailSheet({
   onBackToCompany: () => void;
   onOpenCompany?: (id: number) => void;
   onSaved: () => void;
+  canAddOpportunity?: boolean;
+  onAddOpportunity?: () => void;
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState({
@@ -1067,6 +1121,10 @@ function ContactDetailSheet({
       <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={onBackToCompany}>
         ← Back to company
       </Button>
+      {canAddOpportunity && onAddOpportunity ? (
+        <Button size="sm" variant="outline" className="mt-2" onClick={onAddOpportunity}>+ Opportunity</Button>
+      ) : null}
+      <div className="mt-4"><ContactOpportunities contactId={person.id} /></div>
       <div className="mt-4 space-y-5 text-sm">
         <div className="grid grid-cols-1 gap-3">
           {fields.map((f) => (
@@ -1367,7 +1425,7 @@ function EditCompanyDialog({
   const [priority, setPriority] = useState(company.priority_tier || "");
   const [status, setStatus] = useState(company.status || "target");
   const [busy, setBusy] = useState(false);
-  const isCustomer = company.relationship_type === "customer" || company.account_id != null;
+  const isCustomer = company.relationship_type === "customer";
 
   useEffect(() => {
     setName(company.name);
@@ -1404,7 +1462,7 @@ function EditCompanyDialog({
             <Select value={relationship} onValueChange={setRelationship} disabled={isCustomer}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {(isCustomer ? ["customer"] : ["unclassified", "prospect", "lessor", "railroad", "vendor", "other"]).map((r) => (
+                {(isCustomer ? ["customer"] : ["unclassified", "prospect", "lessor", "railroad", "broker", "vendor", "other"]).map((r) => (
                   <SelectItem key={r} value={r}>{r}</SelectItem>
                 ))}
               </SelectContent>

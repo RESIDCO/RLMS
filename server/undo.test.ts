@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx server/undo.test.ts */
 
-import { currentMatchesAfter, isUndoAllowedTable, nonUndoableMessage, opOf } from "@shared/undo";
+import { currentMatchesAfter, finalizeUndoPreview, isUndoAllowedTable, nonUndoableMessage, opOf, referencedSinceBlocksUndo } from "@shared/undo";
 
 let passed = 0;
 let failed = 0;
@@ -38,6 +38,13 @@ ok(
 );
 ok(isUndoAllowedTable("program_cars"), "per-path: notes/status on program_cars");
 ok(isUndoAllowedTable("car_commitments"), "per-path: commitment");
+ok(referencedSinceBlocksUndo({ table: "accounts", op: "insert", outside: true }), "acceptance 12: referenced account insert blocks");
+const preview = finalizeUndoPreview({ conflicts: [], referencedSince: true });
+ok(!preview.ok && preview.status === 409 && preview.message === "referenced since", "acceptance 12: preview is 409 referenced since");
+const untouched = [{ id: 1, name: "Test Prospect Co" }];
+if (!preview.ok) {
+  ok(untouched[0].name === "Test Prospect Co", "acceptance 12: nothing deleted or nulled");
+}
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

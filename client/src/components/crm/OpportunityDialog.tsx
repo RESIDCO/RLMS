@@ -6,10 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PartyPicker, { type PartySelection } from "@/components/crm/PartyPicker";
+import SetupLesseeNote from "@/components/crm/SetupLesseeNote";
 import { useToast } from "@/hooks/use-toast";
 import {
+  CAR_TYPE_SUGGESTIONS,
+  LESSEE_ROLES,
   LOSS_REASONS,
-  OPPORTUNITY_SOURCES,
+  MANUAL_OPPORTUNITY_SOURCES,
+  OPPORTUNITY_CONTACT_ROLE_LABEL,
+  OPPORTUNITY_CONTACT_ROLES,
+  OPPORTUNITY_SOURCE_LABEL,
   OPPORTUNITY_STAGES,
   OPPORTUNITY_TYPES,
   OPPORTUNITY_TYPE_LABEL,
@@ -17,13 +24,14 @@ import {
   lostNeedsReason,
   remarketRiderUrl,
   wonReletNeedsRemarket,
+  type LesseeRole,
+  type OpportunityContactRole,
+  type OpportunityContactRow,
   type OpportunityRow,
   type OpportunitySource,
   type OpportunityStage,
   type OpportunityType,
 } from "@shared/crm";
-
-type AccountOption = { id: number; name: string };
 
 type FormState = {
   account_id: string;
@@ -46,6 +54,18 @@ type FormState = {
   competitor: string;
   loss_reason: string;
   notes: string;
+  lessee_role: LesseeRole;
+  tags: string[];
+  referral_note: string;
+  tagDraft: string;
+};
+
+type ExtraContact = {
+  name: string;
+  email: string;
+  phone: string;
+  title: string;
+  role: OpportunityContactRole;
 };
 
 function blankForm(seed?: Partial<FormState>): FormState {
@@ -70,6 +90,10 @@ function blankForm(seed?: Partial<FormState>): FormState {
     competitor: "",
     loss_reason: "",
     notes: "",
+    lessee_role: "lessee",
+    tags: [],
+    referral_note: "",
+    tagDraft: "",
     ...seed,
   };
 }
@@ -96,6 +120,9 @@ function fromRow(row: OpportunityRow): FormState {
     competitor: row.competitor ?? "",
     loss_reason: row.loss_reason ?? "",
     notes: row.notes ?? "",
+    lessee_role: row.lessee_role ?? "lessee",
+    tags: row.tags ?? [],
+    referral_note: row.referral_note ?? "",
   });
 }
 
@@ -114,6 +141,7 @@ export default function OpportunityDialog({
   accountName,
   editing,
   preset,
+  partyPreset,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -122,14 +150,21 @@ export default function OpportunityDialog({
   accountName?: string;
   editing?: OpportunityRow | null;
   preset?: Partial<FormState>;
+  partyPreset?: PartySelection | null;
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(() => blankForm(preset));
+  const [party, setParty] = useState<PartySelection | null>(partyPreset ?? null);
+  const [extraContacts, setExtraContacts] = useState<ExtraContact[]>([]);
+  const [setup, setSetup] = useState<{ accountId: number; accountName: string } | null>(null);
   const lockedAccount = accountId ?? editing?.account_id ?? null;
 
   useEffect(() => {
     if (!open) return;
+    setSetup(null);
+    setExtraContacts([]);
+    setParty(partyPreset ?? null);
     if (editing) setForm(fromRow(editing));
     else {
       setForm(
@@ -143,10 +178,10 @@ export default function OpportunityDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing]);
 
-  const accounts = useQuery({
-    queryKey: ["/api/accounts"],
-    queryFn: () => apiGet<AccountOption[]>("/api/accounts"),
-    enabled: open && lockedAccount == null,
+  const savedContacts = useQuery({
+    queryKey: ["/api/opportunities", editing?.id, "contacts"],
+    queryFn: () => apiGet<OpportunityContactRow[]>(`/api/opportunities/${editing!.id}/contacts`),
+    enabled: open && editing != null,
   });
 
   const riderId = numOrNull(form.rider_id);
@@ -158,8 +193,7 @@ export default function OpportunityDialog({
 
   const save = useMutation({
     mutationFn: async () => {
-      const payload = {
-        account_id: lockedAccount ?? numOrNull(form.account_id),
+      const payload: Record<string, unknown> = {
         type: form.type,
         stage: form.stage,
         source: form.source,
@@ -175,11 +209,26 @@ export default function OpportunityDialog({
         new_expiry_date: form.new_expiry_date || null,
         expected_close: form.expected_close || null,
         won_rider_id: wonRiderId,
-        sublessee_note: form.sublessee_note.trim() || null,
+        lessee_role: form.lessee_role,
+        sublessee_note: form.lessee_role === "sublessee" ? form.sublessee_note.trim() || null : null,
         competitor: form.competitor.trim() || null,
         loss_reason: form.loss_reason || null,
         notes: form.notes.trim() || null,
+        tags: form.tags,
+        referral_note: form.referral_note.trim() || null,
       };
+      const contactPayload = [
+        ...(party?.contact_id ? [{ contact_id: party.contact_id, role: "primary" }] : []),
+        ...(savedContacts.data ?? []).filter((row) => row.contact_id !== party?.contact_id).map((row) => ({ contact_id: row.contact_id, role: row.role })),
+        ...extraContacts
+          .filter((row) => row.name.trim())
+          .map((row) => ({ name: row.name.trim(), email: row.email.trim() || null, phone: row.phone.trim() || null, title: row.title.trim() || null, role: row.role })),
+      ];
+      if (!editing || savedContacts.isSuccess) payload.contacts = contactPayload;
+      if (lockedAccount) payload.account_id = lockedAccount;
+      else if (party?.entity === "account" && party.account_id) payload.account_id = party.account_id;
+      else if (party) payload.party = { entity: party.entity, entity_id: party.entity_id };
+      else payload.account_id = numOrNull(form.account_id);
       if (editing) {
         const res = await apiRequest("PATCH", `/api/opportunities/${editing.id}`, payload);
         return res.json();
@@ -187,10 +236,14 @@ export default function OpportunityDialog({
       const res = await apiRequest("POST", "/api/opportunities", payload);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (row: OpportunityRow) => {
       toast({ title: editing ? "Opportunity updated" : "Opportunity created" });
       void qc.invalidateQueries({ queryKey: ["/api/opportunities"] });
       void qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+      if (row.next_step === "setup_lessee") {
+        setSetup({ accountId: row.account_id, accountName: row.account_name || accountLabel || "this account" });
+        return;
+      }
       onOpenChange(false);
     },
     onError: (err: Error) => toast({ title: "Could not save", description: err.message, variant: "destructive" }),
@@ -198,8 +251,9 @@ export default function OpportunityDialog({
 
   const accountLabel = useMemo(() => {
     if (accountName) return accountName;
-    return (accounts.data ?? []).find((row) => row.id === lockedAccount)?.name ?? (lockedAccount ? `Account ${lockedAccount}` : "");
-  }, [accountName, accounts.data, lockedAccount]);
+    if (party?.label) return party.label;
+    return lockedAccount ? `Account ${lockedAccount}` : "";
+  }, [accountName, party?.label, lockedAccount]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -213,23 +267,13 @@ export default function OpportunityDialog({
         </DialogHeader>
         <div className="grid sm:grid-cols-2 gap-3 text-sm">
           <div className="sm:col-span-2">
-            <Label>Account</Label>
+            <Label>Who is this deal with?</Label>
             {lockedAccount ? (
               <div className="mt-1">{accountLabel}</div>
             ) : (
-              <select
-                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2"
-                value={form.account_id}
-                onChange={(e) => set("account_id", e.target.value)}
-                disabled={!canWrite}
-              >
-                <option value="">Select account</option>
-                {(accounts.data ?? []).map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.name}
-                  </option>
-                ))}
-              </select>
+              <div className="mt-1">
+                <PartyPicker selected={party} disabled={!canWrite} onSelect={setParty} />
+              </div>
             )}
           </div>
           <Field label="Type">
@@ -238,44 +282,11 @@ export default function OpportunityDialog({
           <Field label="Stage">
             <SelectValue value={form.stage} disabled={!canWrite} onChange={(value) => set("stage", value as OpportunityStage)} options={OPPORTUNITY_STAGES.map((value) => ({ value, label: OPPORTUNITY_STAGE_LABEL[value] }))} />
           </Field>
-          <Field label="Source">
-            <SelectValue value={form.source} disabled={!canWrite} onChange={(value) => set("source", value as OpportunitySource)} options={OPPORTUNITY_SOURCES.map((value) => ({ value, label: value }))} />
-          </Field>
-          <Field label="Owner">
-            <Input value={form.owner} disabled={!canWrite} onChange={(e) => set("owner", e.target.value)} placeholder="Account manager" />
-          </Field>
-          <Field label="OL rider id">
-            <Input value={form.rider_id} disabled={!canWrite} onChange={(e) => set("rider_id", e.target.value)} />
-          </Field>
-          <Field label="Car type">
-            <Input value={form.car_type} disabled={!canWrite} onChange={(e) => set("car_type", e.target.value)} />
-          </Field>
-          <Field label="Car count">
-            <Input value={form.car_count} disabled={!canWrite} onChange={(e) => set("car_count", e.target.value)} />
-          </Field>
-          <Field label="Current rate">
-            <Input value={form.current_rate} disabled={!canWrite} onChange={(e) => set("current_rate", e.target.value)} />
-          </Field>
-          <Field label="Target rate">
-            <Input value={form.target_rate} disabled={!canWrite} onChange={(e) => set("target_rate", e.target.value)} />
-          </Field>
-          <Field label="Term months">
-            <Input value={form.term_months} disabled={!canWrite} onChange={(e) => set("term_months", e.target.value)} />
-          </Field>
-          <Field label="Est. value">
-            <Input value={form.est_value} disabled={!canWrite} onChange={(e) => set("est_value", e.target.value)} />
-          </Field>
-          <Field label="Expiry snapshot">
-            <Input type="date" value={form.expiry_date} disabled={!canWrite} onChange={(e) => set("expiry_date", e.target.value)} />
-          </Field>
           <Field label="Expected close">
             <Input type="date" value={form.expected_close} disabled={!canWrite} onChange={(e) => set("expected_close", e.target.value)} />
           </Field>
-          <Field label="Sublessee note">
-            <Input value={form.sublessee_note} disabled={!canWrite} onChange={(e) => set("sublessee_note", e.target.value)} />
-          </Field>
-          <Field label="Competitor">
-            <Input value={form.competitor} disabled={!canWrite} onChange={(e) => set("competitor", e.target.value)} />
+          <Field label="Owner">
+            <Input value={form.owner} disabled={!canWrite} onChange={(e) => set("owner", e.target.value)} placeholder="Account manager" />
           </Field>
           {form.stage === "lost" ? (
             <Field label="Loss reason">
@@ -317,14 +328,118 @@ export default function OpportunityDialog({
               onChange={(e) => set("notes", e.target.value)}
             />
           </div>
+          <details className="sm:col-span-2 rounded-md border border-border p-3">
+            <summary className="cursor-pointer text-sm">More details</summary>
+            <div className="grid sm:grid-cols-2 gap-3 mt-3">
+              <Field label="Source">
+                <SelectValue
+                  value={form.source}
+                  disabled={!canWrite}
+                  onChange={(value) => set("source", value as OpportunitySource)}
+                  options={(
+                    (MANUAL_OPPORTUNITY_SOURCES as readonly string[]).includes(form.source)
+                      ? [...MANUAL_OPPORTUNITY_SOURCES]
+                      : [form.source, ...MANUAL_OPPORTUNITY_SOURCES]
+                  ).map((value) => ({ value, label: OPPORTUNITY_SOURCE_LABEL[value] }))}
+                />
+              </Field>
+              <Field label="Lessee or sublessee">
+                <SelectValue value={form.lessee_role} disabled={!canWrite} onChange={(value) => set("lessee_role", value as LesseeRole)} options={LESSEE_ROLES.map((value) => ({ value, label: value === "lessee" ? "Lessee" : "Sublessee" }))} />
+              </Field>
+              {form.lessee_role === "sublessee" ? (
+                <Field label="Sublessee note">
+                  <Input value={form.sublessee_note} disabled={!canWrite} onChange={(e) => set("sublessee_note", e.target.value)} />
+                </Field>
+              ) : null}
+              <Field label="Car type">
+                <Input list="crm-car-types" value={form.car_type} disabled={!canWrite} onChange={(e) => set("car_type", e.target.value)} />
+                <datalist id="crm-car-types">
+                  {CAR_TYPE_SUGGESTIONS.map((value) => <option key={value} value={value} />)}
+                </datalist>
+              </Field>
+              <Field label="Car count">
+                <Input value={form.car_count} disabled={!canWrite} onChange={(e) => set("car_count", e.target.value)} />
+              </Field>
+              <Field label="OL rider id">
+                <Input value={form.rider_id} disabled={!canWrite} onChange={(e) => set("rider_id", e.target.value)} />
+              </Field>
+              <Field label="Current rate">
+                <Input value={form.current_rate} disabled={!canWrite} onChange={(e) => set("current_rate", e.target.value)} />
+              </Field>
+              <Field label="Target rate">
+                <Input value={form.target_rate} disabled={!canWrite} onChange={(e) => set("target_rate", e.target.value)} />
+              </Field>
+              <Field label="Term months">
+                <Input value={form.term_months} disabled={!canWrite} onChange={(e) => set("term_months", e.target.value)} />
+              </Field>
+              <Field label="Est. value">
+                <Input value={form.est_value} disabled={!canWrite} onChange={(e) => set("est_value", e.target.value)} />
+              </Field>
+              <Field label="Expiry snapshot">
+                <Input type="date" value={form.expiry_date} disabled={!canWrite} onChange={(e) => set("expiry_date", e.target.value)} />
+              </Field>
+              <Field label="Competitor">
+                <Input value={form.competitor} disabled={!canWrite} onChange={(e) => set("competitor", e.target.value)} />
+              </Field>
+              {form.source === "referral" ? (
+                <Field label="Referral note">
+                  <Input value={form.referral_note} disabled={!canWrite} onChange={(e) => set("referral_note", e.target.value)} />
+                </Field>
+              ) : null}
+              <div className="sm:col-span-2">
+                <Label>Tags</Label>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {form.tags.map((tag) => (
+                    <button key={tag} type="button" className="rounded bg-muted px-2 py-0.5 text-xs" disabled={!canWrite} onClick={() => set("tags", form.tags.filter((item) => item !== tag))}>
+                      {tag} ×
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  className="mt-1"
+                  value={form.tagDraft}
+                  disabled={!canWrite}
+                  placeholder="Type a tag and press Enter"
+                  onChange={(e) => set("tagDraft", e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    const tag = form.tagDraft.trim().toLowerCase();
+                    if (!tag || form.tags.includes(tag)) {
+                      set("tagDraft", "");
+                      return;
+                    }
+                    set("tags", [...form.tags, tag]);
+                    set("tagDraft", "");
+                  }}
+                />
+              </div>
+              <div className="sm:col-span-2 space-y-2">
+                <div className="text-xs text-muted-foreground">People</div>
+                {(savedContacts.data ?? []).map((row) => (
+                  <div key={row.id} className="text-xs">{row.name || `Contact ${row.contact_id}`} · {OPPORTUNITY_CONTACT_ROLE_LABEL[row.role]}</div>
+                ))}
+                {extraContacts.map((row, index) => (
+                  <div key={index} className="grid grid-cols-2 gap-2">
+                    <Input value={row.name} placeholder="Name" disabled={!canWrite} onChange={(e) => setExtraContacts((list) => list.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} />
+                    <SelectValue value={row.role} disabled={!canWrite} onChange={(value) => setExtraContacts((list) => list.map((item, i) => i === index ? { ...item, role: value as OpportunityContactRole } : item))} options={OPPORTUNITY_CONTACT_ROLES.map((value) => ({ value, label: OPPORTUNITY_CONTACT_ROLE_LABEL[value] }))} />
+                  </div>
+                ))}
+                <Button type="button" size="sm" variant="outline" disabled={!canWrite} onClick={() => setExtraContacts((list) => [...list, { name: "", email: "", phone: "", title: "", role: "contact" }])}>
+                  + add person
+                </Button>
+              </div>
+            </div>
+          </details>
         </div>
+        {setup ? <SetupLesseeNote accountId={setup.accountId} accountName={setup.accountName} /> : null}
         {needsReason ? <p className="text-sm text-destructive">Lost opportunities require a reason.</p> : null}
         {needsEndDate ? <p className="text-sm text-destructive">A won renewal needs the new end date. Nothing is written to the rider.</p> : null}
         {needsRemarket ? <p className="text-sm text-destructive">Mark won after remarket, once the new OL id is known.</p> : null}
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
-            disabled={!canWrite || save.isPending || needsReason || needsEndDate || needsRemarket || !(lockedAccount ?? numOrNull(form.account_id))}
+            disabled={!canWrite || save.isPending || needsReason || needsEndDate || needsRemarket || !(lockedAccount ?? party ?? numOrNull(form.account_id))}
             onClick={() => save.mutate()}
           >
             Save

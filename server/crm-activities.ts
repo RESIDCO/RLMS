@@ -1,7 +1,7 @@
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { CrmHttpError } from "./crm-error";
 import { supabaseAdmin } from "./supabase";
-import { isCrmActivityKind, type CrmActivityKind, type CrmActivityRow } from "@shared/crm";
+import { changeCaptureRow, isCrmActivityKind, type CrmActivityKind, type CrmActivityRow } from "@shared/crm";
 
 export type ActivityFilters = {
   account_id?: number;
@@ -106,7 +106,7 @@ export async function createCrmActivity(
       table: "crm_activities",
       pk: Number(data.id),
       before: {},
-      after: data,
+      after: changeCaptureRow(data as Record<string, unknown>),
       action: "create_crm_activity",
       entity_type: "crm_activity",
       entity_id: Number(data.id),
@@ -147,8 +147,8 @@ export async function patchCrmActivity(
     await recordChange({
       table: "crm_activities",
       pk: id,
-      before,
-      after: data,
+      before: changeCaptureRow(before as Record<string, unknown>),
+      after: changeCaptureRow(data as Record<string, unknown>),
       action: "update_crm_activity",
       entity_type: "crm_activity",
       entity_id: id,

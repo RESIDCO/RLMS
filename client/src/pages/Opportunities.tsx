@@ -8,6 +8,7 @@ import FinanceLeaseTag from "@/components/crm/FinanceLeaseTag";
 import OpportunityDialog from "@/components/crm/OpportunityDialog";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
+import { parseHashSearch, useHashSearch } from "@/lib/hash-location";
 import { useToast } from "@/hooks/use-toast";
 import {
   OPPORTUNITY_STAGES,
@@ -15,6 +16,7 @@ import {
   OPPORTUNITY_TYPES,
   OPPORTUNITY_TYPE_LABEL,
   ownerLabel,
+  type AwaitingLesseeRow,
   type OpportunityRow,
   type OpportunityType,
   type RenewalRunResult,
@@ -26,6 +28,7 @@ type WatchPayload = {
   check_date: WatchRow[];
   off_lease: WatchRow[];
   unclassified: WatchRow[];
+  awaiting_lessee: AwaitingLesseeRow[];
   returns_watch_url: string;
 };
 
@@ -35,7 +38,10 @@ export default function OpportunitiesPage() {
   const qc = useQueryClient();
   const [owner, setOwner] = useState("");
   const [type, setType] = useState("");
+  const hash = useHashSearch();
+  const hashParams = parseHashSearch(hash);
   const [openOnly, setOpenOnly] = useState(true);
+  const [tag, setTag] = useState(hashParams.get("tag") ?? "");
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<OpportunityRow | null>(null);
   const [preview, setPreview] = useState<RenewalRunResult | null>(null);
@@ -45,6 +51,11 @@ export default function OpportunitiesPage() {
   if (owner) params.set("owner", owner);
   if (type) params.set("type", type);
   if (openOnly) params.set("open", "1");
+  const contactId = hashParams.get("contact_id");
+  const companyId = hashParams.get("company_id");
+  if (contactId) params.set("contact_id", contactId);
+  if (companyId) params.set("company_id", companyId);
+  if (tag.trim()) params.set("tag", tag.trim().toLowerCase());
   const qs = params.toString();
 
   const opps = useQuery({
@@ -113,6 +124,12 @@ export default function OpportunitiesPage() {
               <option key={value} value={value}>{OPPORTUNITY_TYPE_LABEL[value]}</option>
             ))}
           </select>
+          <input
+            className="h-8 rounded-md border border-input bg-background px-2"
+            value={tag}
+            placeholder="Tag"
+            onChange={(e) => setTag(e.target.value)}
+          />
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
             Open only
@@ -137,7 +154,7 @@ export default function OpportunitiesPage() {
                   {group.rows.map((row) => (
                     <tr key={row.id} className="border-t">
                       <td className="px-3 py-2">
-                        <Link href={`/accounts/${row.account_id}`} className="hover:underline">Account {row.account_id}</Link>
+                        <Link href={`/accounts/${row.account_id}`} className="hover:underline">{row.account_name || `Account ${row.account_id}`}</Link>
                       </td>
                       <td className="px-3 py-2">
                         <button type="button" className="hover:underline" onClick={() => { setEditing(row); setCreateOpen(true); }}>
@@ -169,6 +186,19 @@ export default function OpportunitiesPage() {
             rows={watch.data?.holdover ?? []}
           />
           <WatchBlock title="Check date" rows={watch.data?.check_date ?? []} />
+          <div>
+            <h3 className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Won – awaiting lessee setup · {(watch.data?.awaiting_lessee ?? []).length}</h3>
+            {(watch.data?.awaiting_lessee ?? []).length === 0 ? <p className="text-sm text-muted-foreground">None.</p> : (
+              <ul className="text-sm space-y-1">
+                {(watch.data?.awaiting_lessee ?? []).map((row) => (
+                  <li key={row.opportunity_id}>
+                    <Link href={`/accounts/${row.account_id}`} className="hover:underline">{row.account_name}</Link>
+                    <span className="text-muted-foreground"> · {OPPORTUNITY_TYPE_LABEL[row.type]} · {ownerLabel(row.owner)}{row.aged ? " · older than 30 days" : ""}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <WatchBlock title="Unclassified (null lifecycle, on rent)" rows={watch.data?.unclassified ?? []} />
           <WatchBlock
             title="Off lease"

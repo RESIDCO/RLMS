@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/undo.test.ts */
 
-import { currentMatchesAfter, isUndoAllowedTable, nonUndoableMessage, opOf, summarizeUndoRows } from "./undo";
+import { currentMatchesAfter, finalizeUndoPreview, isUndoAllowedTable, nonUndoableMessage, opOf, outsideGroupReferences, referencedSinceBlocksUndo, summarizeUndoRows, undoApplyOrder } from "./undo";
 
 let passed = 0;
 let failed = 0;
@@ -59,6 +59,16 @@ ok(
   currentMatchesAfter(mileRow.after, mileRow.after),
   "milestone after-values are a stable undo snapshot",
 );
+ok(
+  undoApplyOrder([{ id: 2, table: "companies" }, { id: 1, table: "accounts" }]).map((row) => row.id).join(",") === "2,1",
+  "undo applies newest id first",
+);
+ok(outsideGroupReferences([{ table: "opportunities", column: "account_id", id: 1, change_group: "same" }], "same").length === 0, "same-group child is not an outside reference");
+ok(outsideGroupReferences([{ table: "master_leases", column: "account_id", id: 1, change_group: null }], "same").length === 1, "later lease is an outside reference");
+ok(referencedSinceBlocksUndo({ table: "companies", op: "insert", outside: true }), "company insert with an outside row blocks");
+ok(!referencedSinceBlocksUndo({ table: "companies", op: "update", outside: true }), "updates are not the referenced-since case");
+const blocked = finalizeUndoPreview({ conflicts: [], referencedSince: true });
+ok(!blocked.ok && blocked.message === "referenced since" && blocked.status === 409, "referenced since is a 409");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

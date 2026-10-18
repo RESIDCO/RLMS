@@ -20,7 +20,14 @@ export const UNDO_ALLOWED_TABLES = [
   "attachments",
   "opportunities",
   "crm_activities",
+  "accounts",
+  "companies",
+  "company_contacts",
+  "opportunity_contacts",
 ] as const;
+
+export const REFERENCED_SINCE_TABLES = ["accounts", "companies", "company_contacts"] as const;
+export const REFERENCED_SINCE_MESSAGE = "referenced since";
 
 export type UndoAllowedTable = (typeof UNDO_ALLOWED_TABLES)[number];
 
@@ -95,6 +102,40 @@ export function summarizeUndoRows(rows: UndoLogRow[]): { count: number; lines: s
     lines.push(`${op} ${r.table_name ?? "?"} #${r.row_pk ?? r.id} (${keys})`);
   }
   return { count: rows.length, lines };
+}
+
+export function undoApplyOrder<T extends { id: number }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => b.id - a.id);
+}
+
+export type OutsideGroupRef = {
+  table: string;
+  column: string;
+  id: number;
+  change_group: string | null;
+};
+
+/** Rows recorded in the same change group are not outside references. */
+export function outsideGroupReferences(refs: OutsideGroupRef[], group: string): OutsideGroupRef[] {
+  return refs.filter((ref) => ref.change_group !== group);
+}
+
+export function referencedSinceBlocksUndo(input: {
+  table: string;
+  op: "insert" | "update" | "delete";
+  outside: boolean;
+}): boolean {
+  if (input.op !== "insert" || !input.outside) return false;
+  return (REFERENCED_SINCE_TABLES as readonly string[]).includes(input.table);
+}
+
+export function finalizeUndoPreview(input: {
+  conflicts: UndoConflict[];
+  referencedSince: boolean;
+}): { ok: true } | { ok: false; status: 409; message: string } {
+  if (input.referencedSince) return { ok: false, status: 409, message: REFERENCED_SINCE_MESSAGE };
+  if (input.conflicts.length > 0) return { ok: false, status: 409, message: "Changed since — undo refused" };
+  return { ok: true };
 }
 
 export function nonUndoableMessage(action: string | null | undefined): string {

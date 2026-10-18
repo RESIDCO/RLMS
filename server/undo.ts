@@ -6,6 +6,9 @@ import {
   isUndoAllowedTable,
   nonUndoableMessage,
   opOf,
+  REFERENCED_SINCE_MESSAGE,
+  REFERENCED_SINCE_TABLES,
+  referencedSinceBlocksUndo,
   summarizeUndoRows,
   type UndoConflict,
   type UndoLogRow,
@@ -101,7 +104,23 @@ export async function previewUndo(group: string, actor: string) {
       conflicts.push({ activity_id: r.id, table_name: r.table_name, row_pk: r.row_pk, reason: "table not undoable" });
       continue;
     }
-    if (opOf(r) === "insert") continue;
+    const op = opOf(r);
+    if (op === "insert") {
+      if ((REFERENCED_SINCE_TABLES as readonly string[]).includes(r.table_name)) {
+        const { data: outside, error: outsideErr } = await supabaseAdmin.rpc("rlms_referenced_outside_group", {
+          p_table: r.table_name,
+          p_id: r.row_pk,
+          p_group: group,
+        });
+        if (outsideErr) throw outsideErr;
+        if (referencedSinceBlocksUndo({ table: r.table_name, op, outside: outside === true })) {
+          const err: any = new Error(REFERENCED_SINCE_MESSAGE);
+          err.status = 409;
+          throw err;
+        }
+      }
+      continue;
+    }
     const cur = await fetchCurrent(r.table_name, r.row_pk);
     if (!currentMatchesAfter(cur, r.after)) {
       conflicts.push({

@@ -1400,8 +1400,8 @@ export default function FleetRegistry() {
 
         {/* Bulk action toolbar — visible when 1+ cars are selected, admin only */}
         {canEdit && selectedIds.size > 0 && (
-          <div className="shrink-0 flex flex-wrap items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
-            <span className="text-sm font-medium text-foreground">
+          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5 overflow-x-hidden">
+            <span className="text-sm font-medium text-foreground shrink-0">
               {selectedIds.size.toLocaleString()} car{selectedIds.size !== 1 ? "s" : ""} selected
             </span>
             {totalCount > filtered.length && selectedIds.size < totalCount && (
@@ -1419,7 +1419,7 @@ export default function FleetRegistry() {
             {selectedIds.size === totalCount && totalCount > filtered.length && (
               <span className="text-xs text-muted-foreground">All matching cars selected</span>
             )}
-            <div className="flex items-center gap-2 ml-2">
+            <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
               <Button
                 variant="outline"
                 size="sm"
@@ -1600,7 +1600,7 @@ export default function FleetRegistry() {
             <Button
               variant="ghost"
               size="sm"
-              className="ml-auto text-muted-foreground"
+              className="ml-auto shrink-0 text-muted-foreground"
               onClick={clearSelection}
               data-testid="bulk-clear"
             >

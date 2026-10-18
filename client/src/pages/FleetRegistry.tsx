@@ -75,6 +75,7 @@ import type { RailcarWithAssignment } from "@shared/schema";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ActivityTimeline from "@/components/ActivityTimeline";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
+import { PHOTO_MAX_CARS, selectionCapNote } from "@/lib/photoFinderClient";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { confirmDelete, confirmSave, confirmWithReason } from "@/components/ConfirmActionDialog";
 import { LeaseGlanceSheet } from "@/components/LeaseGlanceSheet";
@@ -460,6 +461,8 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoSeed, setPhotoSeed] = useState("");
+  const [photoNote, setPhotoNote] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [bulkStatusPending, setBulkStatusPending] = useState(false);
   const [bulkFleetStatusPending, setBulkFleetStatusPending] = useState(false);
   const [selectingAllMatching, setSelectingAllMatching] = useState(false);
@@ -697,6 +700,34 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   }, [allFilteredIds]);
 
   const clearSelection = () => setSelectedIds(new Set());
+
+  const openPhotoFinder = async () => {
+    if (selectedIds.size === 0) {
+      setPhotoSeed("");
+      setPhotoNote("");
+      setPhotoOpen(true);
+      return;
+    }
+    const ids: number[] = [];
+    selectedIds.forEach((id) => ids.push(id));
+    setPhotoNote(selectionCapNote(ids.length, PHOTO_MAX_CARS));
+    setPhotoBusy(true);
+    try {
+      const res = await apiRequest("POST", "/api/railcars/identities", { ids: ids.slice(0, PHOTO_MAX_CARS) });
+      const data = await res.json();
+      const cars = Array.isArray(data?.cars) ? data.cars : [];
+      setPhotoSeed(carsToPasteText(cars));
+      setPhotoOpen(true);
+    } catch (e: any) {
+      toast({
+        title: "Could not load cars for photo search",
+        description: e.message ?? "Try again",
+        variant: "destructive",
+      });
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
 
   const selectAllMatchingFilter = async () => {
     setSelectingAllMatching(true);
@@ -1180,15 +1211,8 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
-                if (selectedIds.size > 0) {
-                  const selected = filtered.filter((r) => selectedIds.has(r.id));
-                  setPhotoSeed(carsToPasteText(selected));
-                } else {
-                  setPhotoSeed("");
-                }
-                setPhotoOpen(true);
-              }}
+              disabled={photoBusy}
+              onClick={() => { void openPhotoFinder(); }}
               data-testid="button-find-photos"
             >
               <Image className="h-4 w-4" />
@@ -1447,11 +1471,8 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  const selected = filtered.filter((r) => selectedIds.has(r.id));
-                  setPhotoSeed(carsToPasteText(selected));
-                  setPhotoOpen(true);
-                }}
+                disabled={photoBusy}
+                onClick={() => { void openPhotoFinder(); }}
                 data-testid="bulk-find-photos"
               >
                 <Image className="h-4 w-4" />
@@ -1808,7 +1829,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       </Dialog>
 
       <Dialog open={photoOpen} onOpenChange={setPhotoOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden w-[calc(100%-2rem)]">
           <DialogHeader>
             <DialogTitle>Railcar photos</DialogTitle>
             <DialogDescription>
@@ -1819,6 +1840,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
             <PhotoFinderPanel
               key={photoSeed || "paste"}
               initialText={photoSeed}
+              selectionNote={photoNote}
               onClose={() => setPhotoOpen(false)}
             />
           )}

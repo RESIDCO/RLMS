@@ -5,9 +5,10 @@
  * Step 3 — For each rider: add cars (enter car numbers + attributes) or pick existing unassigned cars
  * Step 4 — Review summary → submit everything in one shot
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { useHashSearch } from "@/lib/hash-location";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -456,6 +457,18 @@ export default function LeaseWizard() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const canEdit = useCanEdit();
+  const hashSearch = useHashSearch();
+  const preselectAccountId = useMemo(() => {
+    const raw = new URLSearchParams(hashSearch.replace(/^\?/, "")).get("account_id");
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [hashSearch]);
+  const { data: preselectAccount } = useQuery<{ id: number; name: string }>({
+    queryKey: ["/api/accounts", preselectAccountId],
+    queryFn: () => apiRequest("GET", `/api/accounts/${preselectAccountId}`).then((r) => r.json()),
+    enabled: preselectAccountId != null,
+  });
+  const accountLocked = preselectAccountId != null && Boolean(preselectAccount?.name);
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
 
@@ -515,6 +528,12 @@ export default function LeaseWizard() {
     }));
   }
 
+  useEffect(() => {
+    const name = String(preselectAccount?.name ?? "").trim();
+    if (!name) return;
+    setMla((prev) => (prev.lessee === name ? prev : { ...prev, lessee: name }));
+  }, [preselectAccount?.name]);
+
   // ── Validation ────────────────────────────────────────────────────────────
   const step1Valid = mla.lease_number.trim().length > 0 && mla.lessee.trim().length > 0 && !isPlaceholderLessee(mla.lessee) && !isPlaceholderLessee(mla.lease_number);
   const step2Valid = riders.every((r) => isStandardRiderNumber(r.rider_name.trim().toUpperCase()));
@@ -535,6 +554,7 @@ export default function LeaseWizard() {
           lease_type: mla.lease_type || null,
           effective_date: mla.effective_date || null,
           notes: mla.notes || null,
+          ...(preselectAccountId != null ? { account_id: preselectAccountId } : {}),
         },
         riders: riders.map((r) => ({
           rider: {
@@ -627,7 +647,18 @@ export default function LeaseWizard() {
                 </div>
                 <div>
                   <Label>Lessee <span className="text-destructive">*</span></Label>
-                  <Input placeholder="Company name" value={mla.lessee} onChange={(e) => setMla({ ...mla, lessee: e.target.value })} />
+                  <Input
+                    placeholder="Company name"
+                    value={mla.lessee}
+                    readOnly={accountLocked}
+                    onChange={(e) => {
+                      if (accountLocked) return;
+                      setMla({ ...mla, lessee: e.target.value });
+                    }}
+                  />
+                  {accountLocked ? (
+                    <p className="text-xs text-muted-foreground mt-1">Account {preselectAccount?.name} (read-only)</p>
+                  ) : null}
                   {isPlaceholderLessee(mla.lessee) ? (
                     <p className="text-xs text-destructive mt-1">Placeholder names (x…, IDLE, Available, Unassigned) cannot be created.</p>
                   ) : null}

@@ -1,13 +1,16 @@
 /** Lessee > OL/EA rider > cars. Codes are YY + running number, not YYMM. */
 
-export const PLACEHOLDER_LESSEE_RE = /^(x|idle|available|unassigned)/i;
+/** Sold-to / idle fleet labels: lowercase "x" plus a ticker-style char, not "Xcel". */
+export const PLACEHOLDER_X_PREFIX_RE = /^x[A-Z0-9&]/;
+export const PLACEHOLDER_IDLE_RE = /^(idle|available|unassigned)/i;
 export const RIDER_NUMBER_RE = /^(OL|EA)\d{4}$/;
 export const RIDER_DIGITS_RE = /^(?:OL|EA)(\d{4})$/;
 
 export type RiderLifecycle = "active" | "off_lease_pending_remarketing" | "closed";
 
 export function isPlaceholderLessee(name: string | null | undefined): boolean {
-  return PLACEHOLDER_LESSEE_RE.test(String(name ?? "").trim());
+  const trimmed = String(name ?? "").trim();
+  return PLACEHOLDER_X_PREFIX_RE.test(trimmed) || PLACEHOLDER_IDLE_RE.test(trimmed);
 }
 
 export function isStandardRiderNumber(code: string | null | undefined): boolean {

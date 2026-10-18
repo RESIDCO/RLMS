@@ -11,7 +11,7 @@ import { AD_HOC_LEASE_NUMBER } from "@shared/ol-identity";
 import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
-import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
+import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, resolveAccountIdForNewLease, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
   attachLatestAmNotes,
   createRiderAccountComment,
@@ -425,6 +425,7 @@ export async function registerRoutes(
 
       // 1. Create MLA (lease_type only if human set it in the wizard — never invent a default)
       const mlaRow = { ...mla };
+      const requestedAccountId = mlaRow.account_id ?? (req.body as { account_id?: unknown }).account_id;
       delete mlaRow.account_id;
       if (mlaRow.lease_type != null && String(mlaRow.lease_type).trim() === "") {
         mlaRow.lease_type = null;
@@ -433,13 +434,28 @@ export async function registerRoutes(
       for (const rp of riderPayloads ?? []) {
         assertNewRiderNumber(rp.rider?.rider_name ?? rp.rider?.schedule_number);
       }
-      mlaRow.account_id = await ensureAccountForLessee(mlaRow.lessee ?? null);
-      const { data: newMla, error: mlaErr } = await supabase
-        .from("master_leases")
-        .insert(mlaRow)
-        .select()
-        .single();
-      if (mlaErr) throw mlaErr;
+      const linkedAccountId = await resolveAccountIdForNewLease(requestedAccountId);
+      mlaRow.account_id = linkedAccountId ?? await ensureAccountForLessee(mlaRow.lessee ?? null);
+      const createdMla = await withChangeGroupResult(writerId, async () => {
+        const { data: inserted, error: mlaErr } = await supabase
+          .from("master_leases")
+          .insert(mlaRow)
+          .select()
+          .single();
+        if (mlaErr) throw mlaErr;
+        await recordChange({
+          table: "master_leases",
+          pk: Number(inserted.id),
+          before: {},
+          after: inserted,
+          action: "create_lessee",
+          entity_type: "master_lease",
+          entity_id: Number(inserted.id),
+          actor: writerId,
+        });
+        return { mla: inserted };
+      });
+      const newMla = createdMla.mla;
 
       const now = new Date().toISOString();
       const riderResults: any[] = [];
@@ -521,7 +537,7 @@ export async function registerRoutes(
         }
       }
 
-      res.json({ ok: true, mla: newMla, riders: riderResults });
+      res.json({ ok: true, mla: newMla, riders: riderResults, change_group: createdMla.change_group });
     } catch (err: any) {
       if (err?.status) return res.status(err.status).json({ message: err.message });
       errHandler(res, err);
@@ -2130,15 +2146,30 @@ export async function registerRoutes(
       if (parsed.lease_type != null && String(parsed.lease_type).trim() === "") {
         parsed.lease_type = null;
       }
-      const accountId = await ensureAccountForLessee(parsed.lessee ?? null);
-      const { data, error } = await supabase
-        .from("master_leases")
-        .insert({ ...parsed, account_id: accountId })
-        .select()
-        .single();
-      if (error) throw error;
+      const linkedAccountId = await resolveAccountIdForNewLease((req.body as { account_id?: unknown })?.account_id);
+      const accountId = linkedAccountId ?? await ensureAccountForLessee(parsed.lessee ?? null);
+      const data = await withChangeGroupResult(writerId, async () => {
+        const { data: inserted, error } = await supabase
+          .from("master_leases")
+          .insert({ ...parsed, account_id: accountId })
+          .select()
+          .single();
+        if (error) throw error;
+        await recordChange({
+          table: "master_leases",
+          pk: Number(inserted.id),
+          before: {},
+          after: inserted,
+          action: "create_lessee",
+          entity_type: "master_lease",
+          entity_id: Number(inserted.id),
+          actor: writerId,
+        });
+        return inserted;
+      });
       res.json(data);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.status) return res.status(err.status).json({ message: err.message });
       errHandler(res, err);
     }
   });

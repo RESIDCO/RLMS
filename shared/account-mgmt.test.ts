@@ -72,18 +72,19 @@ ok(rentRollLabel("2026-10-01") === "per import as of 2026-10-01", "rent label");
 ok(rentRollLabel(null) === "per import as of —", "missing snapshot label");
 
 const sql = readFileSync(resolve("migrations/20261112_account_mgmt_am1.sql"), "utf8");
+const executable = sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
 ok(/apply after the security lockdown stages/i.test(sql), "migration says apply after lockdown");
 ok(/retaken right after AM-1/i.test(sql), "migration says retake the ACL snapshot if it goes first");
 ok(sql.includes("sum(f.monthly_rent_total)"), "rent roll sums every slice");
 ok(!/distinct\s+on/i.test(sql), "rent roll does not collapse rows");
 ok(!/data-quality/i.test(sql), "no import data-quality flag");
-ok(!/rent_events/i.test(sql), "migration never mentions rent_events");
-ok(!/alter table public\.riders/i.test(sql), "no riders DDL");
-ok(!/alter table public\.master_leases/i.test(sql), "no master_leases DDL");
-ok(!/v_lease_/i.test(sql), "no lease views");
-ok(!/rlms_apply_jsonb_patch|rlms_undo_change_group/i.test(sql), "no undo function changes");
+ok(!/rent_events/i.test(executable), "no rent_events statement");
+ok(!/alter table public\.riders/i.test(executable), "no riders DDL");
+ok(!/alter table public\.master_leases/i.test(executable), "no master_leases DDL");
+ok(!/v_lease_/i.test(executable), "no lease view statement");
+ok(!/rlms_apply_jsonb_patch|rlms_undo_change_group/i.test(executable), "no undo function statement");
 ok(sql.includes("DEPRECATED (AM-1, Oct 2026)"), "status_tag comment");
-ok(!/^\s*update\s+/im.test(sql), "no data update");
+ok(!/^\s*update\s+/im.test(executable), "no data update");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

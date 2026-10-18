@@ -131,6 +131,53 @@ export async function updateAccount(
   return data;
 }
 
+function rejectAccountLink(message: string, status = 409): never {
+  const err = new Error(message);
+  (err as any).status = status;
+  throw err;
+}
+
+/** Optional account_id from wizard/API body. Invalid numbers are 409. */
+export function parseOptionalAccountId(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) rejectAccountLink("Invalid account_id");
+  return Math.trunc(n);
+}
+
+/**
+ * When creating a lessee, an existing account can be linked instead of
+ * find-or-create-by-name. The account must exist, must not be a placeholder
+ * name, and must not already have a non-placeholder master lease.
+ */
+export async function resolveAccountIdForNewLease(raw: unknown): Promise<number | null> {
+  const id = parseOptionalAccountId(raw);
+  if (id == null) return null;
+
+  const { data: account, error } = await supabaseAdmin
+    .from("accounts")
+    .select("id, name")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!account) rejectAccountLink("Account not found");
+  if (isPlaceholderLessee(String(account.name ?? ""))) {
+    rejectAccountLink("Account name is a placeholder");
+  }
+
+  const { data: leases, error: lErr } = await supabaseAdmin
+    .from("master_leases")
+    .select("id, lessee")
+    .eq("account_id", id);
+  if (lErr) throw lErr;
+  const taken = (leases ?? []).some((l) => {
+    const lessee = String(l.lessee ?? "").trim();
+    return lessee.length > 0 && !isPlaceholderLessee(lessee);
+  });
+  if (taken) rejectAccountLink("Account is already linked to a master lease");
+  return account.id;
+}
+
 /**
  * Match or create an accounts row for a lessee name (same bootstrap as the
  * original seed). New accounts get account_manager = null. Importers must call

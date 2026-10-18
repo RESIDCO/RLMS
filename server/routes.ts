@@ -5935,7 +5935,7 @@ export async function registerRoutes(
       const changed = diffProgramPatch(before as Record<string, unknown>, body);
       if (!Object.keys(changed).length) {
         const row = await getProgram(id);
-        return res.json(row);
+        return res.json({ ...(row ?? {}), no_changes: true });
       }
       const updates: Record<string, unknown> = { ...changed, updated_at: new Date().toISOString() };
       const patched = await withChangeGroupResult(userId, async () => {

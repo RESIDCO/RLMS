@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/undo.test.ts */
 
-import { currentMatchesAfter, nonUndoableMessage, opOf, summarizeUndoRows } from "./undo";
+import { currentMatchesAfter, isUndoAllowedTable, nonUndoableMessage, opOf, summarizeUndoRows } from "./undo";
 
 let passed = 0;
 let failed = 0;
@@ -36,6 +36,23 @@ ok(
 ok(
   opOf({ id: 4, change_group: "g", table_name: "program_cars", row_pk: 2, before: {}, after: { railcar_id: 1 }, detail: {} }) === "insert",
   "program_cars insert op",
+);
+
+const mileRow = {
+  id: 5,
+  change_group: "g-mile",
+  table_name: "program_car_milestones" as const,
+  row_pk: 47,
+  before: {},
+  after: { milestone: "Work complete", milestone_date: "2026-10-17", program_car_id: 120 },
+  detail: { op: "insert" as const },
+};
+ok(isUndoAllowedTable(mileRow.table_name), "milestone table is undoable");
+ok(opOf(mileRow) === "insert", "milestone append is insert");
+ok(summarizeUndoRows([mileRow]).lines[0].includes("program_car_milestones"), "milestone summarize");
+ok(
+  currentMatchesAfter(mileRow.after, mileRow.after),
+  "milestone after-values are a stable undo snapshot",
 );
 
 console.log(`${passed} passed, ${failed} failed`);

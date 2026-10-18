@@ -149,7 +149,7 @@ export async function apiRequest(
     });
     await throwIfResNotOk(res);
     // Dynamic import avoids a queryClient ↔ undo cycle.
-    if (method.toUpperCase() !== "GET" && !url.includes("/api/undo")) {
+    if (method.toUpperCase() !== "GET" && !url.includes("/api/undo") && !url.includes("/preview")) {
       const clone = res.clone();
       void clone.json().then((body) => {
         void import("@/lib/undo").then((m) => m.offerUndoToast(body)).catch(() => {});

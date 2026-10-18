@@ -20,7 +20,7 @@ import {
   type ProgramStatus,
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
-import { pickRow } from "@shared/change-log";
+import { changedKeys, pickRow } from "@shared/change-log";
 import { currentChangeGroup, recordChange } from "./change-log";
 
 const PROGRAM_LIST_SELECT = `
@@ -76,20 +76,23 @@ export async function logProgramActivity(row: {
     detail: row.detail ?? {},
   });
   if (error) console.log(`[programs] activity log skipped: ${error.message}`);
+  const before = row.before && typeof row.before === "object" ? row.before : {};
+  const after = row.after && typeof row.after === "object" ? row.after : {};
+  const diff = changedKeys(before, after);
+  if (Object.keys(diff.before).length === 0) return;
   const entity_type = row.program_car_id ? "program_car" : "program";
   const entity_id = row.program_car_id ?? row.program_id;
   await recordChange({
     table: row.program_car_id ? "program_cars" : "programs",
     pk: entity_id,
-    before: row.before ?? {},
-    after: row.after ?? {},
+    before: diff.before,
+    after: diff.after,
     action: row.action,
     entity_type,
     entity_id,
     railcar_id: row.railcar_id ?? null,
     actor: row.actor,
     detail: row.detail,
-    force: !row.before && !row.after,
   });
 }
 
@@ -134,7 +137,7 @@ export async function appendProgramCarMilestone(opts: {
     String(last.milestone) === milestone &&
     String(last.milestone_date).slice(0, 10) === milestoneDate
   ) {
-    return last;
+    return { ...last, inserted: false as const };
   }
   const { data, error } = await supabaseAdmin
     .from("program_car_milestones")
@@ -149,7 +152,39 @@ export async function appendProgramCarMilestone(opts: {
     .select("*")
     .single();
   if (error) throw error;
-  return data;
+  const { data: link } = await supabaseAdmin
+    .from("program_cars")
+    .select("program_id, railcar_id")
+    .eq("id", opts.programCarId)
+    .maybeSingle();
+  await recordChange({
+    table: "program_car_milestones",
+    pk: Number(data.id),
+    before: {},
+    after: {
+      id: data.id,
+      program_car_id: opts.programCarId,
+      milestone,
+      milestone_date: milestoneDate,
+      note: opts.note ?? null,
+    },
+    action: "milestone_added",
+    entity_type: "program_car",
+    entity_id: opts.programCarId,
+    railcar_id: link?.railcar_id != null ? Number(link.railcar_id) : null,
+    actor: opts.actor,
+  });
+  if (link?.program_id) {
+    await logProgramActivity({
+      program_id: Number(link.program_id),
+      action: "milestone_added",
+      actor: opts.actor,
+      program_car_id: opts.programCarId,
+      railcar_id: link.railcar_id != null ? Number(link.railcar_id) : null,
+      detail: { milestone, milestone_date: milestoneDate },
+    });
+  }
+  return { ...data, inserted: true as const };
 }
 
 export async function matchProgramCarsPaste(programId: number, text: string) {

@@ -12,30 +12,42 @@ type Preview = {
   ok?: boolean;
 };
 
+function undoResultToast(title: string, description?: string, variant?: "destructive") {
+  toast({ title, description, variant });
+}
+
 export async function previewAndUndo(changeGroup: string): Promise<boolean> {
-  const prev = (await apiRequest("POST", "/api/undo/preview", { change_group: changeGroup }).then((r) => r.json())) as Preview;
-  if (prev.conflicts?.length) {
-    toast({
-      title: "Cannot undo",
-      description: prev.conflicts.map((c) => `${c.table_name ?? "row"} #${c.row_pk ?? ""} ${c.reason}`).join("; "),
+  try {
+    const prev = (await apiRequest("POST", "/api/undo/preview", { change_group: changeGroup }).then((r) => r.json())) as Preview;
+    if (prev.conflicts?.length) {
+      undoResultToast(
+        "Cannot undo",
+        prev.conflicts.map((c) => `${c.table_name ?? "row"} #${c.row_pk ?? ""} ${c.reason}`).join("; "),
+        "destructive",
+      );
+      return false;
+    }
+    const ok = await confirmAction({
+      title: prev.count > 1 ? `Undo ${prev.count} changes?` : "Undo this change?",
+      description: (prev.lines ?? []).slice(0, 12).join("\n") || "Restore the previous values for this save.",
+      confirmLabel: "Undo",
       variant: "destructive",
     });
-    return false;
-  }
-  const ok = await confirmAction({
-    title: prev.count > 1 ? `Undo ${prev.count} changes?` : "Undo this change?",
-    description: (prev.lines ?? []).slice(0, 12).join("\n") || "Restore the previous values for this save.",
-    confirmLabel: "Undo",
-    variant: "destructive",
-  });
-  if (!ok) return false;
-  try {
-    await apiRequest("POST", "/api/undo", { change_group: changeGroup });
+    if (!ok) {
+      undoResultToast("Undo cancelled");
+      return false;
+    }
+    const body = (await apiRequest("POST", "/api/undo", { change_group: changeGroup }).then((r) => r.json())) as {
+      restored?: number;
+      preview?: { count?: number };
+      message?: string;
+    };
     await queryClient.invalidateQueries();
-    toast({ title: "Undone" });
+    const n = Number(body.restored ?? body.preview?.count ?? prev.count ?? 0);
+    undoResultToast(n === 1 ? "Reverted 1 change" : `Reverted ${n} changes`);
     return true;
   } catch (e: any) {
-    toast({ title: "Undo failed", description: e.message, variant: "destructive" });
+    undoResultToast("Undo failed", e.message, "destructive");
     return false;
   }
 }
@@ -43,6 +55,10 @@ export async function previewAndUndo(changeGroup: string): Promise<boolean> {
 export function offerUndoToast(payload: unknown) {
   if (!payload || typeof payload !== "object") return;
   const row = payload as Record<string, unknown>;
+  if (row.no_changes === true) {
+    toast({ title: "No changes" });
+    return;
+  }
   if (row.undoable === false) {
     const reason = String((row as any).no_undo ?? (row as any).detail?.no_undo ?? "").trim();
     toast({

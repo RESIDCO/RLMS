@@ -6,10 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
 import FleetRegistry from "@/pages/FleetRegistry";
 import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
 import LeaseCrmLinks from "@/components/crm/LeaseCrmLinks";
+import { documentCountLabel, leaseDocumentsPath, type LeaseDoc } from "@/pages/leases/lease-documents";
+import { cn } from "@/lib/utils";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
 import { todayIsoDateOnly } from "@shared/lease-authority";
 import { ArrowLeft } from "lucide-react";
@@ -33,6 +44,13 @@ export default function RiderPage() {
   const [newOl, setNewOl] = useState("");
   const [remarkDate, setRemarkDate] = useState(todayIsoDateOnly);
   const [carIdsText, setCarIdsText] = useState("");
+  const [section, setSection] = useState<"cars" | "documents">("cars");
+  const docsPath = leaseDocumentsPath("rider", id);
+  const docs = useQuery<{ rows: LeaseDoc[] }>({
+    queryKey: [docsPath],
+    queryFn: () => apiGet(docsPath),
+    enabled: Number.isFinite(id) && id > 0,
+  });
 
   const save = useMutation({
     mutationFn: () => apiRequest("PATCH", `/api/lease-mgmt/riders/${id}`, {
@@ -80,14 +98,51 @@ export default function RiderPage() {
 
   if (isLoading || !data) return <div className="p-8 text-sm text-muted-foreground">Loading OL…</div>;
   const code = displayRiderCode(h);
+  const lesseeName = h.lessee || "Lessee";
+  const docCount = docs.data?.rows.length;
+  const hasDocs = (docCount ?? 0) > 0;
+  const docStatus = docs.isLoading
+    ? "Documents…"
+    : docs.isError
+      ? "Documents unavailable"
+      : hasDocs
+        ? documentCountLabel(docCount ?? 0)
+        : null;
+  const carCount = Number(h.cars ?? 0);
 
   return (
-    <div className="h-full min-h-0 flex flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-8">
+        <Breadcrumb data-testid="ol-breadcrumb">
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link href="/leases">Leases</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {h.master_lease_id ? (
+                <BreadcrumbLink asChild>
+                  <Link href={`/leases/lessee/${h.master_lease_id}`}>{lesseeName}</Link>
+                </BreadcrumbLink>
+              ) : (
+                <span>{lesseeName}</span>
+              )}
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{code}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+        <LeaseCrmLinks mode="rider" id={id} part="account" />
+      </div>
       <PageHeader
         title={code}
-        subtitle={`${h.lessee ?? ""} · ${lifecycleLabel(h.lifecycle_status)} · ${h.cars ?? 0} cars`}
+        subtitle={`${lesseeName} · ${lifecycleLabel(h.lifecycle_status)} · ${carCount} cars`}
         actions={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex max-w-full flex-wrap gap-2">
             <Button size="sm" variant="outline" asChild>
               <Link href={h.master_lease_id ? `/leases/lessee/${h.master_lease_id}` : "/leases"}>
                 <ArrowLeft className="h-4 w-4" /> Back
@@ -99,27 +154,60 @@ export default function RiderPage() {
           </div>
         }
       />
-      <LeaseCrmLinks mode="rider" id={id} />
-      <div className="px-4 sm:px-8 py-3 text-sm flex flex-wrap gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm sm:px-8">
         <span>Effective {h.effective_date ?? "—"}</span>
         <span>Expiry {h.expiration_date ?? "—"}</span>
         <span>Rent/car {h.monthly_rent_per_car ?? h.rider_rent_per_car ?? "—"}</span>
         {h.sublessee ? <span className="rounded bg-muted px-1.5 py-0.5 text-xs">Operated by {h.sublessee}</span> : null}
+        {docStatus ? (
+          <button
+            type="button"
+            className={cn(
+              "text-sm underline-offset-2 hover:underline",
+              hasDocs ? "text-foreground" : "text-muted-foreground",
+            )}
+            data-testid="ol-document-count"
+            onClick={() => setSection("documents")}
+          >
+            {docStatus}
+          </button>
+        ) : null}
+        {!docs.isLoading && !docs.isError && !hasDocs && !h.contract_doc_url ? (
+          <span className="text-xs text-muted-foreground" data-testid="ol-document-count">No contract on file</span>
+        ) : null}
         {h.contract_doc_url ? (
-          <button type="button" className="font-mono text-xs underline" onClick={() => void navigator.clipboard.writeText(h.contract_doc_url)}>{h.contract_doc_url}</button>
-        ) : <span className="text-xs text-muted-foreground">No contract on file</span>}
+          <button type="button" className="max-w-full break-all font-mono text-xs underline" onClick={() => void navigator.clipboard.writeText(h.contract_doc_url)}>{h.contract_doc_url}</button>
+        ) : null}
         {h.successor_rider_id ? <Link href={`/leases/rider/${h.successor_rider_id}`} className="underline">Successor OL</Link> : null}
       </div>
-      <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
-        <FleetRegistry scopedRiderId={id} />
+      <div className="shrink-0 px-4 sm:px-8">
+        <LeaseCrmLinks mode="rider" id={id} part="opportunities" />
       </div>
-      <div className="px-4 sm:px-8 py-3 border-t shrink-0 max-h-[36%] overflow-auto">
-        <LeaseDocumentsPanel
-          kind="rider"
-          id={id}
-          fallbackUrls={h.contract_doc_url ? [{ label: "Contract path", url: h.contract_doc_url }] : []}
-        />
-      </div>
+      <Tabs
+        value={section}
+        onValueChange={(value) => {
+          if (value === "cars" || value === "documents") setSection(value);
+        }}
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 pb-4 sm:px-8"
+      >
+        <TabsList className="flex h-auto w-fit max-w-full shrink-0 flex-wrap justify-start">
+          <TabsTrigger value="cars">Cars ({carCount})</TabsTrigger>
+          <TabsTrigger value="documents">
+            Documents{docCount == null ? "" : ` (${docCount})`}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="cars" className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+          <FleetRegistry scopedRiderId={id} />
+        </TabsContent>
+        <TabsContent value="documents" className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+          <LeaseDocumentsPanel
+            fill
+            kind="rider"
+            id={id}
+            fallbackUrls={h.contract_doc_url ? [{ label: "Contract path", url: h.contract_doc_url }] : []}
+          />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={edit} onOpenChange={setEdit}>
         <DialogContent>

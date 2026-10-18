@@ -994,7 +994,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         width={w}
         pinned={pinned}
         className={cn(
-          "px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40",
+          "bg-muted px-4 py-3 text-[11px] font-medium uppercase tracking-wider",
           key === "_select" && "pl-4 pr-2 py-3 w-10",
           key === "marks" && "hidden sm:table-cell",
           key === "type" && "hidden sm:table-cell",
@@ -1170,7 +1170,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   }
 
   return (
-    <div className="h-full min-h-0 flex flex-col overflow-hidden">
+    <div className={cn("flex h-full min-h-0 flex-col overflow-hidden", scopedRiderId && "flex-1")}>
       {scopedRiderId ? null : (
       <PageHeader
         title="Railcars"
@@ -1227,7 +1227,10 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       />
       )}
 
-      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
+      <div className={cn(
+        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+        scopedRiderId ? "gap-3" : "gap-4 px-4 py-4 sm:px-8 sm:py-6",
+      )}>
         <PasteSearchBar
           busy={pasteBusy}
           unmatched={pasteMatch?.unmatched ?? []}
@@ -1264,7 +1267,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
           }}
         />
         {/* Filter bar */}
-        <div className="shrink-0 flex items-center gap-2 flex-wrap">
+        <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 [&>*]:max-w-full">
           <SavedFilters onPick={() => { /* query restore reserved */ }} />
           <ClearableSearchInput
             value={search}
@@ -1408,7 +1411,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
 
         {/* Bulk action toolbar — visible when 1+ cars are selected, admin only */}
         {canEdit && selectedIds.size > 0 && (
-          <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5 overflow-x-hidden">
+          <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 overflow-x-hidden rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 [&>*]:max-w-full">
             <span className="text-sm font-medium text-foreground shrink-0">
               {selectedIds.size.toLocaleString()} car{selectedIds.size !== 1 ? "s" : ""} selected
             </span>
@@ -1619,7 +1622,10 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         )}
 
         {/* Table — bounded panel: both scrollbars stay on-screen; header sticky */}
-        <div className="flex-1 min-h-[240px] rounded-lg border border-card-border bg-card overflow-hidden flex flex-col">
+        <div className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-card-border bg-card",
+          scopedRiderId ? "min-h-0" : "min-h-[240px]",
+        )}>
           <div className="flex-1 min-h-0 overflow-auto">
             <table className="text-sm" style={{ tableLayout: "fixed", width: Math.max(700, tableW) }}>
               <colgroup>
@@ -1627,7 +1633,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
                   <col key={k} style={{ width: colWidth(colWidths, k, FR_WIDTHS[k] ?? 110) }} />
                 ))}
               </colgroup>
-              <thead className="sticky top-0 z-10 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
+              <thead className="sticky top-0 z-10 bg-muted text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                 <tr className="text-left">
                   {displayKeys.map((k) => frHeader(k))}
                 </tr>

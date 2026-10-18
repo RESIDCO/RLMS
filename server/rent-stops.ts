@@ -74,7 +74,7 @@ async function history(railcarId: number) {
   return data ?? [];
 }
 
-async function setAbatement(railcarId: number, body: any, actor: string) {
+export async function setAbatement(railcarId: number, body: any, actor: string) {
   const car = await loadCar(railcarId);
   if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
   if (car.active !== true) throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
@@ -116,6 +116,58 @@ async function setAbatement(railcarId: number, body: any, actor: string) {
     railcar_id: railcarId,
     actor,
     detail: { type: "Abatement", stop_date: stopDate, reason, expected_resume_date: body.expected_resume_date || null },
+    source: "ui",
+    source_table: "car_rent_stops",
+    source_id: Number(data.id),
+  });
+  return data;
+}
+
+export async function setOffRent(railcarId: number, body: any, actor: string) {
+  const car = await loadCar(railcarId);
+  if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
+  if (car.active !== true) throw Object.assign(new Error("inactive – left alone"), { status: 400, code: "inactive" });
+  const existing = await openStop(railcarId);
+  if (existing) {
+    const err: any = new Error(existing.type === "Off rent" ? "already off rent" : "Car already has an open rent stop");
+    err.status = 400;
+    err.code = existing.type === "Off rent" ? "already_off_rent" : "open_stop";
+    throw err;
+  }
+  const assignment = await latestAssignment(railcarId);
+  const stopDate = String(body.stop_date ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(stopDate)) throw Object.assign(new Error("stop_date must be YYYY-MM-DD"), { status: 400 });
+  const reason = isReason(body.reason) ? body.reason : "other";
+  const { data, error } = await supabaseAdmin
+    .from("car_rent_stops")
+    .insert({
+      railcar_id: railcarId,
+      assignment_id: assignment?.id ?? null,
+      rider_id: assignment?.rider_id ?? null,
+      lease_ref: body.lease_ref ?? car.rider_external_id ?? null,
+      lessee_snapshot: car.lessee_name ?? null,
+      type: "Off rent",
+      stop_date: stopDate,
+      expected_resume_date: body.expected_resume_date || null,
+      reason,
+      reason_other: body.reason_other ?? null,
+      note: body.note ?? null,
+      created_by: actor,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  await recordChange({
+    table: "car_rent_stops",
+    pk: Number(data.id),
+    before: {},
+    after: data,
+    action: "rent_stop_off_rent",
+    entity_type: "railcar",
+    entity_id: railcarId,
+    railcar_id: railcarId,
+    actor,
+    detail: { type: "Off rent", stop_date: stopDate, reason, reason_other: body.reason_other ?? null },
     source: "ui",
     source_table: "car_rent_stops",
     source_id: Number(data.id),
@@ -235,6 +287,16 @@ export function registerRentStopRoutes(
     }
   });
 
+  app.post("/api/rent-stops/car/:id/off-rent", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      res.json(await withChangeGroupResult(actor, () => setOffRent(Number(req.params.id), req.body ?? {}, actor)));
+    } catch (e) {
+      errHandler(res, e);
+    }
+  });
+
   app.post("/api/rent-stops/car/:id/abatement", async (req, res) => {
     try {
       const actor = await requireWrite(req, res);
@@ -269,12 +331,30 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      const action = String(req.body?.action ?? "abatement");
+      const action = String(req.body?.action ?? req.body?.type ?? "abatement");
+      const stopType: StopType = action === "Off rent" || action === "off_rent" ? "Off rent" : "Abatement";
       const text = String(req.body?.text ?? "");
       const idsIn = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n: number) => n > 0) : [];
+      const rowsIn: { car?: string; id?: number; stop_date?: string; note?: string }[] = Array.isArray(req.body?.rows)
+        ? req.body.rows
+        : [];
       const parsed = text ? parseCarListText(text) : [];
       const rejected: any[] = [];
+      const warnings: any[] = [];
       let ids = idsIn;
+      const dateById = new Map<number, { stop_date?: string; note?: string }>();
+      if (rowsIn.length) {
+        for (const row of rowsIn) {
+          const raw = String(row.car ?? "").trim();
+          const found = row.id ? [Number(row.id)] : raw ? await resolveRailcarsByAnyIdentity(raw) : [];
+          if (!found.length) {
+            rejected.push({ car: raw || row.id, reason: "not_found" });
+            continue;
+          }
+          ids.push(...found);
+          dateById.set(found[0], { stop_date: row.stop_date, note: row.note });
+        }
+      }
       if (!ids.length) {
         for (const tok of parsed) {
           const raw = tok.initial ? `${tok.initial} ${tok.number}` : tok.raw;
@@ -283,6 +363,7 @@ export function registerRentStopRoutes(
           ids.push(...found);
         }
       }
+      const today = new Date().toISOString().slice(0, 10);
       const toWrite: any[] = [];
       for (const id of [...new Set(ids)]) {
         const car = await loadCar(id);
@@ -291,27 +372,52 @@ export function registerRentStopRoutes(
           continue;
         }
         if (car.active !== true) {
-          rejected.push({ id, car: formatCarId(car), reason: "inactive" });
+          rejected.push({ id, car: formatCarId(car), reason: "inactive – left alone" });
           continue;
+        }
+        const existing = await openStop(id);
+        if (existing) {
+          rejected.push({
+            id,
+            car: formatCarId(car),
+            reason: existing.type === "Off rent" ? "already off rent" : "existing open stop",
+          });
+          continue;
+        }
+        const per = dateById.get(id);
+        const stopDate = String(per?.stop_date ?? req.body?.stop_date ?? "").slice(0, 10);
+        const { data: startRow } = await supabaseAdmin
+          .from("railcars")
+          .select("id, lease_start_date")
+          .eq("id", id)
+          .maybeSingle();
+        const rentStart = String(startRow?.lease_start_date ?? "").slice(0, 10);
+        if (stopDate && rentStart && stopDate < rentStart) {
+          warnings.push({ id, car: formatCarId(car), reason: "date before rent_start", stop_date: stopDate, rent_start: rentStart });
+        }
+        if (stopDate && stopDate > today) {
+          warnings.push({ id, car: formatCarId(car), reason: "date after today", stop_date: stopDate });
         }
         toWrite.push({
           id: car.id,
           car: formatCarId(car),
           ol: car.rider_external_id,
           lessee: car.lessee_name,
-          action,
-          stop_date: req.body?.stop_date ?? null,
+          action: stopType,
+          stop_date: stopDate || null,
           reason: req.body?.reason ?? null,
+          reason_other: req.body?.reason_other ?? null,
+          note: per?.note ?? req.body?.note ?? null,
           expected_resume_date: req.body?.expected_resume_date ?? null,
         });
       }
-      const token = await putPreview("rent_stop", { action, toWrite, body: req.body ?? {} });
+      const token = await putPreview("rent_stop", { action: stopType, toWrite, body: req.body ?? {}, warnings });
       const kpi_delta = await annotateKpiDelta(
         toWrite.map((r) => r.id),
         { kind: "abatement" },
         req.body?.bucket ?? null,
       );
-      res.json({ preview_token: token, to_write: toWrite, rejected, kpi_delta });
+      res.json({ preview_token: token, to_write: toWrite, rejected, warnings, kpi_delta });
     } catch (e) {
       errHandler(res, e);
     }
@@ -325,9 +431,11 @@ export function registerRentStopRoutes(
         const snap = await getPreview("rent_stop", String(req.body?.preview_token ?? ""));
         const written: any[] = [];
         for (const row of snap.toWrite ?? []) {
+          const body = { ...(snap.body ?? {}), stop_date: row.stop_date ?? snap.body?.stop_date, note: row.note ?? snap.body?.note };
           if (snap.action === "resume") written.push(await resumeStop(row.id, actor, snap.body?.actual_resume_date));
-          else if (snap.action === "convert") written.push(await convertToOffRent(row.id, actor, snap.body ?? {}));
-          else written.push(await setAbatement(row.id, snap.body ?? {}, actor));
+          else if (snap.action === "convert") written.push(await convertToOffRent(row.id, actor, body));
+          else if (snap.action === "Off rent" || snap.action === "off_rent") written.push(await setOffRent(row.id, body, actor));
+          else written.push(await setAbatement(row.id, body, actor));
         }
         return { written: written.length };
       });

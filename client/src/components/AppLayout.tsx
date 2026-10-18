@@ -55,7 +55,7 @@ const UMLER_EXTERNAL_URL = "https://railcarumlerportal.vercel.app/";
 const mainNav: { href: string; label: string; icon: React.ElementType; aliases?: string[] }[] = [
   { href: "/",         label: "Dashboard",           icon: LayoutDashboard },
   { href: "/accounts", label: "Account Management",  icon: Building2, aliases: ["/account", "/account-transitions", "/territory-map"] },
-  { href: "/railcars", label: "Railcars",             icon: Train, aliases: ["/fleet"] },
+  { href: "/railcars", label: "Railcars",             icon: Train, aliases: ["/fleet", "/railcars/umler-queue"] },
   { href: "/leases",   label: "Lease Management", icon: FileText },
   { href: "/move",     label: "Move Cars",        icon: ArrowRightLeft },
   { href: "/history",  label: "Lineage",          icon: History },

@@ -1,4 +1,4 @@
-import { splitCarNumber } from "./residco-import";
+import { CAR_NUMBER_WIDTH, splitCarNumber } from "./residco-import";
 
 export const PROGRAM_STATUSES = ["open", "on_hold", "complete"] as const;
 export type ProgramStatus = (typeof PROGRAM_STATUSES)[number];
@@ -345,14 +345,24 @@ export function masterReportFilename(d = new Date()): string {
 
 export const FLAG_TAG_HINTS = ["Watch", "Priority", "Issue", "Hold"] as const;
 
+/** TFOX 3297, TFOX\t3297, and TFOX 003297 all become TFOX 003297. */
+export function canonicalPasteCarToken(token: string): string {
+  const split = splitCarNumber(token);
+  const digits = String(split.car_number ?? "").replace(/\D/g, "");
+  if (!digits) return String(token ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+  const num = digits.length <= CAR_NUMBER_WIDTH ? digits.padStart(CAR_NUMBER_WIDTH, "0") : digits;
+  const mark = split.reporting_marks;
+  return mark ? `${mark} ${num}` : num;
+}
+
 export function parseCarPasteList(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
 
   function push(token: string) {
-    const t = token.trim();
+    const t = canonicalPasteCarToken(token);
     if (!t) return;
-    const key = t.replace(/\s+/g, "").toUpperCase();
+    const key = t.replace(/\s+/g, "");
     if (seen.has(key)) return;
     seen.add(key);
     out.push(t);

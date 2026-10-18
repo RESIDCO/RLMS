@@ -453,6 +453,8 @@ export default function FleetRegistry() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [pasteOnPage, setPasteOnPage] = useState(false);
+  const [pasteMatch, setPasteMatch] = useState<{ ids: number[]; unmatched: string[]; tokenCount: number } | null>(null);
+  const [pasteBusy, setPasteBusy] = useState(false);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoSeed, setPhotoSeed] = useState("");
@@ -569,23 +571,25 @@ export default function FleetRegistry() {
     return next;
   }, [turning50Year, visibleCols]);
 
-  const carLookup = Boolean(debouncedSearch && /\d/.test(debouncedSearch));
-  const carListLookup = isMultiCarListQuery(debouncedSearch);
+  const carLookup = Boolean(!pasteMatch && debouncedSearch && /\d/.test(debouncedSearch));
+  const carListLookup = !pasteMatch && isMultiCarListQuery(debouncedSearch);
+  const pasteEmpty = Boolean(pasteMatch && pasteMatch.ids.length === 0);
   const listParams = {
     page,
     pageSize,
-    search: debouncedSearch || undefined,
-    status: turning50Year || carLookup || statusFilter === "all" ? undefined : statusFilter,
+    search: pasteMatch ? undefined : (debouncedSearch || undefined),
+    ids: pasteMatch?.ids.length ? pasteMatch.ids.join(",") : undefined,
+    status: pasteMatch || turning50Year || carLookup || statusFilter === "all" ? undefined : statusFilter,
     entity: turning50Year || entityFilter === "all" ? undefined : entityFilter,
-    active: turning50Year ? "active" : fleetActiveFilter,
-    assigned: turning50Year || carLookup || assignedFilter === "all" ? undefined : assignedFilter,
+    active: pasteMatch ? "all" : turning50Year ? "active" : fleetActiveFilter,
+    assigned: pasteMatch || turning50Year || carLookup || assignedFilter === "all" ? undefined : assignedFilter,
     rider: turning50Year ? undefined : (olCodeFilter || undefined),
     rider_id: turning50Year ? undefined : (riderFilter !== "all" ? riderFilter : undefined),
     transit: turning50Year || transitFilter === "all" ? undefined : transitFilter,
     turning50: turning50Year || undefined,
     batch: turning50Year || batchFilter === "all" ? undefined : batchFilter,
     needs_completion: turning50Year || needsCompletionFilter === "all" ? undefined : needsCompletionFilter,
-    flag: turning50Year || carLookup || flagFilter === "all" ? undefined : flagFilter,
+    flag: pasteMatch || turning50Year || carLookup || flagFilter === "all" ? undefined : flagFilter,
   };
 
   type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
@@ -594,10 +598,10 @@ export default function FleetRegistry() {
     queryFn: ({ signal }) =>
       apiGet<RailcarPage>(railcarsQs(listParams), { timeoutMs: 15_000, signal }),
     staleTime: 45_000,
-    enabled: !carListLookup,
+    enabled: !carListLookup && !pasteEmpty,
     // Don't keep the unfiltered page on screen while a search request is in flight —
     // that made mark/lessee queries look like they matched unrelated cars (or didn't fire).
-    placeholderData: debouncedSearch ? undefined : keepPreviousData,
+    placeholderData: debouncedSearch || pasteMatch ? undefined : keepPreviousData,
   });
   const { data: riders } = useQuery<any[]>({ queryKey: ["/api/riders"] });
   const riderOptions = useMemo(() => (riders ?? []).map(riderToOption), [riders]);
@@ -617,8 +621,8 @@ export default function FleetRegistry() {
       })),
     [acquisitionBatches],
   );
-  const railcars = pageData?.rows ?? [];
-  const totalCount = pageData?.total_count ?? 0;
+  const railcars = pasteEmpty ? [] : (pageData?.rows ?? []);
+  const totalCount = pasteEmpty ? 0 : (pageData?.total_count ?? 0);
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   useEffect(() => {
@@ -1219,9 +1223,38 @@ export default function FleetRegistry() {
 
       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
         <PasteSearchBar
-          onSearch={(tokens) => {
-            setPasteOnPage(true);
-            setSearch(tokens.join(" "));
+          busy={pasteBusy}
+          unmatched={pasteMatch?.unmatched ?? []}
+          matchedCount={pasteMatch ? pasteMatch.ids.length : null}
+          onClear={() => setPasteMatch(null)}
+          onMatch={(tokens) => {
+            void (async () => {
+              setPasteBusy(true);
+              try {
+                const res = await apiRequest("POST", "/api/search", {
+                  q: tokens.join("\n"),
+                  active: "all",
+                });
+                const data = await res.json();
+                const ids = (data.railcars ?? [])
+                  .map((r: { id?: number }) => Number(r.id))
+                  .filter((n: number) => Number.isFinite(n) && n > 0);
+                setPasteMatch({
+                  ids,
+                  unmatched: Array.isArray(data.not_found) ? data.not_found.map(String) : [],
+                  tokenCount: tokens.length,
+                });
+                setPage(1);
+              } catch (e: any) {
+                toast({
+                  title: "Paste match failed",
+                  description: e.message ?? "Could not match pasted cars",
+                  variant: "destructive",
+                });
+              } finally {
+                setPasteBusy(false);
+              }
+            })();
           }}
         />
         {/* Filter bar */}
@@ -1592,7 +1625,7 @@ export default function FleetRegistry() {
                 </tr>
               </thead>
               <tbody>
-                {isLoading ? (
+                {isLoading || pasteBusy ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="border-t border-border">
                       {displayKeys.map((k) => (
@@ -1614,7 +1647,9 @@ export default function FleetRegistry() {
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={displayKeys.length} className="px-4 py-16 text-center text-muted-foreground">
-                      {search.trim()
+                      {pasteMatch
+                        ? "No railcars match the pasted list."
+                        : search.trim()
                         ? `No railcars match “${search.trim()}”${
                             assignedFilter !== "all" || statusFilter !== "all" || fleetActiveFilter !== "all"
                               ? " with the current filters. Try All cars / All rental statuses."

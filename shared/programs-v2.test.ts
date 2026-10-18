@@ -40,6 +40,8 @@ ok(!isArrivedMilestone("Enroute"), "enroute is not done");
 ok(isTerminalMilestone("On rent"), "on rent is terminal");
 ok(!isArrivedMilestone("On rent"), "on rent is not arrival");
 ok(parseCarPasteList("TFOX 2248\nTFOX 000430, KBX 123").length === 3, "paste list splits");
+ok(parseCarPasteList("TFOX\t3297").join("|") === "TFOX 003297", "tab + zero-pad");
+ok(parseCarPasteList("TFOX  3297\nTFOX 003297").length === 1, "spaces and pad collapse to one car");
 
 ok(isCarDone({ active: false }), "inactive is program done");
 ok(isCarDone({ active: true, milestone: "On rent" }), "on rent is program done");

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import FinanceLeaseTag from "@/components/crm/FinanceLeaseTag";
 import OpportunityDialog from "@/components/crm/OpportunityDialog";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
@@ -24,6 +25,7 @@ type WatchPayload = {
   holdover: WatchRow[];
   check_date: WatchRow[];
   off_lease: WatchRow[];
+  unclassified: WatchRow[];
   returns_watch_url: string;
 };
 
@@ -141,6 +143,7 @@ export default function OpportunitiesPage() {
                         <button type="button" className="hover:underline" onClick={() => { setEditing(row); setCreateOpen(true); }}>
                           {OPPORTUNITY_TYPE_LABEL[row.type]}
                         </button>
+                        <FinanceLeaseTag code={row.rider_name} />
                       </td>
                       <td className="px-3 py-2">{ownerLabel(row.owner)}</td>
                       <td className="px-3 py-2">
@@ -166,6 +169,7 @@ export default function OpportunitiesPage() {
             rows={watch.data?.holdover ?? []}
           />
           <WatchBlock title="Check date" rows={watch.data?.check_date ?? []} />
+          <WatchBlock title="Unclassified (null lifecycle, on rent)" rows={watch.data?.unclassified ?? []} />
           <WatchBlock
             title="Off lease"
             rows={watch.data?.off_lease ?? []}
@@ -246,6 +250,7 @@ function WatchBlock({
           {rows.map((row) => (
             <li key={`${title}-${row.rider_id}`} className="flex flex-wrap items-center gap-2">
               <Link href={`/leases/rider/${row.rider_id}`} className="hover:underline font-mono">{row.rider_name || row.rider_id}</Link>
+              <FinanceLeaseTag code={row.rider_name} />
               <span className="text-muted-foreground">{row.lessee} · {row.reason} · {row.on_rent_cars || row.unsold_cars} cars · {ownerLabel(row.owner)}</span>
               {action ? action(row) : null}
             </li>

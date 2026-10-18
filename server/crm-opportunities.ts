@@ -3,6 +3,7 @@ import { recordChange, withChangeGroup, withChangeGroupResult } from "./change-l
 import { CrmHttpError } from "./crm-error";
 import { supabaseAdmin } from "./supabase";
 import {
+  isActiveRider,
   isLossReason,
   isOpenStage,
   isOpportunitySource,
@@ -11,8 +12,8 @@ import {
   isRenewalCandidate,
   lostNeedsReason,
   mostCommonValue,
-  MULTI_TERM_RENEWAL_NOTE,
   remarketRiderUrl,
+  renewalAutoNotes,
   wonReletNeedsRemarket,
   type OpportunityRow,
   type OpportunitySource,
@@ -315,7 +316,7 @@ async function selectRenewals(months: number, today: string): Promise<RenewalPre
       current_rate: rider.monthly_rent_per_car,
       expiry_date: rider.expiration_date,
       expiration_source: rider.expiration_source,
-      notes: rider.expiration_source === "asset_report_multi_term" ? MULTI_TERM_RENEWAL_NOTE : null,
+      notes: renewalAutoNotes(rider.expiration_source),
       railcarIds,
     });
   }
@@ -433,6 +434,7 @@ export async function listOpportunityWatch(): Promise<{
   holdover: WatchRow[];
   check_date: WatchRow[];
   off_lease: WatchRow[];
+  unclassified: WatchRow[];
   returns_watch_url: string;
 }> {
   const today = utcToday();
@@ -445,12 +447,18 @@ export async function listOpportunityWatch(): Promise<{
   const byRider = onRentIdsByRider(cars);
   const holdover: WatchRow[] = [];
   const checkDate: WatchRow[] = [];
+  const unclassified: WatchRow[] = [];
   const offLeaseRiders: RiderFact[] = [];
 
   for (const rider of riders) {
     const lease = leases.get(rider.master_lease_id);
     if (!lease || lease.is_placeholder) continue;
     const onRent = (byRider.get(rider.id) ?? []).length;
+    const active = isActiveRider({
+      lifecycle_status: rider.lifecycle_status,
+      is_placeholder: lease.is_placeholder,
+      on_rent_nonsold_leased: onRent,
+    });
     const account = lease.account_id != null ? accounts.get(lease.account_id) : undefined;
     const base = {
       rider_id: rider.id,
@@ -468,18 +476,25 @@ export async function listOpportunityWatch(): Promise<{
     };
     const past = rider.expiration_date != null && rider.expiration_date < today && onRent >= 1;
     const mtm = rider.lease_status != null && /mtm/i.test(rider.lease_status);
-    if (past || mtm) {
+    if (active && (past || mtm)) {
       holdover.push({
         ...base,
         bucket: "holdover",
         reason: past && mtm ? "On rent past expiry and MTM" : past ? "On rent past expiry" : "MTM",
       });
     }
-    if (onRent >= 1 && (rider.expiration_source == null || rider.expiration_source === "car_records")) {
+    if (active && onRent >= 1 && (rider.expiration_source == null || rider.expiration_source === "car_records")) {
       checkDate.push({
         ...base,
         bucket: "check_date",
         reason: rider.expiration_source == null ? "No governed expiry" : "car_records expiry",
+      });
+    }
+    if (rider.lifecycle_status == null && active) {
+      unclassified.push({
+        ...base,
+        bucket: "unclassified",
+        reason: "Null lifecycle, on rent",
       });
     }
     if (rider.lifecycle_status === "off_lease_pending_remarketing") offLeaseRiders.push(rider);
@@ -514,7 +529,14 @@ export async function listOpportunityWatch(): Promise<{
   holdover.sort(byName);
   checkDate.sort(byName);
   offLease.sort(byName);
-  return { holdover, check_date: checkDate, off_lease: offLease, returns_watch_url: "#/returns/watch" };
+  unclassified.sort(byName);
+  return {
+    holdover,
+    check_date: checkDate,
+    off_lease: offLease,
+    unclassified,
+    returns_watch_url: "#/returns/watch",
+  };
 }
 
 export type OpportunityFilters = {
@@ -537,7 +559,29 @@ export async function listOpportunities(filters: OpportunityFilters): Promise<Op
   if (filters.open) query = query.not("stage", "in", "(won,lost)");
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []).map((row) => mapOpportunity(row as Record<string, unknown>));
+  return attachRiderNames((data ?? []).map((row) => mapOpportunity(row as Record<string, unknown>)));
+}
+
+async function loadRiderNames(ids: number[]): Promise<Map<number, string | null>> {
+  const names = new Map<number, string | null>();
+  const unique = Array.from(new Set(ids));
+  for (let i = 0; i < unique.length; i += 200) {
+    const slice = unique.slice(i, i + 200);
+    const { data, error } = await supabaseAdmin.from("riders").select("id, rider_name").in("id", slice);
+    if (error) throw error;
+    for (const row of data ?? []) names.set(Number(row.id), textOrNull(row.rider_name));
+  }
+  return names;
+}
+
+async function attachRiderNames(rows: OpportunityRow[]): Promise<OpportunityRow[]> {
+  const ids = rows.flatMap((row) => (row.rider_id == null ? [] : [row.rider_id]));
+  if (!ids.length) return rows.map((row) => ({ ...row, rider_name: null }));
+  const names = await loadRiderNames(ids);
+  return rows.map((row) => ({
+    ...row,
+    rider_name: row.rider_id == null ? null : names.get(row.rider_id) ?? null,
+  }));
 }
 
 async function riderContext(riderId: number): Promise<{ master_lease_id: number; account_id: number | null }> {

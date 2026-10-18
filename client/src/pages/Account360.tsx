@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import ActivityDialog from "@/components/crm/ActivityDialog";
+import FinanceLeaseTag from "@/components/crm/FinanceLeaseTag";
 import OpportunityDialog from "@/components/crm/OpportunityDialog";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { contactsDirectoryPath } from "@/lib/directory-nav";
@@ -153,6 +154,7 @@ export default function Account360Page() {
                     <tr key={ol.rider_id} className="border-t">
                       <td className="px-3 py-2">
                         <Link href={`/leases/rider/${ol.rider_id}`} className="hover:underline font-mono">{ol.rider_name || ol.rider_id}</Link>
+                        <FinanceLeaseTag code={ol.rider_name} />
                       </td>
                       <td className="px-3 py-2">
                         <Link href={`/leases/lessee/${ol.master_lease_id}`} className="hover:underline">{ol.lessee || "Lessee"}</Link>
@@ -269,6 +271,7 @@ function OppTable({ rows, onOpen }: { rows: OpportunityRow[]; onOpen: (row: Oppo
             <tr key={row.id} className="border-t">
               <td className="px-3 py-2">
                 <button type="button" className="hover:underline" onClick={() => onOpen(row)}>{OPPORTUNITY_TYPE_LABEL[row.type]}</button>
+                <FinanceLeaseTag code={row.rider_name} />
               </td>
               <td className="px-3 py-2">{OPPORTUNITY_STAGE_LABEL[row.stage]}</td>
               <td className="px-3 py-2">{ownerLabel(row.owner)}</td>

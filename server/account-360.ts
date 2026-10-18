@@ -5,6 +5,7 @@ import { listDirectoryPeopleForAccount } from "./directory";
 import { fetchAllRows } from "./fetch-all";
 import { supabaseAdmin } from "./supabase";
 import {
+  isActiveRider,
   isGovernedExpirySource,
   isOpenStage,
   type Account360Contact,
@@ -272,7 +273,13 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
     },
     counts: {
       lessees: lessees.length,
-      ols: ols.filter((ol) => ol.lifecycle_status === "active").length,
+      ols: ols.filter((ol) =>
+        isActiveRider({
+          lifecycle_status: ol.lifecycle_status,
+          is_placeholder: placeholder.has(ol.master_lease_id),
+          on_rent_nonsold_leased: ol.on_rent_cars,
+        }),
+      ).length,
       on_rent_cars: onRentCars,
       off_lease: ols.filter((ol) => ol.lifecycle_status === "off_lease_pending_remarketing").length,
       open_opps: openOpps.length,

@@ -4,9 +4,13 @@
 import { isUndoAllowedTable, UNDO_ALLOWED_TABLES } from "./undo";
 import {
   addMonthsIso,
+  FINANCE_LEASE_TAG,
+  financeLeaseTag,
+  isActiveRider,
   isRenewalCandidate,
   lostNeedsReason,
   mostCommonValue,
+  renewalAutoNotes,
   renewalExclusion,
   type RenewalRiderInput,
   wonReletNeedsRemarket,
@@ -44,12 +48,35 @@ ok(addMonthsIso("2024-01-31", 1) === "2024-02-29", "month clamp leap");
 
 ok(isRenewalCandidate(rider(), { today: TODAY, months: 12 }), "baseline candidate");
 ok(renewalExclusion(rider({ is_placeholder: true }), { today: TODAY, months: 12 }) === "placeholder", "placeholder excluded");
-ok(renewalExclusion(rider({ lifecycle_status: null }), { today: TODAY, months: 12 }) === "lifecycle", "null lifecycle excluded");
+ok(isActiveRider(rider({ lifecycle_status: null })), "null lifecycle with on-rent cars is active");
+ok(isRenewalCandidate(rider({ lifecycle_status: null }), { today: TODAY, months: 12 }), "null with on-rent cars is included");
+ok(
+  !isActiveRider(rider({ lifecycle_status: null, on_rent_nonsold_leased: 0 }))
+    && !isRenewalCandidate(rider({ lifecycle_status: null, on_rent_nonsold_leased: 0 }), { today: TODAY, months: 12 }),
+  "null with only sold or idle cars is excluded",
+);
+ok(
+  renewalExclusion(rider({ lifecycle_status: null, is_placeholder: true, on_rent_nonsold_leased: 4 }), { today: TODAY, months: 12 }) === "placeholder",
+  "null placeholder with on-rent cars stays excluded",
+);
 ok(renewalExclusion(rider({ lifecycle_status: "closed" }), { today: TODAY, months: 12 }) === "lifecycle", "closed excluded");
 ok(
-  renewalExclusion(rider({ lifecycle_status: "off_lease_pending_remarketing" }), { today: TODAY, months: 12 }) === "lifecycle",
-  "off lease excluded",
+  !isActiveRider(rider({ lifecycle_status: "off_lease_pending_remarketing", on_rent_nonsold_leased: 3 }))
+    && renewalExclusion(rider({ lifecycle_status: "off_lease_pending_remarketing", on_rent_nonsold_leased: 3 }), { today: TODAY, months: 12 }) === "lifecycle",
+  "off lease never counts",
 );
+ok(
+  isRenewalCandidate(rider({ lifecycle_status: null, on_rent_nonsold_leased: 5 }), { today: TODAY, months: 12 })
+    && financeLeaseTag("FL2429") === FINANCE_LEASE_TAG
+    && financeLeaseTag("FL2429") === "Finance lease (FL)",
+  "FL is included and tagged",
+);
+ok(financeLeaseTag("OL1739") === null, "OL number is not a finance lease");
+ok(financeLeaseTag("xOL1804") === null, "xOL number is not a finance lease");
+ok(financeLeaseTag("  FL2120") === "Finance lease (FL)", "FL prefix allows surrounding space");
+ok(!FINANCE_LEASE_TAG.toLowerCase().includes("confirm"), "finance lease tag has no confirm wording");
+ok(renewalAutoNotes("asset_report") === null, "generated FL renewal has no warning note");
+ok(renewalAutoNotes("asset_report_multi_term") === "multi-term: check car groups", "multi-term note unchanged");
 ok(renewalExclusion(rider({ on_rent_nonsold_leased: 0 }), { today: TODAY, months: 12 }) === "on_rent", "sold / zero on-rent excluded");
 ok(renewalExclusion(rider({ expiration_source: "car_records" }), { today: TODAY, months: 12 }) === "expiry_source", "car_records excluded");
 ok(renewalExclusion(rider({ expiration_source: null }), { today: TODAY, months: 12 }) === "expiry_source", "null source excluded");

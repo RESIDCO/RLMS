@@ -1,7 +1,8 @@
 /**
  * CRM Phase 1 types and pure rules.
- * Renewal selection matches the generator: active, non-placeholder, at least one
- * on-rent non-Sold Leased car, governed expiry inside [today, today+months).
+ * Renewal selection matches the generator: an active rider (see isActiveRider),
+ * non-placeholder, at least one on-rent non-Sold Leased car, governed expiry
+ * inside [today, today+months).
  */
 
 export const OPPORTUNITY_TYPES = [
@@ -50,6 +51,9 @@ export type GovernedExpirySource = (typeof GOVERNED_EXPIRY_SOURCES)[number];
 
 export const MULTI_TERM_RENEWAL_NOTE = "multi-term: check car groups";
 
+/** Informational only. Finance leases are long-term, NET, and defined upfront. */
+export const FINANCE_LEASE_TAG = "Finance lease (FL)";
+
 export const OPPORTUNITY_TYPE_LABEL: Record<OpportunityType, string> = {
   renewal: "Renewal",
   relet: "Re-lease",
@@ -76,6 +80,8 @@ export type OpportunityRow = {
   account_id: number;
   master_lease_id: number | null;
   rider_id: number | null;
+  /** Read-model only. Loaded from riders.rider_name; not an opportunities column. */
+  rider_name?: string | null;
   company_id: number | null;
   type: OpportunityType;
   stage: OpportunityStage;
@@ -183,6 +189,44 @@ export type RenewalExclusion =
   | "window"
   | "open_renewal";
 
+export type ActiveRiderInput = {
+  lifecycle_status: string | null;
+  is_placeholder: boolean;
+  /**
+   * Active, on-rent, non-Sold, fleet_status Leased cars.
+   * Sold, idle, and off-rent cars are not counted.
+   */
+  on_rent_nonsold_leased: number;
+};
+
+/**
+ * One rule for the renewal generator, Account 360 OL count, and watch lists.
+ * A rider is active when lifecycle_status is 'active', or when lifecycle_status
+ * is null and it has at least one on-rent non-Sold Leased car on a
+ * non-placeholder lessee. off_lease_pending_remarketing never counts. Any other
+ * status does not count. Null riders that only sit in Sold, idle, or off-rent
+ * buckets stay excluded.
+ */
+export function isActiveRider(row: ActiveRiderInput): boolean {
+  if (row.lifecycle_status === "active") return true;
+  if (row.lifecycle_status == null) {
+    return !row.is_placeholder && row.on_rent_nonsold_leased >= 1;
+  }
+  return false;
+}
+
+/** OL numbers that start with FL. Display tag only; the generator does not write a note. */
+export function financeLeaseTag(olNumber: string | null | undefined): typeof FINANCE_LEASE_TAG | null {
+  const code = String(olNumber ?? "").trim();
+  return code.startsWith("FL") ? FINANCE_LEASE_TAG : null;
+}
+
+/** Generator note. Finance leases are tagged in the UI and do not get a note. */
+export function renewalAutoNotes(expirationSource: string | null | undefined): string | null {
+  if (expirationSource === "asset_report_multi_term") return MULTI_TERM_RENEWAL_NOTE;
+  return null;
+}
+
 export type RenewalRiderInput = {
   lifecycle_status: string | null;
   is_placeholder: boolean;
@@ -195,7 +239,7 @@ export type RenewalRiderInput = {
 
 export function renewalExclusion(row: RenewalRiderInput, opts: { today: string; months: number }): RenewalExclusion | null {
   if (row.is_placeholder) return "placeholder";
-  if (row.lifecycle_status !== "active") return "lifecycle";
+  if (!isActiveRider(row)) return "lifecycle";
   if (!(row.on_rent_nonsold_leased >= 1)) return "on_rent";
   if (!isGovernedExpirySource(row.expiration_source)) return "expiry_source";
   if (!row.expiration_date || !inRenewalWindow(row.expiration_date, opts.today, opts.months)) return "window";
@@ -292,7 +336,7 @@ export type WatchRow = {
   lease_status: string | null;
   on_rent_cars: number;
   unsold_cars: number;
-  bucket: "holdover" | "check_date" | "off_lease";
+  bucket: "holdover" | "check_date" | "off_lease" | "unclassified";
   reason: string;
 };
 

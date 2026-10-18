@@ -5,6 +5,7 @@ export type AccountKpiFilter =
   | { kind: "tag"; tag: "good" | "watch" | "risk" }
   | null;
 
+/** Previous list shape. Dashboard still links here; year tiles are not filters anymore. */
 export type AccountMgmtListState = {
   manager: string | null;
   kpi: AccountKpiFilter;
@@ -12,44 +13,92 @@ export type AccountMgmtListState = {
   search: string;
 };
 
-export const UNASSIGNED_AM = "unassigned";
+export type BookSegment = "mybook" | "client" | "former" | "prospect";
+export type BookChip = "renewals" | "overdue" | "never" | "handoffs" | "unowned" | "untiered";
 
-export function readAccountMgmtListState(): AccountMgmtListState {
+export type AccountBookListState = {
+  segment: BookSegment;
+  owner: string;
+  tier: string;
+  q: string;
+  chip: BookChip | null;
+};
+
+export const UNASSIGNED_AM = "unassigned";
+export const ME_STORAGE_KEY = "rlms.am.me";
+
+const SEGMENTS = new Set<string>(["mybook", "client", "former", "prospect"]);
+const CHIPS = new Set<string>(["renewals", "overdue", "never", "handoffs", "unowned", "untiered"]);
+
+export function readMeInitials(): string {
+  try {
+    return window.localStorage.getItem(ME_STORAGE_KEY)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeMeInitials(initials: string) {
+  const value = initials.trim();
+  try {
+    if (value) window.localStorage.setItem(ME_STORAGE_KEY, value);
+    else window.localStorage.removeItem(ME_STORAGE_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+export function readAccountBookState(): AccountBookListState {
   const p = hashSearchParams();
-  const am = p.get("am");
-  const kpiRaw = p.get("kpi") ?? "";
-  let kpi: AccountKpiFilter = null;
-  const year = kpiRaw.match(/^y:(\d{4})$/);
-  const tag = kpiRaw.match(/^t:(good|watch|risk)$/);
-  if (year) kpi = { kind: "year", year: Number(year[1]) };
-  else if (tag) kpi = { kind: "tag", tag: tag[1] as "good" | "watch" | "risk" };
+  const segment = p.get("segment") ?? "mybook";
+  const chip = p.get("chip") ?? "";
   return {
-    manager: am && am.trim() ? am.trim() : null,
-    kpi,
-    showInactive: p.get("inactive") === "1",
-    search: p.get("q") ?? "",
+    segment: SEGMENTS.has(segment) ? (segment as BookSegment) : "mybook",
+    owner: p.get("owner")?.trim() || "any",
+    tier: p.get("tier")?.trim() || "any",
+    q: p.get("q") ?? "",
+    chip: CHIPS.has(chip) ? (chip as BookChip) : null,
   };
 }
 
-export function accountMgmtQueryString(state: AccountMgmtListState): string {
+/** @deprecated Use readAccountBookState. Kept so older callers still compile. */
+export function readAccountMgmtListState(): AccountBookListState {
+  return readAccountBookState();
+}
+
+export function accountBookQueryString(state: AccountBookListState): string {
   const p = new URLSearchParams();
-  if (state.manager) p.set("am", state.manager);
-  if (state.kpi?.kind === "year") p.set("kpi", `y:${state.kpi.year}`);
-  if (state.kpi?.kind === "tag") p.set("kpi", `t:${state.kpi.tag}`);
-  if (state.showInactive) p.set("inactive", "1");
-  if (state.search.trim()) p.set("q", state.search.trim());
+  if (state.segment && state.segment !== "mybook") p.set("segment", state.segment);
+  if (state.owner && state.owner !== "any") p.set("owner", state.owner);
+  if (state.tier && state.tier !== "any") p.set("tier", state.tier);
+  if (state.q.trim()) p.set("q", state.q.trim());
+  if (state.chip) p.set("chip", state.chip);
   const s = p.toString();
   return s ? `?${s}` : "";
 }
 
-export function accountListPath(state: AccountMgmtListState): string {
-  return `/accounts${accountMgmtQueryString(state)}`;
+function isLegacyState(state: AccountBookListState | AccountMgmtListState): state is AccountMgmtListState {
+  return "manager" in state && !("segment" in state);
 }
 
-export function accountDetailPath(id: number, state: AccountMgmtListState): string {
-  return `/accounts/${id}${accountMgmtQueryString(state)}`;
+export function accountListPath(state: AccountBookListState | AccountMgmtListState): string {
+  if (isLegacyState(state)) {
+    const owner = !state.manager ? "any" : state.manager === UNASSIGNED_AM ? "unowned" : state.manager;
+    return accountListPath({
+      segment: "client",
+      owner,
+      tier: "any",
+      q: state.search ?? "",
+      chip: null,
+    });
+  }
+  return `/accounts${accountBookQueryString(state)}`;
 }
 
-export function replaceAccountMgmtListState(state: AccountMgmtListState) {
+export function accountDetailPath(id: number, state: AccountBookListState): string {
+  return `/accounts/${id}${accountBookQueryString(state)}`;
+}
+
+export function replaceAccountBookState(state: AccountBookListState) {
   navigateHash(accountListPath(state), { replace: true });
 }

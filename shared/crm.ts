@@ -1,3 +1,4 @@
+import type { AccountBrief, RentRoll, TouchStatus } from "./account-mgmt";
 import { isPlaceholderLessee } from "./lease-mgmt";
 
 /**
@@ -368,6 +369,8 @@ export type RenewalPreviewRow = {
   account_name: string | null;
   company_id: number | null;
   owner: string | null;
+  owner_of_record: string | null;
+  incoming_owner: string | null;
   car_count: number;
   car_type: string | null;
   current_rate: number | null;
@@ -444,7 +447,8 @@ export type Account360Payload = {
     name: string;
     account_manager: string | null;
     notes: string | null;
-    kind: "client" | "prospect";
+    kind: "client" | "prospect" | "former";
+    touch_cadence_days: number | null;
   };
   counts: {
     lessees: number;
@@ -456,6 +460,22 @@ export type Account360Payload = {
   };
   next_expiry: string | null;
   last_activity_at: string | null;
+  owner: {
+    of_record: string | null;
+    incoming: string | null;
+    effective: string | null;
+    handoff_id: number | null;
+    handoff_status: string | null;
+    handoff_pct: number | null;
+  };
+  tier: string | null;
+  cadence_days: number | null;
+  last_touch_at: string | null;
+  next_touch_due: string | null;
+  touch_status: TouchStatus;
+  rent_roll: RentRoll | null;
+  brief: AccountBrief | null;
+  activities: CrmActivityRow[];
   expiry_bars: { month: string; cars: number }[];
   ols: Account360Ol[];
   contacts: { role: string; people: Account360Contact[] }[];

@@ -3,12 +3,18 @@ import { fetchAllRows } from "./fetch-all";
 import { assertAccountImporterPatch } from "@shared/rider-import-guard";
 import { countActiveCarsByRiderId } from "./rider-car-counts";
 import { isPlaceholderLessee } from "@shared/lease-mgmt";
+import { recordChange, withChangeGroupResult } from "./change-log";
+import { applyAccountInsert, applyAccountUpdate, type AccountPatchInput, type AccountWriteDeps } from "./account-write";
+
+const ACCOUNT_COLUMNS = "id, name, notes, account_manager, tier, touch_cadence_days, created_at, updated_at";
 
 export type Account = {
   id: number;
   name: string;
   notes: string | null;
   account_manager: string | null;
+  tier: string | null;
+  touch_cadence_days: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -38,7 +44,7 @@ export async function listAccounts(): Promise<AccountListRow[]> {
     fetchAllRows<Account>((from, to) =>
       supabaseAdmin
         .from("accounts")
-        .select("id, name, notes, account_manager, created_at, updated_at")
+        .select(ACCOUNT_COLUMNS)
         .order("name", { ascending: true })
         .range(from, to)
     ),
@@ -62,73 +68,82 @@ export async function listAccounts(): Promise<AccountListRow[]> {
   }));
 }
 
-export async function createAccount(input: {
-  name: string;
-  notes?: string | null;
-  account_manager?: string | null;
-}) {
-  const name = String(input.name ?? "").trim();
-  if (!name) {
-    const err = new Error("Name is required");
-    (err as any).status = 400;
-    throw err;
-  }
-  const row: Record<string, unknown> = {
-    name,
-    notes: input.notes?.trim() || null,
+function liveAccountDeps(): AccountWriteDeps {
+  return {
+    async get(id) {
+      const { data, error } = await supabaseAdmin.from("accounts").select(ACCOUNT_COLUMNS).eq("id", id).maybeSingle();
+      if (error) throw error;
+      return (data as Record<string, unknown> | null) ?? null;
+    },
+    async update(id, updates) {
+      const { data, error } = await supabaseAdmin
+        .from("accounts")
+        .update(updates)
+        .eq("id", id)
+        .select(ACCOUNT_COLUMNS)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as Record<string, unknown> | null) ?? null;
+    },
+    async insert(row) {
+      const { data, error } = await supabaseAdmin.from("accounts").insert(row).select(ACCOUNT_COLUMNS).single();
+      if (error) throw error;
+      return data as Record<string, unknown>;
+    },
+    async activeOwners() {
+      const { data, error } = await supabaseAdmin.from("territory_owners").select("initials").eq("is_active", true);
+      if (error) throw error;
+      return new Set((data ?? []).map((row) => String(row.initials)));
+    },
+    async record(opts) {
+      await recordChange(opts);
+    },
+    inGroup(actor, fn) {
+      return withChangeGroupResult(actor, fn);
+    },
   };
-  if (input.account_manager !== undefined) {
-    row.account_manager = String(input.account_manager ?? "").trim() || null;
-  }
-  const { data, error } = await supabaseAdmin
-    .from("accounts")
-    .insert(row)
-    .select("id, name, notes, account_manager, created_at, updated_at")
-    .single();
-  if (error) {
-    if (isUniqueNameError(error)) {
-      const err = new Error("An account with that name already exists");
-      (err as any).status = 409;
-      throw err;
-    }
-    throw error;
-  }
-  return data;
 }
 
-export async function updateAccount(
-  id: number,
-  input: { name?: string; notes?: string | null; account_manager?: string | null },
+function rethrowAccountWrite(error: unknown): never {
+  if (isUniqueNameError(error)) {
+    const err = new Error("An account with that name already exists");
+    (err as { status?: number }).status = 409;
+    throw err;
+  }
+  throw error;
+}
+
+export async function createAccount(
+  input: { name: string; notes?: string | null; account_manager?: string | null },
+  actor: string,
 ) {
-  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (input.name !== undefined) {
-    const name = String(input.name).trim();
-    if (!name) {
-      const err = new Error("Name is required");
-      (err as any).status = 400;
-      throw err;
-    }
-    updates.name = name;
+  try {
+    return await applyAccountInsert(input, actor, liveAccountDeps());
+  } catch (error) {
+    rethrowAccountWrite(error);
   }
-  if (input.notes !== undefined) updates.notes = input.notes?.trim() || null;
-  if (input.account_manager !== undefined) {
-    updates.account_manager = String(input.account_manager ?? "").trim() || null;
+}
+
+export async function updateAccount(id: number, input: AccountPatchInput, actor: string) {
+  try {
+    return await applyAccountUpdate(id, input, actor, liveAccountDeps());
+  } catch (error) {
+    rethrowAccountWrite(error);
   }
+}
+
+export async function listAccountOwners(): Promise<{ initials: string; full_name: string; sort_order: number }[]> {
   const { data, error } = await supabaseAdmin
-    .from("accounts")
-    .update(updates)
-    .eq("id", id)
-    .select("id, name, notes, account_manager, created_at, updated_at")
-    .maybeSingle();
-  if (error) {
-    if (isUniqueNameError(error)) {
-      const err = new Error("An account with that name already exists");
-      (err as any).status = 409;
-      throw err;
-    }
-    throw error;
-  }
-  return data;
+    .from("territory_owners")
+    .select("initials, full_name, sort_order")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    initials: String(row.initials),
+    full_name: String(row.full_name ?? row.initials),
+    sort_order: Number(row.sort_order ?? 0),
+  }));
 }
 
 function rejectAccountLink(message: string, status = 409): never {
@@ -486,7 +501,7 @@ export type AccountOlRow = {
 export async function getAccount(id: number) {
   const { data, error } = await supabaseAdmin
     .from("accounts")
-    .select("id, name, notes, account_manager, created_at, updated_at")
+    .select(ACCOUNT_COLUMNS)
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
@@ -555,17 +570,6 @@ export async function getAccount(id: number) {
     },
     programs: (programs ?? []) as LinkedProgram[],
   };
-}
-
-export async function patchRiderStatusTag(riderId: number, statusTag: StatusTag | null) {
-  const { data, error } = await supabaseAdmin
-    .from("riders")
-    .update({ status_tag: statusTag })
-    .eq("id", riderId)
-    .select("id, status_tag")
-    .maybeSingle();
-  if (error) throw error;
-  return data;
 }
 
 export async function listRiderCarsForAccountMgmt(riderId: number) {

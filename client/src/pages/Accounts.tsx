@@ -1,905 +1,399 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useRoute } from "wouter";
-import { apiRequest } from "@/lib/queryClient";
+import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
 import PageHeader from "@/components/PageHeader";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
-import { useToast } from "@/hooks/use-toast";
-import { useCanEdit, usePermissions } from "@/lib/AuthContext";
-import { cn } from "@/lib/utils";
-import { formatCalendarDate } from "@shared/lease-authority";
-import { ArrowLeft, Building2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
-import { programPath } from "@/lib/browse-nav";
-import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
-import { AmCommentThread } from "@/components/AmCommentThread";
-import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
-import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
-import { RailcarDetailSheet } from "@/pages/FleetRegistry";
-import { navigateHash } from "@/lib/hash-location";
+import QuickProspectForm from "@/components/crm/QuickProspectForm";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  UNASSIGNED_AM,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth, useCanEdit } from "@/lib/AuthContext";
+import { apiGet } from "@/lib/queryClient";
+import {
   accountDetailPath,
-  accountListPath,
-  readAccountMgmtListState,
-  replaceAccountMgmtListState,
-  type AccountKpiFilter,
-  type AccountMgmtListState,
+  readAccountBookState,
+  readMeInitials,
+  replaceAccountBookState,
+  writeMeInitials,
+  type AccountBookListState,
+  type BookChip,
+  type BookSegment,
 } from "@/lib/account-mgmt-nav";
+import { cn } from "@/lib/utils";
+import {
+  rentRollLabel,
+  tierLabel,
+  touchStatusClass,
+  TIER_LABEL,
+  TIER_VALUES,
+  type AccountBookResponse,
+  type AccountBookRow,
+  type TouchStatus,
+} from "@shared/account-mgmt";
 
-type StatusTag = "good" | "watch" | "risk";
+type OwnerOption = { initials: string; full_name: string; sort_order: number };
 
-type OverviewAccount = {
-  id: number;
-  name: string;
-  notes: string | null;
-  account_manager: string | null;
-  program_count: number;
-  expire_years: number[];
-  status_tags: StatusTag[];
-  ol_count: number;
-  active_car_count: number;
-  is_inactive: boolean;
-  sold_ol_count?: number;
-  sold_ol_total?: number;
-};
+const CHIPS: { id: BookChip; label: string }[] = [
+  { id: "renewals", label: "Renewals ≤ 6 mo" },
+  { id: "overdue", label: "Touch overdue" },
+  { id: "never", label: "Never touched (tiered)" },
+  { id: "handoffs", label: "Handoffs to me" },
+  { id: "unowned", label: "Unowned clients" },
+  { id: "untiered", label: "No tier" },
+];
 
-type CrmSummaryRow = {
-  account_id: number;
-  next_expiry: string | null;
-  open_opps: number;
-  last_activity_at: string | null;
-};
-
-type Overview = {
-  managers: string[];
-  manager_pills: { name: string; account_count: number }[];
-  unassigned_count: number;
-  all_count: number;
-  expire_years: number[];
-  kpis: {
-    expiring: { year: number; count: number }[];
-    status: { good: number; watch: number; risk: number };
-  };
-  accounts: OverviewAccount[];
-};
-
-type AccountOl = {
-  id: number;
-  rider_name: string;
-  schedule_number: string | null;
-  master_lease_id: number;
-  lease_number: string | null;
-  expiration_date: string | null;
-  status_tag: StatusTag | null;
-  active_car_count: number;
-  is_inactive: boolean;
-  sold?: boolean;
-};
-
-type AccountDetail = {
-  id: number;
-  name: string;
-  notes: string | null;
-  account_manager: string | null;
-  counts: { mlas: number; ols: number; active_cars: number };
-  ols: AccountOl[];
-  programs: { id: number; name: string; status: string | null; account_manager: string | null }[];
-};
-
-type OlCar = {
-  id: number;
-  car_number: string | null;
-  reporting_marks: string | null;
-  car_type: string | null;
-  expiration_date: string | null;
-};
-
-let overviewInvalidateTimer: ReturnType<typeof setTimeout> | null = null;
-function scheduleOverviewInvalidate(qc: QueryClient) {
-  if (overviewInvalidateTimer) clearTimeout(overviewInvalidateTimer);
-  overviewInvalidateTimer = setTimeout(() => {
-    overviewInvalidateTimer = null;
-    qc.invalidateQueries({ queryKey: ["/api/account-management/overview"] });
-  }, 600);
+function money(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return "—";
+  return Number(value).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
-const TAG_LABEL: Record<StatusTag, string> = { good: "Good", watch: "Watch", risk: "Risk" };
-const TAG_CLASS: Record<StatusTag, string> = {
-  good: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  watch: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  risk: "bg-red-500/15 text-red-400 border-red-500/30",
-};
+function chipCount(data: AccountBookResponse | undefined, chip: BookChip): number {
+  if (!data) return 0;
+  switch (chip) {
+    case "renewals":
+      return data.attention.renewals_6mo;
+    case "overdue":
+      return data.attention.touch_overdue;
+    case "never":
+      return data.attention.never_touched_tiered;
+    case "handoffs":
+      return data.attention.handoffs_incoming;
+    case "unowned":
+      return data.attention.unowned_clients.length;
+    case "untiered":
+      return data.attention.untiered;
+    default: {
+      const neverChip: never = chip;
+      return neverChip;
+    }
+  }
+}
+
+function rowMatchesChip(row: AccountBookRow, chip: BookChip, me: string): boolean {
+  switch (chip) {
+    case "renewals":
+      return row.renewal_riders_6mo > 0;
+    case "overdue":
+      return row.touch_status === "overdue";
+    case "never":
+      return row.touch_status === "never";
+    case "handoffs":
+      return Boolean(me) && row.incoming_owner === me;
+    case "unowned":
+      return row.effective_owner == null && row.kind === "client";
+    case "untiered":
+      return row.touch_status === "untiered";
+    default: {
+      const neverChip: never = chip;
+      return neverChip;
+    }
+  }
+}
+
+function statusLabel(status: TouchStatus): string {
+  switch (status) {
+    case "overdue":
+      return "Overdue";
+    case "due_soon":
+      return "Due soon";
+    case "ok":
+      return "On track";
+    case "never":
+      return "Never touched";
+    case "untiered":
+      return "No tier";
+    default: {
+      const neverStatus: never = status;
+      return neverStatus;
+    }
+  }
+}
 
 export default function AccountsPage() {
-  const [match, params] = useRoute("/accounts/:id");
-  if (match && params?.id) return <AccountDetailView id={Number(params.id)} />;
-  return <AccountListView />;
-}
-
-function AccountListView() {
-  const { toast } = useToast();
   const canEdit = useCanEdit();
+  const { role } = useAuth();
   const [, navigate] = useLocation();
-  const initial = readAccountMgmtListState();
-  const [search, setSearch] = useState(initial.search);
-  const [manager, setManager] = useState<string | null>(initial.manager);
-  const [kpi, setKpi] = useState<AccountKpiFilter>(initial.kpi);
-  const [showInactive, setShowInactive] = useState(initial.showInactive);
-  const [createOpen, setCreateOpen] = useState(false);
+  const initial = readAccountBookState();
+  const [segment, setSegment] = useState<BookSegment>(initial.segment);
+  const [owner, setOwner] = useState(initial.owner);
+  const [tier, setTier] = useState(initial.tier);
+  const [q, setQ] = useState(initial.q);
+  const [chip, setChip] = useState<BookChip | null>(initial.chip);
+  const [me, setMe] = useState(readMeInitials);
+  const [prospectOpen, setProspectOpen] = useState(false);
 
-  const listState: AccountMgmtListState = { manager, kpi, showInactive, search };
-
+  const state: AccountBookListState = { segment, owner, tier, q, chip };
   useEffect(() => {
-    replaceAccountMgmtListState(listState);
-  }, [manager, kpi, showInactive, search]);
+    replaceAccountBookState(state);
+  }, [segment, owner, tier, q, chip]);
 
-  const { data, isLoading } = useQuery<Overview>({
-    queryKey: ["/api/account-management/overview", manager, showInactive],
+  const queryOwner = chip === "unowned" ? "unowned" : segment === "mybook" ? me || "any" : owner;
+  const querySegment = chip === "unowned" ? "client" : segment === "mybook" ? "mybook" : segment;
+  const book = useQuery({
+    queryKey: ["/api/accounts/book", querySegment, queryOwner, tier, q],
     queryFn: () => {
       const p = new URLSearchParams();
-      if (manager) p.set("account_manager", manager);
-      if (showInactive) p.set("include_inactive", "1");
-      const q = p.toString() ? `?${p.toString()}` : "";
-      return apiRequest("GET", `/api/account-management/overview${q}`).then((r) => r.json());
+      p.set("segment", querySegment);
+      p.set("owner", queryOwner || "any");
+      if (tier && tier !== "any") p.set("tier", tier);
+      if (q.trim()) p.set("q", q.trim());
+      return apiGet<AccountBookResponse>(`/api/accounts/book?${p.toString()}`);
     },
+    enabled: segment !== "mybook" || Boolean(me) || chip === "unowned",
   });
-  const { data: atSummary } = useQuery<{ flagged: number; pct: number | null }>({
-    queryKey: ["/api/account-transitions/summary"],
-    queryFn: () => apiRequest("GET", "/api/account-transitions/summary").then((r) => r.json()),
+  const owners = useQuery({
+    queryKey: ["/api/account-owners"],
+    queryFn: () => apiGet<OwnerOption[]>("/api/account-owners"),
   });
-  const { data: crmSummary } = useQuery<CrmSummaryRow[]>({
-    queryKey: ["/api/accounts/crm-summary"],
-    queryFn: () => apiRequest("GET", "/api/accounts/crm-summary").then((r) => r.json()),
-    retry: false,
-  });
-  const crmByAccount = useMemo(() => {
-    const map = new Map<number, CrmSummaryRow>();
-    for (const row of crmSummary ?? []) map.set(row.account_id, row);
-    return map;
-  }, [crmSummary]);
 
-  const filtered = useMemo(() => {
-    const rows = data?.accounts ?? [];
-    const q = search.trim().toLowerCase();
-    return rows.filter((a) => {
-      if (kpi?.kind === "year" && !a.expire_years.includes(kpi.year)) return false;
-      if (kpi?.kind === "tag" && !a.status_tags.includes(kpi.tag)) return false;
-      if (!q) return true;
-      return `${a.name} ${a.account_manager ?? ""} ${a.notes ?? ""}`.toLowerCase().includes(q);
-    });
-  }, [data?.accounts, search, kpi]);
+  const rows = useMemo(() => {
+    const list = book.data?.rows ?? [];
+    if (!chip || chip === "unowned") return list;
+    return list.filter((row) => rowMatchesChip(row, chip, me));
+  }, [book.data?.rows, chip, me]);
 
-  function toggleKpi(next: AccountKpiFilter) {
-    if (
-      kpi &&
-      next &&
-      ((kpi.kind === "year" && next.kind === "year" && kpi.year === next.year) ||
-        (kpi.kind === "tag" && next.kind === "tag" && kpi.tag === next.tag))
-    ) {
-      setKpi(null);
-      return;
-    }
-    setKpi(next);
+  const snapshot = book.data?.rows.find((row) => row.rent_roll?.snapshot_month)?.rent_roll?.snapshot_month ?? null;
+  const rentHint = rentRollLabel(snapshot);
+
+  function chooseMe(value: string) {
+    setMe(value);
+    writeMeInitials(value);
   }
 
-  const kpiLabel =
-    kpi?.kind === "year" ? `Expiring ${kpi.year}` : kpi?.kind === "tag" ? TAG_LABEL[kpi.tag] : null;
-  const showingLabel =
-    manager === UNASSIGNED_AM
-      ? "Unassigned accounts"
-      : manager
-        ? manager
-        : "All accounts";
+  function toggleChip(next: BookChip) {
+    setChip((current) => (current === next ? null : next));
+  }
+
+  function exportCsv() {
+    const headers = ["Account", "Owner", "Tier", "On-rent cars", "Rent/mo", "Next expiry", "Open opps", "Last touch", "Next touch due"];
+    const lines = rows.map((row) => [
+      row.name,
+      row.incoming_owner ? `${row.owner_of_record ?? "—"} → ${row.incoming_owner}` : row.effective_owner ?? "",
+      tierLabel(row.tier),
+      row.on_rent_cars,
+      canEdit && row.rent_roll ? row.rent_roll.total : "",
+      row.next_expiry ?? "",
+      row.open_opps,
+      row.last_touch_at?.slice(0, 10) ?? "",
+      row.next_touch_due ?? "",
+    ]);
+    const csv = [headers, ...lines]
+      .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "my-book.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const counts = book.data?.counts;
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
-        title="Account Management"
-        subtitle="OL status, comments, and expiration — owned here, not by Lease Management"
+        title="My Book"
+        subtitle="Clients, former clients, and prospects. Lease Management keeps the official owner."
         actions={
-          canEdit ? (
-            <Button size="sm" onClick={() => setCreateOpen(true)} data-testid="button-new-account">
-              <Plus className="h-4 w-4" /> New Account
-            </Button>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            {canEdit ? (
+              <Button size="sm" onClick={() => setProspectOpen(true)}>+ Prospect</Button>
+            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline">More</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => navigate("/account-transitions")}>Handoffs</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/territory-map")}>Territory map</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportCsv}>Export CSV</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-4">
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">Account Manager</span>
-          <FilterPill active={!manager} onClick={() => setManager(null)}>
-            ALL{data ? ` · ${data.all_count}` : ""}
-          </FilterPill>
-          {(data?.manager_pills ?? []).map((m) => (
-            <FilterPill key={m.name} active={manager === m.name} onClick={() => setManager(m.name)}>
-              {m.name} · {m.account_count}
-            </FilterPill>
-          ))}
-          <button
-            type="button"
-            onClick={() => setManager(UNASSIGNED_AM)}
-            className={cn(
-              "h-7 px-3 rounded-full text-xs border border-dashed transition-colors",
-              manager === UNASSIGNED_AM
-                ? "bg-amber-500/15 text-amber-200 border-amber-500/50"
-                : "border-amber-500/35 text-amber-400/90 hover:text-amber-200 hover:border-amber-500/50",
-            )}
-            title="Accounts with no account manager set"
-            data-testid="filter-unassigned-am"
-          >
-            Unassigned{data ? ` · ${data.unassigned_count}` : ""}
-          </button>
-        </div>
-
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Deals Expiring</div>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            {(data?.kpis.expiring ?? data?.expire_years.map((year) => ({ year, count: 0 })) ?? []).map((tile) => (
-              <KpiTile
-                key={tile.year}
-                label={String(tile.year)}
-                value={isLoading ? "—" : tile.count}
-                active={kpi?.kind === "year" && kpi.year === tile.year}
-                onClick={() => toggleKpi({ kind: "year", year: tile.year })}
-              />
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">OL Status</div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {(["good", "watch", "risk"] as StatusTag[]).map((tag) => (
-              <KpiTile
-                key={tag}
-                label={TAG_LABEL[tag]}
-                value={isLoading ? "—" : data?.kpis.status[tag] ?? 0}
-                active={kpi?.kind === "tag" && kpi.tag === tag}
-                tone={tag}
-                onClick={() => toggleKpi({ kind: "tag", tag })}
-              />
-            ))}
-          </div>
-        </div>
-
-        <details className="rounded-xl border border-card-border bg-card shadow-card">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">More</summary>
-          <div className="px-4 pb-4 space-y-4">
-        <div className="rounded-xl border border-card-border bg-card shadow-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Account Transitions</div>
-            <div className="text-2xl font-semibold font-mono-num mt-1">
-              {atSummary?.pct == null ? "Not started" : `${atSummary.pct}%`}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {atSummary
-                ? atSummary.flagged === 0
-                  ? "No accounts flagged yet — set Incoming AM on a handoff to start the count."
-                  : `${atSummary.pct}% — ${atSummary.flagged} accounts flagged`
-                : "Loading…"}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => navigate("/account-transitions")}
-            data-testid="button-enter-account-transitions"
-          >
-            Enter Account Transitions
-          </Button>
-        </div>
-
-        <div className="rounded-xl border border-card-border bg-card shadow-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Territory Map</div>
-            <div className="text-2xl font-semibold font-mono-num mt-1">Sales · Contacts</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              County territories by rep, and contact locations from the Contacts module.
-            </p>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => navigate("/territory-map")}
-            data-testid="button-enter-territory-map"
-          >
-            Open Territory Map
-          </Button>
-        </div>
-          </div>
-        </details>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <ClearableSearchInput
-            className="relative w-full max-w-sm shrink-0 flex-none"
-            inputClassName="h-9"
-            placeholder="Search accounts…"
-            value={search}
-            onChange={setSearch}
-          />
-          <label
-            className="flex items-center gap-2 h-9 px-2 rounded-md border border-border bg-background text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap"
-            data-testid="toggle-show-inactive-ols"
-          >
-            <Checkbox
-              checked={showInactive}
-              onCheckedChange={(v) => setShowInactive(v === true)}
-            />
-            Show inactive OLs
-          </label>
-          {kpiLabel && (
+          {(
+            [
+              ["mybook", "My Book"],
+              ["client", `Clients${counts ? ` (${counts.client})` : ""}`],
+              ["former", `Former${counts ? ` (${counts.former})` : ""}`],
+              ["prospect", `Prospects${counts ? ` (${counts.prospect})` : ""}`],
+            ] as const
+          ).map(([id, label]) => (
             <button
+              key={id}
               type="button"
-              className="text-xs border border-border rounded-full px-2.5 py-1 text-muted-foreground hover:text-foreground"
-              onClick={() => setKpi(null)}
+              onClick={() => setSegment(id)}
+              className={cn(
+                "h-8 px-3 rounded-full text-xs border",
+                segment === id ? "bg-primary/15 border-primary/40 text-foreground" : "border-border text-muted-foreground",
+              )}
             >
-              Filter: {kpiLabel} <X className="inline h-3 w-3 ml-0.5" />
+              {label}
             </button>
-          )}
+          ))}
         </div>
 
-        {isLoading ? (
+        <div className="flex flex-wrap gap-2 items-center">
+          <label className="text-xs text-muted-foreground">
+            I am
+            <select
+              className="ml-2 h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={me}
+              onChange={(e) => chooseMe(e.target.value)}
+            >
+              <option value="">Choose initials</option>
+              {(owners.data ?? []).map((row) => (
+                <option key={row.initials} value={row.initials}>{row.initials} · {row.full_name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-muted-foreground">
+            Owner
+            <select
+              className="ml-2 h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={owner}
+              onChange={(e) => setOwner(e.target.value)}
+            >
+              <option value="any">Anyone</option>
+              <option value="unowned">Unowned</option>
+              {(owners.data ?? []).map((row) => (
+                <option key={row.initials} value={row.initials}>{row.initials}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-muted-foreground">
+            Tier
+            <select
+              className="ml-2 h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={tier}
+              onChange={(e) => setTier(e.target.value)}
+            >
+              <option value="any">Any tier</option>
+              <option value="none">No tier</option>
+              {TIER_VALUES.map((value) => (
+                <option key={value} value={value}>{TIER_LABEL[value]}</option>
+              ))}
+            </select>
+          </label>
+          <ClearableSearchInput
+            className="relative w-full max-w-sm"
+            inputClassName="h-8"
+            placeholder="Search accounts…"
+            value={q}
+            onChange={setQ}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {CHIPS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => toggleChip(item.id)}
+              className={cn(
+                "h-7 px-3 rounded-full text-xs border",
+                chip === item.id ? "bg-amber-500/15 border-amber-500/40" : "border-border text-muted-foreground",
+              )}
+            >
+              {item.label} · {chipCount(book.data, item.id)}
+            </button>
+          ))}
+        </div>
+
+        {segment === "mybook" && !me && chip !== "unowned" ? (
+          <p className="text-sm text-muted-foreground">Choose “I am” to open My Book. Nothing is saved to the database.</p>
+        ) : book.isLoading ? (
           <Skeleton className="h-40 w-full" />
+        ) : book.isError ? (
+          <p className="text-sm text-destructive">{book.error instanceof Error ? book.error.message : "Could not load My Book"}</p>
         ) : (
-          <div className="rounded-xl border border-card-border bg-card overflow-hidden">
-            <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border flex flex-wrap items-center justify-between gap-2">
-              <span>Showing: {showingLabel}</span>
-            </div>
+          <div className="rounded-xl border border-card-border bg-card overflow-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <tr>
-                  <th className="text-left font-medium px-4 py-2">Name</th>
-                  <th className="text-left font-medium px-4 py-2">Account Manager</th>
-                  <th className="text-right font-medium px-4 py-2"># OLs</th>
-                  <th className="text-right font-medium px-4 py-2"># Active Cars</th>
-                  <th className="text-left font-medium px-4 py-2 hidden sm:table-cell">Programs</th>
-                  <th className="text-left font-medium px-4 py-2">Next expiry</th>
-                  <th className="text-right font-medium px-4 py-2">Open opps</th>
-                  <th className="text-left font-medium px-4 py-2">Last contact</th>
+                  {["Account", "Owner", "Tier", "On-rent cars", ...(canEdit ? ["Rent/mo"] : []), "Next expiry", "Open opps", "Last touch", "Next touch due"].map((label) => (
+                    <th key={label} className="text-left font-medium px-3 py-2">
+                      {label === "Rent/mo" ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild><span>{label}</span></TooltipTrigger>
+                          <TooltipContent>{rentHint}</TooltipContent>
+                        </Tooltip>
+                      ) : label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((a) => (
-                  <tr key={a.id} className="border-t border-border hover:bg-muted/20">
-                    <td className="px-4 py-2">
-                      <Link href={accountDetailPath(a.id, listState)} className="font-medium text-foreground hover:underline">
-                        {a.name}
-                      </Link>
-                      <SoldRollupBadge sold={a.sold_ol_count ?? 0} total={a.sold_ol_total ?? 0} />
-                      {a.is_inactive && (
-                        <span className="ml-2">
-                          <InactiveFleetBadge active={false} />
+                {rows.map((row) => (
+                  <tr key={row.account_id} className="border-t border-border">
+                    <td className="px-3 py-2">
+                      <Link href={accountDetailPath(row.account_id, state)} className="font-medium hover:underline">{row.name}</Link>
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.incoming_owner ? (
+                        <span title={row.handoff_pct == null ? "Open handoff" : `Handoff ${row.handoff_pct}%`}>
+                          {row.owner_of_record || "—"} → {row.incoming_owner}
                         </span>
+                      ) : (
+                        row.effective_owner || "—"
                       )}
                     </td>
-                    <td className="px-4 py-2 text-muted-foreground">{a.account_manager || ""}</td>
-                    <td className="px-4 py-2 text-right font-mono-num">{a.ol_count}</td>
-                    <td className="px-4 py-2 text-right font-mono-num">{a.active_car_count}</td>
-                    <td className="px-4 py-2 text-muted-foreground hidden sm:table-cell">{a.program_count || ""}</td>
-                    <td className="px-4 py-2 font-mono-num">{crmByAccount.get(a.id)?.next_expiry ?? "—"}</td>
-                    <td className="px-4 py-2 text-right font-mono-num">{crmByAccount.get(a.id)?.open_opps ?? "—"}</td>
-                    <td className="px-4 py-2 font-mono-num">{crmByAccount.get(a.id)?.last_activity_at?.slice(0, 10) || "—"}</td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
-                      No accounts match.
+                    <td className="px-3 py-2">{tierLabel(row.tier)}</td>
+                    <td className="px-3 py-2 font-mono-num">{row.on_rent_cars}</td>
+                    {canEdit ? (
+                      <td className="px-3 py-2 font-mono-num">
+                        {row.rent_roll ? money(row.rent_roll.total) : "—"}
+                        {row.rent_roll && row.rent_roll.riders_without_summary > 0 ? (
+                          <span title={`${row.rent_roll.riders_without_summary} OLs not in import`}> †</span>
+                        ) : null}
+                      </td>
+                    ) : null}
+                    <td className="px-3 py-2 font-mono-num">{row.next_expiry ?? "—"}</td>
+                    <td className="px-3 py-2 font-mono-num">{row.open_opps}</td>
+                    <td className="px-3 py-2 font-mono-num">{row.last_touch_at?.slice(0, 10) ?? "—"}</td>
+                    <td className={cn("px-3 py-2 font-mono-num", touchStatusClass(row.touch_status))} title={statusLabel(row.touch_status)}>
+                      {row.next_touch_due ?? statusLabel(row.touch_status)}
                     </td>
                   </tr>
-                )}
+                ))}
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={canEdit ? 9 : 8} className="px-3 py-8 text-center text-muted-foreground">No accounts match.</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
         )}
+        {role ? null : <p className="text-xs text-muted-foreground">Sign in to work this book.</p>}
       </div>
-      <NewAccountDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => {
-          setCreateOpen(false);
-          toast({ title: "Account created" });
-        }}
-      />
-    </div>
-  );
-}
-
-function SoldBadge({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex align-middle text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30",
-        className,
-      )}
-    >
-      SOLD
-    </span>
-  );
-}
-
-function SoldRollupBadge({ sold, total }: { sold: number; total: number }) {
-  if (total <= 0 || sold <= 0) return null;
-  if (sold >= total) {
-    return (
-      <span className="ml-2">
-        <SoldBadge />
-      </span>
-    );
-  }
-  return (
-    <span className="ml-2 inline-flex align-middle text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded border border-umler-amber/25 text-umler-amber/80">
-      {sold}/{total} SOLD
-    </span>
-  );
-}
-
-function FilterPill({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "h-7 px-3 rounded-full text-xs border transition-colors",
-        active
-          ? "bg-primary/15 text-foreground border-primary/40"
-          : "border-border text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function KpiTile({
-  label,
-  value,
-  active,
-  onClick,
-  tone,
-}: {
-  label: string;
-  value: number | string;
-  active: boolean;
-  onClick: () => void;
-  tone?: StatusTag;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-xl border bg-card shadow-card p-4 text-left transition-all",
-        active ? "border-primary/50 ring-1 ring-primary/30" : "border-card-border hover:border-border",
-        tone && active ? TAG_CLASS[tone] : "",
-      )}
-    >
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-2xl font-semibold font-mono-num mt-1">{value}</div>
-    </button>
-  );
-}
-
-function AccountDetailView({ id }: { id: number }) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [, navigate] = useLocation();
-  const canEdit = useCanEdit();
-  const { canEditAccountMgmtTags, canEditAccountMgmtComments, canDeleteAccountMgmtComments } = usePermissions();
-  const listState = readAccountMgmtListState();
-  const [showInactive, setShowInactive] = useState(listState.showInactive);
-  const { data, isLoading } = useQuery<AccountDetail>({
-    queryKey: ["/api/accounts", id],
-    queryFn: () => apiRequest("GET", `/api/accounts/${id}`).then((r) => r.json()),
-  });
-  const [name, setName] = useState<string | null>(null);
-  const [notes, setNotes] = useState<string | null>(null);
-  const [accountManager, setAccountManager] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const [sheetCarId, setSheetCarId] = useState<number | null>(null);
-  const displayName = name ?? data?.name ?? "";
-  const displayNotes = notes ?? data?.notes ?? "";
-  const displayManager = accountManager ?? data?.account_manager ?? "";
-
-  const visibleOls = useMemo(() => {
-    const rows = data?.ols ?? [];
-    if (showInactive) return rows;
-    return rows.filter((ol) => !ol.is_inactive);
-  }, [data?.ols, showInactive]);
-
-  const visibleCounts = useMemo(() => {
-    const mlas = new Set(visibleOls.map((ol) => ol.master_lease_id));
-    return {
-      mlas: mlas.size,
-      ols: visibleOls.length,
-      active_cars: visibleOls.reduce((n, ol) => n + (ol.active_car_count ?? 0), 0),
-    };
-  }, [visibleOls]);
-
-  function setDetailInactive(next: boolean) {
-    setShowInactive(next);
-    navigateHash(accountDetailPath(id, { ...listState, showInactive: next }), { replace: true });
-  }
-
-  const save = useMutation({
-    mutationFn: () =>
-      apiRequest("PATCH", `/api/accounts/${id}`, {
-        name: displayName,
-        notes: displayNotes,
-        account_manager: displayManager.trim() || null,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
-      toast({ title: "Account saved" });
-    },
-    onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
-  });
-
-  if (isLoading || !data) {
-    return (
-      <div className="p-8">
-        <Skeleton className="h-32 w-full max-w-xl" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="h-full min-h-0 flex flex-col overflow-hidden">
-      <PageHeader
-        title={data.name}
-        subtitle="Account"
-        actions={
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-            onClick={() => navigate(accountListPath({ ...listState, showInactive }))}
-            data-testid="button-back-accounts"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to accounts
-          </button>
-        }
-      />
-      <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-5 space-y-6 max-w-5xl">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          {data.account_manager ? (
-            <span className="h-7 px-3 rounded-full text-xs border border-border">{data.account_manager}</span>
-          ) : (
-            <span className="text-xs text-muted-foreground">No account manager</span>
-          )}
-          <span className="text-muted-foreground font-mono-num">
-            {visibleCounts.mlas} MLA · {visibleCounts.ols} OL · {visibleCounts.active_cars} active cars
-          </span>
-          <label
-            className="flex items-center gap-2 h-7 px-2 rounded-md border border-border bg-background text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap"
-            data-testid="toggle-show-inactive-ols-detail"
-          >
-            <Checkbox
-              checked={showInactive}
-              onCheckedChange={(v) => setDetailInactive(v === true)}
-            />
-            Show inactive OLs
-          </label>
-        </div>
-        <p className="text-xs text-muted-foreground max-w-3xl">
-          Status tags and notes are owned by Account Management. Anyone with access to this page (including Viewers)
-          can set tags and post notes; notes are append-only. Car lists, dates, and other OL fields are Lease
-          Management / Railcars data shown for reference only and are not editable here.
-        </p>
-
-        <AccountDirectoryPeople accountId={id} searchHint={data.name} onOpen={navigate} />
-
-        {canEdit && (
-          <div className="space-y-3 max-w-xl">
-            <div>
-              <Label className="text-xs">Name</Label>
-              <Input value={displayName} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-xs">Notes</Label>
-              <Textarea rows={2} value={displayNotes} onChange={(e) => setNotes(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-xs">Account Manager</Label>
-              <Input
-                value={displayManager}
-                onChange={(e) => setAccountManager(e.target.value)}
-                placeholder="Initials, e.g. GS"
-              />
-            </div>
-            <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
-              {save.isPending ? "Saving…" : "Save account"}
-            </Button>
-          </div>
-        )}
-
-        <div className="rounded-xl border border-card-border bg-card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="text-left font-medium px-4 py-2">OL</th>
-                <th className="text-left font-medium px-4 py-2">MLA</th>
-                <th className="text-right font-medium px-4 py-2">Active cars</th>
-                <th className="text-left font-medium px-4 py-2">Status</th>
-                <th className="text-left font-medium px-4 py-2">Comment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(visibleOls).map((ol) => (
-                <OlRows
-                  key={ol.id}
-                  accountId={id}
-                  ol={ol}
-                  expanded={expanded === ol.id}
-                  onToggle={() => setExpanded(expanded === ol.id ? null : ol.id)}
-                  onOpenCar={setSheetCarId}
-                  canTag={canEditAccountMgmtTags}
-                  canComment={canEditAccountMgmtComments}
-                  canDeleteComment={canDeleteAccountMgmtComments}
-                />
-              ))}
-              {visibleOls.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                    {showInactive ? "No OLs linked to this account." : "No active OLs. Turn on “Show inactive OLs” to see historical deals."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <AccountTransitionDocuments
-          accountId={id}
-          ols={visibleOls.map((ol) => ({
-            id: ol.id,
-            label: String(ol.schedule_number || ol.rider_name || `OL ${ol.id}`),
-          }))}
-          canUpload={canEditAccountMgmtComments}
-        />
-
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Linked programs</div>
-          {data.programs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">None yet.</p>
-          ) : (
-            <ul className="space-y-1 text-sm">
-              {data.programs.map((p) => (
-                <li key={p.id}>
-                  <Link href={programPath(p.id)} className="hover:underline">
-                    {p.name}
-                  </Link>
-                  {p.account_manager ? (
-                    <span className="text-muted-foreground"> · {p.account_manager}</span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-      <RailcarDetailSheet carId={sheetCarId} onClose={() => setSheetCarId(null)} readOnly />
-    </div>
-  );
-}
-
-function OlRows({
-  accountId,
-  ol,
-  expanded,
-  onToggle,
-  onOpenCar,
-  canTag,
-  canComment,
-  canDeleteComment,
-}: {
-  accountId: number;
-  ol: AccountOl;
-  expanded: boolean;
-  onToggle: () => void;
-  onOpenCar: (carId: number) => void;
-  canTag: boolean;
-  canComment: boolean;
-  canDeleteComment: boolean;
-}) {
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  const cars = useQuery<{ cars: OlCar[] }>({
-    queryKey: ["/api/account-management/riders", ol.id, "cars"],
-    queryFn: () => apiRequest("GET", `/api/account-management/riders/${ol.id}/cars`).then((r) => r.json()),
-    enabled: expanded,
-  });
-
-  const tagMut = useMutation({
-    mutationFn: (status_tag: StatusTag | null) =>
-      apiRequest("PATCH", `/api/account-management/riders/${ol.id}/status-tag`, { status_tag }),
-    onMutate: async (status_tag) => {
-      await qc.cancelQueries({ queryKey: ["/api/accounts", accountId] });
-      const prev = qc.getQueryData<AccountDetail>(["/api/accounts", accountId]);
-      if (prev) {
-        qc.setQueryData<AccountDetail>(["/api/accounts", accountId], {
-          ...prev,
-          ols: prev.ols.map((row) => (row.id === ol.id ? { ...row, status_tag } : row)),
-        });
-      }
-      return { prev };
-    },
-    onError: (e: Error, _tag, ctx) => {
-      if (ctx?.prev) qc.setQueryData(["/api/accounts", accountId], ctx.prev);
-      toast({ title: "Could not save status", description: e.message, variant: "destructive" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/accounts", accountId] });
-      scheduleOverviewInvalidate(qc);
-    },
-  });
-
-  function setTag(next: StatusTag) {
-    tagMut.mutate(ol.status_tag === next ? null : next);
-  }
-
-  return (
-    <>
-      <tr className="border-t border-border align-top">
-        <td className="px-4 py-2 font-mono-num">
-          {ol.schedule_number || ol.rider_name}
-          {ol.sold ? <SoldBadge className="ml-2" /> : null}
-          {ol.is_inactive ? (
-            <span className="ml-2">
-              <InactiveFleetBadge active={false} />
-            </span>
-          ) : null}
-          {ol.expiration_date ? (
-            <div className="text-[11px] text-muted-foreground">Exp {formatCalendarDate(ol.expiration_date)}</div>
-          ) : null}
-        </td>
-        <td className="px-4 py-2 text-muted-foreground font-mono-num">{ol.lease_number || ""}</td>
-        <td className="px-4 py-2 text-right">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 font-mono-num hover:underline"
-            onClick={onToggle}
-          >
-            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-            {ol.active_car_count}
-          </button>
-        </td>
-        <td className="px-4 py-2">
-          <div className="flex flex-wrap gap-1">
-            {(["good", "watch", "risk"] as StatusTag[]).map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                disabled={!canTag || tagMut.isPending}
-                onClick={() => setTag(tag)}
-                className={cn(
-                  "h-6 px-2 rounded-full text-[10px] uppercase tracking-wide border",
-                  ol.status_tag === tag ? TAG_CLASS[tag] : "border-border text-muted-foreground",
-                )}
-              >
-                {TAG_LABEL[tag]}
-              </button>
-            ))}
-          </div>
-        </td>
-        <td className="px-4 py-2 min-w-[16rem]">
-          <AmCommentThread
-            riderId={ol.id}
-            canCompose={canComment}
-            canDelete={canDeleteComment}
+      <Dialog open={prospectOpen} onOpenChange={setProspectOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New prospect</DialogTitle>
+          </DialogHeader>
+          <QuickProspectForm
+            initialName={q}
+            onCancel={() => setProspectOpen(false)}
+            onCreated={(created) => {
+              setProspectOpen(false);
+              navigate(`/accounts/${created.account_id}`);
+            }}
           />
-        </td>
-      </tr>
-      {expanded && (
-        <tr className="border-t border-border bg-muted/10">
-          <td colSpan={5} className="px-8 py-3">
-            {cars.isLoading ? (
-              <p className="text-xs text-muted-foreground">Loading cars…</p>
-            ) : (cars.data?.cars ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">No active cars on this OL.</p>
-            ) : (
-              <table className="w-full text-xs">
-                <thead className="text-muted-foreground">
-                  <tr>
-                    <th className="text-left font-medium py-1">Car</th>
-                    <th className="text-left font-medium py-1">Type</th>
-                    <th className="text-left font-medium py-1">Expiration</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(cars.data?.cars ?? []).map((c) => (
-                    <tr key={c.id}>
-                      <td className="py-0.5 font-mono-num">
-                        <button
-                          type="button"
-                          className="text-left hover:underline text-foreground"
-                          onClick={() => onOpenCar(c.id)}
-                          data-testid={`open-am-car-${c.id}`}
-                        >
-                          {(c.reporting_marks || "") + (c.car_number || "")}
-                        </button>
-                      </td>
-                      <td className="py-0.5 text-muted-foreground">{c.car_type || ""}</td>
-                      <td className="py-0.5 text-muted-foreground">
-                        {c.expiration_date ? formatCalendarDate(c.expiration_date) : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-function NewAccountDialog({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  const [name, setName] = useState("");
-  const [notes, setNotes] = useState("");
-
-  const save = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/accounts", { name: name.trim(), notes: notes.trim() || null }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
-      qc.invalidateQueries({ queryKey: ["/api/account-management/overview"] });
-      setName("");
-      setNotes("");
-      onCreated();
-    },
-    onError: (e: Error) => toast({ title: "Could not create account", description: e.message, variant: "destructive" }),
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Building2 className="h-4 w-4" /> New Account
-          </DialogTitle>
-          <DialogDescription>Prospects do not need an OL or MLA yet.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs">Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Customer or prospect name" />
-          </div>
-          <div>
-            <Label className="text-xs">Notes (optional)</Label>
-            <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={() => save.mutate()} disabled={!name.trim() || save.isPending}>
-              {save.isPending ? "Creating…" : "Create"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

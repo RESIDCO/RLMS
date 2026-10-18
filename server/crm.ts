@@ -1,7 +1,10 @@
 import type { Express, Request, Response } from "express";
-import { requireUser, requireWrite } from "./auth";
+import { getUserRole, requireUser, requireWrite, type AppRole } from "./auth";
+import { listAccountBook, type BookQuery } from "./account-book";
+import { listAccountOwners } from "./accounts";
 import { getAccount360, listCrmSummary } from "./account-360";
-import { createCrmActivity, listCrmActivities, patchCrmActivity } from "./crm-activities";
+import { createCrmActivity, deleteCrmActivity, listCrmActivities, patchCrmActivity } from "./crm-activities";
+import type { CrmActivityRole } from "./crm-activity-access";
 import { CrmHttpError } from "./crm-error";
 import { createCrmProspect, dedupCrmProspects, searchCrmParties } from "./crm-parties";
 import {
@@ -41,11 +44,51 @@ async function actor(req: Request, res: Response, write: boolean): Promise<strin
   return write ? requireWrite(req, res) : requireUser(req, res);
 }
 
+function asRole(role: string | null | undefined): CrmActivityRole | null {
+  if (role === "admin" || role === "editor" || role === "viewer") return role;
+  return null;
+}
+
+async function sessionRole(req: Request, userId: string): Promise<AppRole | null> {
+  const role = req.authRole ?? (await getUserRole({ id: userId }));
+  return asRole(role);
+}
+
+function bookSegment(value: unknown): BookQuery["segment"] {
+  if (value === "mybook" || value === "former" || value === "prospect" || value === "all" || value === "client") return value;
+  return "client";
+}
+
 export function registerCrmRoutes(app: Express) {
   app.get("/api/accounts/crm-summary", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
       res.json(await listCrmSummary());
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.get("/api/account-owners", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(await listAccountOwners());
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.get("/api/accounts/book", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json(
+        await listAccountBook({
+          segment: bookSegment(req.query.segment),
+          owner: queryText(req.query.owner) ?? "any",
+          tier: queryText(req.query.tier) ?? "any",
+          q: queryText(req.query.q) ?? "",
+        }),
+      );
     } catch (err) {
       sendError(res, err);
     }
@@ -209,9 +252,13 @@ export function registerCrmRoutes(app: Express) {
 
   app.post("/api/crm-activities", async (req, res) => {
     try {
-      const user = await actor(req, res, true);
+      const user = await requireUser(req, res);
       if (!user) return;
-      const row = await createCrmActivity((req.body ?? {}) as Record<string, unknown>, user);
+      const role = await sessionRole(req, user);
+      if (!role) return res.status(403).json({ message: "Forbidden" });
+      const body = { ...((req.body ?? {}) as Record<string, unknown>) };
+      delete body.actor;
+      const row = await createCrmActivity(body, user, role);
       res.status(201).json(row);
     } catch (err) {
       sendError(res, err);
@@ -220,10 +267,24 @@ export function registerCrmRoutes(app: Express) {
 
   app.patch("/api/crm-activities/:id", async (req, res) => {
     try {
-      const user = await actor(req, res, true);
+      const user = await requireUser(req, res);
       if (!user) return;
-      const row = await patchCrmActivity(Number(req.params.id), (req.body ?? {}) as Record<string, unknown>, user);
+      const role = await sessionRole(req, user);
+      if (!role) return res.status(403).json({ message: "Forbidden" });
+      const row = await patchCrmActivity(Number(req.params.id), (req.body ?? {}) as Record<string, unknown>, user, role);
       res.json(row);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.delete("/api/crm-activities/:id", async (req, res) => {
+    try {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      const role = await sessionRole(req, user);
+      if (!role) return res.status(403).json({ message: "Forbidden" });
+      await deleteCrmActivity(Number(req.params.id), user, role);
     } catch (err) {
       sendError(res, err);
     }

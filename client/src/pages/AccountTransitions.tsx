@@ -922,7 +922,6 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
                   <th className="text-left font-medium px-4 py-2">MLA</th>
                   <th className="text-left font-medium px-4 py-2">Expires</th>
                   <th className="text-right font-medium px-4 py-2">Active cars</th>
-                  <th className="text-left font-medium px-4 py-2">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -939,12 +938,11 @@ function TransitionDetailForm({ id, payload }: { id: number; payload: DetailPayl
                     <td className="px-4 py-2 text-muted-foreground font-mono-num">{ol.lease_number || ""}</td>
                     <td className="px-4 py-2">{formatCalendarDate(ol.expiration_date)}</td>
                     <td className="px-4 py-2 text-right font-mono-num">{ol.active_car_count}</td>
-                    <td className="px-4 py-2 capitalize">{ol.status_tag || "—"}</td>
                   </tr>
                 ))}
                 {acct.ols.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                    <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
                       No OLs on this account.
                     </td>
                   </tr>

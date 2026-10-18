@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { offerUndoToast } from "@/lib/undo";
 import { CRM_ACTIVITY_KINDS, type CrmActivityKind } from "@shared/crm";
 
 export default function ActivityDialog({
@@ -50,8 +51,8 @@ export default function ActivityDialog({
       });
       return res.json();
     },
-    onSuccess: () => {
-      toast({ title: kind === "task" ? "Task added" : "Activity logged" });
+    onSuccess: (row) => {
+      offerUndoToast(row);
       void qc.invalidateQueries({ queryKey: ["/api/accounts"] });
       void qc.invalidateQueries({ queryKey: ["/api/crm-activities"] });
       onOpenChange(false);

@@ -49,7 +49,9 @@ def load_dotenv():
 
 def rest(method: str, path: str, body=None, prefer: str | None = None):
     url = os.environ["SUPABASE_URL"].rstrip("/") + path
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["SUPABASE_ANON_KEY"]
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not key:
+        raise SystemExit("SUPABASE_SERVICE_ROLE_KEY is required")
     headers = {
         "apikey": key,
         "Authorization": f"Bearer {key}",

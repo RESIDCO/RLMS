@@ -28,6 +28,7 @@ export async function getAuthUser(req: Request): Promise<AuthUser | null> {
  * Resolve the app role from user_roles. Microsoft (and invite) users are
  * authorized by email; user_id is tried first so existing password accounts
  * stay on the fast path. Never inserts a row.
+ * Reads go through the service-role client (`supabase`).
  */
 export async function getUserRole(user: { id: string; email?: string | null }): Promise<string | null> {
   const { data: byId } = await supabase

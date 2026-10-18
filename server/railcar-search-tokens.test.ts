@@ -3,7 +3,7 @@
  * Run: npx tsx server/railcar-search-tokens.test.ts
  */
 process.env.SUPABASE_URL ??= "https://example.supabase.co";
-process.env.SUPABASE_ANON_KEY ??= "test-anon-key";
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 import { carNumberSearchPattern } from "../shared/residco-import";
 const { railcarSearchTokens } = await import("./railcar-list");

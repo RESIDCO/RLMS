@@ -6,30 +6,22 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Download, ExternalLink } from "lucide-react";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import {
+  classLabel,
+  distinctDocClasses,
+  documentCountLabel,
+  filterLeaseDocs,
+  groupLeaseDocs,
+  leaseDocumentsPath,
+  type LeaseDoc,
+} from "@/pages/leases/lease-documents";
 
-export type LeaseDoc = {
-  id: number;
-  file_name: string;
-  file_size: number;
-  mime_type: string | null;
-  source_path: string | null;
-  source_modified: string | null;
-  doc_class: string | null;
-  source: string | null;
-  rider_id?: number | null;
-  rider_code?: string | null;
-  sub_folder?: string | null;
-};
+export type { LeaseDoc };
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function classLabel(raw: string | null) {
-  if (raw === "likely_executed") return "Likely executed";
-  return raw || "Other";
 }
 
 async function openSigned(id: number, download: boolean, fileName: string) {
@@ -51,10 +43,10 @@ export default function LeaseDocumentsPanel(props: {
   kind: "rider" | "lessee";
   id: number;
   fallbackUrls?: { label: string; url: string }[];
+  /** Fill a bounded parent: filters stay put, the list is the only scroll region. */
+  fill?: boolean;
 }) {
-  const path = props.kind === "rider"
-    ? `/api/lease-mgmt/riders/${props.id}/documents`
-    : `/api/lease-mgmt/lessees/${props.id}/documents`;
+  const path = leaseDocumentsPath(props.kind, props.id);
   const { data, isLoading } = useQuery<{ rows: LeaseDoc[] }>({
     queryKey: [path],
     queryFn: () => apiGet(path),
@@ -62,107 +54,135 @@ export default function LeaseDocumentsPanel(props: {
   });
   const [q, setQ] = useState("");
   const [ol, setOl] = useState("all");
+  const [docClass, setDocClass] = useState("all");
   const rows = data?.rows ?? [];
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (ol !== "all" && String(r.rider_code ?? r.rider_id) !== ol) return false;
-      if (!needle) return true;
-      const hay = `${r.file_name} ${r.source_path ?? ""} ${r.rider_code ?? ""}`.toLowerCase();
-      return hay.includes(needle);
-    });
-  }, [rows, q, ol]);
-  const groups = useMemo(() => {
-    const m = new Map<string, LeaseDoc[]>();
-    for (const r of filtered) {
-      const k = r.doc_class || "other";
-      const list = m.get(k) ?? [];
-      list.push(r);
-      m.set(k, list);
+  const classes = useMemo(() => distinctDocClasses(rows), [rows]);
+  const ols = useMemo(() => {
+    const codes = new Set<string>();
+    for (const row of rows) {
+      if (row.rider_code) codes.add(row.rider_code);
     }
-    for (const list of m.values()) {
-      list.sort((a, b) => String(b.source_modified ?? "").localeCompare(String(a.source_modified ?? "")));
-    }
-    return [...m.entries()];
-  }, [filtered]);
-  const ols = [...new Set(rows.map((r) => r.rider_code).filter(Boolean))] as string[];
+    return Array.from(codes);
+  }, [rows]);
+  const filtered = useMemo(
+    () => filterLeaseDocs(rows, { q, ol, docClass }),
+    [rows, q, ol, docClass],
+  );
+  const groups = useMemo(() => groupLeaseDocs(filtered), [filtered]);
 
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2 items-center">
-        <Input className="max-w-xs h-8" placeholder="Filter name or path" value={q} onChange={(e) => setQ(e.target.value)} />
-        {props.kind === "lessee" ? (
-          <select className="h-8 rounded-md border bg-background px-2 text-sm" value={ol} onChange={(e) => setOl(e.target.value)}>
-            <option value="all">All OLs</option>
-            {ols.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        ) : null}
-        <span className="text-xs text-muted-foreground">{filtered.length} file{filtered.length === 1 ? "" : "s"}</span>
-      </div>
-      {isLoading ? <p className="text-xs text-muted-foreground">Loading documents…</p> : null}
+  const filters = (
+    <div className="flex w-full min-w-0 flex-wrap items-center gap-2 [&>*]:max-w-full">
+      <Input
+        className="h-8 w-full min-w-[12rem] flex-1 sm:max-w-xs"
+        placeholder="Filter name or path"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <select
+        className="h-8 max-w-full rounded-md border bg-background px-2 text-sm"
+        value={docClass}
+        onChange={(e) => setDocClass(e.target.value)}
+        aria-label="Document class"
+      >
+        <option value="all">All classes</option>
+        {classes.map((c) => (
+          <option key={c} value={c}>{classLabel(c)}</option>
+        ))}
+      </select>
+      {props.kind === "lessee" ? (
+        <select
+          className="h-8 max-w-full rounded-md border bg-background px-2 text-sm"
+          value={ol}
+          onChange={(e) => setOl(e.target.value)}
+          aria-label="Operating lease"
+        >
+          <option value="all">All OLs</option>
+          {ols.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      ) : null}
+      <span className="text-xs text-muted-foreground">
+        {isLoading ? "Loading documents…" : `${filtered.length} file${filtered.length === 1 ? "" : "s"}`}
+      </span>
+    </div>
+  );
+
+  const list = (
+    <>
       {!isLoading && !rows.length ? (
         <div className="text-xs text-muted-foreground space-y-1">
-          <p>No contract on file</p>
+          <p>{documentCountLabel(0)}</p>
           {(props.fallbackUrls ?? []).map((d) => (
-            <p key={d.url} className="font-mono">{d.label}: {d.url}</p>
+            <p key={d.url} className="font-mono break-all">{d.label}: {d.url}</p>
           ))}
         </div>
       ) : null}
-      {groups.map(([cls, list]) => (
-        <div key={cls} className="border rounded-md">
-          <div className="px-3 py-1.5 text-xs font-medium border-b bg-muted/30">{classLabel(cls)} · {list.length}</div>
-          <div className="overflow-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  {props.kind === "lessee" ? <th className="px-2 py-1">OL</th> : null}
-                  <th className="px-2 py-1">Name</th>
-                  <th className="px-2 py-1">Sub-folder</th>
-                  <th className="px-2 py-1">Modified</th>
-                  <th className="px-2 py-1">Size</th>
-                  <th className="px-2 py-1">Source</th>
-                  <th className="px-2 py-1"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((r) => (
-                  <tr key={r.id} className="border-t">
-                    {props.kind === "lessee" ? <td className="px-2 py-1 font-mono">{r.rider_code ?? "—"}</td> : null}
-                    <td className="px-2 py-1">{r.file_name}</td>
-                    <td className="px-2 py-1 text-muted-foreground">{r.sub_folder || "—"}</td>
-                    <td className="px-2 py-1 font-mono-num">{r.source_modified ?? "—"}</td>
-                    <td className="px-2 py-1 font-mono-num">{formatBytes(r.file_size)}</td>
-                    <td className="px-2 py-1">
+      {!isLoading && rows.length > 0 && !filtered.length ? (
+        <p className="text-xs text-muted-foreground">No documents match this filter.</p>
+      ) : null}
+      <div className="space-y-3">
+        {groups.map((group) => (
+          <div key={group.key} className="rounded-md border">
+            <div className="sticky top-0 z-10 border-b bg-muted px-3 py-1.5 text-xs font-medium">
+              {group.label} · {group.docs.length}
+            </div>
+            <ul>
+              {group.docs.map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-3 py-2 text-xs">
+                  <div className="min-w-0 flex-1 basis-48">
+                    <div className="break-words text-foreground">{r.file_name}</div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground">
+                      {props.kind === "lessee" ? <span className="font-mono">{r.rider_code ?? "—"}</span> : null}
+                      <span>{r.sub_folder || "—"}</span>
+                      <span className="font-mono-num">{r.source_modified ?? "—"}</span>
+                      <span className="font-mono-num">{formatBytes(r.file_size)}</span>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">Z:</span>
                         </TooltipTrigger>
                         <TooltipContent className="max-w-md font-mono text-xs">{r.source_path || r.source}</TooltipContent>
                       </Tooltip>
-                    </td>
-                    <td className="px-2 py-1">
-                      <div className="flex flex-wrap gap-1">
-                        <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void openSigned(r.id, false, r.file_name)}>
-                          <ExternalLink className="h-3 w-3" /> View
-                        </Button>
-                        <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void openSigned(r.id, true, r.file_name)}>
-                          <Download className="h-3 w-3" /> Download
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-1">
+                    <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void openSigned(r.id, false, r.file_name)}>
+                      <ExternalLink className="h-3 w-3" /> View
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void openSigned(r.id, true, r.file_name)}>
+                      <Download className="h-3 w-3" /> Download
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
-      ))}
-      <div className="flex flex-wrap gap-2">
-        <AttachmentsPanel
-          entityType={props.kind === "rider" ? "rider" : "master_lease"}
-          entityId={props.id}
-        />
+        ))}
       </div>
+      <details className="rounded-md border px-3 py-2">
+        <summary className="cursor-pointer text-xs font-medium">Upload or remove a file</summary>
+        <div className="pt-3">
+          <AttachmentsPanel
+            entityType={props.kind === "rider" ? "rider" : "master_lease"}
+            entityId={props.id}
+            compact
+          />
+        </div>
+      </details>
+    </>
+  );
+
+  if (props.fill) {
+    return (
+      <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
+        <div className="shrink-0">{filters}</div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto">{list}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {filters}
+      {list}
     </div>
   );
 }

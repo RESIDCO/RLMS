@@ -13,7 +13,7 @@ export default function PageHeader({
 }) {
   return (
     <div className="shrink-0 px-4 sm:px-8 pt-5 sm:pt-7 pb-4 sm:pb-5 border-b border-border flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-6">
-      <div>
+      <div className="min-w-0">
         <div className="font-eyebrow mb-1.5">
           RLMS
         </div>
@@ -27,7 +27,7 @@ export default function PageHeader({
           <p className="text-[11px] text-muted-foreground italic mt-1.5">{note}</p>
         )}
       </div>
-      {actions && <div className="flex gap-2 items-center flex-wrap">{actions}</div>}
+      {actions && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }

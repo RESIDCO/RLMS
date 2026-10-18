@@ -418,6 +418,8 @@ function parseFleetQuery(searchStr: string): {
   };
 }
 
+const FR_DEFAULT_COLS = new Set<string>([]);
+
 function isMultiCarListQuery(raw: string): boolean {
   const cars = carListSearchTokens(raw);
   return Boolean(cars && cars.length >= 2);
@@ -553,7 +555,6 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     { key: "am_note", label: "Latest AM Note" },
     { key: "comment_event_note",  label: "Comment / Event Note" },
   ];
-  const FR_DEFAULT_COLS = new Set<string>([]);
   const colPrefs = useColumnPrefs("fleet_registry", FR_DEFAULT_COLS);
   const {
     visibleCols: visibleColsRaw,

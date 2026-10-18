@@ -19,10 +19,23 @@ import {
 
 type RequireWrite = (req: Request, res: Response) => Promise<string | null>;
 
+function errMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    const m = (err as { message?: unknown }).message;
+    if (m != null && String(m) && String(m) !== "[object Object]") return String(m);
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "Unknown error";
+  }
+}
+
 function errHandler(res: Response, err: unknown) {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errMessage(err);
   const status = Number((err as { status?: number })?.status) || 500;
-  console.error("[lease-mgmt]", msg, err);
+  console.error("[lease-mgmt]", msg);
   return res.status(status).json({ message: msg });
 }
 
@@ -93,36 +106,38 @@ async function lesseeIdsForQuery(q: string): Promise<number[] | null> {
   return [...ids];
 }
 
+const ISSUE_VIEWS: { view: string; cols: string }[] = [
+  { view: "v_lease_issue_ea_on_rent", cols: "master_lease_id, rider_id" },
+  { view: "v_lease_issue_unlinked", cols: "master_lease_id, proposed_rider_id" },
+  { view: "v_lease_issue_lessee_mismatch", cols: "master_lease_id, rider_id" },
+  { view: "v_lease_issue_dup_lessees", cols: "master_lease_id" },
+  { view: "v_lease_issue_nonstandard", cols: "master_lease_id, rider_id" },
+  { view: "v_lease_issue_past_exp", cols: "master_lease_id, rider_id" },
+  { view: "v_lease_issue_rent_mismatch", cols: "master_lease_id" },
+  { view: "v_lease_issue_placeholder", cols: "master_lease_id" },
+];
+
 async function issueLesseeIds(): Promise<Set<number>> {
-  const tables = [
-    "v_lease_issue_ea_on_rent",
-    "v_lease_issue_unlinked",
-    "v_lease_issue_lessee_mismatch",
-    "v_lease_issue_dup_lessees",
-    "v_lease_issue_nonstandard",
-    "v_lease_issue_past_exp",
-    "v_lease_issue_rent_mismatch",
-    "v_lease_issue_placeholder",
-  ];
   const ids = new Set<number>();
-  for (const t of tables) {
+  const riderIds: number[] = [];
+  for (const { view, cols } of ISSUE_VIEWS) {
     const rows = await fetchAllRows((from, to) =>
-      supabaseAdmin.from(t).select("master_lease_id, rider_id").range(from, to),
+      supabaseAdmin.from(view).select(cols).range(from, to),
     );
-    const riderIds = rows.map((r: any) => Number(r.rider_id)).filter((n) => n > 0);
-    for (const r of rows) {
+    for (const r of rows as any[]) {
       if (r.master_lease_id) ids.add(Number(r.master_lease_id));
+      if (r.rider_id) riderIds.push(Number(r.rider_id));
+      if (r.proposed_rider_id) riderIds.push(Number(r.proposed_rider_id));
     }
-    if (riderIds.length) {
-      for (let i = 0; i < riderIds.length; i += 200) {
-        const { data, error } = await supabaseAdmin
-          .from("riders")
-          .select("master_lease_id")
-          .in("id", riderIds.slice(i, i + 200));
-        if (error) throw error;
-        for (const x of data ?? []) ids.add(Number(x.master_lease_id));
-      }
-    }
+  }
+  const uniqRiders = [...new Set(riderIds.filter((n) => n > 0))];
+  for (let i = 0; i < uniqRiders.length; i += 200) {
+    const { data, error } = await supabaseAdmin
+      .from("riders")
+      .select("master_lease_id")
+      .in("id", uniqRiders.slice(i, i + 200));
+    if (error) throw error;
+    for (const x of data ?? []) ids.add(Number(x.master_lease_id));
   }
   return ids;
 }
@@ -453,9 +468,13 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
         idFilter = idFilter ? idFilter.filter((id) => issueIds.includes(id)) : issueIds;
       }
 
+      const includeEmpty = String(req.query.include_empty ?? "") === "1";
       let query = supabaseAdmin.from("v_lease_lessee_rollup").select("*", { count: "exact" });
-      if (!includePlaceholders && !hasIssues) {
-        query = query.eq("is_placeholder", false).is("merged_into_id", null);
+      if (!includePlaceholders) {
+        query = query.is("merged_into_id", null);
+      }
+      if (!includeEmpty && !hasIssues) {
+        query = query.gt("cars", 0);
       }
       if (idFilter) query = query.in("master_lease_id", idFilter.length ? idFilter : [-1]);
       if (am) query = query.eq("account_manager", am);
@@ -478,7 +497,8 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
       const kpisQuery = supabaseAdmin.from("v_lease_lessee_rollup").select("cars, on_rent, off_rent, monthly_rent, cars_expiring_6mo, cars_expiring_12mo");
       // Re-apply the same filters without paging
       let kq = supabaseAdmin.from("v_lease_lessee_rollup").select("*");
-      if (!includePlaceholders && !hasIssues) kq = kq.eq("is_placeholder", false).is("merged_into_id", null);
+      if (!includePlaceholders) kq = kq.is("merged_into_id", null);
+      if (!includeEmpty && !hasIssues) kq = kq.gt("cars", 0);
       if (idFilter) kq = kq.in("master_lease_id", idFilter.length ? idFilter : [-1]);
       if (am) kq = kq.eq("account_manager", am);
       if (hasEa) kq = kq.gt("ea_count", 0);

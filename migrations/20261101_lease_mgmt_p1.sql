@@ -189,7 +189,8 @@ SELECT
   c.rider_external_id AS car_says_ol,
   c.lessee_name,
   rd.id AS proposed_rider_id,
-  ml.lessee AS rider_lessee
+  ml.lessee AS rider_lessee,
+  ml.id AS master_lease_id
 FROM public.railcars c
 LEFT JOIN public.railcar_assignments a ON a.railcar_id = c.id
 LEFT JOIN public.riders rd ON rd.rider_name = c.rider_external_id

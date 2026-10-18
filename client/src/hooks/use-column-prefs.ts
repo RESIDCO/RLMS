@@ -49,6 +49,8 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   const { session } = useAuth();
   const isAdmin = useIsAdmin();
   const listKey = normalizeListKey(page);
+  const defaultColsRef = useRef(defaultCols);
+  defaultColsRef.current = defaultCols;
   const [visibleCols, setVisibleCols] = useState<Set<string>>(defaultCols);
   const [colOrder, setColOrderState] = useState<string[]>([]);
   const [colWidths, setColWidthsState] = useState<Record<string, number>>({});
@@ -64,13 +66,13 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   viewNameRef.current = viewName;
 
   const applyCached = useCallback((parsed: Cached | null) => {
-    const next = parsed ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number>, sort: null };
+    const next = parsed ?? { cols: defaultColsRef.current, order: [] as string[], widths: {} as Record<string, number>, sort: null };
     setVisibleCols(next.cols);
     setColOrderState(next.order);
     setColWidthsState(next.widths);
     setSortState(next.sort ?? null);
     latest.current = next;
-  }, [defaultCols]);
+  }, []);
 
   const load = useCallback(
     async (wantedView?: string) => {
@@ -136,10 +138,10 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
   );
 
   const resetCols = useCallback(() => {
-    const next = sharedDefault ?? { cols: defaultCols, order: [] as string[], widths: {} as Record<string, number>, sort: null };
+    const next = sharedDefault ?? { cols: defaultColsRef.current, order: [] as string[], widths: {} as Record<string, number>, sort: null };
     applyCached(next);
     persist(next);
-  }, [sharedDefault, defaultCols, persist, applyCached]);
+  }, [sharedDefault, persist, applyCached]);
 
   const setColOrder = useCallback(
     (order: string[]) => {

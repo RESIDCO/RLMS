@@ -83,7 +83,7 @@ export default function LeaseMgmtHome() {
   qs.set("page", String(page));
   qs.set("pageSize", String(pageSize));
 
-  const { data, isLoading } = useQuery<ListResp>({
+  const { data, isLoading, isError, error, refetch } = useQuery<ListResp>({
     queryKey: ["/api/lease-mgmt/lessees", qs.toString()],
     queryFn: () => apiGet<ListResp>(`/api/lease-mgmt/lessees?${qs}`),
     placeholderData: keepPreviousData,
@@ -116,7 +116,7 @@ export default function LeaseMgmtHome() {
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="Lease Management"
-        subtitle="Lessee → OL/EA → cars. Placeholder Idle/x- lessees are hidden by default."
+        subtitle="Lessee → OL/EA → cars. Lessees with no assigned cars are hidden by default."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" asChild>
@@ -132,6 +132,14 @@ export default function LeaseMgmtHome() {
         }
       />
       <div className="px-4 sm:px-8 py-4 flex-1 min-h-0 flex flex-col gap-4 overflow-hidden">
+        {isError ? (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-red-400">
+            Couldn't load lessees — {(error as Error)?.message || "request failed"}.{" "}
+            <button type="button" className="underline text-foreground" onClick={() => refetch()}>
+              Retry
+            </button>
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {kpiTiles.map((t) => (
             <button
@@ -193,7 +201,9 @@ export default function LeaseMgmtHome() {
                   </tr>
                 </thead>
                 <tbody>
-                  {isLoading && !rows.length ? (
+                  {isError ? (
+                    <tr><td className="px-3 py-6 text-red-400" colSpan={11}>Couldn't load lessees. See the error above.</td></tr>
+                  ) : isLoading && !rows.length ? (
                     <tr><td className="px-3 py-6 text-muted-foreground" colSpan={11}>Loading…</td></tr>
                   ) : rows.map((r) => (
                     <tr key={r.master_lease_id} className="border-b hover:bg-muted/40">

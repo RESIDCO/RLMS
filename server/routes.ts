@@ -120,6 +120,7 @@ import {
 import { applyPutOnRent, previewPutOnRent } from "./program-put-on-rent";
 import { registerRentStartRoutes } from "./rent-start";
 import { registerRentStopRoutes } from "./rent-stops";
+import { registerRailcarBulkRoutes } from "./railcar-bulk";
 import { registerKpiCarRoutes } from "./kpi-cars";
 import { registerColumnPrefRoutes } from "./column-prefs";
 import { statusFromAssignmentLink } from "@shared/commitment";
@@ -398,6 +399,7 @@ export async function registerRoutes(
   registerCommitmentRoutes(app, requireWrite);
   registerRentStartRoutes(app, requireWrite);
   registerRentStopRoutes(app, requireWrite);
+  registerRailcarBulkRoutes(app, requireWrite);
   registerKpiCarRoutes(app);
 
   // ---------- Batch Lease Setup (wizard) ----------

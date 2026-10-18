@@ -85,6 +85,9 @@ import {
   crossesInactiveBoundary,
   isInactiveCarStatus,
 } from "@shared/car-lifecycle-status";
+import { PasteSearchBar } from "@/pages/railcars/PasteSearchBar";
+import { BulkEditDrawer } from "@/pages/railcars/BulkEditDrawer";
+import { SavedFilters } from "@/pages/railcars/SavedFilters";
 
 type Row = RailcarWithAssignment;
 
@@ -448,6 +451,9 @@ export default function FleetRegistry() {
   const [flagFilter, setFlagFilter] = useState<string>("all");
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  const [pasteOnPage, setPasteOnPage] = useState(false);
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoSeed, setPhotoSeed] = useState("");
   const [bulkStatusPending, setBulkStatusPending] = useState(false);
@@ -486,9 +492,9 @@ export default function FleetRegistry() {
 
   // Paste or typed lists of 2+ cars belong on /search, not the single-string fleet filter.
   useEffect(() => {
-    if (!debouncedSearch) return;
+    if (!debouncedSearch || pasteOnPage) return;
     openCarListSearch(debouncedSearch);
-  }, [debouncedSearch, openCarListSearch]);
+  }, [debouncedSearch, openCarListSearch, pasteOnPage]);
 
   // Dashboard tiles land on ?filter=sold (etc.). A car-number search should look up
   // that car, not stay trapped in Sold / Idle / Leased.
@@ -652,6 +658,11 @@ export default function FleetRegistry() {
       return 0;
     });
   }, [railcars, sort]);
+
+  const displayRows = useMemo(
+    () => (showSelectedOnly ? filtered.filter((r) => selectedIds.has(r.id)) : filtered),
+    [filtered, showSelectedOnly, selectedIds],
+  );
 
   // ── Multi-select helpers ──────────────────────────────────────────────────
   const allFilteredIds = filtered.map((r) => r.id);
@@ -1174,6 +1185,9 @@ export default function FleetRegistry() {
               <Image className="h-4 w-4" />
               {selectedIds.size > 0 ? `Find Photos (${selectedIds.size})` : "Find Photos"}
             </Button>
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/railcars/umler-queue">UMLER queue</Link>
+            </Button>
             <Button
               size="sm"
               variant="outline"
@@ -1204,8 +1218,15 @@ export default function FleetRegistry() {
       />
 
       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
+        <PasteSearchBar
+          onSearch={(tokens) => {
+            setPasteOnPage(true);
+            setSearch(tokens.join(" "));
+          }}
+        />
         {/* Filter bar */}
         <div className="shrink-0 flex items-center gap-2 flex-wrap">
+          <SavedFilters onPick={() => { /* query restore reserved */ }} />
           <ClearableSearchInput
             value={search}
             onChange={setSearch}
@@ -1366,6 +1387,22 @@ export default function FleetRegistry() {
               <span className="text-xs text-muted-foreground">All matching cars selected</span>
             )}
             <div className="flex items-center gap-2 ml-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setWorkbenchOpen(true)}
+                data-testid="bulk-workbench"
+              >
+                Bulk edit…
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setShowSelectedOnly((v) => !v)}
+              >
+                {showSelectedOnly ? "Show all" : "Show selected only"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -1587,7 +1624,7 @@ export default function FleetRegistry() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((r) => (
+                  displayRows.map((r) => (
                     <tr
                       key={r.id}
                       className={cn(
@@ -1753,6 +1790,12 @@ export default function FleetRegistry() {
         onClose={() => setAddOpen(false)}
         car={null}
       />
+      {workbenchOpen ? (
+        <BulkEditDrawer
+          railcarIds={[...selectedIds]}
+          onClose={() => setWorkbenchOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

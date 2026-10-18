@@ -15,6 +15,8 @@ export const UNDO_ALLOWED_TABLES = [
   "car_tags",
   "car_lists",
   "car_list_members",
+  "riders",
+  "master_leases",
 ] as const;
 
 export type UndoAllowedTable = (typeof UNDO_ALLOWED_TABLES)[number];

@@ -423,7 +423,7 @@ function isMultiCarListQuery(raw: string): boolean {
   return Boolean(cars && cars.length >= 2);
 }
 
-export default function FleetRegistry() {
+export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: number } = {}) {
   const canEdit = useCanEdit();
   const wouterSearch = useHashSearch();
   const [location, setLocation] = useLocation();
@@ -431,7 +431,7 @@ export default function FleetRegistry() {
 
   const [search, setSearch] = useState(initQ.search);
   const [assignedFilter, setAssignedFilter] = useState<string>(initQ.assigned);
-  const [riderFilter, setRiderFilter] = useState<string>("all");
+  const [riderFilter, setRiderFilter] = useState<string>(scopedRiderId ? String(scopedRiderId) : "all");
   const [olCodeFilter, setOlCodeFilter] = useState<string>(initQ.riderOl);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   // §5 fleet membership — distinct from service-status filter below
@@ -584,7 +584,7 @@ export default function FleetRegistry() {
     active: pasteMatch ? "all" : turning50Year ? "active" : fleetActiveFilter,
     assigned: pasteMatch || turning50Year || carLookup || assignedFilter === "all" ? undefined : assignedFilter,
     rider: turning50Year ? undefined : (olCodeFilter || undefined),
-    rider_id: turning50Year ? undefined : (riderFilter !== "all" ? riderFilter : undefined),
+    rider_id: scopedRiderId ? scopedRiderId : (turning50Year ? undefined : (riderFilter !== "all" ? riderFilter : undefined)),
     transit: turning50Year || transitFilter === "all" ? undefined : transitFilter,
     turning50: turning50Year || undefined,
     batch: turning50Year || batchFilter === "all" ? undefined : batchFilter,
@@ -1063,6 +1063,9 @@ export default function FleetRegistry() {
                 {r.car_number}
               </button>
               <InactiveFleetBadge active={r.active} />
+              {(r.assignment as any)?.assignment_status === "off_lease_pending_remarketing" ? (
+                <span className="text-[10px] rounded bg-amber-500/15 text-amber-800 px-1">EA</span>
+              ) : null}
             </div>
           </td>
         );
@@ -1167,11 +1170,12 @@ export default function FleetRegistry() {
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
+      {scopedRiderId ? null : (
       <PageHeader
         title="Railcars"
         subtitle="All railcars under management, current assignments, and lease status"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               variant="outline"
@@ -1220,6 +1224,7 @@ export default function FleetRegistry() {
           </div>
         }
       />
+      )}
 
       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4">
         <PasteSearchBar
@@ -1308,6 +1313,7 @@ export default function FleetRegistry() {
               ))}
             </SelectContent>
           </Select>
+          {scopedRiderId ? null : (
           <SearchableSelect
             value={riderFilter}
             onChange={setRiderFilter}
@@ -1319,6 +1325,7 @@ export default function FleetRegistry() {
             testId="filter-rider"
             triggerClassName="w-[220px]"
           />
+          )}
           <Select value={entityFilter} onValueChange={setEntityFilter}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Ownership" />

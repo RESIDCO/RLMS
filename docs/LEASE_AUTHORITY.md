@@ -1,23 +1,18 @@
-# Lease status authority
+# Lease date authority
 
-## Decision (2026-08-13)
+## Decision (2026-10-18)
 
-**Source of truth for lease status, expiration, lessee, and OL code:** `railcars` fields maintained by monthly VCF import:
+`riders.expiration_date` is the authoritative OL expiry when `expiration_source` is `asset_report` or `asset_report_multi_term`.
 
-- `rider_external_id` (OL code)
-- `lessee_name`
-- `assignment_label`
-- `lease_start_date` / `lease_end_date` / `lease_expiry`
+That date is governed by `server/govern-lease-dates.ts` and `shared/lease-governance.ts` (commit 2d3ac69, 24 Aug 2026). Governance runs on every VCF commit. It uses the latest Asset Report snapshot and, when an OL is split across rows, the soonest date.
 
-**`riders.expiration_date` is not authoritative.** It was seeded early and went stale (hundreds of OLs showing expired dates while cars remain actively assigned). Dashboard KPIs must not join through it for “is this lease current?”
+- `car_records` is the V_Valid fallback. Those riders go on the CRM check-date watch list. They are not renewal candidates.
+- A null expiry means the date is unknown.
+- A renewal keeps the same OL number. Only its dates change, and the CRM does not write `riders.expiration_date`. The governed date arrives through the Asset Report / VCF commit.
+- A re-lease to a new lessee, or out of an EA, gets a new OL through Lease Management remarket. The CRM does not create OLs, lessees, or accounts.
 
-## riders table going forward
+The 13 Aug 2026 note below treated `riders.expiration_date` as a stale cache. That note is superseded. Dashboard KPIs still use car-level on-rent status (`v_rlms_kpi_car_rows` / `rlms_fleet_kpis`), not the rider expiry, to decide whether a car is on rent.
 
-Keep `riders` for MLA structure, contacts, Move Cars destination IDs, and Lease Management editing — but treat `expiration_date` as a **derived cache**:
+## Previous note (2026-08-13, superseded)
 
-1. Refreshed after each VCF commit (`syncRiderExpirationsFromCars`)
-2. Also runnable via `POST /api/riders/sync-expirations` or `python script/sync_rider_expirations.py`
-3. Match key: `riders.rider_name` / `schedule_number` ↔ `railcars.rider_external_id`
-4. Value: max known `lease_end_date` among active cars on that OL (null when VCF end is indefinite)
-
-Do not reintroduce Dashboard / expiration-timeline / Active OL counts from the riders table without re-validating against car-level fields.
+Source of truth then recorded for lease status, lessee, and OL code was the `railcars` fields maintained by the monthly VCF import (`rider_external_id`, `lessee_name`, `assignment_label`, `lease_start_date` / `lease_end_date` / `lease_expiry`). `riders.expiration_date` had been seeded early and had gone stale. Do not reintroduce Dashboard / expiration-timeline / Active OL counts from the riders table without re-validating against car-level fields.

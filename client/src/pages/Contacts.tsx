@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -736,6 +736,11 @@ export default function Contacts() {
                   {detail.status ? <span>· {detail.status}</span> : null}
                 </SheetDescription>
               </SheetHeader>
+              {detail.account_id != null ? (
+                <Link href={`/accounts/${detail.account_id}`} className="inline-block mt-3 text-sm text-primary hover:underline">
+                  Open account →
+                </Link>
+              ) : null}
               {canEditContacts && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditCompanyOpen(true)}>

@@ -50,6 +50,13 @@ type OverviewAccount = {
   sold_ol_total?: number;
 };
 
+type CrmSummaryRow = {
+  account_id: number;
+  next_expiry: string | null;
+  open_opps: number;
+  last_activity_at: string | null;
+};
+
 type Overview = {
   managers: string[];
   manager_pills: { name: string; account_count: number }[];
@@ -147,6 +154,16 @@ function AccountListView() {
     queryKey: ["/api/account-transitions/summary"],
     queryFn: () => apiRequest("GET", "/api/account-transitions/summary").then((r) => r.json()),
   });
+  const { data: crmSummary } = useQuery<CrmSummaryRow[]>({
+    queryKey: ["/api/accounts/crm-summary"],
+    queryFn: () => apiRequest("GET", "/api/accounts/crm-summary").then((r) => r.json()),
+    retry: false,
+  });
+  const crmByAccount = useMemo(() => {
+    const map = new Map<number, CrmSummaryRow>();
+    for (const row of crmSummary ?? []) map.set(row.account_id, row);
+    return map;
+  }, [crmSummary]);
 
   const filtered = useMemo(() => {
     const rows = data?.accounts ?? [];
@@ -252,6 +269,9 @@ function AccountListView() {
           </div>
         </div>
 
+        <details className="rounded-xl border border-card-border bg-card shadow-card">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">More</summary>
+          <div className="px-4 pb-4 space-y-4">
         <div className="rounded-xl border border-card-border bg-card shadow-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Account Transitions</div>
@@ -291,6 +311,8 @@ function AccountListView() {
             Open Territory Map
           </Button>
         </div>
+          </div>
+        </details>
 
         <div className="flex flex-wrap items-center gap-3">
           <ClearableSearchInput
@@ -327,7 +349,6 @@ function AccountListView() {
           <div className="rounded-xl border border-card-border bg-card overflow-hidden">
             <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border flex flex-wrap items-center justify-between gap-2">
               <span>Showing: {showingLabel}</span>
-              <span>Account-level status rollup — coming soon</span>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -337,6 +358,9 @@ function AccountListView() {
                   <th className="text-right font-medium px-4 py-2"># OLs</th>
                   <th className="text-right font-medium px-4 py-2"># Active Cars</th>
                   <th className="text-left font-medium px-4 py-2 hidden sm:table-cell">Programs</th>
+                  <th className="text-left font-medium px-4 py-2">Next expiry</th>
+                  <th className="text-right font-medium px-4 py-2">Open opps</th>
+                  <th className="text-left font-medium px-4 py-2">Last contact</th>
                 </tr>
               </thead>
               <tbody>
@@ -357,11 +381,14 @@ function AccountListView() {
                     <td className="px-4 py-2 text-right font-mono-num">{a.ol_count}</td>
                     <td className="px-4 py-2 text-right font-mono-num">{a.active_car_count}</td>
                     <td className="px-4 py-2 text-muted-foreground hidden sm:table-cell">{a.program_count || ""}</td>
+                    <td className="px-4 py-2 font-mono-num">{crmByAccount.get(a.id)?.next_expiry ?? "—"}</td>
+                    <td className="px-4 py-2 text-right font-mono-num">{crmByAccount.get(a.id)?.open_opps ?? "—"}</td>
+                    <td className="px-4 py-2 font-mono-num">{crmByAccount.get(a.id)?.last_activity_at?.slice(0, 10) || "—"}</td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
                       No accounts match.
                     </td>
                   </tr>

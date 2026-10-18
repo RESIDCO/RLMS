@@ -1,6 +1,14 @@
 /** Diff helpers for activity_log before/after payloads. Undo (PR U2) restores only these keys. */
 
-export type ActivityEntityType = "railcar" | "rider" | "program" | "program_car" | "master_lease";
+export type ActivityEntityType =
+  | "railcar"
+  | "rider"
+  | "program"
+  | "program_car"
+  | "master_lease"
+  | "account"
+  | "opportunity"
+  | "crm_activity";
 
 export function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;

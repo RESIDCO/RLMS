@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
 import FleetRegistry from "@/pages/FleetRegistry";
 import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
+import LeaseCrmLinks from "@/components/crm/LeaseCrmLinks";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
 import { todayIsoDateOnly } from "@shared/lease-authority";
 import { ArrowLeft } from "lucide-react";
@@ -98,6 +99,7 @@ export default function RiderPage() {
           </div>
         }
       />
+      <LeaseCrmLinks mode="rider" id={id} />
       <div className="px-4 sm:px-8 py-3 text-sm flex flex-wrap gap-3">
         <span>Effective {h.effective_date ?? "—"}</span>
         <span>Expiry {h.expiration_date ?? "—"}</span>

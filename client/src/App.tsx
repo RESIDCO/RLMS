@@ -24,6 +24,8 @@ import UserManagement from "@/pages/UserManagement";
 import Contacts from "@/pages/Contacts";
 import ContactsDedupReview from "@/pages/ContactsDedupReview";
 import Accounts from "@/pages/Accounts";
+import Account360 from "@/pages/Account360";
+import Opportunities from "@/pages/Opportunities";
 import AccountTransitions from "@/pages/AccountTransitions";
 import TerritoryMap from "@/pages/TerritoryMap";
 import APTracker from "@/pages/APTracker";
@@ -99,7 +101,8 @@ function AppRouter() {
       <Route path="/fleet" component={FleetRegistry} />
       <Route path="/railcars/umler-queue" component={UmlerQueue} />
       <Route path="/railcars" component={FleetRegistry} />
-      <Route path="/accounts/:id" component={Accounts} />
+      <Route path="/opportunities" component={Opportunities} />
+      <Route path="/accounts/:id" component={Account360} />
       <Route path="/accounts" component={Accounts} />
       <Route path="/account-transitions/:id" component={AccountTransitions} />
       <Route path="/account-transitions" component={AccountTransitions} />

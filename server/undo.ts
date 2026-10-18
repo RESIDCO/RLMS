@@ -148,6 +148,13 @@ export async function applyUndo(group: string, actor: string) {
   }
 
   const rows = await loadChangeGroup(group);
+  const storagePaths = rows
+    .filter((r) => r.table_name === "attachments")
+    .map((r) => String(r.after?.storage_path ?? r.detail?.storage_path ?? ""))
+    .filter(Boolean);
+  if (storagePaths.length) {
+    await supabaseAdmin.storage.from("rlms-attachments").remove(storagePaths);
+  }
   for (const r of rows) {
     if (r.table_name === "railcars" && r.railcar_id && r.before && "active" in r.before) {
       await syncCurrentAssignmentHistoryActive(r.railcar_id, r.before.active === true);

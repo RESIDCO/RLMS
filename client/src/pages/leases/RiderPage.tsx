@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
 import FleetRegistry from "@/pages/FleetRegistry";
-import AttachmentsPanel from "@/components/AttachmentsPanel";
+import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
 import { todayIsoDateOnly } from "@shared/lease-authority";
 import { ArrowLeft } from "lucide-react";
@@ -111,8 +111,12 @@ export default function RiderPage() {
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <FleetRegistry scopedRiderId={id} />
       </div>
-      <div className="px-4 sm:px-8 py-3 border-t shrink-0 max-h-[28%] overflow-auto">
-        <AttachmentsPanel entityType="rider" entityId={id} />
+      <div className="px-4 sm:px-8 py-3 border-t shrink-0 max-h-[36%] overflow-auto">
+        <LeaseDocumentsPanel
+          kind="rider"
+          id={id}
+          fallbackUrls={h.contract_doc_url ? [{ label: "Contract path", url: h.contract_doc_url }] : []}
+        />
       </div>
 
       <Dialog open={edit} onOpenChange={setEdit}>

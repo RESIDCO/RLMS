@@ -6,10 +6,12 @@ import {
   AM1_STAY_UNOWNED,
   executeAm1Plans,
   ownerSignoffTable,
+  parseAm1Part,
   planOwnerAssignments,
   planOwnerRow,
   planTierRow,
   plannedWrites,
+  writesForPart,
   type OwnerLive,
 } from "./am1-plan";
 
@@ -117,6 +119,41 @@ try {
   refused = err instanceof Error && err.message.includes("AM1_APPLY_OK");
 }
 ok(refused && writes === 0, "--apply without AM1_APPLY_OK=bruce refuses before any write");
+
+ok(parseAm1Part(["node", "am1-data.ts"]) === "owners", "default --part is owners");
+ok(parseAm1Part(["node", "am1-data.ts", "--part", "tiers"]) === "tiers", "--part tiers is explicit");
+ok(parseAm1Part(["node", "am1-data.ts", "--apply", "--part", "all"]) === "all", "--part all is explicit");
+const both = plannedWrites(first, [tierSet]);
+const ownerOnly = writesForPart(both, parseAm1Part(["node", "am1-data.ts"]));
+ok(ownerOnly.length === 12 && ownerOnly.every((row) => row.group === "owners"), "default part does not seed tiers");
+const tierOnly = writesForPart(both, "tiers");
+ok(tierOnly.length === 1 && tierOnly[0]?.group === "tiers", "explicit tiers part seeds tiers");
+let tierWrites = 0;
+const tierDry = await executeAm1Plans({
+  apply: false,
+  env: {},
+  writes: tierOnly,
+  write: async () => {
+    tierWrites += 1;
+    return { change_group: "nope" };
+  },
+});
+ok(!tierDry.applied && tierWrites === 0, "tier part stays dry-run without --apply");
+let tierRefused = false;
+try {
+  await executeAm1Plans({
+    apply: true,
+    env: {},
+    writes: tierOnly,
+    write: async () => {
+      tierWrites += 1;
+      return { change_group: "nope" };
+    },
+  });
+} catch (err) {
+  tierRefused = err instanceof Error && err.message.includes("AM1_APPLY_OK");
+}
+ok(tierRefused && tierWrites === 0, "tier --apply uses the same AM1_APPLY_OK gate");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

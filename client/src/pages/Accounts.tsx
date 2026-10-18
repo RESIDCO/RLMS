@@ -312,6 +312,14 @@ export default function AccountsPage() {
           ))}
         </div>
 
+        {canEdit && (book.data?.unmatched_import.length ?? 0) > 0 ? (
+          <p className="text-sm text-amber-800">
+            Import rows with no OL:{" "}
+            {book.data?.unmatched_import.map((row) => `${row.rider_name} (${money(row.monthly_rent_total)})`).join(", ")}
+            . These are not included in an account total.
+          </p>
+        ) : null}
+
         {segment === "mybook" && !me && chip !== "unowned" ? (
           <p className="text-sm text-muted-foreground">Choose “I am” to open My Book. Nothing is saved to the database.</p>
         ) : book.isLoading ? (

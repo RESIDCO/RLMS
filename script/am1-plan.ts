@@ -205,6 +205,20 @@ export type PlannedWrite = {
   patch: { account_manager?: string; tier?: AccountTier };
 };
 
+export function parseAm1Part(argv: string[]): "owners" | "tiers" | "all" {
+  const index = argv.indexOf("--part");
+  const part = index === -1 ? "owners" : argv[index + 1];
+  if (part !== "owners" && part !== "tiers" && part !== "all") {
+    throw new Error("--part must be owners, tiers, or all");
+  }
+  return part;
+}
+
+export function writesForPart(writes: PlannedWrite[], part: "owners" | "tiers" | "all"): PlannedWrite[] {
+  if (part === "all") return writes;
+  return writes.filter((row) => row.group === part);
+}
+
 export function plannedWrites(owners: OwnerPlan[], tiers: TierPlan[]): PlannedWrite[] {
   const writes: PlannedWrite[] = [];
   for (const row of owners) {

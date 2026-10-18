@@ -31,6 +31,7 @@ import {
   ownerLabel,
   OPPORTUNITY_STAGE_LABEL,
   OPPORTUNITY_TYPE_LABEL,
+  viewerActivityPatch,
   type Account360Payload,
   type CrmActivityKind,
   type CrmActivityRow,
@@ -481,9 +482,11 @@ function ActivityList({
 }) {
   const qc = useQueryClient();
   const save = useMutation({
-    mutationFn: (row: CrmActivityRow) => apiRequest("PATCH", `/api/crm-activities/${row.id}`, {
-      done_at: row.done_at ? null : new Date().toISOString(),
-    }).then((r) => r.json()),
+    mutationFn: (row: CrmActivityRow) => {
+      const done_at = row.done_at ? null : new Date().toISOString();
+      const payload = canEditAny ? { done_at } : viewerActivityPatch({ ...row, done_at });
+      return apiRequest("PATCH", `/api/crm-activities/${row.id}`, payload).then((r) => r.json());
+    },
     onSuccess: (saved) => {
       offerUndoToast(saved);
       void qc.invalidateQueries({ queryKey: ["/api/accounts"] });

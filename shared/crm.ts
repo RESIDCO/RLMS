@@ -173,6 +173,18 @@ export type OpportunityRow = {
   closed_at: string | null;
 };
 
+export const VIEWER_ACTIVITY_PATCH_KEYS = ["body", "due_date", "done_at"] as const;
+
+/** Viewers may PATCH only these fields. Extra keys are dropped before the request. */
+export function viewerActivityPatch(input: object): Partial<Record<(typeof VIEWER_ACTIVITY_PATCH_KEYS)[number], unknown>> {
+  const source = input as Record<string, unknown>;
+  const patch: Partial<Record<(typeof VIEWER_ACTIVITY_PATCH_KEYS)[number], unknown>> = {};
+  for (const key of VIEWER_ACTIVITY_PATCH_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) patch[key] = source[key];
+  }
+  return patch;
+}
+
 export type CrmActivityRow = {
   id: number;
   account_id: number | null;

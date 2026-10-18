@@ -54,6 +54,12 @@ export type AccountBookAttention = {
   untiered: number;
 };
 
+export type UnmatchedRentRow = {
+  rider_name: string;
+  monthly_rent_total: number;
+  snapshot_month: string | null;
+};
+
 export type AccountBookResponse = {
   segment: AccountBookSegment;
   owner: string;
@@ -61,6 +67,7 @@ export type AccountBookResponse = {
   q: string;
   counts: { client: number; former: number; prospect: number };
   attention: AccountBookAttention;
+  unmatched_import: UnmatchedRentRow[];
   rows: AccountBookRow[];
 };
 
@@ -188,6 +195,70 @@ export function handoffPct(input: HandoffScoreInput | null | undefined, handoffI
     communication_completed: input?.communication_completed,
     briefing_form_completed: input?.briefing_form_completed,
   }).pct;
+}
+
+export type RentRiderKey = {
+  rider_name: string | null;
+  account_id: number | null;
+  is_placeholder?: boolean | null;
+};
+
+export type RentImportSlice = {
+  /** rider_financial_summary.rider_id: the rider name, such as OL1919. */
+  rider_id: string;
+  monthly_rent_total: number | string | null;
+  former_deal?: string | null;
+};
+
+/**
+ * Same key as v_account_rent_roll: sum every slice whose rider_id equals
+ * riders.rider_name. A numeric riders.id never matches. Names with no rider
+ * row are returned as unmatched instead of being dropped.
+ */
+export function accountRentRoll(riders: RentRiderKey[], slices: RentImportSlice[]): {
+  accounts: { account_id: number; monthly_rent_total: number; riders_in_import: number; riders_without_summary: number }[];
+  unmatched: { rider_name: string; monthly_rent_total: number; slices: number }[];
+} {
+  const knownNames = new Set<string>();
+  const namesByAccount = new Map<number, Set<string>>();
+  for (const rider of riders) {
+    const name = rider.rider_name == null ? "" : String(rider.rider_name);
+    if (!name.trim()) continue;
+    knownNames.add(name);
+    if (rider.is_placeholder === true || rider.account_id == null) continue;
+    const names = namesByAccount.get(rider.account_id) ?? new Set<string>();
+    names.add(name);
+    namesByAccount.set(rider.account_id, names);
+  }
+  const slicesByName = new Map<string, { total: number; count: number }>();
+  for (const slice of slices) {
+    const name = String(slice.rider_id);
+    const prev = slicesByName.get(name) ?? { total: 0, count: 0 };
+    prev.total += Number(slice.monthly_rent_total ?? 0);
+    prev.count += 1;
+    slicesByName.set(name, prev);
+  }
+  const accounts = Array.from(namesByAccount.entries()).map(([account_id, names]) => {
+    let monthly_rent_total = 0;
+    let riders_in_import = 0;
+    let riders_without_summary = 0;
+    for (const name of Array.from(names)) {
+      const hit = slicesByName.get(name);
+      if (!hit) riders_without_summary += 1;
+      else {
+        monthly_rent_total += hit.total;
+        riders_in_import += 1;
+      }
+    }
+    return { account_id, monthly_rent_total, riders_in_import, riders_without_summary };
+  });
+  const unmatched: { rider_name: string; monthly_rent_total: number; slices: number }[] = [];
+  for (const entry of Array.from(slicesByName.entries())) {
+    if (knownNames.has(entry[0])) continue;
+    unmatched.push({ rider_name: entry[0], monthly_rent_total: entry[1].total, slices: entry[1].count });
+  }
+  unmatched.sort((a, b) => a.rider_name.localeCompare(b.rider_name));
+  return { accounts, unmatched };
 }
 
 export function rentRollLabel(snapshotMonth: string | null | undefined): string {

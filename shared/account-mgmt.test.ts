@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  accountRentRoll,
   effectiveCadence,
   effectiveOwner,
   isTouchActivity,
@@ -71,11 +72,42 @@ ok(effectiveOwner({ owner_of_record: "KB", incoming_owner: "FF" }) === "FF", "in
 ok(rentRollLabel("2026-10-01") === "per import as of 2026-10-01", "rent label");
 ok(rentRollLabel(null) === "per import as of —", "missing snapshot label");
 
+const roll = accountRentRoll(
+  [
+    { rider_name: "OL1919", account_id: 10, is_placeholder: false },
+    { rider_name: "OL1000", account_id: 10, is_placeholder: false },
+    { rider_name: "IDLE", account_id: 99, is_placeholder: true },
+  ],
+  [
+    { rider_id: "OL1919", former_deal: "xOL1244", monthly_rent_total: 1000 },
+    { rider_id: "OL1919", former_deal: "xOL1932", monthly_rent_total: 250 },
+    { rider_id: "1919", monthly_rent_total: 999999 },
+    { rider_id: "EA2312", monthly_rent_total: 10 },
+    { rider_id: "OL1816", monthly_rent_total: 20 },
+    { rider_id: "OL2611", monthly_rent_total: 30 },
+    { rider_id: "IDLE", monthly_rent_total: 5 },
+  ],
+);
+const account = roll.accounts.find((row) => row.account_id === 10);
+ok(account?.monthly_rent_total === 1250, "OL1919 xOL1244 and xOL1932 sum on the rider name");
+ok(account?.monthly_rent_total !== 0, "a numeric riders.id does not match the import key");
+ok(account?.riders_in_import === 1 && account?.riders_without_summary === 1, "OL1000 is on the account and missing from the import");
+ok(!roll.accounts.some((row) => row.account_id === 99), "placeholder rent is not an account total");
+ok(
+  roll.unmatched.map((row) => row.rider_name).join(",") === "1919,EA2312,OL1816,OL2611",
+  "numeric id plus EA2312, OL1816, and OL2611 stay unmatched",
+);
+ok(roll.unmatched.find((row) => row.rider_name === "EA2312")?.monthly_rent_total === 10, "EA2312 rent is kept");
+ok(!roll.unmatched.some((row) => row.rider_name === "OL1919" || row.rider_name === "IDLE"), "names with a rider row are not unmatched");
+
 const sql = readFileSync(resolve("migrations/20261112_account_mgmt_am1.sql"), "utf8");
 const executable = sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
 ok(/apply after the security lockdown stages/i.test(sql), "migration says apply after lockdown");
 ok(/retaken right after AM-1/i.test(sql), "migration says retake the ACL snapshot if it goes first");
 ok(sql.includes("sum(f.monthly_rent_total)"), "rent roll sums every slice");
+ok(executable.includes("f.rider_id = ar.rider_name"), "rent roll joins on the rider name");
+ok(!executable.includes("rider_id::text"), "rent roll does not cast riders.id");
+ok(executable.includes("unmatched_rider_name"), "unmatched import names stay in the view");
 ok(!/distinct\s+on/i.test(sql), "rent roll does not collapse rows");
 ok(!/data-quality/i.test(sql), "no import data-quality flag");
 ok(!/rent_events/i.test(executable), "no rent_events statement");

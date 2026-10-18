@@ -1,7 +1,7 @@
+import { VIEWER_ACTIVITY_PATCH_KEYS } from "@shared/crm";
+
 export type CrmActivityRole = "admin" | "editor" | "viewer";
 export type CrmActivityAction = "create" | "patch" | "delete";
-
-export const VIEWER_ACTIVITY_PATCH_FIELDS = ["body", "due_date", "done_at"] as const;
 
 export type CrmActivityDecision =
   | { ok: true }
@@ -34,7 +34,7 @@ export function crmActivityPermission(input: {
       const actorId = String(input.actorId ?? "");
       const rowActor = String(input.rowActor ?? "");
       if (!actorId || actorId !== rowActor) return deny("Viewers can edit only their own activities");
-      const allowed = new Set<string>(VIEWER_ACTIVITY_PATCH_FIELDS);
+      const allowed = new Set<string>(VIEWER_ACTIVITY_PATCH_KEYS);
       for (const key of input.patchKeys ?? []) {
         if (!allowed.has(key)) return deny("Viewers can edit only body, due date, and done");
       }

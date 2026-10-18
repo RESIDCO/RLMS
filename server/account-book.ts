@@ -10,6 +10,7 @@ import {
   type AccountBookRow,
   type AccountBookSegment,
   type TouchStatus,
+  type UnmatchedRentRow,
 } from "@shared/account-mgmt";
 import { inRenewalWindow, isGovernedExpirySource, isOpenStage } from "@shared/crm";
 import { fetchAllRows } from "./fetch-all";
@@ -43,10 +44,11 @@ type AccountRow = {
   touch_cadence_days: number | null;
 };
 type RentRow = {
-  account_id: number;
+  account_id: number | null;
   snapshot_month: string | null;
   monthly_rent_total: number | string | null;
   riders_without_summary: number | null;
+  unmatched_rider_name: string | null;
 };
 
 function dateOnly(value: unknown): string | null {
@@ -111,7 +113,7 @@ export async function listAccountBook(query: BookQuery): Promise<AccountBookResp
     fetchAllRows<RentRow>((from, to) =>
       supabaseAdmin
         .from("v_account_rent_roll")
-        .select("account_id, snapshot_month, monthly_rent_total, riders_without_summary")
+        .select("account_id, snapshot_month, monthly_rent_total, riders_without_summary, unmatched_rider_name")
         .order("account_id", { ascending: true })
         .range(from, to),
     ),
@@ -147,7 +149,24 @@ export async function listAccountBook(query: BookQuery): Promise<AccountBookResp
   }
   const accountById = new Map(accounts.map((row) => [Number(row.id), row]));
   const ownerById = new Map(owners.map((row) => [Number(row.account_id), row]));
-  const rentById = new Map(rents.map((row) => [Number(row.account_id), row]));
+  const accountRents: RentRow[] = [];
+  const unmatchedImport: UnmatchedRentRow[] = [];
+  for (const row of rents) {
+    const unmatchedName = textOrNull(row.unmatched_rider_name);
+    if (row.account_id == null || unmatchedName) {
+      if (unmatchedName) {
+        unmatchedImport.push({
+          rider_name: unmatchedName,
+          monthly_rent_total: Number(row.monthly_rent_total ?? 0),
+          snapshot_month: dateOnly(row.snapshot_month),
+        });
+      }
+      continue;
+    }
+    accountRents.push(row);
+  }
+  unmatchedImport.sort((a, b) => a.rider_name.localeCompare(b.rider_name));
+  const rentById = new Map(accountRents.map((row) => [Number(row.account_id), row]));
   const leaseById = new Map(leases.map((lease) => [Number(lease.id), lease]));
   const onRent = onRentIdsByRider(cars);
 
@@ -277,6 +296,7 @@ export async function listAccountBook(query: BookQuery): Promise<AccountBookResp
     q: query.q,
     counts,
     attention,
+    unmatched_import: unmatchedImport,
     rows,
   };
 }

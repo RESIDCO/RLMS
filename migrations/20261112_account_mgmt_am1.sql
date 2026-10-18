@@ -53,30 +53,54 @@ from public.accounts a
 left join public.account_transition_records t on t.account_id = a.id;
 
 -- 3. Rent roll. Sum every rider_financial_summary slice for the latest
--- snapshot (car_type / entity / former_deal and the rest). rider_id on the
--- import table is text; riders.id is bigint.
+-- snapshot (car_type / entity / former_deal and the rest).
+-- rider_financial_summary.rider_id is the rider NAME (for example OL1919),
+-- not riders.id. Joining on riders.id::text sums every account to 0.
+-- Import names with no riders row (Oct 2026: EA2312, OL1816, OL2611) are
+-- returned with account_id null so they are not dropped.
 create or replace view public.v_account_rent_roll
 with (security_invoker = true) as
 with snap as (
   select max(snapshot_month) as m from public.rider_financial_summary
 ),
 acct_riders as (
-  select ml.account_id, r.id as rider_id
+  select distinct ml.account_id, r.rider_name
   from public.riders r
   join public.master_leases ml on ml.id = r.master_lease_id
   where ml.account_id is not null
     and coalesce(ml.is_placeholder, false) = false
+    and nullif(btrim(r.rider_name), '') is not null
+),
+matched as (
+  select ar.account_id,
+         (select m from snap) as snapshot_month,
+         coalesce(sum(f.monthly_rent_total), 0)::numeric as monthly_rent_total,
+         count(distinct f.rider_id) as riders_in_import,
+         count(distinct ar.rider_name) filter (where f.rider_id is null) as riders_without_summary,
+         null::text as unmatched_rider_name
+  from acct_riders ar
+  left join public.rider_financial_summary f
+    on f.rider_id = ar.rider_name
+   and f.snapshot_month = (select m from snap)
+  group by ar.account_id
+),
+unmatched as (
+  select null::bigint as account_id,
+         (select m from snap) as snapshot_month,
+         coalesce(sum(f.monthly_rent_total), 0)::numeric as monthly_rent_total,
+         count(*)::bigint as riders_in_import,
+         0::bigint as riders_without_summary,
+         f.rider_id as unmatched_rider_name
+  from public.rider_financial_summary f
+  where f.snapshot_month = (select m from snap)
+    and not exists (
+      select 1 from public.riders r where r.rider_name = f.rider_id
+    )
+  group by f.rider_id
 )
-select ar.account_id,
-       (select m from snap) as snapshot_month,
-       coalesce(sum(f.monthly_rent_total), 0)::numeric as monthly_rent_total,
-       count(distinct f.rider_id) as riders_in_import,
-       count(distinct ar.rider_id) filter (where f.rider_id is null) as riders_without_summary
-from acct_riders ar
-left join public.rider_financial_summary f
-  on f.rider_id = ar.rider_id::text
- and f.snapshot_month = (select m from snap)
-group by ar.account_id;
+select * from matched
+union all
+select * from unmatched;
 
 -- 4. Grants match the lockdown. Safe before or after it.
 revoke all on public.v_account_owner_effective, public.v_account_rent_roll from public, anon, authenticated;

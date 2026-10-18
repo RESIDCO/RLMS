@@ -1,6 +1,7 @@
 /**
  * AM-1 owner and tier seed. Dry-run by default.
  *   npx tsx script/am1-data.ts [--apply] [--part owners|tiers|all]
+ * --part defaults to owners. Tier seeding needs --part tiers (or --part all).
  *
  * --apply requires AM1_APPLY_OK=bruce and is run only after the migration
  * and after Bruce signs off the 12-row preview. Each part is one change group
@@ -18,23 +19,19 @@ import {
   AM1_STAY_UNOWNED,
   assertAm1ApplyAllowed,
   ownerSignoffTable,
+  parseAm1Part,
   planOwnerAssignments,
   planTierRow,
   plannedWrites,
   previewCsvRows,
   toCsv,
+  writesForPart,
   type OwnerLive,
   type TierLive,
 } from "./am1-plan";
 
 const ACTOR = "am1-data";
 const stay = new Set<number>(AM1_STAY_UNOWNED.map((row) => row.account_id));
-
-function arg(name: string): string | null {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index === -1) return null;
-  return process.argv[index + 1] ?? null;
-}
 
 async function loadOwners(): Promise<Map<number, OwnerLive>> {
   const ids = AM1_OWNER_ASSIGNMENTS.map((row) => row.account_id);
@@ -109,10 +106,7 @@ async function loadTiers(): Promise<TierLive[]> {
 
 async function main() {
   const apply = process.argv.includes("--apply");
-  const part = arg("part") ?? "all";
-  if (part !== "owners" && part !== "tiers" && part !== "all") {
-    throw new Error("--part must be owners, tiers, or all");
-  }
+  const part = parseAm1Part(process.argv);
   const owners = planOwnerAssignments(await loadOwners());
   const tiers = (await loadTiers()).map(planTierRow);
   console.log("Owner assignment preview — all 12 lessee rows (current blank, new BH/FF) for sign-off");
@@ -125,12 +119,15 @@ async function main() {
   const csvPath = join(dirname(fileURLToPath(import.meta.url)), "am1-data-preview.csv");
   writeFileSync(csvPath, toCsv(previewCsvRows(owners, tiers)));
   console.log(`Wrote ${csvPath}`);
+  console.log(part === "owners" && !process.argv.includes("--part")
+    ? "Part: owners (default). Pass --part tiers to seed tiers, or --part all for both."
+    : `Part: ${part}`);
   if (!apply) {
     console.log("Dry-run. No database writes. Re-run with --apply only after Bruce signs off, and only with AM1_APPLY_OK=bruce.");
     return;
   }
   assertAm1ApplyAllowed(true, process.env);
-  const writes = plannedWrites(owners, tiers).filter((row) => part === "all" || row.group === part);
+  const writes = writesForPart(plannedWrites(owners, tiers), part);
   for (const group of ["owners", "tiers"] as const) {
     const rows = writes.filter((row) => row.group === group);
     if (!rows.length) continue;

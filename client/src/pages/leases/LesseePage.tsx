@@ -86,9 +86,9 @@ export default function LesseePage() {
 
         <div>
           <h2 className="text-sm font-semibold mb-2">OL / EA</h2>
-          <div className="overflow-auto border rounded-md">
+          <div className="border rounded-md">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-xs text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-card text-xs text-muted-foreground border-b">
                 <tr>
                   {["Code","Effective","Expiry","Cars","On rent","Off lease","Rent/car","Monthly rent","Owner entity","Sublessee","Doc"].map((h) => (
                     <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>

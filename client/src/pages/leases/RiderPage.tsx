@@ -108,10 +108,10 @@ export default function RiderPage() {
         ) : <span className="text-xs text-muted-foreground">No contract on file</span>}
         {h.successor_rider_id ? <Link href={`/leases/rider/${h.successor_rider_id}`} className="underline">Successor OL</Link> : null}
       </div>
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <FleetRegistry scopedRiderId={id} />
       </div>
-      <div className="px-4 sm:px-8 py-3 border-t">
+      <div className="px-4 sm:px-8 py-3 border-t shrink-0 max-h-[28%] overflow-auto">
         <AttachmentsPanel entityType="rider" entityId={id} />
       </div>
 

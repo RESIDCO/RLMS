@@ -154,7 +154,7 @@ export default function LeaseMgmtHome() {
           ))}
         </div>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "lessees" | "issues")}>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "lessees" | "issues")} className="flex-1 min-h-0 flex flex-col">
           <TabsList>
             <TabsTrigger value="lessees">Lessees</TabsTrigger>
             <TabsTrigger value="issues">Data issues</TabsTrigger>
@@ -196,7 +196,7 @@ export default function LeaseMgmtHome() {
                 <thead className="sticky top-0 bg-card border-b">
                   <tr className="text-left text-xs text-muted-foreground">
                     {["Lessee","AM","OLs","EAs","Cars","On rent","Off rent","Monthly rent","Next exp.","Exp ≤6/≤12","Issues"].map((h) => (
-                      <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">{h}</th>
+                      <th key={h} className="px-3 py-2 font-medium whitespace-nowrap sticky top-0 bg-card">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -231,7 +231,7 @@ export default function LeaseMgmtHome() {
               <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></Button>
             </div>
           </TabsContent>
-          <TabsContent value="issues" className="mt-3 overflow-auto">
+          <TabsContent value="issues" className="mt-3 flex-1 min-h-0 overflow-auto">
             <div className="space-y-6">
               {Object.entries(issues ?? {}).filter(([k]) => k !== "duplicate_rows").map(([kind, pack]) => (
                 <div key={kind} className="border rounded-md">

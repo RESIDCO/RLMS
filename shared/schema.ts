@@ -448,3 +448,19 @@ export type HistoryRow = AssignmentHistory & {
   from_rider: (Pick<Rider, "id" | "rider_name"> & { master_lease: Pick<MasterLease, "id" | "lease_number"> | null }) | null;
   to_rider: (Pick<Rider, "id" | "rider_name"> & { master_lease: Pick<MasterLease, "id" | "lease_number"> | null }) | null;
 };
+
+export type {
+  Account360Contact,
+  Account360Ol,
+  Account360Payload,
+  Account360TimelineItem,
+  CrmActivityKind,
+  CrmActivityRow,
+  LossReason,
+  OpportunityRow,
+  OpportunitySource,
+  OpportunityStage,
+  OpportunityType,
+  RenewalRunResult,
+  WatchRow,
+} from "./crm";

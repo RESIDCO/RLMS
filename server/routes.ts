@@ -123,6 +123,7 @@ import { registerRentStopRoutes } from "./rent-stops";
 import { registerRailcarBulkRoutes } from "./railcar-bulk";
 import { registerKpiCarRoutes } from "./kpi-cars";
 import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } from "./lease-mgmt";
+import { registerCrmRoutes } from "./crm";
 import { registerColumnPrefRoutes } from "./column-prefs";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
@@ -5723,6 +5724,8 @@ export async function registerRoutes(
       errHandler(res, err);
     }
   });
+
+  registerCrmRoutes(app);
 
   app.get("/api/accounts/:id", async (req, res) => {
     try {

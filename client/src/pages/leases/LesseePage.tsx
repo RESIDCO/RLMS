@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
 import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
+import LeaseCrmLinks from "@/components/crm/LeaseCrmLinks";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
 import { ArrowLeft, FileText } from "lucide-react";
 import { useCanEdit } from "@/lib/AuthContext";
@@ -64,6 +65,7 @@ export default function LesseePage() {
         }
       />
       <div className="px-4 sm:px-8 py-4 flex-1 min-h-0 overflow-auto space-y-6">
+        <LeaseCrmLinks mode="lessee" id={id} />
         <div className="flex flex-wrap gap-4 text-sm">
           {(data.contacts ?? []).slice(0, 8).map((c: any) => (
             <div key={c.id} className="text-muted-foreground">{c.name || c.email || "Contact"}</div>

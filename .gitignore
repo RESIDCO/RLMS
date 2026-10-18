@@ -18,6 +18,8 @@ dist/
 
 # Local run artifacts
 script/*-last.json
+script/load_log.csv
+script/load_state.json
 script/__pycache__/
 script/_census2020/
 supabase/.temp/

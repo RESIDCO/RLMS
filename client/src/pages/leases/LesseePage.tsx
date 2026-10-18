@@ -5,7 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
-import AttachmentsPanel from "@/components/AttachmentsPanel";
+import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
 import { ArrowLeft, FileText } from "lucide-react";
 import { useCanEdit } from "@/lib/AuthContext";
@@ -141,15 +141,7 @@ export default function LesseePage() {
           </div>
           <div>
             <h2 className="text-sm font-semibold mb-2">Documents</h2>
-            <ul className="text-sm space-y-1 mb-3">
-              {docs.length ? docs.map((d) => (
-                <li key={d.url} className="font-mono text-xs flex gap-2">
-                  <span>{d.label}</span>
-                  <button type="button" className="underline" onClick={() => void navigator.clipboard.writeText(d.url)}>{d.url}</button>
-                </li>
-              )) : <li className="text-muted-foreground text-xs">No contract on file</li>}
-            </ul>
-            <AttachmentsPanel entityType="master_lease" entityId={id} />
+            <LeaseDocumentsPanel kind="lessee" id={id} fallbackUrls={docs} />
           </div>
         </div>
       </div>

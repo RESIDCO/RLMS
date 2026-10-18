@@ -4456,6 +4456,26 @@ export async function registerRoutes(
   // source_module is stamped server-side; client body.source_module is ignored.
   // entity_id: the primary key of the linked record
 
+  // GET /api/attachments/:id/signed-url — 5-minute Storage URL (private bucket; do not use getPublicUrl)
+  app.get("/api/attachments/:id/signed-url", async (req, res) => {
+    try {
+      const user = await getAuthUser(req);
+      if (!user) return res.status(401).json({ error: "Unauthorized" });
+      const { id } = req.params;
+      const { data: att, error: fetchErr } = await supabaseAdmin
+        .from("attachments")
+        .select("storage_path, file_name")
+        .eq("id", id)
+        .single();
+      if (fetchErr || !att) return res.status(404).json({ error: "Attachment not found" });
+      const { data, error } = await supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .createSignedUrl(att.storage_path, 300);
+      if (error || !data?.signedUrl) throw error ?? new Error("Could not sign URL");
+      res.json({ url: data.signedUrl, file_name: att.file_name });
+    } catch (err) { errHandler(res, err); }
+  });
+
   // GET /api/attachments/:id/download — stream file directly (must be BEFORE /:entityType/:entityId to avoid route conflict)
   app.get("/api/attachments/:id/download", async (req, res) => {
     try {

@@ -4,6 +4,7 @@ export const ATTACHMENT_SOURCE_MODULES = [
   "lease_management",
   "programs",
   "contacts_directory",
+  "lease_contracts",
 ] as const;
 
 export type AttachmentSourceModule = (typeof ATTACHMENT_SOURCE_MODULES)[number];
@@ -14,6 +15,7 @@ export const ATTACHMENT_SOURCE_LABEL: Record<AttachmentSourceModule, string> = {
   lease_management: "Lease Management",
   programs: "Programs",
   contacts_directory: "Contacts",
+  lease_contracts: "Z: contracts",
 };
 
 export function attachmentSourceLabel(raw: string | null | undefined): string {

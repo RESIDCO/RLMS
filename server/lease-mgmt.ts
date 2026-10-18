@@ -43,6 +43,29 @@ function reject(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
 }
 
+function subFolderFromSource(sourcePath: string | null | undefined): string {
+  if (!sourcePath) return "";
+  const parts = String(sourcePath).replace(/\//g, "\\").split("\\").filter(Boolean);
+  if (parts.length <= 2) return "";
+  return parts.slice(1, -1).join("\\");
+}
+
+function shapeLeaseDoc(row: any, riderCode?: string | null) {
+  return {
+    id: Number(row.id),
+    file_name: row.file_name,
+    file_size: Number(row.file_size ?? 0),
+    mime_type: row.mime_type,
+    source_path: row.source_path ?? null,
+    source_modified: row.source_modified ?? null,
+    doc_class: row.doc_class ?? null,
+    source: row.source ?? null,
+    rider_id: row.entity_type === "rider" ? Number(row.entity_id) : null,
+    rider_code: riderCode ?? null,
+    sub_folder: subFolderFromSource(row.source_path),
+  };
+}
+
 async function assertActiveCars(ids: number[]): Promise<{ ok: number[]; skipped: { id: number; reason: string }[] }> {
   const ok: number[] = [];
   const skipped: { id: number; reason: string }[] = [];
@@ -647,6 +670,60 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
         .order("occurred_at", { ascending: false })
         .limit(100);
       res.json({ header: { ...rider, ...rollup }, cars, timeline: timeline ?? [] });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/lease-mgmt/riders/:id/documents", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { data: rider, error: rErr } = await supabaseAdmin.from("riders").select("id, rider_name").eq("id", id).maybeSingle();
+      if (rErr) throw rErr;
+      if (!rider) return res.status(404).json({ message: "Rider not found" });
+      const { data, error } = await supabaseAdmin
+        .from("attachments")
+        .select("*")
+        .eq("entity_type", "rider")
+        .eq("entity_id", id)
+        .order("source_modified", { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      res.json({ rows: (data ?? []).map((row) => shapeLeaseDoc(row, rider.rider_name)) });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/lease-mgmt/lessees/:id/documents", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const riders = await fetchAllRows((from, to) =>
+        supabaseAdmin.from("riders").select("id, rider_name").eq("master_lease_id", id).range(from, to),
+      );
+      const codeById = new Map(riders.map((r: any) => [Number(r.id), String(r.rider_name ?? "")]));
+      const riderIds = riders.map((r: any) => Number(r.id));
+      const { data: mlAtt, error: mlErr } = await supabaseAdmin
+        .from("attachments")
+        .select("*")
+        .or(`and(entity_type.eq.master_lease,entity_id.eq.${id}),master_lease_id.eq.${id}`);
+      if (mlErr) throw mlErr;
+      let riderAtt: any[] = [];
+      if (riderIds.length) {
+        riderAtt = await fetchAllRows((from, to) =>
+          supabaseAdmin.from("attachments").select("*").eq("entity_type", "rider").in("entity_id", riderIds).range(from, to),
+        );
+      }
+      const seen = new Set<number>();
+      const rows = [];
+      for (const row of [...(mlAtt ?? []), ...riderAtt]) {
+        const nid = Number(row.id);
+        if (seen.has(nid)) continue;
+        seen.add(nid);
+        const code = row.entity_type === "rider" ? codeById.get(Number(row.entity_id)) ?? null : null;
+        rows.push(shapeLeaseDoc(row, code));
+      }
+      rows.sort((a, b) => String(b.source_modified ?? "").localeCompare(String(a.source_modified ?? "")));
+      res.json({ rows });
     } catch (err) {
       errHandler(res, err);
     }

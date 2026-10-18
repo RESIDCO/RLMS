@@ -18,6 +18,7 @@ general_description, commodity, notes, data_source, lease_type, managed,
 total_bv_rider, cars_on_rider_ar, commodity_family, comment_event_note,
 car_initial, description, active_status, built_year, dot_code, dot_specification,
 acquisition_batch_id, acquisition_date, purchase_price, needs_completion, ops_flag, ops_flag_set_at,
+scrapped_at, scrap_source, umler_status, umler_status_at,
 assignment:railcar_assignments(
   id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
   rider:riders(

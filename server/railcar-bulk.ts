@@ -438,7 +438,7 @@ async function applyRow(row: BulkRow, ops: BulkOp[], actor: string) {
       return;
     case "end_assignment": {
       const after = row.after as any;
-      const pk = Number(after?.id ?? row.before && (row.before as any).id);
+      const pk = Number(after?.id ?? (row.before && (row.before as any).id));
       const { data: prior } = await supabaseAdmin.from("assignment_history").select("id, end_date").eq("id", pk).maybeSingle();
       if (!prior) throw new Error("assignment row missing");
       if (prior.end_date) throw new Error("assignment already ended");

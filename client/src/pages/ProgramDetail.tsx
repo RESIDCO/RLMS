@@ -781,16 +781,6 @@ export default function ProgramDetailPage() {
             />
           </td>
         );
-      case "comment":
-        return (
-          <td key={key} className="px-2 py-1 overflow-hidden">
-            <CellInput
-              readOnly={!canEdit || exited}
-              value={c.notes ?? ""}
-              onSave={(v) => queueCarPatch(c.id, { notes: v })}
-            />
-          </td>
-        );
       case "ol_entry":
         return <td key={key} className="px-2 py-1.5 font-mono">{c.rider_external_id_snapshot ?? "—"}</td>;
       case "ol_now":

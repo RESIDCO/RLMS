@@ -11,11 +11,9 @@ import { AD_HOC_LEASE_NUMBER } from "@shared/ol-identity";
 import { queryRailcars, queryRailcarIds, queryRailcarSummary, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
-import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, resolveAccountIdForNewLease, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
+import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, resolveAccountIdForNewLease, accountManagerByAccountIds, listAccountManagementOverview, listRiderCarsForAccountMgmt } from "./accounts";
 import {
   attachLatestAmNotes,
-  createRiderAccountComment,
-  deleteRiderAccountComment,
   listRiderAccountComments,
 } from "./rider-account-comments";
 import {
@@ -5386,22 +5384,8 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  app.patch("/api/account-management/riders/:riderId/status-tag", async (req, res) => {
-    try {
-      if (!(await requireAccountMgmtWrite(req, res))) return;
-      const riderId = Number(req.params.riderId);
-      if (!Number.isFinite(riderId) || riderId <= 0) {
-        return res.status(400).json({ message: "Invalid rider" });
-      }
-      const raw = req.body?.status_tag;
-      const statusTag = raw === null || raw === "" ? null : raw;
-      if (statusTag != null && !isStatusTag(statusTag)) {
-        return res.status(400).json({ message: "status_tag must be good, watch, or risk" });
-      }
-      const row = await patchRiderStatusTag(riderId, statusTag);
-      if (!row) return res.status(404).json({ message: "Rider not found" });
-      res.json(row);
-    } catch (err) { errHandler(res, err); }
+  app.patch("/api/account-management/riders/:riderId/status-tag", (_req, res) => {
+    res.status(410).json({ message: "Retired in AM-1: use account Log activity" });
   });
 
   app.get("/api/account-management/riders/:riderId/comments", async (req, res) => {
@@ -5415,25 +5399,8 @@ export async function registerRoutes(
     } catch (err) { errHandler(res, err); }
   });
 
-  app.post("/api/account-management/riders/:riderId/comments", async (req, res) => {
-    try {
-      const userId = await requireAccountMgmtWrite(req, res);
-      if (!userId) return;
-      const riderId = Number(req.params.riderId);
-      if (!Number.isFinite(riderId) || riderId <= 0) {
-        return res.status(400).json({ message: "Invalid rider" });
-      }
-      const row = await createRiderAccountComment({
-        riderId,
-        authorUserId: userId,
-        authorEmail: req.authUser?.email ?? "",
-        body: String(req.body?.body ?? ""),
-      });
-      res.status(201).json(row);
-    } catch (err: any) {
-      if (err?.status) return res.status(err.status).json({ message: err.message });
-      errHandler(res, err);
-    }
+  app.post("/api/account-management/riders/:riderId/comments", (_req, res) => {
+    res.status(410).json({ message: "Retired in AM-1: use account Log activity" });
   });
 
   app.get("/api/account-management/accounts/:id/attachments", async (req, res) => {
@@ -5502,17 +5469,8 @@ export async function registerRoutes(
     },
   );
 
-  app.delete("/api/account-management/comments/:commentId", async (req, res) => {
-    try {
-      if (!(await requireAdmin(req, res))) return;
-      const commentId = Number(req.params.commentId);
-      if (!Number.isFinite(commentId) || commentId <= 0) {
-        return res.status(400).json({ message: "Invalid comment" });
-      }
-      const ok = await deleteRiderAccountComment(commentId);
-      if (!ok) return res.status(404).json({ message: "Comment not found" });
-      res.json({ ok: true });
-    } catch (err) { errHandler(res, err); }
+  app.delete("/api/account-management/comments/:commentId", (_req, res) => {
+    res.status(410).json({ message: "Retired in AM-1: use account Log activity" });
   });
 
   app.patch("/api/account-management/comments/:commentId", (_req, res) => {
@@ -5522,7 +5480,7 @@ export async function registerRoutes(
     res.status(405).json({ message: "Account Management notes cannot be edited" });
   });
   app.patch("/api/account-management/riders/:riderId/comment", (_req, res) => {
-    res.status(410).json({ message: "Use POST /api/account-management/riders/:riderId/comments" });
+    res.status(410).json({ message: "Retired in AM-1: use account Log activity" });
   });
 
   app.get("/api/account-transitions/summary", async (req, res) => {
@@ -5844,11 +5802,13 @@ export async function registerRoutes(
 
   app.post("/api/accounts", async (req, res) => {
     try {
-      if (!(await requireWrite(req, res))) return;
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
       const row = await createAccount({
         name: String(req.body.name ?? ""),
         notes: req.body.notes ?? null,
-      });
+        account_manager: req.body.account_manager,
+      }, writerId);
       res.json(row);
     } catch (err: any) {
       if (err?.status) return res.status(err.status).json({ message: err.message });
@@ -5880,12 +5840,16 @@ export async function registerRoutes(
 
   app.patch("/api/accounts/:id", async (req, res) => {
     try {
-      if (!(await requireWrite(req, res))) return;
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const body = (req.body ?? {}) as Record<string, unknown>;
       const row = await updateAccount(Number(req.params.id), {
-        name: req.body.name,
-        notes: req.body.notes,
-        account_manager: req.body.account_manager,
-      });
+        name: "name" in body ? (body.name as string) : undefined,
+        notes: "notes" in body ? (body.notes as string | null) : undefined,
+        account_manager: "account_manager" in body ? (body.account_manager as string | null) : undefined,
+        tier: "tier" in body ? (body.tier as string | null) : undefined,
+        touch_cadence_days: "touch_cadence_days" in body ? (body.touch_cadence_days as number | null) : undefined,
+      }, writerId);
       if (!row) return res.status(404).json({ message: "Account not found" });
       res.json(row);
     } catch (err: any) {

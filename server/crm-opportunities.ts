@@ -35,6 +35,7 @@ import {
   type RenewalRunResult,
   type WatchRow,
 } from "@shared/crm";
+import { renewalOwnerFields } from "@shared/account-mgmt";
 import { createCrmProspect, ensureCompanyForAccount, resolveCrmParty } from "./crm-parties";
 
 type RiderFact = {
@@ -221,6 +222,24 @@ async function loadLeases(): Promise<Map<number, LeaseFact>> {
   return map;
 }
 
+async function loadEffectiveOwners(): Promise<Map<number, { owner_of_record: string | null; incoming_owner: string | null }>> {
+  const rows = await fetchAllRows<{ account_id: number; owner_of_record: string | null; incoming_owner: string | null }>((from, to) =>
+    supabaseAdmin
+      .from("v_account_owner_effective")
+      .select("account_id, owner_of_record, incoming_owner")
+      .order("account_id", { ascending: true })
+      .range(from, to),
+  );
+  const map = new Map<number, { owner_of_record: string | null; incoming_owner: string | null }>();
+  for (const row of rows) {
+    map.set(Number(row.account_id), {
+      owner_of_record: textOrNull(row.owner_of_record),
+      incoming_owner: textOrNull(row.incoming_owner),
+    });
+  }
+  return map;
+}
+
 async function loadAccounts(): Promise<Map<number, AccountFact>> {
   const rows = await fetchAllRows<Record<string, unknown>>((from, to) =>
     supabaseAdmin
@@ -293,13 +312,14 @@ async function leasedCarTypes(railcarIds: number[]): Promise<Map<number, string 
 }
 
 async function selectRenewals(months: number, today: string): Promise<RenewalPreviewRow[]> {
-  const [cars, riders, leases, accounts, companies, openRenewals] = await Promise.all([
+  const [cars, riders, leases, accounts, companies, openRenewals, effectiveOwners] = await Promise.all([
     loadOnRentCars(),
     loadRiders(),
     loadLeases(),
     loadAccounts(),
     companyIdByAccount(),
     openRenewalRiderIds(),
+    loadEffectiveOwners(),
   ]);
   const byRider = onRentIdsByRider(cars);
   const prelim: Array<RenewalPreviewRow & { railcarIds: number[] }> = [];
@@ -319,6 +339,11 @@ async function selectRenewals(months: number, today: string): Promise<RenewalPre
     );
     if (!selected || !lease?.account_id || !rider.expiration_date || !rider.expiration_source) continue;
     const account = accounts.get(lease.account_id);
+    const effective = effectiveOwners.get(lease.account_id);
+    const ownerFields = renewalOwnerFields({
+      owner_of_record: effective?.owner_of_record ?? account?.account_manager ?? null,
+      incoming_owner: effective?.incoming_owner ?? null,
+    });
     prelim.push({
       rider_id: rider.id,
       rider_name: rider.rider_name,
@@ -326,7 +351,9 @@ async function selectRenewals(months: number, today: string): Promise<RenewalPre
       account_id: lease.account_id,
       account_name: account?.name ?? null,
       company_id: companies.get(lease.account_id) ?? null,
-      owner: account?.account_manager ?? null,
+      owner: ownerFields.owner,
+      owner_of_record: ownerFields.owner_of_record,
+      incoming_owner: ownerFields.incoming_owner,
       car_count: railcarIds.length,
       car_type: null,
       current_rate: rider.monthly_rent_per_car,

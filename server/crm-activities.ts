@@ -1,4 +1,5 @@
 import { recordChange, withChangeGroupResult } from "./change-log";
+import { crmActivityPermission, type CrmActivityRole } from "./crm-activity-access";
 import { CrmHttpError } from "./crm-error";
 import { supabaseAdmin } from "./supabase";
 import { changeCaptureRow, isCrmActivityKind, type CrmActivityKind, type CrmActivityRow } from "@shared/crm";
@@ -68,7 +69,10 @@ export async function listCrmActivities(filters: ActivityFilters): Promise<CrmAc
 export async function createCrmActivity(
   body: Record<string, unknown>,
   actor: string,
+  role: CrmActivityRole,
 ): Promise<CrmActivityRow & { change_group: string }> {
+  const allowed = crmActivityPermission({ role, action: "create", actorId: actor });
+  if (!allowed.ok) throw httpError(allowed.status, allowed.message);
   if (!isCrmActivityKind(body.kind)) throw httpError(400, "Invalid activity kind");
   const text = String(body.body ?? "").trim();
   if (!text) throw httpError(400, "Activity body is required");
@@ -123,11 +127,20 @@ export async function patchCrmActivity(
   id: number,
   body: Record<string, unknown>,
   actor: string,
+  role: CrmActivityRole,
 ): Promise<CrmActivityRow & { change_group: string }> {
   if (!Number.isFinite(id) || id <= 0) throw httpError(400, "Invalid activity");
   const { data: before, error: beforeErr } = await supabaseAdmin.from("crm_activities").select("*").eq("id", id).maybeSingle();
   if (beforeErr) throw beforeErr;
   if (!before) throw httpError(404, "Activity not found");
+  const allowed = crmActivityPermission({
+    role,
+    action: "patch",
+    actorId: actor,
+    rowActor: String(before.actor ?? ""),
+    patchKeys: Object.keys(body),
+  });
+  if (!allowed.ok) throw httpError(allowed.status, allowed.message);
   const patch: Record<string, unknown> = {};
   if ("kind" in body) {
     if (!isCrmActivityKind(body.kind)) throw httpError(400, "Invalid activity kind");
@@ -159,4 +172,12 @@ export async function patchCrmActivity(
     return mapActivity(data as Record<string, unknown>);
   });
   return result;
+}
+
+/** Viewers can never delete. No role can delete an activity in AM-1. */
+export async function deleteCrmActivity(id: number, actor: string, role: CrmActivityRole): Promise<never> {
+  void id;
+  const allowed = crmActivityPermission({ role, action: "delete", actorId: actor });
+  if (!allowed.ok) throw httpError(allowed.status, allowed.message);
+  throw httpError(403, "Deleting activities is not available");
 }

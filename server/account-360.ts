@@ -1,3 +1,5 @@
+import { effectiveCadence, handoffPct, isTouchActivity, nextTouchDue, touchStatus } from "@shared/account-mgmt";
+import type { AccountBrief } from "@shared/account-mgmt";
 import { getAccount } from "./accounts";
 import { listCrmActivities } from "./crm-activities";
 import { listOpportunities, loadOnRentCars, onRentIdsByRider, utcToday } from "./crm-opportunities";
@@ -103,7 +105,7 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
   const account = await getAccount(id);
   if (!account) return null;
   const today = utcToday();
-  const [lessees, leases, opportunities, people, cars, activities, transitionRes] = await Promise.all([
+  const [lessees, leases, opportunities, people, cars, activities, transitionRes, ownerRes, rentRes, partyRes] = await Promise.all([
     fetchAllRows<{ master_lease_id: number; account_id: number | null }>((from, to) =>
       supabaseAdmin.from("v_crm_lessee_account").select("master_lease_id, account_id").eq("account_id", id).order("master_lease_id").range(from, to),
     ),
@@ -112,10 +114,24 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
     listDirectoryPeopleForAccount(id),
     loadOnRentCars(),
     listCrmActivities({ account_id: id }),
-    supabaseAdmin.from("account_transition_records").select("id, status").eq("account_id", id).order("id", { ascending: false }).limit(1).maybeSingle(),
+    supabaseAdmin
+      .from("account_transition_records")
+      .select("id, status, to_account_manager, meeting_scheduled, communication_completed, briefing_form_completed")
+      .eq("account_id", id)
+      .maybeSingle(),
+    supabaseAdmin.from("v_account_owner_effective").select("*").eq("account_id", id).maybeSingle(),
+    supabaseAdmin
+      .from("v_account_rent_roll")
+      .select("account_id, snapshot_month, monthly_rent_total, riders_without_summary")
+      .eq("account_id", id)
+      .maybeSingle(),
+    supabaseAdmin.from("v_crm_party_search").select("kind").eq("entity", "account").eq("entity_id", id).limit(5),
   ]);
   if (leases.error) throw leases.error;
   if (transitionRes.error) throw transitionRes.error;
+  if (ownerRes.error) throw ownerRes.error;
+  if (rentRes.error) throw rentRes.error;
+  if (partyRes.error) throw partyRes.error;
 
   const leaseIds = (leases.data ?? []).map((lease) => Number(lease.id));
   const leaseName = new Map((leases.data ?? []).map((lease) => [Number(lease.id), lease.lessee == null ? null : String(lease.lessee)]));
@@ -262,6 +278,46 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
   const transition = transitionRes.data
     ? { id: Number(transitionRes.data.id), status: transitionRes.data.status == null ? null : String(transitionRes.data.status) }
     : null;
+  let brief: AccountBrief | null = null;
+  if (transition) {
+    const { data: forms, error: formErr } = await supabaseAdmin
+      .from("account_transition_briefing_forms")
+      .select("tier_track, overall_account_health, renewal_risk_retention, growth_potential_pipeline, landmines, credit_payment_history, completed_at, outgoing_signature_name, id")
+      .eq("record_id", transition.id)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1);
+    if (formErr) throw formErr;
+    const form = forms?.[0];
+    if (form) {
+      brief = {
+        tier_track: form.tier_track ?? null,
+        overall_account_health: form.overall_account_health ?? null,
+        renewal_risk_retention: form.renewal_risk_retention ?? null,
+        growth_potential_pipeline: form.growth_potential_pipeline ?? null,
+        landmines: form.landmines ?? null,
+        credit_payment_history: form.credit_payment_history ?? null,
+        completed_at: form.completed_at ?? null,
+        outgoing_signature_name: form.outgoing_signature_name ?? null,
+      };
+    }
+  }
+  const ownerRow = ownerRes.data;
+  const partyKind = partyRes.data?.find((row) => row.kind === "client" || row.kind === "former" || row.kind === "prospect")?.kind;
+  const kind = partyKind === "client" || partyKind === "former" || partyKind === "prospect"
+    ? partyKind
+    : lessees.length > 0
+      ? "client"
+      : "prospect";
+  const tier = account.tier ?? null;
+  const cadence = effectiveCadence(tier, account.touch_cadence_days ?? null);
+  const lastTouch = activities.reduce<string | null>((latest, row) => {
+    if (!isTouchActivity(row) || !row.occurred_at) return latest;
+    if (!latest || row.occurred_at > latest) return row.occurred_at;
+    return latest;
+  }, null);
+  const rent = rentRes.data;
 
   return {
     account: {
@@ -269,7 +325,8 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
       name: account.name,
       account_manager: account.account_manager,
       notes: account.notes,
-      kind: lessees.length > 0 ? "client" : "prospect",
+      kind,
+      touch_cadence_days: account.touch_cadence_days ?? null,
     },
     counts: {
       lessees: lessees.length,
@@ -287,6 +344,36 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
     },
     next_expiry: nextExpiry,
     last_activity_at: lastActivity,
+    owner: {
+      of_record: ownerRow?.owner_of_record ?? null,
+      incoming: ownerRow?.incoming_owner ?? null,
+      effective: ownerRow?.effective_owner ?? null,
+      handoff_id: ownerRow?.handoff_id == null ? null : Number(ownerRow.handoff_id),
+      handoff_status: ownerRow?.handoff_status ?? null,
+      handoff_pct: handoffPct(
+        {
+          to_account_manager: ownerRow?.to_account_manager ?? transitionRes.data?.to_account_manager,
+          meeting_scheduled: ownerRow?.meeting_scheduled ?? transitionRes.data?.meeting_scheduled,
+          communication_completed: ownerRow?.communication_completed ?? transitionRes.data?.communication_completed,
+          briefing_form_completed: ownerRow?.briefing_form_completed ?? transitionRes.data?.briefing_form_completed,
+        },
+        ownerRow?.handoff_id == null ? null : Number(ownerRow.handoff_id),
+      ),
+    },
+    tier,
+    cadence_days: cadence,
+    last_touch_at: lastTouch,
+    next_touch_due: nextTouchDue(lastTouch, cadence),
+    touch_status: touchStatus({ tier, cadenceDays: cadence, lastTouchIso: lastTouch, today }),
+    rent_roll: rent
+      ? {
+          total: Number(rent.monthly_rent_total ?? 0),
+          snapshot_month: dateOnly(rent.snapshot_month),
+          riders_without_summary: Number(rent.riders_without_summary ?? 0),
+        }
+      : null,
+    brief,
+    activities,
     expiry_bars: expiryBars,
     ols,
     contacts,

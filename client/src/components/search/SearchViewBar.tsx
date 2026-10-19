@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, Copy, GripVertical, List, Loader2, MoreHorizontal, Pin, Plus, RefreshCw } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, GripVertical, List, Loader2, MoreHorizontal, Pin, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { EMPTY_VIEWS_HINT, FOCUS_PRESET_LABEL, formatEtTime, partitionSavedViews, viewCountLabel, viewNamesCollide, type ViewKind } from "@shared/saved-views";
+import { EMPTY_VIEWS_HINT, FOCUS_PRESET_LABEL, comparePinnedOrder, formatEtTime, partitionSavedViews, reorderPinnedIds, movePinnedOrder, viewCountLabel, viewNamesCollide, type ViewKind, type ViewLayout, type ViewQuery } from "@shared/saved-views";
 
 export type ViewSummary = {
   id: number;
@@ -33,6 +33,8 @@ export type ViewSummary = {
   updated_at?: string;
   updated_at_et?: string;
   member_count?: number | null;
+  query?: ViewQuery;
+  layout?: ViewLayout;
 };
 
 export type ViewCount = { count: number; active: number; inactive: number; ms: number } | null;
@@ -68,6 +70,7 @@ function countTitle(count: ViewCount | undefined): string {
 export function PinnedViewStrip({
   views,
   counts,
+  countsLoading,
   activeId,
   canPin,
   onOpen,
@@ -76,6 +79,7 @@ export function PinnedViewStrip({
 }: {
   views: ViewSummary[];
   counts: Record<string, ViewCount | undefined>;
+  countsLoading?: boolean;
   activeId: number | null;
   canPin: boolean;
   onOpen: (id: number) => void;
@@ -83,55 +87,93 @@ export function PinnedViewStrip({
   onCreate: () => void;
 }) {
   const pins = useMemo(
-    () => views.filter((view) => view.pinned).sort((a, b) => (a.pin_order ?? 999) - (b.pin_order ?? 999) || a.name.localeCompare(b.name)),
+    () => views.filter((view) => view.pinned).sort(comparePinnedOrder),
     [views],
   );
   const [dragId, setDragId] = useState<number | null>(null);
+  const ids = pins.map((pin) => pin.id);
+  function move(id: number, direction: -1 | 1) {
+    const next = movePinnedOrder(ids, id, direction);
+    if (next) onReorder(next);
+  }
   return (
-    <div className="flex flex-wrap items-center gap-1.5" data-testid="search-pinned-views">
-      {pins.map((view) => {
+    <div className="flex items-stretch gap-2 overflow-x-auto pb-0.5" data-testid="search-pinned-views">
+      {pins.length === 0 ? (
+        <div className="flex h-[4.25rem] min-w-[12rem] items-center rounded-lg border border-dashed border-border px-3 text-xs text-muted-foreground">
+          Pin a view to keep it here
+        </div>
+      ) : null}
+      {pins.map((view, index) => {
         const count = counts[String(view.id)];
+        const label = count == null && countsLoading ? "…" : countLabel(count);
         return (
-          <button
+          <div
             key={view.id}
-            type="button"
-            draggable={canPin}
-            onDragStart={() => setDragId(view.id)}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={() => {
-              if (!canPin || dragId == null || dragId === view.id) return;
-              const ids = pins.map((pin) => pin.id);
-              const from = ids.indexOf(dragId);
-              const to = ids.indexOf(view.id);
-              if (from < 0 || to < 0) return;
-              const next = [...ids];
-              const [moved] = next.splice(from, 1);
-              next.splice(to, 0, moved);
-              onReorder(next);
-              setDragId(null);
-            }}
-            title={countTitle(count)}
-            onClick={() => onOpen(view.id)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-              activeId === view.id ? "border-primary bg-primary/10 text-foreground" : "border-border bg-card text-foreground hover:border-primary/40",
+              "flex min-w-[11rem] max-w-[16rem] items-stretch rounded-lg border bg-card",
+              activeId === view.id ? "border-primary bg-primary/10" : "border-border",
             )}
             data-testid={`pinned-view-${view.id}`}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => {
+              if (!canPin || dragId == null) return;
+              const next = reorderPinnedIds(ids, dragId, view.id);
+              if (next) onReorder(next);
+              setDragId(null);
+            }}
           >
-            {canPin ? <GripVertical className="h-3 w-3 text-muted-foreground" /> : null}
-            <span className="max-w-[12rem] truncate">{view.name}</span>
-            <span className="font-mono-num text-muted-foreground">{countLabel(count)}</span>
-          </button>
+            {canPin ? (
+              <button
+                type="button"
+                className="flex items-center px-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                aria-label={`Move ${view.name} earlier`}
+                disabled={index === 0}
+                onClick={() => move(view.id, -1)}
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              draggable={canPin}
+              title={countTitle(count)}
+              onDragStart={() => setDragId(view.id)}
+              onClick={() => onOpen(view.id)}
+              onKeyDown={(event) => {
+                if (!canPin || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+                event.preventDefault();
+                move(view.id, event.key === "ArrowLeft" ? -1 : 1);
+              }}
+              className="flex min-w-0 flex-1 items-center gap-2 px-1 py-2 text-left"
+            >
+              {canPin ? <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-muted-foreground" /> : null}
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium text-foreground">{view.name}</span>
+                <span className="block font-mono-num text-lg leading-tight text-foreground">{label}</span>
+              </span>
+            </button>
+            {canPin ? (
+              <button
+                type="button"
+                className="flex items-center px-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                aria-label={`Move ${view.name} later`}
+                disabled={index === pins.length - 1}
+                onClick={() => move(view.id, 1)}
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
         );
       })}
       <button
         type="button"
         onClick={onCreate}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground hover:text-foreground"
+        className="inline-flex h-[4.25rem] w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground hover:text-foreground"
         aria-label="Save view"
         data-testid="button-pin-new-view"
       >
-        <Plus className="h-3.5 w-3.5" />
+        <Plus className="h-4 w-4" />
       </button>
     </div>
   );

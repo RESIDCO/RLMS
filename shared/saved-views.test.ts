@@ -47,7 +47,15 @@ import {
   schemaProbeResult,
   snapshotBeforePatch,
   viewCreateRoundTrips,
+  VIEW_COUNT_TTL_MS,
+  comparePinnedOrder,
+  movePinnedOrder,
+  nextPinOrder,
+  openedViewQuery,
+  reorderPinnedIds,
+  viewCountFromSplit,
   viewCountLabel,
+  viewCountMode,
   viewCreateSnapshots,
   viewDeleteSnapshots,
   viewNamesCollide,
@@ -195,6 +203,11 @@ ok(viewUpdatedAtConflicts("2026-10-19T14:00:00.000Z", ""), "a missing expected t
 
 ok(pickOpenStop([{ actual_resume_date: "2026-01-01", type: "Abatement" }, { actual_resume_date: null, type: "Off rent", reason: "shop" }])?.type === "Off rent", "an open stop is kept");
 ok(pickOpenStop([{ actual_resume_date: "2026-01-01", type: "Abatement", reason: "old" }]) == null, "a car whose only stop is closed is blank");
+ok(pickOpenStop([
+  { actual_resume_date: null, type: "Abatement", stop_date: "2026-01-01" },
+  { actual_resume_date: null, type: "Off rent", stop_date: "2026-10-16" },
+  { actual_resume_date: "2026-11-01", type: "Off rent", stop_date: "2026-12-01" },
+])?.type === "Off rent", "the latest open stop is shown and a later closed stop is ignored");
 const programs = pickOpenPrograms([
   { name: "Older", status: "first", added_at: "2026-01-01", exited_date: null },
   { name: "Newer", status: "being sent to scrap soon", added_at: "2026-08-01", exited_date: null },
@@ -376,6 +389,25 @@ ok(sections.shared.every((view) => view.id !== 2) && sections.mine.every((view) 
 ok(sections.shared.some((view) => view.id === 4) && sections.mine.some((view) => view.id === 3), "unpinned shared and private views stay in their sections");
 ok(viewCountLabel({ count: 29, active: 29, inactive: 2 }) === "29 active of 31", "the header names the hidden inactive cars");
 ok(viewCountLabel({ count: 12, active: 12, inactive: 0 }) === "12", "a list with no inactive cars stays a plain count");
+ok(VIEW_COUNT_TTL_MS > 0 && VIEW_COUNT_TTL_MS <= 60_000, "tile counts cache for at most a minute");
+ok(viewCountMode(false, "active") === "active" && viewCountMode(true, "active") === "all", "a fixed list counts active cars unless inactive cars are shown");
+const graymontCount = viewCountFromSplit(29, 2, viewCountMode(false, "active"));
+ok(graymontCount.count === 29 && graymontCount.active === 29 && graymontCount.inactive === 2, "the tile count is the active cars on a fixed list");
+ok(viewCountFromSplit(29, 2, "all").count === 31, "showing every car counts active and inactive");
+ok(nextPinOrder([0, null, 2]) === 3 && nextPinOrder([]) === 0, "a new pin takes the next shared index");
+const moved = movePinnedOrder([4, 8, 9], 8, -1);
+ok(moved?.join(",") === "8,4,9", "an arrow moves a pin one place in the shared order");
+ok(movePinnedOrder([4, 8], 4, -1) == null, "the first pin cannot move earlier");
+ok(reorderPinnedIds([4, 8, 9], 9, 4)?.join(",") === "9,4,8", "a drag drops the pin at the target");
+const ordered = [
+  { id: 9, name: "Zulu", pin_order: null },
+  { id: 4, name: "Alpha", pin_order: 1 },
+  { id: 8, name: "Beta", pin_order: 0 },
+].sort(comparePinnedOrder);
+ok(ordered.map((view) => view.id).join(",") === "8,4,9", "shared pin order puts unset pins last");
+ok(openedViewQuery("query", { q: "hopper" }) === "hopper", "a query tile reruns its saved search");
+ok(openedViewQuery("fixed", { q: "TFOX 401" }) === "", "a fixed-list tile opens the cars, not the old paste");
+ok(openedViewQuery("query", null) === "", "a query with no text still opens");
 
 const buried = withFocusColumnsAfterIdentity([
   "marks", "car_number", "lessee", "expires", "description", "mechanical_designation", "equipment_type",

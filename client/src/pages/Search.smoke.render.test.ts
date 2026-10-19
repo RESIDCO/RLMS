@@ -72,5 +72,13 @@ if (!html.includes("No saved views yet — use Save view above")) {
   console.error("FAIL empty views hint missing");
   process.exit(1);
 }
+if (!html.includes("Pin a view to keep it here")) {
+  console.error("FAIL pinned tile row missing");
+  process.exit(1);
+}
+if (!html.includes("search-pinned-views")) {
+  console.error("FAIL pinned tile row marker missing");
+  process.exit(1);
+}
 
 console.log("1 passed, 0 failed");

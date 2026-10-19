@@ -7,6 +7,7 @@ import {
   VIEWS_UNAVAILABLE_MESSAGE,
   VIEW_MEMBER_CAP,
   VIEW_MEMBER_WRITE_BATCH,
+  VIEW_COUNT_TTL_MS,
   VIEW_PIN_CAP,
   abandonedListPatch,
   canonicalViewName,
@@ -27,6 +28,9 @@ import {
   snapshotBeforePatch,
   viewCreateSnapshots,
   viewDeleteSnapshots,
+  nextPinOrder,
+  viewCountFromSplit,
+  viewCountMode,
   viewNameKey,
   viewUpdatedAtConflicts,
   viewWriteError,
@@ -62,7 +66,6 @@ type Actor = { id: string; role: string };
 const SCHEMA_TTL_MS = 15_000;
 let schemaCache: { at: number; ready: boolean; unavailable: boolean } | null = null;
 const countCache = new Map<string, { at: number; value: ViewCount }>();
-const COUNT_TTL_MS = 60_000;
 const nameCache = new Map<string, string>();
 
 export type ViewCount = { count: number; active: number; inactive: number; ms: number };
@@ -279,6 +282,8 @@ function summary(view: ViewRow, names: Map<string, string>, memberCount: number 
     updated_at_et: formatEtTime(view.updated_at),
     created_at: view.created_at,
     member_count: memberCount,
+    query: view.query,
+    layout: view.layout,
   };
 }
 
@@ -298,16 +303,9 @@ export async function listSavedViews(actor: Actor) {
   }
   const views = (data ?? []).map((row) => asView(row as Record<string, unknown>)).filter((view) => canRead(view, actor));
   const fixedIds = views.filter((view) => view.kind === "fixed").map((view) => view.id);
+  const splits = await loadFixedMemberSplits(fixedIds);
   const counts = new Map<number, number>();
-  if (fixedIds.length) {
-    const { data: members, error: memberError } = await supabaseAdmin
-      .from("car_list_members")
-      .select("list_id")
-      .in("list_id", fixedIds)
-      .is("removed_at", null);
-    if (memberError) throw memberError;
-    for (const row of members ?? []) counts.set(Number(row.list_id), (counts.get(Number(row.list_id)) ?? 0) + 1);
-  }
+  splits.forEach((split, id) => counts.set(id, split.active + split.inactive));
   const names = await nameMap(views.flatMap((view) => [view.owner, view.updated_by]));
   return {
     schema_ready: true as const,
@@ -473,6 +471,23 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
   memberCount = railcarIds.length;
   if (railcarIds.length > VIEW_MEMBER_CAP) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
   const pinned = body.pinned !== false;
+  let pinOrder: number | null = null;
+  if (pinned) {
+    const { count, error: countError } = await supabaseAdmin
+      .from("car_lists")
+      .select("id", { count: "exact", head: true })
+      .eq("pinned", true)
+      .is("deleted_at", null);
+    if (countError) throw countError;
+    if ((count ?? 0) >= VIEW_PIN_CAP) throw httpError(400, `Pin at most ${VIEW_PIN_CAP} views`);
+    const { data: orders, error: orderError } = await supabaseAdmin
+      .from("car_lists")
+      .select("pin_order")
+      .eq("pinned", true)
+      .is("deleted_at", null);
+    if (orderError) throw orderError;
+    pinOrder = nextPinOrder((orders ?? []).map((row) => row.pin_order as number | null));
+  }
   const hiddenAt = new Date().toISOString();
   const result = await withChangeGroupResult(actor.id, async () => {
     const { data, error } = await supabaseAdmin
@@ -486,7 +501,7 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
         query,
         layout,
         pinned,
-        pin_order: pinned ? Date.now() % 1_000_000 : null,
+        pin_order: pinOrder,
         ...stamp(actor.id),
         deleted_at: null,
       })
@@ -564,6 +579,29 @@ export async function patchSavedView(id: number, actor: Actor, body: Record<stri
   if (body.shared != null) patch.shared = body.shared !== false;
   if (body.pinned != null) patch.pinned = body.pinned === true;
   if (body.pin_order != null) patch.pin_order = Number(body.pin_order);
+  if (body.pinned === true && body.pin_order == null) {
+    if (!view.pinned) {
+      const { count, error: countError } = await supabaseAdmin
+        .from("car_lists")
+        .select("id", { count: "exact", head: true })
+        .eq("pinned", true)
+        .is("deleted_at", null);
+      if (countError) throw countError;
+      if ((count ?? 0) >= VIEW_PIN_CAP) throw httpError(400, `Pin at most ${VIEW_PIN_CAP} views`);
+    }
+    if (view.pinned && view.pin_order != null) {
+      patch.pin_order = view.pin_order;
+    } else {
+      const { data: orders, error: orderError } = await supabaseAdmin
+        .from("car_lists")
+        .select("pin_order")
+        .eq("pinned", true)
+        .is("deleted_at", null);
+      if (orderError) throw orderError;
+      patch.pin_order = nextPinOrder((orders ?? []).map((row) => row.pin_order as number | null));
+    }
+  }
+  if (body.pinned === false) patch.pin_order = null;
   const before = snapshotBeforePatch(view as unknown as Record<string, unknown>, patch);
   const result = await withChangeGroupResult(actor.id, async () => {
     const { data, error } = await supabaseAdmin.from("car_lists").update(patch).eq("id", id).select("*").single();
@@ -871,38 +909,68 @@ function paramsFromView(view: ViewRow): RailcarListParams {
   });
 }
 
-async function activeSplit(ids: number[]): Promise<{ active: number; inactive: number }> {
-  let active = 0;
-  let inactive = 0;
-  for (let i = 0; i < ids.length; i += 200) {
-    const slice = ids.slice(i, i + 200);
-    const { data, error } = await supabaseAdmin.from("railcars").select("id, active").in("id", slice);
-    if (error) throw error;
-    for (const car of data ?? []) {
-      if (car.active === false) inactive += 1;
-      else active += 1;
-    }
-  }
-  return { active, inactive };
+function missingCountFunction(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const code = String(error.code ?? "");
+  const message = String(error.message ?? "");
+  if (code === "42883" || code === "PGRST202") return true;
+  return /rlms_saved_view_member_counts/i.test(message) && /does not exist|could not find|schema cache/i.test(message);
 }
 
-async function countOne(view: ViewRow): Promise<ViewCount> {
-  const started = Date.now();
-  if (view.kind === "fixed") {
-    const ids = await liveMemberIds(view.id);
-    const split = await activeSplit(ids);
-    const mode = view.layout.showInactive ? "all" : view.layout.filters.active;
-    const count = mode === "all" ? split.active + split.inactive : mode === "inactive" ? split.inactive : split.active;
-    return { count, active: split.active, inactive: split.inactive, ms: Date.now() - started };
+/** Active and inactive cars for every fixed list, in one database call when the function exists. */
+async function loadFixedMemberSplits(ids: number[]): Promise<Map<number, { active: number; inactive: number }>> {
+  const unique = Array.from(new Set(ids.filter((id) => id > 0)));
+  const out = new Map<number, { active: number; inactive: number }>();
+  for (const id of unique) out.set(id, { active: 0, inactive: 0 });
+  if (!unique.length) return out;
+  const rpc = await supabaseAdmin.rpc("rlms_saved_view_member_counts", { p_list_ids: unique });
+  if (!rpc.error) {
+    for (const row of (rpc.data ?? []) as { list_id?: number; active_count?: number; inactive_count?: number }[]) {
+      out.set(Number(row.list_id), {
+        active: Number(row.active_count ?? 0),
+        inactive: Number(row.inactive_count ?? 0),
+      });
+    }
+    return out;
   }
+  if (!missingCountFunction(rpc.error)) throw rpc.error;
+  const { data: members, error } = await supabaseAdmin
+    .from("car_list_members")
+    .select("list_id, railcar_id")
+    .in("list_id", unique)
+    .is("removed_at", null);
+  if (error) throw error;
+  const railcarIds = Array.from(new Set((members ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0)));
+  const activeById = new Map<number, boolean>();
+  for (let i = 0; i < railcarIds.length; i += 200) {
+    const slice = railcarIds.slice(i, i + 200);
+    const { data, error: carError } = await supabaseAdmin.from("railcars").select("id, active").in("id", slice);
+    if (carError) throw carError;
+    for (const car of data ?? []) activeById.set(Number(car.id), car.active !== false);
+  }
+  for (const row of members ?? []) {
+    const split = out.get(Number(row.list_id));
+    if (!split) continue;
+    const active = activeById.get(Number(row.railcar_id));
+    if (active === false) split.inactive += 1;
+    else if (active === true) split.active += 1;
+  }
+  return out;
+}
+
+function countForView(view: ViewRow, active: number, inactive: number, started: number): ViewCount {
+  const mode = viewCountMode(view.layout.showInactive, view.layout.filters.active);
+  return { ...viewCountFromSplit(active, inactive, mode), ms: Date.now() - started };
+}
+
+async function countQueryView(view: ViewRow): Promise<ViewCount> {
+  const started = Date.now();
   const base = paramsFromView(view);
   const [active, inactive] = await Promise.all([
     countRailcars({ ...base, active: "active" }),
     countRailcars({ ...base, active: "inactive" }),
   ]);
-  const mode = view.layout.showInactive ? "all" : view.layout.filters.active;
-  const count = mode === "all" ? active + inactive : mode === "inactive" ? inactive : active;
-  return { count, active, inactive, ms: Date.now() - started };
+  return countForView(view, active, inactive, started);
 }
 
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | null> {
@@ -925,29 +993,52 @@ export async function countSavedViews(ids: number[], actor: Actor) {
   if (!(await savedViewsSchemaReady())) {
     return { schema_ready: false as const, message: notReadyMessage(), counts: {} as Record<string, ViewCount | null> };
   }
-  const unique = Array.from(new Set(ids.map(Number).filter((id) => id > 0))).slice(0, 12);
+  const unique = Array.from(new Set(ids.map(Number).filter((id) => id > 0))).slice(0, VIEW_PIN_CAP);
   const started = Date.now();
   let cold = 0;
   let cached = 0;
   const counts: Record<string, ViewCount | null> = {};
-  await Promise.all(unique.map(async (id) => {
-    const view = await loadRow(id).catch(() => null);
-    if (!view || !canRead(view, actor)) {
-      counts[String(id)] = null;
-      return;
+  for (const id of unique) counts[String(id)] = null;
+  const { data, error } = await supabaseAdmin.from("car_lists").select("*").in("id", unique.length ? unique : [-1]).is("deleted_at", null);
+  if (error) {
+    if (isMissingViewSchema(error)) {
+      return { schema_ready: false as const, message: SAVED_VIEWS_SCHEMA_MESSAGE, counts };
     }
+    throw error;
+  }
+  const views = (data ?? []).map((row) => asView(row as Record<string, unknown>)).filter((view) => canRead(view, actor));
+  const pending: ViewRow[] = [];
+  for (const view of views) {
     const key = countCacheKey(view.id, view.updated_at, view.layout.showInactive, view.layout.filters.active);
     const hit = countCache.get(key);
-    if (hit && Date.now() - hit.at < COUNT_TTL_MS) {
+    if (hit && Date.now() - hit.at < VIEW_COUNT_TTL_MS) {
       cached += 1;
-      counts[String(id)] = hit.value;
-      return;
+      counts[String(view.id)] = hit.value;
+      continue;
     }
-    cold += 1;
-    const value = await withTimeout(countOne(view), 5000);
-    if (value) countCache.set(key, { at: Date.now(), value });
-    counts[String(id)] = value;
-  }));
+    pending.push(view);
+  }
+  cold = pending.length;
+  const fixed = pending.filter((view) => view.kind === "fixed");
+  const queries = pending.filter((view) => view.kind === "query");
+  const [splits] = await Promise.all([
+    loadFixedMemberSplits(fixed.map((view) => view.id)),
+    Promise.all(queries.map(async (view) => {
+      const value = await withTimeout(countQueryView(view), 5000);
+      if (value) {
+        const key = countCacheKey(view.id, view.updated_at, view.layout.showInactive, view.layout.filters.active);
+        countCache.set(key, { at: Date.now(), value });
+      }
+      counts[String(view.id)] = value;
+    })),
+  ]);
+  for (const view of fixed) {
+    const split = splits.get(view.id) ?? { active: 0, inactive: 0 };
+    const value = countForView(view, split.active, split.inactive, started);
+    const key = countCacheKey(view.id, view.updated_at, view.layout.showInactive, view.layout.filters.active);
+    countCache.set(key, { at: Date.now(), value });
+    counts[String(view.id)] = value;
+  }
   console.log(`[search] views/counts n=${unique.length} cold=${cold} cached=${cached} ms=${Date.now() - started}`);
   return { schema_ready: true as const, counts };
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { carListSearchTokens } from "@shared/programs";
+import { carListSearchTokens, pasteSearchBatches, programPickerFromSearch, type SearchPastePage } from "@shared/programs";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +15,11 @@ export type ResolveResult = {
   matched: { token: string; railcar_id: number; label: string }[];
   not_found: { token: string; reason?: string }[];
   already_in_program: { token: string; railcar_id: number; label: string }[];
-  ambiguous: { token: string; matches: { railcar_id: number; label: string }[] }[];
+  ambiguous: {
+    token: string;
+    reason?: string;
+    matches: { railcar_id: number; label: string; active?: boolean | null }[];
+  }[];
 };
 
 function carLabel(r: { reporting_marks?: string | null; car_number?: string | null }): string {
@@ -36,13 +40,16 @@ export default function ProgramCarPicker({
   const [paste, setPaste] = useState("");
   const [preview, setPreview] = useState<ResolveResult | null>(null);
   const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
-  const { data } = useQuery({
-    queryKey: ["/api/railcars", "program-picker", q],
-    queryFn: () => apiGet(railcarsQs({ search: q || undefined, all: 1, active: "all", pageSize: 80 })),
-    enabled: mode === "search",
+  const searchText = q.trim();
+  const searchReady = mode === "search" && searchText.length >= 2;
+  const { data, isFetching, isError, error } = useQuery({
+    queryKey: ["/api/railcars", "program-picker", searchText],
+    queryFn: () => apiGet(railcarsQs({ search: searchText, active: "all", pageSize: 25 })),
+    enabled: searchReady,
   });
-  const rows = asRailcarList<any>(data as any);
+  const rows = searchReady ? asRailcarList<any>(data as any) : [];
   const pickedIds = useMemo(() => new Set(value.map((c) => c.id)), [value]);
 
   function addCar(id: number, label: string) {
@@ -55,20 +62,53 @@ export default function ProgramCarPicker({
     onChange(value.filter((c) => c.id !== id));
   }
 
-  async function resolvePaste(text = paste) {
-    const body = text.trim();
-    if (!body) return;
+  async function resolvePaste(text?: string) {
+    const body = (typeof text === "string" ? text : paste).trim();
+    if (!body) {
+      setResolveError("Paste a car list first.");
+      return;
+    }
     setResolving(true);
+    setResolveError(null);
     try {
-      const res = await apiRequest("POST", "/api/programs/resolve-cars", {
-        text: body,
-        program_id: programId ?? null,
-      });
-      const out = (await res.json()) as ResolveResult;
+      const { batches, rejected } = pasteSearchBatches(body);
+      if (!batches.length) {
+        setPreview(programPickerFromSearch([], rejected));
+        if (!rejected.length) setResolveError("No car numbers found in that paste.");
+        return;
+      }
+      const pages: SearchPastePage[] = [];
+      for (const qBatch of batches) {
+        const res = await apiRequest("POST", "/api/search", {
+          q: qBatch,
+          active: "all",
+          search_cars: 1,
+          search_leases: 0,
+          search_car_data: 0,
+          ...(programId ? { program_id: programId } : {}),
+        });
+        pages.push(await res.json());
+      }
+      const out = programPickerFromSearch(pages, rejected);
       setPreview(out);
+      if (!out.matched.length && !out.ambiguous.length && !out.already_in_program.length) {
+        setResolveError(out.not_found[0]?.reason ?? "No cars matched.");
+      }
+    } catch (err) {
+      setPreview(null);
+      setResolveError(err instanceof Error ? err.message : "Could not match that list.");
     } finally {
       setResolving(false);
     }
+  }
+
+  function chooseAmbiguous(token: string, id: number, label: string) {
+    addCar(id, label);
+    setPreview((prev) =>
+      prev
+        ? { ...prev, ambiguous: prev.ambiguous.filter((row) => row.token !== token) }
+        : prev,
+    );
   }
 
   function acceptMatched() {
@@ -150,10 +190,22 @@ export default function ProgramCarPicker({
                     </tr>
                   );
                 })}
-                {rows.length === 0 && (
+                {isFetching && (
                   <tr>
-                    <td className="px-3 py-6 text-center text-muted-foreground italic">
-                      {q.trim() ? "No matching cars." : "Start typing a car number."}
+                    <td colSpan={3} className="px-3 py-6 text-center text-muted-foreground italic">Searching cars…</td>
+                  </tr>
+                )}
+                {isError && !isFetching && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-6 text-center text-destructive">
+                      {error instanceof Error ? error.message : "Could not search cars."}
+                    </td>
+                  </tr>
+                )}
+                {!isFetching && !isError && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-6 text-center text-muted-foreground italic">
+                      {searchReady ? "No matching cars." : "Type at least 2 characters, or paste a list."}
                     </td>
                   </tr>
                 )}
@@ -164,7 +216,7 @@ export default function ProgramCarPicker({
       ) : (
         <>
           <div>
-            <Label className="text-xs">Paste car numbers (comma, space, or newline — marks optional)</Label>
+            <Label className="text-xs">Paste car numbers. MARKNUMBER, MARK NUMBER, and MARK-NUMBER all match. Leading zeros are optional.</Label>
             <Textarea
               className="mt-1 font-mono text-xs"
               rows={6}
@@ -172,13 +224,20 @@ export default function ProgramCarPicker({
               onChange={(e) => {
                 setPaste(e.target.value);
                 setPreview(null);
+                setResolveError(null);
               }}
               placeholder={"TFOX 901745\nKCS 310100\n475002"}
             />
           </div>
-          <Button type="button" size="sm" variant="outline" onClick={resolvePaste} disabled={!paste.trim() || resolving}>
+          <Button type="button" size="sm" variant="outline" onClick={() => void resolvePaste()} disabled={!paste.trim() || resolving}>
             {resolving ? "Matching…" : "Match list"}
           </Button>
+          {resolveError && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {resolveError}
+            </div>
+          )}
+          {resolving && <div className="text-xs text-muted-foreground">Matching on the server…</div>}
           {preview && (
             <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-2">
               <div>
@@ -190,14 +249,21 @@ export default function ProgramCarPicker({
                 {preview.ambiguous.length > 0 && (
                   <>
                     {" · "}
-                    <span className="text-amber-400 font-medium">{preview.ambiguous.length} ambiguous</span>
+                    <span className="text-amber-400 font-medium">{preview.ambiguous.length} need a choice</span>
                   </>
                 )}
               </div>
               {preview.not_found.length > 0 && (
                 <div>
                   <div className="text-muted-foreground mb-0.5">Not found</div>
-                  <div className="font-mono">{preview.not_found.map((t) => t.token).join(", ")}</div>
+                  <ul className="space-y-0.5">
+                    {preview.not_found.map((t) => (
+                      <li key={`${t.token}:${t.reason ?? ""}`} className="font-mono">
+                        {t.token}
+                        {t.reason ? <span className="text-muted-foreground"> — {t.reason}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
               {preview.already_in_program.length > 0 && (
@@ -207,11 +273,34 @@ export default function ProgramCarPicker({
                 </div>
               )}
               {preview.ambiguous.length > 0 && (
-                <div>
-                  <div className="text-muted-foreground mb-0.5">Ambiguous (add reporting marks)</div>
+                <div className="space-y-2">
+                  <div className="text-muted-foreground">Needs a choice</div>
                   {preview.ambiguous.map((a) => (
-                    <div key={a.token} className="font-mono">
-                      {a.token}: {a.matches.map((m) => m.label).join(", ")}
+                    <div key={a.token} className="space-y-1">
+                      <div className="font-mono">
+                        {a.token}
+                        {a.reason ? <span className="text-muted-foreground"> — {a.reason}</span> : null}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {a.matches.map((m) =>
+                          m.active === false ? (
+                            <span key={m.railcar_id} className="rounded border border-border px-1.5 py-0.5 font-mono text-muted-foreground">
+                              {m.label} (inactive)
+                            </span>
+                          ) : (
+                            <Button
+                              key={m.railcar_id}
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 font-mono text-xs"
+                              onClick={() => chooseAmbiguous(a.token, m.railcar_id, m.label)}
+                            >
+                              Use {m.label}
+                            </Button>
+                          ),
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

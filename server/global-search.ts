@@ -44,7 +44,8 @@ export type InactiveMatch = {
 
 export type AmbiguousMatch = {
   token: string;
-  matches: { id: number; label: string }[];
+  reason?: string;
+  matches: { id: number; label: string; active?: boolean }[];
 };
 
 export type GlobalSearchResult = {
@@ -262,17 +263,21 @@ async function runCarListSearch(raw: string, tokens: string[], active?: string):
     orderedIds.push(id);
   };
   for (const m of resolved.matched) pushId(m.railcar_id);
-  // Bare numbers may match several marks — keep them all. Mark-scoped tokens are ambiguous, not missing.
+  // Bare numbers that hit two marks stay in the grid and are also listed so
+  // Add cars can ask which one. A mark that is still ambiguous is a choice, not a hit.
   for (const a of resolved.ambiguous) {
     if (splitCarNumber(a.token).reporting_marks) continue;
     for (const m of a.matches) pushId(m.railcar_id);
   }
-  const ambiguous: AmbiguousMatch[] = resolved.ambiguous
-    .filter((a) => Boolean(splitCarNumber(a.token).reporting_marks))
-    .map((a) => ({
-      token: a.token,
-      matches: a.matches.map((m) => ({ id: m.railcar_id, label: m.label })),
-    }));
+  const ambiguous: AmbiguousMatch[] = resolved.ambiguous.map((a) => ({
+    token: a.token,
+    reason: a.reason,
+    matches: a.matches.map((m) => ({
+      id: m.railcar_id,
+      label: m.label,
+      active: m.active !== false,
+    })),
+  }));
   const not_found = resolved.not_found.map((n) => n.token);
   const allCars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds, "all"));
   const want = !active || active === "active" ? "active" : active;

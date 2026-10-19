@@ -35,6 +35,12 @@ ok(
   "OFOX 32115 → OFOX 032115",
 );
 ok(normalizeMarkAndNumber("OFOX32115").ok && (normalizeMarkAndNumber("OFOX32115") as any).car_number === "032115", "concatenated pads");
+ok(
+  normalizeMarkAndNumber("0FOX815215").ok &&
+    (normalizeMarkAndNumber("0FOX815215") as any).reporting_marks === "OFOX" &&
+    (normalizeMarkAndNumber("0FOX815215") as any).car_number === "815215",
+  "leading zero mark is the letter O",
+);
 ok(!normalizeMarkAndNumber("OFOX").ok, "marks only rejected");
 ok(
   defaultRemarkReason("CEFX 032115", "OFOX 032115") ===

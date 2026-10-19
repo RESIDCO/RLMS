@@ -339,7 +339,7 @@ type Summary = {
 type PasteMeta = {
   notFound: string[];
   inactive: { id: number; reporting_marks: string | null; car_number: string | null; status: string | null }[];
-  ambiguous: { token: string; matches: { id: number; label: string }[] }[];
+  ambiguous: { token: string; reason?: string; matches: { id: number; label: string; active?: boolean }[] }[];
   truncated: boolean;
   counts: { pasted: number; found: number; inactive: number; not_found: number; ambiguous: number };
 };
@@ -2618,11 +2618,14 @@ export default function SearchPage() {
                 {ambiguous.map((a) => (
                   <li key={a.token}>
                     <span className="font-mono">{a.token}</span>
-                    {" — "}
+                    {a.reason ? ` — ${a.reason} ` : " — "}
                     {a.matches.map((m, i) => (
                       <span key={m.id}>
                         {i > 0 ? ", " : ""}
-                        <Link href={withFrom(`/cars/${m.id}`)} className="hover:underline" onClick={() => rememberScroll()}>{m.label || m.id}</Link>
+                        <Link href={withFrom(`/cars/${m.id}`)} className="hover:underline" onClick={() => rememberScroll()}>
+                          {m.label || m.id}
+                          {m.active === false ? " (inactive)" : ""}
+                        </Link>
                       </span>
                     ))}
                   </li>

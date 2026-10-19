@@ -96,6 +96,7 @@ import {
   olProgramHistory,
   parseStatus,
   resolveProgramCars,
+  carsAlreadyInProgram,
   logProgramActivity,
   listProgramCarMilestones,
   matchProgramCarsPaste,
@@ -4282,7 +4283,34 @@ export async function registerRoutes(
         active: typeof body.active === "string" ? body.active : "active",
         searchScope: parseSearchScope(body),
       });
-      res.json(await decoratePasteSearch(found, body, (rows, opts) => attachFocusColumns(rows, opts)));
+      const decorated = await decoratePasteSearch(found, body, (rows, opts) => attachFocusColumns(rows, opts));
+      const programId = Number(body.program_id);
+      if (!Number.isFinite(programId) || programId <= 0) {
+        res.json(decorated);
+        return;
+      }
+      const labeled = new Map<number, string>();
+      for (const car of decorated.railcars) {
+        labeled.set(Number(car.id), [car.reporting_marks, car.car_number].filter(Boolean).join(" ") || String(car.id));
+      }
+      for (const row of decorated.ambiguous) {
+        for (const match of row.matches) labeled.set(Number(match.id), match.label || String(match.id));
+      }
+      const idList: number[] = [];
+      labeled.forEach((_label, id) => idList.push(id));
+      const open = await carsAlreadyInProgram(programId, idList);
+      const already_in_program: { railcar_id: number; label: string; token: string }[] = [];
+      open.forEach((id) => {
+        const label = labeled.get(id) ?? String(id);
+        already_in_program.push({ railcar_id: id, label, token: label });
+      });
+      const railcars = decorated.railcars.filter((car) => !open.has(Number(car.id)));
+      res.json({
+        ...decorated,
+        railcars,
+        already_in_program,
+        counts: { ...decorated.counts, railcars: railcars.length, total: railcars.length },
+      });
     } catch (err) {
       errHandler(res, err);
     }

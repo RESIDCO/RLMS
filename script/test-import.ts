@@ -213,6 +213,7 @@ for (const m of ["CSXT", "BNSF", "NS", "UP", "GATX", "TILX", "TFOX", "HWCX", "AT
 
 // --- splitCarNumber ----------------------------------------------------------
 eq(splitCarNumber("TFOX88031"), { reporting_marks: "TFOX", car_number: "88031", car_initial: "TFOX" }, "split TFOX88031");
+eq(splitCarNumber("0FOX815215"), { reporting_marks: "OFOX", car_number: "815215", car_initial: "OFOX" }, "split leading zero mark as O");
 eq(splitCarNumber("HWCX010823"), { reporting_marks: "HWCX", car_number: "010823", car_initial: "HWCX" }, "split HWCX010823 keeps leading zero");
 eq(splitCarNumber("BNSF 712345"), { reporting_marks: "BNSF", car_number: "712345", car_initial: "BNSF" }, "split BNSF 712345 (space tolerated)");
 eq(splitCarNumber("UP-12345"), { reporting_marks: "UP", car_number: "12345", car_initial: "UP" }, "split UP-12345 (dash tolerated)");

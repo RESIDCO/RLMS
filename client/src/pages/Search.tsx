@@ -7,6 +7,7 @@ import { classifyFleetQuery, summaryCarTypeKey } from "@shared/carTypeAliases";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate, carLeaseEndDate } from "@shared/lease-authority";
 import { FleetMembershipBadge, FleetAwareStatusBadge, InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+import { FormerlyBadge } from "@/components/FormerlyBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { displayStatusInputFromRailcar, FLEET_STATUSES } from "@shared/fleet-status";
@@ -1617,6 +1618,7 @@ export default function SearchPage() {
                 {r.car_number}
               </Link>
               <FleetMembershipBadge active={r.active} />
+              <FormerlyBadge formerly={r.formerly} />
             </div>
           </td>
         );

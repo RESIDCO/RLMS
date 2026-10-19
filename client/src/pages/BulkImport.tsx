@@ -128,6 +128,14 @@ interface VcfReviewResult {
   badActiveValues: Array<{ raw: string; count: number; sampleRows: number[] }>;
   unmappedManagedCategoryCount: number;
   unmappedManagedCategories: Array<{ raw: string; count: number }>;
+  remarkedAliasCount?: number;
+  remarkedAliases?: Array<{
+    car_initial: string;
+    car_number: string;
+    label: string;
+    file_active: boolean;
+    action: string;
+  }>;
 }
 
 interface VcfCommitResult {
@@ -144,6 +152,7 @@ interface VcfCommitResult {
   assignmentInserted: number;
   assignmentClosed: number;
   remarkInserted: number;
+  remarkedAliases?: number;
   integrityChecks?: IntegrityCheckView[];
 }
 
@@ -926,6 +935,25 @@ export default function BulkImportPage() {
                 />
               </div>
 
+              {(vcfReview.remarkedAliasCount ?? 0) > 0 && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+                  <div className="text-sm font-medium text-foreground mb-1">
+                    Remarked in RLMS ({vcfReview.remarkedAliasCount}) — old mark will not create a car
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    These rows match a prior mark. They are skipped. Active/status on the renamed car is not changed. An old mark still marked ACTIVE in the file needs a check that Umler was updated.
+                  </p>
+                  <div className="text-xs font-mono text-muted-foreground space-y-0.5">
+                    {(vcfReview.remarkedAliases ?? []).map((c) => (
+                      <div key={`${c.car_initial}-${c.car_number}-${c.action}`}>
+                        {c.car_initial} {c.car_number} — {c.label}
+                        {c.file_active ? " — ACTIVE in file" : ""}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {(vcfReview.skippedManualCount ?? 0) > 0 && (
                 <div className="rounded-lg border border-border bg-card p-4">
                   <div className="text-sm font-medium text-foreground mb-2">
@@ -1039,6 +1067,7 @@ export default function BulkImportPage() {
                 <div>History inserted: <span className="font-mono-num">{vcfCommitted.assignmentInserted.toLocaleString()}</span></div>
                 <div>History periods closed: <span className="font-mono-num">{vcfCommitted.assignmentClosed.toLocaleString()}</span></div>
                 <div>car_number_history added: <span className="font-mono-num">{vcfCommitted.remarkInserted.toLocaleString()}</span></div>
+                <div>old marks skipped: <span className="font-mono-num">{(vcfCommitted.remarkedAliases ?? 0).toLocaleString()}</span></div>
                 <div>skipped, manual: <span className="font-mono-num">{vcfCommitted.skippedManual.toLocaleString()}</span></div>
                 <div>not in file: <span className="font-mono-num">{vcfCommitted.notInFile.toLocaleString()}</span></div>
               </div>

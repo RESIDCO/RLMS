@@ -221,13 +221,13 @@ export async function matchProgramCarsPaste(programId: number, text: string) {
       continue;
     }
     if (hits.length > 1) {
-      ambiguous.push({ token, matches: hits.map((h) => ({ link_id: h.link_id, label: h.label })) });
+      ambiguous.push({ token, matches: hits.map((h) => ({ link_id: h.link_id, label: formerlyOnLabel(h.label, token) })) });
       continue;
     }
     const hit = hits[0];
     if (seenLink.has(hit.link_id)) continue;
     seenLink.add(hit.link_id);
-    matched.push({ token, ...hit });
+    matched.push({ token, ...hit, label: formerlyOnLabel(hit.label, token) });
   }
   return {
     requested: tokens.length,
@@ -686,6 +686,17 @@ function carLabel(c: { reporting_marks?: string | null; car_number?: string | nu
   return [c.reporting_marks, c.car_number].filter(Boolean).join(" ");
 }
 
+function labelWithFormerly(label: string, token: string, car: { reporting_marks?: string | null; car_initial?: string | null }): string {
+  const split = splitCarNumber(token);
+  const current = String(car.car_initial || car.reporting_marks || "").trim().toUpperCase();
+  if (!split.reporting_marks || split.reporting_marks === current) return label;
+  return `${label} (formerly ${split.reporting_marks} ${split.car_number})`;
+}
+
+function formerlyOnLabel(label: string, token: string): string {
+  return labelWithFormerly(label, token, { reporting_marks: splitCarNumber(label).reporting_marks });
+}
+
 export async function resolveProgramCars(opts: { text: string; programId?: number | null }) {
   const tokens = parseCarPasteList(opts.text);
   const matched: { token: string; railcar_id: number; label: string }[] = [];
@@ -753,7 +764,7 @@ export async function resolveProgramCars(opts: { text: string; programId?: numbe
           .eq("id", priorIds[0])
           .maybeSingle();
         if (car) {
-          const row = { token: p.token, railcar_id: Number(car.id), label: carLabel(car) };
+          const row = { token: p.token, railcar_id: Number(car.id), label: labelWithFormerly(carLabel(car), p.token, car) };
           if (openIds.has(row.railcar_id)) already.push(row);
           else matched.push(row);
           continue;
@@ -766,7 +777,7 @@ export async function resolveProgramCars(opts: { text: string; programId?: numbe
           .in("id", priorIds.slice(0, 20));
         ambiguous.push({
           token: p.token,
-          matches: (cars ?? []).map((c) => ({ railcar_id: Number(c.id), label: carLabel(c) })),
+          matches: (cars ?? []).map((c) => ({ railcar_id: Number(c.id), label: labelWithFormerly(carLabel(c), p.token, c) })),
         });
         continue;
       }

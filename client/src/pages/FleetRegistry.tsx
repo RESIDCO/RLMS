@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Image, ClipboardList, ExternalLink } from "lucide-react";
+import { FormerlyBadge } from "@/components/FormerlyBadge";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { searchPagePath } from "@/lib/search-query";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
@@ -1095,6 +1096,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               >
                 {r.car_number}
               </button>
+              <FormerlyBadge formerly={(r as { formerly?: string | null }).formerly} />
               <InactiveFleetBadge active={r.active} />
               {(r.assignment as any)?.assignment_status === "off_lease_pending_remarketing" ? (
                 <span className="text-[10px] rounded bg-amber-500/15 text-amber-800 px-1">EA</span>
@@ -1244,6 +1246,11 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <Download className="h-4 w-4" />
               Export
             </Button>
+            {canEdit && (
+              <Button size="sm" variant="outline" asChild data-testid="button-remark-cars">
+                <Link href="/railcars/remark">Remark</Link>
+              </Button>
+            )}
             {canEdit && (
               <Button
                 size="sm"

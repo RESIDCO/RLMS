@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { apiRequest } from "@/lib/queryClient";
 import { Image, Loader2, ExternalLink, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,6 +50,7 @@ export default function PhotoFinderPanel({
   onClose?: () => void;
 }) {
   const [text, setText] = useState(initialText);
+  const [aliasNote, setAliasNote] = useState("");
   const [isSearching, setIsSearching] = useState(() => hasRunningPhotoJob());
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
@@ -130,21 +132,37 @@ export default function PhotoFinderPanel({
     });
   }, []);
 
-  function handleSearch() {
+  async function handleSearch() {
     if (searchingRef.current || isSearching) return;
     if (!rows.length) return;
     searchingRef.current = true;
     seenRunningRef.current = true;
     setIsSearching(true);
+    let cars: PhotoCar[] = rows;
+    try {
+      const res = await apiRequest("POST", "/api/railcars/resolve-prior-marks", {
+        cars: rows.map((car) => ({ mark: car.mark, number: car.number })),
+      });
+      const data = (await res.json()) as { cars?: Array<{ mark: string; number: string; formerly: string | null }> };
+      if (data.cars?.length) {
+        const notes = data.cars
+          .filter((car) => car.formerly)
+          .map((car) => `${car.formerly} is now ${car.mark} ${car.number}`);
+        setAliasNote(notes.slice(0, 8).join("; "));
+        cars = data.cars.map((car) => ({ mark: car.mark, number: car.number }));
+      }
+    } catch {
+      cars = rows;
+    }
     setRunStatus({
       kind: "running",
       carsDone: 0,
-      carTotal: rows.length,
-      message: `Searching ${rows.length} car${rows.length === 1 ? "" : "s"} for photos…`,
+      carTotal: cars.length,
+      message: `Searching ${cars.length} car${cars.length === 1 ? "" : "s"} for photos…`,
     });
     startPhotoJob({
-      cars: rows,
-      title: `Photo Search · ${rows.length} car${rows.length === 1 ? "" : "s"}`,
+      cars,
+      title: `Photo Search · ${cars.length} car${cars.length === 1 ? "" : "s"}`,
     });
   }
 
@@ -218,7 +236,7 @@ export default function PhotoFinderPanel({
             ? "No cars parsed yet — paste MARK + NUMBER."
             : `${rows.length} car${rows.length === 1 ? "" : "s"} ready${
                 truncated ? ` (capped at ${PHOTO_MAX_CARS})` : ""
-              }`}
+              }${aliasNote ? `. ${aliasNote}` : ""}`}
         </p>
       </div>
 

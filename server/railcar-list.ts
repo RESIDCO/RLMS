@@ -12,6 +12,7 @@ import {
 } from "@shared/carTypeAliases";
 import { fetchAllRows } from "./fetch-all";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
+import { attachFormerly } from "./prior-marks";
 import { attachLatestAmNotes } from "./rider-account-comments";
 import { attachFocusColumns } from "./focus-columns";
 
@@ -97,6 +98,8 @@ export type RailcarListParams = {
   focus?: boolean;
   /** Fixed or query view whose members and notes apply to this request. */
   viewId?: number;
+  /** Set once prior-mark ids have been OR'd into the search filter. */
+  priorIdentityChecked?: boolean;
 };
 
 export type FleetMatchReport = {
@@ -555,6 +558,11 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
       leaseIds: p.searchLeaseIds,
     });
   }
+  if (p.search && !p.fleetOr && !p.ids?.length && !p.priorIdentityChecked) {
+    p.priorIdentityChecked = true;
+    const prior = (await resolveRailcarsByAnyIdentity(p.search)).slice(0, 80);
+    if (prior.length) searchRailcarIds = [...new Set([...(searchRailcarIds ?? []), ...prior])];
+  }
   const extra = { railcarIds: searchRailcarIds };
 
   if (p.turning50) {
@@ -808,9 +816,10 @@ async function finishRows<T extends { id: number; notes?: string | null; rider_e
     attachAccountJoins(rows),
     p.focus ? attachFocusColumns(rows, { viewId: p.viewId }) : Promise.resolve(null),
   ]);
-  if (!focused) return joined;
+  const badged = await attachFormerly(joined, p.search);
+  if (!focused) return badged;
   const byId = new Map(focused.map((row) => [row.id, row]));
-  return joined.map((row) => {
+  return badged.map((row) => {
     const extra = byId.get((row as { id: number }).id);
     if (!extra) return row;
     const focus: Record<string, unknown> = {};
@@ -933,7 +942,7 @@ async function queryRailcarsByAssignedIds(p: RailcarListParams, select: string) 
 }
 
 async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, haveIds: Set<number>) {
-  if (!p.search || p.fleetOr) return [];
+  if (!p.search || p.fleetOr || p.priorIdentityChecked) return [];
   const ids = (await resolveRailcarsByAnyIdentity(p.search)).filter((id) => !haveIds.has(id));
   if (!ids.length) return [];
   let q = supabaseAdmin.from("railcars").select(select).in("id", ids.slice(0, 80));

@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
 import { carListSearchTokens, looksLikeCarToken, parseCarPasteListDetailed } from "@shared/programs";
-import { classifyFleetQuery } from "@shared/carTypeAliases";
+import { classifyFleetQuery, summaryCarTypeKey } from "@shared/carTypeAliases";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate, carLeaseEndDate } from "@shared/lease-authority";
 import { FleetMembershipBadge, FleetAwareStatusBadge, InactiveFleetBadge } from "@/components/InactiveFleetBadge";
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { historyPath } from "@/lib/browse-nav";
 import { contactsDirectoryPath } from "@/lib/directory-nav";
-import { navigateHash } from "@/lib/hash-location";
+import { navigateHash, useHashSearch } from "@/lib/hash-location";
 import { clearSearchSession, readSearchSession, saveSearchSession, shouldRestoreSearchSession } from "@/lib/search-query";
 import {
   createSearchSid,
@@ -28,7 +28,10 @@ import {
   encodeHash,
   loadSearchState,
   pageSizeNumber,
+  pasteFoundLabel,
+  pasteShowsInactiveSeparately,
   saveSearchState,
+  shouldRebootSearch,
   type SearchActive,
   type SearchHashState,
   type StoredSearchResults,
@@ -232,7 +235,7 @@ type PasteMeta = {
   counts: { pasted: number; found: number; inactive: number; not_found: number; ambiguous: number };
 };
 
-type FleetMatch = { kind?: string; label?: string; ruleLabel?: string; activeCount?: number | null } | null;
+type FleetMatch = { kind?: string; label?: string; ruleLabel?: string; activeCount?: number | null; textCount?: number | null } | null;
 
 type Boot = {
   query: string;
@@ -248,6 +251,7 @@ type Boot = {
   status: string;
   sort: string;
   dir: "asc" | "desc";
+  exactFleet: boolean;
   sid: string;
   fromCache: boolean;
   pasteRows: any[] | null;
@@ -279,6 +283,7 @@ function blankBoot(): Boot {
     status: "",
     sort: "car_number",
     dir: "asc",
+    exactFleet: true,
     sid: "",
     fromCache: false,
     pasteRows: null,
@@ -316,7 +321,7 @@ function summarize(rows: any[]): Summary {
   const byEntity = new Map<string, number>();
   const byStatus = new Map<string, number>();
   for (const row of rows) {
-    bump(byType, row.car_type);
+    bump(byType, summaryCarTypeKey(row.car_type, row.equipment_type_code));
     bump(byEntity, row.entity);
     bump(byStatus, row.fleet_status);
   }
@@ -324,7 +329,7 @@ function summarize(rows: any[]): Summary {
 }
 
 function scrollParent(): HTMLElement | null {
-  const el = document.querySelector("main > div");
+  const el = document.querySelector("[data-app-scroll]");
   return el instanceof HTMLElement ? el : null;
 }
 
@@ -351,6 +356,7 @@ function readBoot(): Boot {
       status: h.status,
       sort: h.sort,
       dir: h.dir,
+      exactFleet: h.fleet !== false,
       sid: cached.sid,
       fromCache: true,
       pasteRows: results.mode === "paste" ? (results.rows as any[]) : null,
@@ -415,6 +421,7 @@ function readBoot(): Boot {
     base.status = hash.status;
     base.sort = hash.sort;
     base.dir = hash.dir;
+    base.exactFleet = hash.fleet;
     base.sid = hash.sid;
   }
   return base;
@@ -512,13 +519,15 @@ export default function SearchPage() {
   const [statusFilter, setStatusFilter] = useState(boot.status);
   const [sort, setSort] = useState(boot.sort);
   const [dir, setDir] = useState<"asc" | "desc">(boot.dir);
+  const [exactFleet, setExactFleet] = useState(boot.exactFleet);
   const [pasteRows, setPasteRows] = useState<any[] | null>(boot.pasteRows);
   const [pasteMeta, setPasteMeta] = useState<PasteMeta | null>(boot.pasteMeta);
-  const [cachedTextRows] = useState<any[]>(boot.textRows);
-  const [cachedTextTotal] = useState(boot.textTotal);
-  const [cachedSummary] = useState<Summary | null>(boot.summary);
-  const [cachedMatch] = useState<FleetMatch>(boot.match);
+  const [cachedTextRows, setCachedTextRows] = useState<any[]>(boot.textRows);
+  const [cachedTextTotal, setCachedTextTotal] = useState(boot.textTotal);
+  const [cachedSummary, setCachedSummary] = useState<Summary | null>(boot.summary);
+  const [cachedMatch, setCachedMatch] = useState<FleetMatch>(boot.match);
   const [live, setLive] = useState(!boot.fromCache);
+  const [scrollTick, setScrollTick] = useState(0);
   const [pasteLoading, setPasteLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editCarId, setEditCarId] = useState<number | null>(null);
@@ -528,6 +537,10 @@ export default function SearchPage() {
   const sidRef = useRef(boot.sid);
   const scrollRef = useRef(boot.scrollY);
   const pendingScroll = useRef<number | null>(boot.fromCache ? boot.scrollY : null);
+  const committedRef = useRef(boot.committed);
+  const lastSeenHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
+  const hashBooted = useRef(false);
+  committedRef.current = committed;
   const { toast } = useToast();
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -552,6 +565,7 @@ export default function SearchPage() {
     aar: aarFilter || undefined,
     entity: entityFilter || undefined,
     status: statusFilter || undefined,
+    fleet: exactFleet ? 1 : undefined,
   };
 
   const textQuery = useQuery<RailcarPage>({
@@ -588,6 +602,8 @@ export default function SearchPage() {
   }, [pasteRows, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter]);
 
   const rows = isPaste ? filteredPaste : live ? (textQuery.data?.rows ?? []) : cachedTextRows;
+  const summary = isPaste ? summarize(filteredPaste) : live ? (summaryQuery.data ?? null) : cachedSummary;
+  const match: FleetMatch = isPaste ? null : live ? (textQuery.data?.match ?? summaryQuery.data?.match ?? null) : cachedMatch;
   // Summary counts every matching row. The list endpoint's total is an estimate, so the
   // breadcrumb, pager, and summary chips share the summary total once it has loaded.
   const totalCount = isPaste
@@ -598,8 +614,6 @@ export default function SearchPage() {
   const pageRows = isPaste ? filteredPaste.slice((page - 1) * pageSize, page * pageSize) : rows;
   const peopleRows = peopleQuery.data?.rows ?? [];
   const peopleTotal = peopleQuery.data?.total_count ?? 0;
-  const summary = isPaste ? summarize(filteredPaste) : live ? (summaryQuery.data ?? null) : cachedSummary;
-  const match: FleetMatch = isPaste ? null : live ? (textQuery.data?.match ?? summaryQuery.data?.match ?? null) : cachedMatch;
   const alias = classifyFleetQuery(committed);
   const matchLabel = match?.label || (alias.kind === "alias" ? `Matched rule: ${alias.rule.label}` : "");
 
@@ -621,6 +635,7 @@ export default function SearchPage() {
       entity: entityFilter,
       status: statusFilter,
       active: activeMode,
+      fleet: exactFleet,
       sort,
       dir,
       page,
@@ -680,15 +695,20 @@ export default function SearchPage() {
       window.clearTimeout(timer);
       el.removeEventListener("scroll", onScroll);
     };
-  }, [committed, loading, pageRows.length]);
+  }, [committed, loading, pageRows.length, scrollTick]);
 
   const draft = parseCarPasteListDetailed(query);
   const draftCount = draft.tokens.filter(looksLikeCarToken).length;
 
   useEffect(() => {
     if (!committed) return;
+    const external = decodeHash(window.location.hash);
+    if (window.location.hash !== lastSeenHash.current && shouldRebootSearch({ q: committed, sid: sidRef.current }, external)) {
+      return;
+    }
     const hash = hashState();
     const path = encodeHash(hash);
+    lastSeenHash.current = `#${path}`;
     if (window.location.hash !== `#${path}`) navigateHash(path, { replace: true });
     const ready = !live || (isPaste ? !pasteLoading : textQuery.isFetched || textQuery.isError);
     const results: StoredSearchResults = isPaste
@@ -751,7 +771,57 @@ export default function SearchPage() {
     });
     // hashState closes over the latest filters; listing them keeps the hash in step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [committed, page, ps, activeMode, scope, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter, sort, dir, pasteRows, pasteMeta, selected, live, pasteLoading, textQuery.data, textQuery.isFetched, summaryQuery.data, totalCount]);
+  }, [committed, page, ps, activeMode, exactFleet, scope, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter, sort, dir, pasteRows, pasteMeta, selected, live, pasteLoading, textQuery.data, textQuery.isFetched, summaryQuery.data, totalCount]);
+
+  function applyBoot(next: Boot) {
+    sidRef.current = next.sid;
+    scrollRef.current = next.scrollY;
+    pendingScroll.current = next.fromCache ? next.scrollY : null;
+    committedRef.current = next.committed;
+    setQuery(next.query);
+    setCommitted(next.committed);
+    setScope(next.scope);
+    setActiveMode(next.activeMode);
+    setPage(next.page);
+    setPs(next.ps);
+    setTypeFilter(next.type);
+    setMechFilter(next.mech);
+    setAarFilter(next.aar);
+    setEntityFilter(next.entity);
+    setStatusFilter(next.status);
+    setSort(next.sort);
+    setDir(next.dir);
+    setExactFleet(next.exactFleet);
+    setPasteRows(next.pasteRows);
+    setPasteMeta(next.pasteMeta);
+    setCachedTextRows(next.textRows);
+    setCachedTextTotal(next.textTotal);
+    setCachedSummary(next.summary);
+    setCachedMatch(next.match);
+    setSelected(new Set(next.selection));
+    setLive(!next.fromCache);
+    setPasteLoading(false);
+    setError(null);
+    setScrollTick((n) => n + 1);
+    if (!next.fromCache && next.committed && carListSearchTokens(next.committed)) {
+      void runPaste(next.committed, next.scope, next.activeMode);
+    }
+  }
+
+  const hashQs = useHashSearch();
+  useEffect(() => {
+    if (!hashBooted.current) {
+      hashBooted.current = true;
+      return;
+    }
+    if (window.location.hash === lastSeenHash.current) return;
+    const hash = decodeHash(window.location.hash);
+    lastSeenHash.current = window.location.hash;
+    if (!shouldRebootSearch({ q: committedRef.current, sid: sidRef.current }, { q: hash.q, sid: hash.sid })) return;
+    applyBoot(readBoot());
+    // Re-read when the top bar or Back/Forward changes q or sid. Filter edits stay on this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hashQs]);
 
   async function runPaste(q: string, nextScope: SearchScope, nextActive: SearchActive) {
     setPasteLoading(true);
@@ -797,6 +867,7 @@ export default function SearchPage() {
     setPage(1);
     setSelected(new Set());
     setError(null);
+    setExactFleet(true);
     if (carListSearchTokens(trimmed)) void runPaste(trimmed, scope, activeMode);
     else {
       setPasteRows(null);
@@ -807,8 +878,10 @@ export default function SearchPage() {
   }
 
   function clear() {
+    sidRef.current = "";
     setQuery("");
     setCommitted("");
+    setExactFleet(true);
     setPasteRows(null);
     setPasteMeta(null);
     setError(null);
@@ -1151,6 +1224,7 @@ export default function SearchPage() {
                 setQuery(tip.example);
                 setPage(1);
                 setLive(true);
+                setExactFleet(true);
                 setCommitted(tip.example);
               }}
               className="text-left p-3 rounded-lg border border-border bg-card hover:bg-card/80 hover:border-primary/30 transition-all group"
@@ -1235,14 +1309,18 @@ export default function SearchPage() {
                   <>
                     {pasteMeta.counts.pasted.toLocaleString()} pasted
                     {" · "}
-                    {pasteMeta.counts.found.toLocaleString()} found
-                    {" · "}
-                    {pasteMeta.counts.inactive.toLocaleString()} inactive
-                    {activeMode === "active" && pasteMeta.counts.inactive > 0 && (
+                    {pasteFoundLabel(pasteMeta.counts.found, pasteMeta.counts.inactive, activeMode)}
+                    {pasteShowsInactiveSeparately(activeMode) && (
                       <>
-                        {" ("}
-                        <button type="button" className="text-primary hover:underline" onClick={() => changeActive("all")}>Show</button>
-                        {")"}
+                        {" · "}
+                        {pasteMeta.counts.inactive.toLocaleString()} inactive
+                        {pasteMeta.counts.inactive > 0 && (
+                          <>
+                            {" ("}
+                            <button type="button" className="text-primary hover:underline" onClick={() => changeActive("all")}>Show</button>
+                            {")"}
+                          </>
+                        )}
                       </>
                     )}
                     {" · "}
@@ -1261,12 +1339,24 @@ export default function SearchPage() {
           </div>
 
           {matchLabel && (
-            <div className="text-sm text-foreground" data-testid="search-match-rule">{matchLabel}</div>
+            <div className="text-sm text-foreground flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="search-match-rule">
+              <span>{matchLabel}</span>
+              {exactFleet && match?.textCount != null && match.textCount > 0 && (
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={() => { setExactFleet(false); setPage(1); setLive(true); }}
+                  data-testid="button-search-as-text"
+                >
+                  Also search as text ({match.textCount.toLocaleString()})
+                </button>
+              )}
+            </div>
           )}
           {summary && summary.total > 0 && (
             <SummaryBits
               summary={summary}
-              onType={(key) => { setTypeFilter(key); touchFilters(); }}
+              onType={(key) => { setTypeFilter(!key || key === "—" ? "" : key); touchFilters(); }}
               onEntity={(key) => { setEntityFilter(key); touchFilters(); }}
               onStatus={(key) => { setStatusFilter(key); touchFilters(); }}
             />

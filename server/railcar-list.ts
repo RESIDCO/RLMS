@@ -8,6 +8,7 @@ import {
   fleetMatchLabel,
   fleetOrClause,
   fleetPatternToLike,
+  summaryCarTypeKey,
 } from "@shared/carTypeAliases";
 import { fetchAllRows } from "./fetch-all";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
@@ -76,6 +77,11 @@ export type RailcarListParams = {
   mech?: string;
   /** AAR designation, exact or prefix. */
   aar?: string;
+  /**
+   * Exact car-type / mechanical / alias match. Search sends `fleet=1`.
+   * Omitted everywhere else so Railcars and select-all keep text search.
+   */
+  fleetCodes?: boolean;
   /** Set by attachFleetMatch. Not a query-string param. */
   fleetOr?: string | null;
   fleetMatch?: FleetMatchReport | null;
@@ -89,6 +95,8 @@ export type FleetMatchReport = {
   ruleId?: string;
   ruleLabel?: string;
   activeCount: number | null;
+  /** How many cars the same query would return as ordinary text. */
+  textCount?: number | null;
 };
 
 export function parseRailcarListParams(query: Record<string, unknown>): RailcarListParams {
@@ -139,6 +147,7 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
     carType: str(query.type) ?? str(query.car_type),
     mech: str(query.mech),
     aar: str(query.aar),
+    fleetCodes: truthy(query.fleet),
     all: truthy(query.all) || truthy(query.export),
     acquisition_batch_id: num(query.acquisition_batch_id) ?? num(query.batch),
     needs_completion:
@@ -465,10 +474,27 @@ export async function resolveFleetMatch(search: string | undefined): Promise<{
   }
 }
 
+async function countTextMatches(p: RailcarListParams): Promise<number> {
+  const plain: RailcarListParams = {
+    ...p,
+    fleetCodes: false,
+    fleetReady: true,
+    fleetOr: null,
+    fleetMatch: null,
+    searchRiderIds: undefined,
+    searchLeaseIds: undefined,
+  };
+  let q = supabaseAdmin.from("railcars").select("id", { count: "exact", head: true });
+  q = await applyRailcarFilters(q, plain);
+  const { count, error } = await q;
+  if (error) throw error;
+  return count ?? 0;
+}
+
 async function attachFleetMatch(p: RailcarListParams) {
   if (p.fleetReady) return;
   p.fleetReady = true;
-  if (!p.search || p.ids?.length) {
+  if (!p.fleetCodes || !p.search || p.ids?.length) {
     p.fleetOr = null;
     p.fleetMatch = null;
     return;
@@ -476,6 +502,12 @@ async function attachFleetMatch(p: RailcarListParams) {
   const resolved = await resolveFleetMatch(p.search);
   p.fleetOr = resolved.orClause;
   p.fleetMatch = resolved.match;
+  if (!p.fleetMatch || !p.fleetOr) return;
+  try {
+    p.fleetMatch = { ...p.fleetMatch, textCount: await countTextMatches(p) };
+  } catch (err) {
+    console.log(`[railcars] text-count skipped: ${String((err as { message?: string })?.message ?? err)}`);
+  }
 }
 
 async function applyRailcarFilters(query: any, p: RailcarListParams) {
@@ -739,19 +771,25 @@ async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]
   return data.map((r) => r.id);
 }
 
+function orderRailcarQuery(query: any, p: RailcarListParams) {
+  const orderCol = p.sort === "id" ? "id" : "car_number";
+  const ordered = query.order(orderCol, { ascending: p.dir !== "desc" });
+  if (orderCol === "id") return ordered;
+  return ordered.order("id", { ascending: true });
+}
+
 async function queryRailcarsByAssignedIds(p: RailcarListParams, select: string) {
   const ids = await railcarIdsForAssignmentFilter(p);
     if (!ids?.length) {
     return { rows: [] as any[], total_count: 0, page: 1, pageSize: p.pageSize ?? 0, match: p.fleetMatch ?? null };
   }
-  const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
   const rows: any[] = [];
   for (let i = 0; i < ids.length; i += 150) {
     const slice = ids.slice(i, i + 150);
-    let q = supabaseAdmin
-      .from("railcars")
-      .select(select)
-      .order(orderCol, { ascending: p.dir !== "desc" });
+    let q = orderRailcarQuery(
+      supabaseAdmin.from("railcars").select(select),
+      p,
+    );
     q = await applyRailcarFilters(q, { ...p, assignedRailcarIds: slice });
     const { data, error } = await q;
     if (error) throw error;
@@ -791,7 +829,6 @@ async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, ha
 
 async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   const db = supabaseAdmin;
-  const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
 
   if (p.assigned === "nolink") {
     // Left-anti-join: cars with no assignment row.
@@ -800,7 +837,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     );
     const assignedSet = new Set(assigned.map((a) => a.railcar_id));
     const all = await fetchAllRows(async (from, to) => {
-      let q = db.from("railcars").select(select).order(orderCol, { ascending: p.dir !== "desc" }).range(from, to);
+      let q = orderRailcarQuery(db.from("railcars").select(select), p).range(from, to);
       q = await applyRailcarFilters(q, { ...p, assigned: undefined });
       return q;
     });
@@ -820,7 +857,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
 
   if (p.all) {
     const data = await fetchAllRows(async (from, to) => {
-      let q = db.from("railcars").select(select).order(orderCol, { ascending: p.dir !== "desc" }).range(from, to);
+      let q = orderRailcarQuery(db.from("railcars").select(select), p).range(from, to);
       q = await applyRailcarFilters(q, p);
       return q;
     });
@@ -832,11 +869,10 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
 
   const from = (p.page! - 1) * p.pageSize!;
   const to = from + p.pageSize! - 1;
-  let q = db
-    .from("railcars")
-    .select(select, { count: "estimated" })
-    .order(orderCol, { ascending: p.dir !== "desc" })
-    .range(from, to);
+  let q = orderRailcarQuery(
+    db.from("railcars").select(select, { count: "estimated" }),
+    p,
+  ).range(from, to);
   q = await applyRailcarFilters(q, p);
   const { data, error, count } = await q;
   if (error) throw error;
@@ -874,10 +910,11 @@ function rankedCounts(map: Map<string, number>) {
 /** Same filters as the list. Grouped counts for the summary above the grid. */
 export async function queryRailcarSummary(p: RailcarListParams): Promise<RailcarSummary> {
   await attachFleetMatch(p);
-  const select = "id, car_type, entity, fleet_status";
+  const select = "id, car_type, equipment_type_code, entity, fleet_status";
   const data = await fetchAllRows<{
     id: number;
     car_type: string | null;
+    equipment_type_code: string | null;
     entity: string | null;
     fleet_status: string | null;
   }>(async (from, to) => {
@@ -889,7 +926,7 @@ export async function queryRailcarSummary(p: RailcarListParams): Promise<Railcar
   const byEntity = new Map<string, number>();
   const byStatus = new Map<string, number>();
   for (const row of data) {
-    bumpCount(byType, String(row.car_type ?? ""));
+    bumpCount(byType, summaryCarTypeKey(row.car_type, row.equipment_type_code));
     bumpCount(byEntity, String(row.entity ?? ""));
     bumpCount(byStatus, String(row.fleet_status ?? ""));
   }

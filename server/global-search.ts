@@ -315,7 +315,7 @@ async function runCarListSearch(raw: string, tokens: string[], active?: string):
 
 export async function runGlobalSearch(
   raw: string,
-  opts?: { active?: string; searchScope?: SearchScope },
+  opts?: { active?: string; searchScope?: SearchScope; fleetCodes?: boolean },
 ): Promise<GlobalSearchResult> {
   const tAll = Date.now();
   const active = opts?.active ?? "active";
@@ -331,7 +331,9 @@ export async function runGlobalSearch(
 
   const groups = raw.split(/[\n\r,;]+/).map((g) => g.trim()).filter(Boolean);
   const terms = groups.flatMap((g) => g.split(/\s+/).filter(Boolean));
-  const fleet = groups.length === 1 ? await resolveFleetMatch(groups[0]) : { orClause: null, match: null };
+  const fleet = opts?.fleetCodes && groups.length === 1
+    ? await resolveFleetMatch(groups[0])
+    : { orClause: null, match: null };
 
   if (fleet.orClause) {
     const cars = await timed("railcars-fleet-code", async () => {

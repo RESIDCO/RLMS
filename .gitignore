@@ -17,6 +17,7 @@ dist/
 *.log
 
 # Local run artifacts
+tmp/
 script/*-last.json
 script/load_log.csv
 script/load_state.json

@@ -56,6 +56,14 @@ export type FleetQueryClass =
   | { kind: "mechanical"; code: string }
   | { kind: "text" };
 
+/** Summary chip: car type, or the equipment code when car type is blank. */
+export function summaryCarTypeKey(carType: unknown, equipmentTypeCode: unknown): string {
+  const car = String(carType ?? "").trim();
+  if (car) return car;
+  const equip = String(equipmentTypeCode ?? "").trim();
+  return equip || "—";
+}
+
 export function normalizeFleetPhrase(raw: string): string {
   return String(raw ?? "")
     .trim()

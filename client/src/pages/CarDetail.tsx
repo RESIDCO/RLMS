@@ -150,7 +150,6 @@ export default function CarDetailPage() {
   }, [focus, r]);
 
   const abs = Array.isArray(r?.railcar_ab_items) ? r.railcar_ab_items : [];
-  const inactiveCar = data?.railcar?.active === false;
 
   return (
     <>
@@ -219,8 +218,7 @@ export default function CarDetailPage() {
             <div className="rounded-xl border border-card-border bg-card p-5">
               <CarDetail
                 carId={id}
-                canEdit={canEdit && !inactiveCar}
-                readOnly={inactiveCar}
+                canEdit={canEdit}
                 showCarPageLink={false}
                 onEdit={(car) => setEditCar(car)}
                 onDelete={() => deleteMutation.mutate()}

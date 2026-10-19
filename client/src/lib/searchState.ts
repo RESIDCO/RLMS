@@ -21,6 +21,8 @@ export type SearchHashState = {
   entity: string;
   status: string;
   active: SearchActive;
+  /** False when the user asked to search the code as ordinary text. */
+  fleet: boolean;
   sort: string;
   dir: "asc" | "desc";
   page: number;
@@ -63,7 +65,24 @@ const PREFIX = "rlms-search:";
 const INDEX_KEY = "rlms-search-index";
 const PASTE_KEY = "rlms-search-paste";
 const MAX_SIDS = 20;
+const FULL_ROW_SIDS = 5;
 const HASH_Q_MAX = 1600;
+
+/** True when a top-bar search or Back/Forward moved to a different search. */
+export function shouldRebootSearch(current: { q: string; sid: string }, next: { q: string; sid: string }): boolean {
+  return current.q !== next.q || (current.sid || "") !== (next.sid || "");
+}
+
+/** "found" stays the cars in the grid. When inactive cars are in that grid, say so instead of adding them again. */
+export function pasteFoundLabel(found: number, inactive: number, active: SearchActive): string {
+  const n = found.toLocaleString();
+  if (active === "all" && inactive > 0) return `${n} found (incl. ${inactive.toLocaleString()} inactive)`;
+  return `${n} found`;
+}
+
+export function pasteShowsInactiveSeparately(active: SearchActive): boolean {
+  return active === "active";
+}
 
 export function createSearchSid(): string {
   const rand = Math.random().toString(36).slice(2, 10);
@@ -84,6 +103,7 @@ export function emptySearchHash(sid = ""): SearchHashState {
     entity: "",
     status: "",
     active: "active",
+    fleet: true,
     sort: "car_number",
     dir: "asc",
     page: 1,
@@ -130,6 +150,7 @@ export function decodeHash(hash: string): SearchHashState {
   state.entity = params.get("entity") ?? "";
   state.status = params.get("status") ?? "";
   state.active = active;
+  state.fleet = params.get("fleet") !== "0";
   state.sort = params.get("sort") || "car_number";
   state.dir = params.get("dir") === "desc" ? "desc" : "asc";
   const page = Number(params.get("page"));
@@ -168,6 +189,7 @@ export function encodeHash(state: SearchHashState): string {
   if (state.entity) params.set("entity", state.entity);
   if (state.status) params.set("status", state.status);
   if (state.active !== "active") params.set("active", state.active);
+  if (!state.fleet) params.set("fleet", "0");
   if (state.sort && state.sort !== "car_number") params.set("sort", state.sort);
   if (state.dir === "desc") params.set("dir", "desc");
   if (state.page > 1) params.set("page", String(state.page));
@@ -211,10 +233,39 @@ export function loadSearchState(sid: string): StoredSearch | null {
   }
 }
 
+function isQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = (err as { name?: string }).name;
+  const code = (err as { code?: number }).code;
+  return name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED" || code === 22;
+}
+
+function withoutRows(state: StoredSearch): StoredSearch {
+  if (!state.results) return state;
+  return { ...state, results: { ...state.results, rows: [] } };
+}
+
+function slimOlder(store: Storage, index: string[]) {
+  const keepFull = new Set(index.slice(0, FULL_ROW_SIDS));
+  for (const id of index) {
+    if (keepFull.has(id)) continue;
+    try {
+      const raw = store.getItem(PREFIX + id);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as StoredSearch;
+      const rows = parsed?.results?.rows;
+      if (!Array.isArray(rows) || rows.length === 0) continue;
+      store.setItem(PREFIX + id, JSON.stringify(withoutRows(parsed)));
+    } catch {
+      /* the quota retry evicts this entry */
+    }
+  }
+}
+
 export function saveSearchState(sid: string, state: Omit<StoredSearch, "sid" | "timestamp"> & { timestamp?: number }): void {
   const store = storage();
   if (!store || !sid) return;
-  const payload: StoredSearch = {
+  let payload: StoredSearch = {
     sid,
     hash: state.hash,
     pastedText: state.pastedText ?? "",
@@ -225,15 +276,38 @@ export function saveSearchState(sid: string, state: Omit<StoredSearch, "sid" | "
     ready: state.ready !== false,
     timestamp: state.timestamp ?? Date.now(),
   };
-  try {
+  const prior = readIndex(store);
+  let index = [sid, ...prior.filter((id) => id !== sid)].slice(0, MAX_SIDS);
+  for (const id of prior) {
+    if (!index.includes(id)) store.removeItem(PREFIX + id);
+  }
+  slimOlder(store, index);
+
+  const persist = () => {
     store.setItem(PREFIX + sid, JSON.stringify(payload));
     if (payload.pastedText) store.setItem(PASTE_KEY, payload.pastedText);
-    const index = [sid, ...readIndex(store).filter((id) => id !== sid)].slice(0, MAX_SIDS);
-    const dropped = readIndex(store).filter((id) => !index.includes(id));
-    for (const id of dropped) store.removeItem(PREFIX + id);
     store.setItem(INDEX_KEY, JSON.stringify(index));
-  } catch {
-    /* quota / private mode */
+  };
+
+  for (let attempt = 0; attempt < MAX_SIDS + 2; attempt += 1) {
+    try {
+      persist();
+      return;
+    } catch (err) {
+      if (!isQuotaError(err)) return;
+      const oldest = index.length > 1 ? index[index.length - 1] : "";
+      if (oldest && oldest !== sid) {
+        index = index.slice(0, -1);
+        store.removeItem(PREFIX + oldest);
+        continue;
+      }
+      const rows = payload.results?.rows;
+      if (Array.isArray(rows) && rows.length > 0) {
+        payload = withoutRows(payload);
+        continue;
+      }
+      return;
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
   fleetOrClause,
   fleetPatternToLike,
   matchCarTypeAlias,
+  summaryCarTypeKey,
 } from "./carTypeAliases";
 
 let passed = 0;
@@ -78,6 +79,10 @@ if (covered.kind === "alias") {
 } else {
   ok(false, "covered hopper class");
 }
+
+ok(summaryCarTypeKey("J312", "J302") === "J312", "summary prefers car type");
+ok(summaryCarTypeKey("", "C614") === "C614", "summary falls back to the equipment code");
+ok(summaryCarTypeKey("  ", null) === "—", "summary uses a dash when both type columns are blank");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

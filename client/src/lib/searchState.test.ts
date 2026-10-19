@@ -7,8 +7,12 @@ import {
   emptySearchHash,
   encodeHash,
   loadSearchState,
+  pasteFoundLabel,
+  pasteShowsInactiveSeparately,
   saveSearchState,
+  shouldRebootSearch,
   type SearchHashState,
+  type StoredSearchResults,
 } from "./searchState";
 
 const mem = new Map<string, string>();
@@ -75,6 +79,15 @@ ok(trip.decoded.entity === "Main" && trip.decoded.status === "Leased" && trip.de
 ok(trip.decoded.sort === "id" && trip.decoded.dir === "desc", "sort round-trips");
 ok(trip.decoded.page === 2 && trip.decoded.ps === "all", "page and page size round-trip");
 ok(trip.decoded.sid === "sid1", "sid round-trips");
+ok(trip.decoded.fleet === true, "exact fleet match stays on by default");
+const asText = roundTrip({ ...full, fleet: false });
+ok(asText.encoded.includes("fleet=0") && asText.decoded.fleet === false, "fleet=0 round-trips");
+ok(!shouldRebootSearch({ q: "J312", sid: "a" }, { q: "J312", sid: "a" }), "same q and sid does not reboot");
+ok(shouldRebootSearch({ q: "J312", sid: "a" }, { q: "LO", sid: "" }), "a new top-bar query reboots");
+ok(shouldRebootSearch({ q: "J312", sid: "a" }, { q: "J312", sid: "b" }), "Back to another sid reboots");
+ok(pasteFoundLabel(38, 5, "active") === "38 found", "active paste found is the active count");
+ok(pasteFoundLabel(43, 5, "all") === "43 found (incl. 5 inactive)", "showing inactive does not count those cars twice");
+ok(pasteShowsInactiveSeparately("active") && !pasteShowsInactiveSeparately("all"), "inactive is separate only while it is hidden");
 
 const legacy = decodeHash("#/search?q=graymont");
 ok(legacy.q === "graymont" && legacy.page === 1 && legacy.ps === 75 && legacy.active === "active", "old #/search?q= links still decode");
@@ -131,6 +144,58 @@ for (let i = 0; i < 25; i += 1) {
 }
 ok(loadSearchState("s0") == null, "older than the last 20 sids are dropped");
 ok(loadSearchState("s24") != null && loadSearchState("s5") != null, "the newest 20 sids are kept");
+
+function stored(id: string, withRow: boolean): StoredSearchResults {
+  return {
+    mode: "text",
+    rows: withRow ? [{ id: 1 }] : [],
+    total: 1,
+    summary: null,
+    notFound: [],
+    inactiveMatches: [],
+    ambiguous: [],
+    counts: null,
+    match: null,
+    truncated: false,
+    rejectedRanges: [],
+    expandedFrom: [],
+  };
+}
+
+sessionStorage.clear();
+for (const id of ["row0", "row1", "row2", "row3", "row4", "row5"]) {
+  saveSearchState(id, {
+    hash: emptySearchHash(id),
+    pastedText: "",
+    ids: [1],
+    selection: [1],
+    scrollY: 0,
+    results: stored(id, true),
+  });
+}
+ok((loadSearchState("row5")?.results?.rows.length ?? 0) === 1, "the newest sid keeps full rows");
+ok((loadSearchState("row1")?.results?.rows.length ?? 0) === 1, "the newest five sids keep full rows");
+ok((loadSearchState("row0")?.results?.rows.length ?? 0) === 0, "older sids drop full rows");
+ok(loadSearchState("row0")?.ids.join(",") === "1" && loadSearchState("row0")?.selection.join(",") === "1", "older sids keep ids and selection");
+
+sessionStorage.clear();
+saveSearchState("old", { hash: emptySearchHash("old"), pastedText: "", ids: [9], selection: [], scrollY: 0, results: stored("old", true) });
+saveSearchState("mid", { hash: emptySearchHash("mid"), pastedText: "", ids: [8], selection: [], scrollY: 0, results: stored("mid", true) });
+let quotaThrows = 1;
+const origSet = sessionStorage.setItem.bind(sessionStorage);
+sessionStorage.setItem = (key: string, value: string) => {
+  if (quotaThrows > 0 && key.indexOf("rlms-search:") === 0) {
+    quotaThrows -= 1;
+    const err = new Error("quota");
+    err.name = "QuotaExceededError";
+    throw err;
+  }
+  origSet(key, value);
+};
+saveSearchState("new", { hash: emptySearchHash("new"), pastedText: "", ids: [7], selection: [7], scrollY: 12, results: stored("new", true) });
+sessionStorage.setItem = origSet;
+ok(loadSearchState("old") == null, "a quota error drops the oldest saved search and retries");
+ok(loadSearchState("new")?.ids.join(",") === "7" && loadSearchState("new")?.scrollY === 12, "the new search is saved after the retry");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -81,6 +81,7 @@ export const GLOBAL_OPTIONAL_FIELDS: { field_key: string; label: string; field_t
   { field_key: "loaded_by_lessee", label: "Loaded by lessee", field_type: "text", section: "Optional" },
   { field_key: "return_location", label: "Return location", field_type: "text", section: "Optional" },
   { field_key: "settlement_amount", label: "Settlement amount", field_type: "currency", section: "Optional" },
+  { field_key: "trace_date_ran", label: "Trace date ran", field_type: "date", section: "Optional" },
 ];
 
 /** Grid columns for a program that has no saved layout yet. Optional globals stay hidden. */
@@ -255,6 +256,7 @@ const HEADER_TARGETS: Record<string, FieldTarget> = {
   "arrived destination": custom("arrived_lessee_destination", "date"),
   "arrived lessee destination": custom("arrived_lessee_destination", "date"),
   "trace date": custom("trace_date", "date"),
+  "trace date ran": custom("trace_date_ran", "date"),
   "location city": layoutOnly("trace_city", "text"),
   "location state": layoutOnly("trace_state", "text"),
   lessee: custom("lessee", "text"),

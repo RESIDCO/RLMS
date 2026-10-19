@@ -5,6 +5,7 @@ import { pickEarliestOpenProgram, shouldCreateProgramCommitment } from "./commit
 import {
   displayTypeFromCategory,
   deriveCompletionLevel,
+  frozenProgramCarAcceptsPatch,
   isArrivedMilestone,
   isCarDone,
   isTerminalMilestone,
@@ -43,7 +44,20 @@ ok(parseCarPasteList("TFOX 2248\nTFOX 000430, KBX 123").length === 3, "paste lis
 ok(parseCarPasteList("TFOX\t3297").join("|") === "TFOX 003297", "tab + zero-pad");
 ok(parseCarPasteList("TFOX  3297\nTFOX 003297").length === 1, "spaces and pad collapse to one car");
 
-ok(isCarDone({ active: false }), "inactive is program done");
+ok(isCarDone({ active: false }), "fleet inactive is program done");
+ok(isCarDone({ active: true, railcar_status: "Inactive" }), "Inactive status is program done");
+ok(!isCarDone({ active: true, railcar_status: "Off-Lease" }), "an active Off-Lease car is not program done");
+ok(!isCarDone({ active: false, keep_open: true }), "keep open is not done by inactivity");
+ok(isCarDone({ active: false, keep_open: true, outcome_reached_at: "2026-10-17" }), "keep open plus outcome is program done");
+ok(isCarDone({ active: true, railcar_status: "Inactive", keep_open: true, milestone: "On rent" }), "keep open plus a done milestone is program done");
+ok(deriveCompletionLevel({ active: false, keep_open: true, status: "Enroute" }) === "in_progress", "keep open with a status stays in progress");
+ok(deriveCompletionLevel({ active: false, status: "Enroute" }) === "program_done", "inactive fleet car is program done");
+ok(isCarDone({ active: false, exited_date: "2026-10-01" }), "program exit is program done");
+ok(!frozenProgramCarAcceptsPatch({ active: false }, { status: "Enroute" }), "a frozen car rejects a status edit");
+ok(frozenProgramCarAcceptsPatch({ active: false, custom_fields: { __keep_open: true } }, { status: "Enroute" }), "keep open accepts a status edit");
+ok(frozenProgramCarAcceptsPatch({ active: false }, { custom_fields: { __keep_open: true } }), "turning keep open on is allowed");
+ok(frozenProgramCarAcceptsPatch({ active: true, railcar_status: "Storage" }, { status: "Enroute" }), "an active Storage car accepts a status edit");
+ok(!frozenProgramCarAcceptsPatch({ active: false }, null), "exit stays blocked until keep open");
 ok(isCarDone({ active: true, milestone: "On rent" }), "on rent is program done");
 ok(isCarDone({ active: true, milestones: [{ milestone: "Scrapped" }] }), "scrapped trail is program done");
 ok(!isCarDone({ active: true, milestone: "Work complete" }), "work complete is not program done");

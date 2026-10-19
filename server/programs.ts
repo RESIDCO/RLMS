@@ -6,6 +6,8 @@ import {
   excelSheetName,
   formatCustomField,
   deriveCompletionLevel,
+  frozenProgramCarAcceptsPatch,
+  programCarKeepOpen,
   COMPLETION_LABEL,
   isArrivedMilestone,
   isCustomFieldPopulated,
@@ -26,6 +28,9 @@ import {
   type ProgramStatus,
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
+import { activeFieldDefs, fieldDefsForProgram } from "@shared/manage-columns";
+import { excelMoneyValue, isProgramMoneyField } from "@shared/money";
+import { parseProgramDate } from "@shared/program-dates";
 import { changedKeys, pickRow } from "@shared/change-log";
 import { isFrozenRailcar } from "@shared/car-lifecycle-status";
 import { currentChangeGroup, recordChange } from "./change-log";
@@ -59,7 +64,11 @@ function missingCompletedColumn(err: unknown) {
   return /completed/i.test(msg) && /column|schema cache|does not exist|could not find/i.test(msg);
 }
 
-async function rejectIfFrozenRailcar(railcarId: number | null | undefined): Promise<void> {
+async function rejectIfFrozenRailcar(
+  railcarId: number | null | undefined,
+  customFields?: unknown,
+  updates?: Record<string, unknown>,
+): Promise<void> {
   const id = Number(railcarId);
   if (!Number.isFinite(id) || id <= 0) return;
   const { data, error } = await supabaseAdmin
@@ -68,9 +77,16 @@ async function rejectIfFrozenRailcar(railcarId: number | null | undefined): Prom
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
-  if (data && isFrozenRailcar(data)) {
-    throw Object.assign(new Error(FROZEN_CAR_MESSAGE), { status: 409 });
+  if (!data) return;
+  if (
+    frozenProgramCarAcceptsPatch(
+      { active: data.active, railcar_status: data.status, custom_fields: customFields },
+      updates,
+    )
+  ) {
+    return;
   }
+  throw Object.assign(new Error(FROZEN_CAR_MESSAGE), { status: 409 });
 }
 
 function isCarCompleted(row: any): boolean {
@@ -149,11 +165,11 @@ export async function appendProgramCarMilestone(opts: {
   if (!milestone || !/^\d{4}-\d{2}-\d{2}$/.test(milestoneDate)) return null;
   const { data: linkOwner, error: ownerErr } = await supabaseAdmin
     .from("program_cars")
-    .select("railcar_id")
+    .select("railcar_id, custom_fields")
     .eq("id", opts.programCarId)
     .maybeSingle();
   if (ownerErr) throw ownerErr;
-  await rejectIfFrozenRailcar(linkOwner?.railcar_id);
+  await rejectIfFrozenRailcar(linkOwner?.railcar_id, linkOwner?.custom_fields);
   const { data: last } = await supabaseAdmin
     .from("program_car_milestones")
     .select("id, milestone, milestone_date")
@@ -373,18 +389,14 @@ export async function listCategories() {
   return data ?? [];
 }
 
-export async function listFieldDefs(categoryId: number | null): Promise<ProgramFieldDef[]> {
-  let q = supabaseAdmin.from("program_field_defs").select("*");
-  if (categoryId) q = q.or(`category_id.eq.${categoryId},category_id.is.null`);
-  else q = q.is("category_id", null);
-  const { data, error } = await q.order("sort_order", { ascending: true }).order("id", { ascending: true });
+export async function listFieldDefs(categoryId: number | null, programId: number): Promise<ProgramFieldDef[]> {
+  const { data, error } = await supabaseAdmin
+    .from("program_field_defs")
+    .select("*")
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true });
   if (error) throw error;
-  const byKey = new Map<string, ProgramFieldDef>();
-  for (const row of (data ?? []) as ProgramFieldDef[]) {
-    const existing = byKey.get(row.field_key);
-    if (!existing || (existing.category_id == null && row.category_id != null)) byKey.set(row.field_key, row);
-  }
-  return Array.from(byKey.values());
+  return fieldDefsForProgram((data ?? []) as ProgramFieldDef[], programId, categoryId);
 }
 
 export async function getProgram(id: number) {
@@ -404,7 +416,7 @@ export async function getProgram(id: number) {
   if (!data) return null;
   const category = Array.isArray(data.category) ? data.category[0] ?? null : data.category;
   const account = Array.isArray(data.account) ? data.account[0] ?? null : data.account ?? null;
-  const field_defs = await listFieldDefs(data.category_id ? Number(data.category_id) : null);
+  const field_defs = await listFieldDefs(data.category_id ? Number(data.category_id) : null, id);
   const { data: progress } = await supabaseAdmin.from("v_program_progress").select("*").eq("program_id", id).maybeSingle();
   return {
     ...data,
@@ -511,11 +523,14 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
     const trail = trailBy.get(Number(r.id)) ?? [];
     const completion_level = deriveCompletionLevel({
       active: r.railcar?.active,
+      railcar_status: r.railcar?.status,
       status: r.status,
       milestone: r.milestone,
       milestones: trail,
       outcome_reached_at: r.outcome_reached_at,
       completed: r.completed,
+      exited_date: r.exited_date,
+      keep_open: programCarKeepOpen(r.custom_fields),
     });
     return {
       ...r,
@@ -589,14 +604,14 @@ export async function addCarsToProgram(
 export async function exitCarFromProgram(programId: number, linkId: number, actor: string | null) {
   const { data: row, error: getErr } = await supabaseAdmin
     .from("program_cars")
-    .select("id, railcar_id, exited_date")
+    .select("id, railcar_id, exited_date, custom_fields")
     .eq("id", linkId)
     .eq("program_id", programId)
     .maybeSingle();
   if (getErr) throw getErr;
   if (!row) return null;
   if (row.exited_date) return row;
-  await rejectIfFrozenRailcar(row.railcar_id);
+  await rejectIfFrozenRailcar(row.railcar_id, row.custom_fields);
   const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await supabaseAdmin
     .from("program_cars")
@@ -643,7 +658,7 @@ export async function patchProgramCar(
     .maybeSingle();
   if (getErr) throw getErr;
   if (!existing) return null;
-  await rejectIfFrozenRailcar(existing.railcar_id);
+  await rejectIfFrozenRailcar(existing.railcar_id, existing.custom_fields, body);
   const updates: Record<string, unknown> = {};
   if (body.status !== undefined) updates.status = body.status === "" ? null : String(body.status);
   if (body.notes !== undefined) updates.notes = body.notes === "" ? null : body.notes;
@@ -1047,6 +1062,19 @@ function coreCarColumns() {
   ] as const;
 }
 
+function excelStoredDate(value: unknown): string {
+  if (value == null || value === "") return "";
+  const parsed = parseProgramDate(value);
+  return parsed ? parsed.iso : String(value).slice(0, 10);
+}
+
+type ExcelCell = { value: string | number | null; numFmt?: string | null };
+
+function excelMoneyCell(value: unknown): ExcelCell {
+  const packed = excelMoneyValue(value);
+  return { value: packed.value, numFmt: packed.numFmt };
+}
+
 function carExportValue(row: any, key: string): string {
   const r = row.railcar ?? {};
   switch (key) {
@@ -1061,15 +1089,15 @@ function carExportValue(row: any, key: string): string {
     case "milestone":
       return row.milestone ?? "";
     case "milestone_at":
-      return row.milestone_at ? String(row.milestone_at).slice(0, 10) : "";
+      return excelStoredDate(row.milestone_at);
     case "work_complete_at":
-      return row.work_complete_at ? String(row.work_complete_at).slice(0, 10) : "";
+      return excelStoredDate(row.work_complete_at);
     case "arrived_at":
-      return row.arrived_at ? String(row.arrived_at).slice(0, 10) : "";
+      return excelStoredDate(row.arrived_at);
     case "program_done_step":
       return row.program_done_step ?? "";
     case "program_done_at":
-      return row.program_done_at ? String(row.program_done_at).slice(0, 10) : "";
+      return excelStoredDate(row.program_done_at);
     case "completed":
       return isCarCompleted(row) ? "Yes" : "";
     case "flag_tag":
@@ -1077,9 +1105,9 @@ function carExportValue(row: any, key: string): string {
     case "notes":
       return row.notes ?? "";
     case "joined_date":
-      return row.joined_date ? String(row.joined_date).slice(0, 10) : "";
+      return excelStoredDate(row.joined_date);
     case "exited_date":
-      return row.exited_date ? String(row.exited_date).slice(0, 10) : "";
+      return excelStoredDate(row.exited_date);
     case "ol_snapshot":
       return row.rider_external_id_snapshot ?? "";
     case "ol_current":
@@ -1126,7 +1154,7 @@ export async function buildProgramReport(opts: {
 
   for (const p of programs) {
     const cars = await listProgramCarsWithDocs(p.id, true);
-    const defs = (p.field_defs ?? []) as ProgramFieldDef[];
+    const defs = activeFieldDefs((p.field_defs ?? []) as ProgramFieldDef[]);
     const usedDefs = defs.filter((d) =>
       cars.some((c) => isCustomFieldPopulated(c.custom_fields?.[d.field_key])),
     );
@@ -1170,14 +1198,24 @@ export async function buildProgramReport(opts: {
     sheet.addRow(headers);
     sheet.getRow(1).font = { bold: true };
     for (const car of cars) {
-      const vals = keys.map((key) => {
-        if (key.startsWith("cf:")) {
+      const row = sheet.addRow([]);
+      keys.forEach((key, index) => {
+        const cell = row.getCell(index + 1);
+        let packed: ExcelCell;
+        if (key === "repair_cost_total") {
+          packed = excelMoneyCell(car.repair_cost_total);
+        } else if (key.startsWith("cf:")) {
           const d = usedDefs.find((x) => `cf:${x.field_key}` === key);
-          return d ? formatCustomField(car.custom_fields?.[d.field_key], d.field_type) : "";
+          if (!d) packed = { value: "" };
+          else if (isProgramMoneyField(d)) packed = excelMoneyCell(car.custom_fields?.[d.field_key]);
+          else if (d.field_type === "date") packed = { value: excelStoredDate(car.custom_fields?.[d.field_key]) || null };
+          else packed = { value: formatCustomField(car.custom_fields?.[d.field_key], d.field_type) };
+        } else {
+          packed = { value: carExportValue(car, key) };
         }
-        return carExportValue(car, key);
+        cell.value = packed.value;
+        if (packed.numFmt && packed.value != null) cell.numFmt = packed.numFmt;
       });
-      sheet.addRow(vals);
     }
     sheet.columns.forEach((col) => {
       col.width = Math.min(40, Math.max(12, Number(col.width) || 16));

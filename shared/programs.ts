@@ -1,4 +1,48 @@
+import { isFrozenRailcar } from "./car-lifecycle-status";
+import { formatMoneyCell } from "./money";
+import { formatProgramDate } from "./program-dates";
 import { CAR_NUMBER_WIDTH, splitCarNumber } from "./residco-import";
+
+/** Program-row override. Fleet inactive is Program done unless this is true. */
+export const PROGRAM_KEEP_OPEN_CF = "__keep_open";
+
+export function programCarKeepOpen(custom: unknown): boolean {
+  if (!custom || typeof custom !== "object" || Array.isArray(custom)) return false;
+  const value = (custom as Record<string, unknown>)[PROGRAM_KEEP_OPEN_CF];
+  return value === true || value === "true" || value === "t" || value === 1 || value === "1";
+}
+
+export function programCarPatchSetsKeepOpen(updates: Record<string, unknown> | null | undefined): boolean {
+  const fields = updates?.custom_fields;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return false;
+  return programCarKeepOpen({ [PROGRAM_KEEP_OPEN_CF]: (fields as Record<string, unknown>)[PROGRAM_KEEP_OPEN_CF] });
+}
+
+export function programCarPatchIsOnlyKeepOpen(updates: Record<string, unknown> | null | undefined): boolean {
+  if (!updates) return false;
+  const keys = Object.keys(updates).filter((key) => updates[key] !== undefined);
+  if (keys.length !== 1 || keys[0] !== "custom_fields") return false;
+  const fields = updates.custom_fields;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return false;
+  const fieldKeys = Object.keys(fields as Record<string, unknown>);
+  return fieldKeys.length === 1 && fieldKeys[0] === PROGRAM_KEEP_OPEN_CF;
+}
+
+/**
+ * A frozen fleet car accepts program-row edits when Keep open is already set,
+ * this patch turns it on, or the patch only changes that flag. Railcar and
+ * commitment writes stay blocked either way.
+ */
+export function frozenProgramCarAcceptsPatch(
+  row: { active?: boolean | null; railcar_status?: string | null; custom_fields?: unknown },
+  updates?: Record<string, unknown> | null,
+): boolean {
+  if (!isFrozenRailcar({ active: row.active, status: row.railcar_status })) return true;
+  if (programCarKeepOpen(row.custom_fields)) return true;
+  if (programCarPatchSetsKeepOpen(updates)) return true;
+  if (programCarPatchIsOnlyKeepOpen(updates)) return true;
+  return false;
+}
 
 export const PROGRAM_STATUSES = ["open", "on_hold", "complete"] as const;
 export type ProgramStatus = (typeof PROGRAM_STATUSES)[number];
@@ -94,16 +138,25 @@ export function isTerminalMilestone(raw: string | null | undefined): boolean {
 }
 
 export function deriveCompletionLevel(row: {
+  /** railcars.active. False is a frozen fleet car. */
   active?: boolean | null;
+  /** railcars.status. Inactive freezes the car even when active is still true. */
+  railcar_status?: string | null;
+  /** program_cars.status. The text alone is not Program done. */
   status?: string | null;
   milestone?: string | null;
   milestones?: { milestone?: string | null }[] | null;
   outcome_reached_at?: string | null;
   completed?: boolean | null;
+  exited_date?: string | null;
+  /** program_cars.custom_fields.__keep_open. Inactivity alone is not done. */
+  keep_open?: boolean | null;
 }): CompletionLevel {
-  if (row.active === false) return "program_done";
+  const frozen = isFrozenRailcar({ active: row.active, status: row.railcar_status });
+  if (frozen && row.keep_open !== true) return "program_done";
   if (row.completed === true) return "program_done";
   if (String(row.outcome_reached_at ?? "").trim()) return "program_done";
+  if (String(row.exited_date ?? "").trim()) return "program_done";
   const names = [
     ...(row.milestones ?? []).map((m) => m.milestone),
     row.milestone,
@@ -193,11 +246,14 @@ export function displayTypeFromCategory(categoryName: string | null | undefined)
 /** True when the car has reached the program end result (Program done). */
 export function isCarDone(row: {
   active?: boolean | null;
+  railcar_status?: string | null;
   status?: string | null;
   milestone?: string | null;
   milestones?: { milestone?: string | null }[] | null;
   outcome_reached_at?: string | null;
   completed?: boolean | null;
+  exited_date?: string | null;
+  keep_open?: boolean | null;
 }): boolean {
   return deriveCompletionLevel(row) === "program_done";
 }
@@ -245,6 +301,10 @@ export type ProgramFieldDef = {
   select_options: string[] | null;
   /** Global optional fields (category_id null) stay hidden until added from Columns. */
   is_optional?: boolean;
+  /** Set when the column belongs to one program. Null is category-wide or global. */
+  program_id?: number | null;
+  /** Set when the column is retired. The definition and stored values stay. */
+  retired_at?: string | null;
 };
 
 export const CATEGORY_BADGE: Record<string, string> = {
@@ -301,13 +361,12 @@ export function isCustomFieldPopulated(v: unknown): boolean {
 export function formatCustomField(v: unknown, type: ProgramFieldType): string {
   if (v == null || v === "") return "";
   if (type === "boolean") return v === true || v === "true" ? "Yes" : v === false || v === "false" ? "No" : "";
-  if (type === "currency") {
+  if (type === "currency") return formatMoneyCell(v);
+  if (type === "date") return formatProgramDate(v);
+  if (type === "number") {
     const n = Number(v);
-    return Number.isFinite(n)
-      ? n.toLocaleString("en-US", { style: "currency", currency: "USD" })
-      : String(v);
+    return Number.isFinite(n) ? n.toLocaleString("en-US") : String(v);
   }
-  if (type === "date") return String(v).slice(0, 10);
   return String(v);
 }
 

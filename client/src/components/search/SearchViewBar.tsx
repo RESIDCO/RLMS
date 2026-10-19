@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { FOCUS_PRESET_LABEL, formatEtTime, viewNamesCollide, type ViewKind } from "@shared/saved-views";
+import { EMPTY_VIEWS_HINT, FOCUS_PRESET_LABEL, formatEtTime, viewNamesCollide, type ViewKind } from "@shared/saved-views";
 
 export type ViewSummary = {
   id: number;
@@ -227,6 +227,15 @@ export function ViewsMenu({
   const pinned = views.filter((view) => view.pinned && match(view));
   const shared = views.filter((view) => view.shared && match(view));
   const mine = views.filter((view) => !view.shared && view.owner === userId && match(view));
+  if (views.length === 0) {
+    return (
+      <div className="min-w-0">
+        {schemaMessage ? <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">{schemaMessage}</div> : null}
+        <Input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter views" className="h-8 text-xs" data-testid="views-filter" />
+        <div className="mt-2 px-1.5 py-1 text-xs text-muted-foreground" data-testid="views-empty">{EMPTY_VIEWS_HINT}</div>
+      </div>
+    );
+  }
   const section = (title: string, rows: ViewSummary[]) => (
     <div className="mt-2">
       <div className="px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">{title}</div>

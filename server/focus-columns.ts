@@ -1,8 +1,6 @@
 import {
-  daysStopped,
-  openStopReason,
+  openStopFocusFields,
   pickOpenPrograms,
-  pickOpenStop,
   type OpenStopRow,
   type ProgramJoinRow,
 } from "@shared/saved-views";
@@ -204,8 +202,6 @@ export async function attachFocusColumns<T extends { id: number; notes?: string 
   const ms = Date.now() - started;
   console.log(`[search] focus cars=${ids.length} ms=${ms}`);
   return rows.map((row) => {
-    const open = pickOpenStop(stopByCar.get(row.id) ?? []);
-    const reason = openStopReason(open);
     const program = pickOpenPrograms(programByCar.get(row.id) ?? []);
     const latest = noteByCar.get(row.id);
     const fallback = String(row.notes ?? "").trim();
@@ -213,12 +209,7 @@ export async function attachFocusColumns<T extends { id: number; notes?: string 
     return {
       ...row,
       ...EMPTY,
-      open_stop_type: open ? String(open.type ?? "").trim() || null : null,
-      open_stop_since: open?.stop_date ? String(open.stop_date).slice(0, 10) : null,
-      open_stop_days: open ? daysStopped(open.stop_date) : null,
-      open_stop_expected: open?.expected_resume_date ? String(open.expected_resume_date).slice(0, 10) : null,
-      open_stop_reason: reason.text || null,
-      open_stop_note: reason.note || null,
+      ...openStopFocusFields(stopByCar.get(row.id) ?? []),
       program_name: program.latest?.name ? String(program.latest.name) : null,
       program_extra: program.extra,
       program_status: program.latest?.status ? String(program.latest.status) : null,

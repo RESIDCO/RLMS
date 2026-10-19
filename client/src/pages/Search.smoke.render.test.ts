@@ -60,5 +60,17 @@ if (!html.includes("Search")) {
   console.error("FAIL search page render produced no Search heading");
   process.exit(1);
 }
+if (!html.includes("Save view")) {
+  console.error("FAIL search page has no Save view button");
+  process.exit(1);
+}
+if (html.includes("Save as…")) {
+  console.error("FAIL search page still shows Save as…");
+  process.exit(1);
+}
+if (!html.includes("No saved views yet — use Save view above")) {
+  console.error("FAIL empty views hint missing");
+  process.exit(1);
+}
 
 console.log("1 passed, 0 failed");

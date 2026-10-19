@@ -382,7 +382,116 @@ export function focusPresetLayout(filters?: Partial<ViewFilters>): ViewLayout {
     density: "comfortable",
   });
   if (!parsed.ok) throw new Error(parsed.message);
-  return parsed.layout;
+  return withLeadingIdentityColumnsLayout(parsed.layout);
+}
+
+const IDENTITY_COLUMNS = ["marks", "car_number"] as const;
+
+/** Marks and car number stay in front so sticky cells are not laid over later columns. */
+export function withLeadingIdentityColumns(order: string[]): string[] {
+  const lead = IDENTITY_COLUMNS.filter((key) => order.includes(key));
+  const rest = order.filter((key) => key !== "marks" && key !== "car_number");
+  return [...lead, ...rest];
+}
+
+export function withLeadingIdentityColumnsLayout<T extends { order: string[]; cols: string[] }>(layout: T): T {
+  return {
+    ...layout,
+    order: withLeadingIdentityColumns(layout.order),
+    cols: withLeadingIdentityColumns(layout.cols),
+  };
+}
+
+/**
+ * Left offsets for marks and car number when they are the leading columns.
+ * The checkbox occupies `checkboxWidth` pixels at the left edge.
+ */
+export function stickyLeftOffsets(
+  keys: string[],
+  widthOf: (key: string) => number,
+  checkboxWidth = 36,
+): Record<string, number> {
+  const offsets: Record<string, number> = {};
+  let left = checkboxWidth;
+  for (const key of keys) {
+    if (key !== "marks" && key !== "car_number") break;
+    offsets[key] = left;
+    left += widthOf(key);
+  }
+  return offsets;
+}
+
+export function searchWantsFocus(value: unknown): boolean {
+  return value === 1 || value === "1" || value === true || value === "true" || value === "yes";
+}
+
+export function pasteSearchBody(opts: {
+  q: string;
+  active: string;
+  scope: { cars: boolean; leases: boolean; carData: boolean };
+  layoutKeys: Iterable<string>;
+  viewId?: number | null;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    q: opts.q,
+    active: opts.active,
+    search_cars: opts.scope.cars ? 1 : 0,
+    search_leases: opts.scope.leases ? 1 : 0,
+    search_car_data: opts.scope.carData ? 1 : 0,
+  };
+  if (layoutNeedsFocus(opts.layoutKeys)) body.focus = 1;
+  if (opts.viewId != null && opts.viewId > 0) body.view_id = opts.viewId;
+  return body;
+}
+
+export function openStopFocusFields(stops: OpenStopRow[], now = new Date()): {
+  open_stop_type: string | null;
+  open_stop_since: string | null;
+  open_stop_days: number | null;
+  open_stop_expected: string | null;
+  open_stop_reason: string | null;
+  open_stop_note: string | null;
+} {
+  const open = pickOpenStop(stops);
+  const reason = openStopReason(open);
+  return {
+    open_stop_type: open ? String(open.type ?? "").trim() || null : null,
+    open_stop_since: open?.stop_date ? String(open.stop_date).slice(0, 10) : null,
+    open_stop_days: open ? daysStopped(open.stop_date, now) : null,
+    open_stop_expected: open?.expected_resume_date ? String(open.expected_resume_date).slice(0, 10) : null,
+    open_stop_reason: reason.text || null,
+    open_stop_note: reason.note || null,
+  };
+}
+
+export function viewSavedToast(name: string, shared: boolean, pinned: boolean): string {
+  const quoted = `Saved '${name}'`;
+  if (shared && pinned) return `${quoted} — shared with RESIDCO, pinned`;
+  if (shared) return `${quoted} — shared with RESIDCO`;
+  if (pinned) return `${quoted} — pinned`;
+  return quoted;
+}
+
+export const EMPTY_VIEWS_HINT = "No saved views yet — use Save view above";
+
+export function createdViewSelection<T extends { id: number; name: string }>(views: T[], createdId: number): T | null {
+  return views.find((view) => view.id === createdId) ?? null;
+}
+
+/** One POST, then the refetched list, then the new view is the one to select. */
+export async function runViewCreate<T extends { id: number; name: string }>(opts: {
+  post: () => Promise<{ id: number; name: string }>;
+  refetch: () => Promise<T[]>;
+}): Promise<{ posts: number; selected: { id: number; name: string } }> {
+  const created = await opts.post();
+  let views: T[] = [];
+  try {
+    views = await opts.refetch();
+  } catch {
+    views = [];
+  }
+  const selected = createdViewSelection(views, created.id) ?? { id: created.id, name: created.name };
+  return { posts: 1, selected };
 }
 
 export type ViewWrite =

@@ -1,4 +1,4 @@
-import { Search as SearchIcon, Loader2, X, Pencil, History, ChevronLeft, ChevronRight, Download, ChevronDown, Copy, Info, MoreHorizontal, PanelLeft } from "lucide-react";
+import { Search as SearchIcon, Loader2, X, Pencil, History, ChevronLeft, ChevronRight, Download, ChevronDown, Copy, Info, MoreHorizontal, PanelLeft, Save } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
@@ -61,6 +61,11 @@ import {
   focusPresetLayout,
   isFocusColumn,
   layoutNeedsFocus,
+  pasteSearchBody,
+  runViewCreate,
+  stickyLeftOffsets,
+  viewSavedToast,
+  withLeadingIdentityColumns,
   type ViewFilters,
   type ViewKind,
   type ViewLayout,
@@ -795,6 +800,7 @@ export default function SearchPage() {
     Boolean(boot.draft && boot.draft.viewId === boot.viewId && !boot.draft.panelCollapsed),
   );
   const [schemaMessage, setSchemaMessage] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ViewSummary | null>(null);
   const [viewLayout, setViewLayout] = useState<ViewLayout | null>(null);
   const [viewDirty, setViewDirty] = useState(Boolean(boot.draft?.dirty && boot.draft.viewId === boot.viewId));
@@ -815,6 +821,8 @@ export default function SearchPage() {
   const lastSeenHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
   const hashBooted = useRef(false);
   const replaceFromView = useRef<number | null>(null);
+  const pendingLayout = useRef<ViewLayout | null>(null);
+  const pasteFocusSeen = useRef(false);
   const suppressDirty = useRef(false);
   committedRef.current = committed;
   const { toast } = useToast();
@@ -1231,7 +1239,9 @@ export default function SearchPage() {
     const keepDraft = !opening && stored?.dirty && stored.viewId === detail.id;
     if (opening) {
       suppressDirty.current = true;
-      applyLayout(detail.layout, detail.kind === "query" ? detail.query : null);
+      const layout = pendingLayout.current ?? detail.layout;
+      pendingLayout.current = null;
+      applyLayout(layout, detail.kind === "query" ? detail.query : null);
       if (detail.kind === "fixed") {
         setCommitted("");
         setQuery(detail.query?.q ?? "");
@@ -1296,7 +1306,7 @@ export default function SearchPage() {
 
   function layoutSnapshot(preset?: ViewLayout): ViewLayout {
     if (preset) return preset;
-    const order = (viewId && viewLayout?.order.length ? viewLayout.order : displayKeys).filter((key) => key !== "_actions");
+    const order = withLeadingIdentityColumns((viewId && viewLayout?.order.length ? viewLayout.order : displayKeys).filter((key) => key !== "_actions"));
     const pageSizeValue = ps === "all" || ps === 500 ? 500 : ps === 200 ? 200 : 75;
     return {
       v: 1,
@@ -1352,18 +1362,24 @@ export default function SearchPage() {
     ensureSid();
   }
 
+  function focusLayoutKeys(): string[] {
+    if (viewLayout?.order?.length) return viewLayout.order;
+    if (sessionLayout?.order?.length) return sessionLayout.order;
+    return Array.from(visibleCols);
+  }
+
   async function runPaste(q: string, nextScope: SearchScope, nextActive: SearchActive) {
     setPasteLoading(true);
     setError(null);
     setLive(true);
     try {
-      const res = await apiRequest("POST", "/api/search", {
+      const res = await apiRequest("POST", "/api/search", pasteSearchBody({
         q,
         active: nextActive,
-        search_cars: nextScope.cars ? 1 : 0,
-        search_leases: nextScope.leases ? 1 : 0,
-        search_car_data: nextScope.carData ? 1 : 0,
-      });
+        scope: nextScope,
+        layoutKeys: focusLayoutKeys(),
+        viewId,
+      }));
       const data = await res.json();
       const notFound = data.not_found ?? [];
       const inactive = data.inactive_matches ?? [];
@@ -1413,6 +1429,19 @@ export default function SearchPage() {
       setCommitted(trimmed);
     }
   }
+
+  const pasteFocus = layoutNeedsFocus(focusLayoutKeys()) ? 1 : 0;
+  useEffect(() => {
+    if (!pasteFocusSeen.current) {
+      pasteFocusSeen.current = true;
+      return;
+    }
+    const q = committedRef.current;
+    if (!q || !carListSearchTokens(q)) return;
+    void runPaste(q, scope, activeMode);
+    // Re-paste when a focus column is turned on. The first run is the boot effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pasteFocus]);
 
   function clear() {
     sidRef.current = "";
@@ -1519,7 +1548,7 @@ export default function SearchPage() {
   const displayKeys = useMemo(() => {
     const layoutOrder = (viewId ? viewLayout?.order : sessionLayout?.order) ?? [];
     if (layoutOrder.length) {
-      const order = layoutOrder.filter((key) => key !== "_actions" && key !== "_select");
+      const order = withLeadingIdentityColumns(layoutOrder.filter((key) => key !== "_actions" && key !== "_select"));
       return [...order, ...PINNED_END];
     }
     const movable = [...CORE_MOVABLE, ...OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => c.key)];
@@ -1569,10 +1598,10 @@ export default function SearchPage() {
       case "entity":
         return <td key={key} className={`${pad} font-mono-num text-muted-foreground`}><EntityBadge entity={r.entity} /></td>;
       case "marks":
-        return <td key={key} className={cn(`${pad} font-mono-num text-muted-foreground sticky left-9 z-10 bg-card hidden sm:table-cell`)}>{r.reporting_marks ?? "—"}</td>;
+        return <td key={key} className={cn(`${pad} font-mono-num text-muted-foreground hidden sm:table-cell`, stickyClass(key))} style={stickyStyle(key)}>{r.reporting_marks ?? "—"}</td>;
       case "car_number":
         return (
-          <td key={key} className={cn(`${pad} font-mono-num font-medium sticky left-[7.75rem] z-10 bg-card`)}>
+          <td key={key} className={cn(`${pad} font-mono-num font-medium`, stickyClass(key))} style={stickyStyle(key)}>
             <div className="flex items-center gap-2 flex-wrap">
               <Link
                 href={withFrom(`/cars/${r.id}`)}
@@ -1682,6 +1711,15 @@ export default function SearchPage() {
     if (viewId) void queryClient.invalidateQueries({ queryKey: ["/api/views", viewId] });
   }
 
+  async function refetchViewLists(): Promise<ViewSummary[]> {
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ["/api/views"] }),
+      queryClient.refetchQueries({ queryKey: ["/api/views/counts"] }),
+    ]);
+    const listed = queryClient.getQueryData<{ views?: ViewSummary[] }>(["/api/views"]);
+    return listed?.views ?? [];
+  }
+
   async function saveMemberNote(railcarId: number, note: string) {
     if (!viewId) return;
     try {
@@ -1718,10 +1756,13 @@ export default function SearchPage() {
       const saved = await patchView(viewId, body);
       setViewDirty(false);
       setViewLayout(layout);
+      setSaveError(null);
       if (saved?.updated_at) setActiveView((prev) => prev ? { ...prev, updated_at: saved.updated_at, updated_at_et: saved.updated_at_et } : prev);
-      toast({ title: "View saved" });
+      toast({ title: viewSavedToast(activeView.name, activeView.shared, activeView.pinned) });
     } catch (e: any) {
-      toast({ title: "Could not save view", description: e.message, variant: "destructive" });
+      const message = e.message ?? "Could not save view";
+      setSaveError(message);
+      toast({ title: "Could not save view", description: message, variant: "destructive" });
     } finally {
       setSavingView(false);
     }
@@ -1749,15 +1790,40 @@ export default function SearchPage() {
         const data = await apiGet<{ ids: number[] }>(railcarsQs({ ...listParams, page: undefined, pageSize: undefined }).replace("/api/railcars?", "/api/railcars/ids?"), { timeoutMs: 20_000 });
         payload.railcar_ids = (data.ids ?? []).slice(0, 2000);
       }
-      const res = await apiRequest("POST", "/api/views", payload);
-      const created = await res.json();
-      const id = Number(created?.view?.id ?? created?.id);
+      const outcome = await runViewCreate({
+        post: async () => {
+          const res = await apiRequest("POST", "/api/views", payload);
+          const created = await res.json();
+          const id = Number(created?.view?.id ?? created?.id);
+          return { id, name: body.name };
+        },
+        refetch: refetchViewLists,
+      });
       setSaveOpen(false);
-      refreshViews();
-      if (id > 0) openView(id);
-      if (body.preset === "focus") setViewLayout(layout);
+      setSaveError(null);
+      pendingLayout.current = layout;
+      setViewLayout(layout);
+      if (layout.sort?.key) {
+        setSort(layout.sort.key);
+        setDir(layout.sort.dir === "desc" ? "desc" : "asc");
+      }
+      const listed = queryClient.getQueryData<{ views?: ViewSummary[] }>(["/api/views"]);
+      const summary = listed?.views?.find((view) => view.id === outcome.selected.id);
+      setActiveView(summary ?? {
+        id: outcome.selected.id,
+        name: outcome.selected.name,
+        kind: body.kind,
+        shared: body.shared,
+        pinned: body.pinned,
+        pin_order: null,
+      });
+      if (outcome.selected.id > 0) openView(outcome.selected.id);
+      setViewDirty(false);
+      toast({ title: viewSavedToast(outcome.selected.name, body.shared, body.pinned) });
     } catch (e: any) {
-      toast({ title: "Could not save view", description: e.message, variant: "destructive" });
+      const message = e.message ?? "Could not save view";
+      setSaveError(message);
+      toast({ title: "Could not save view", description: message, variant: "destructive" });
     } finally {
       setSavingView(false);
     }
@@ -1866,13 +1932,13 @@ export default function SearchPage() {
 
   function moveColumn(from: string, to: string) {
     if (viewId && viewLayout) {
-      const order = moveCol(viewLayout.order.length ? viewLayout.order : displayKeys.filter((key) => key !== "_actions"), from, to);
+      const order = withLeadingIdentityColumns(moveCol(viewLayout.order.length ? viewLayout.order : displayKeys.filter((key) => key !== "_actions"), from, to));
       setViewLayout({ ...viewLayout, order, cols: order });
       markDirty();
       return;
     }
     if (sessionLayout) {
-      const order = moveCol(sessionLayout.order, from, to);
+      const order = withLeadingIdentityColumns(moveCol(sessionLayout.order, from, to));
       setSessionLayout({ ...sessionLayout, order, cols: order });
       return;
     }
@@ -1883,6 +1949,15 @@ export default function SearchPage() {
     const custom = (viewId ? viewLayout?.widths : sessionLayout?.widths)?.[key];
     if (custom) return custom;
     return colWidth(colWidths, key, WIDTHS[key] ?? 110);
+  }
+
+  const stickyOffsets = stickyLeftOffsets(displayKeys, columnWidth);
+  function stickyClass(key: string): string {
+    return stickyOffsets[key] == null ? "" : "sticky z-10 bg-card";
+  }
+  function stickyStyle(key: string): { left: number } | undefined {
+    const left = stickyOffsets[key];
+    return left == null ? undefined : { left };
   }
 
   function selectPage() {
@@ -2093,16 +2168,17 @@ export default function SearchPage() {
           </nav>
           <ViewMeta view={activeView} />
           <div className="ml-auto flex flex-wrap items-center gap-1">
-            <Button type="button" size="sm" className="h-7 text-xs" disabled={Boolean(schemaMessage) || (!canEdit && Boolean(viewId)) || savingView} title={!canEdit ? "Viewers can save a private copy" : undefined} onClick={() => { if (!canEdit || !viewId) setSaveOpen(true); else void saveCurrentView(); }}>
-              {viewId && canEdit ? "Save" : "Save as…"}
+            <Button type="button" size="sm" className="h-7 gap-1 text-xs" disabled={Boolean(schemaMessage) || savingView} title={!canEdit ? "Viewers can save a private copy" : undefined} data-testid="button-save-view" onClick={() => { if (viewId && canEdit && viewDirty) void saveCurrentView(); else setSaveOpen(true); }}>
+              <Save className="h-3.5 w-3.5" />
+              {viewId && canEdit && viewDirty ? "Save changes" : "Save view"}
             </Button>
-            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={Boolean(schemaMessage)} onClick={() => setSaveOpen(true)}>Save as…</Button>
             {viewId ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button type="button" size="sm" variant="outline" className="h-7 px-2" aria-label="View actions"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setSaveOpen(true)}>Save as new view…</DropdownMenuItem>
                   <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void renameView(activeView)}>Rename</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => activeView && void duplicateView(activeView)}>Duplicate</DropdownMenuItem>
                   <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void togglePin(activeView)}>{activeView?.pinned ? "Unpin" : "Pin"}</DropdownMenuItem>
@@ -2116,6 +2192,12 @@ export default function SearchPage() {
           </div>
         </div>
         {schemaMessage ? <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200" data-testid="saved-views-schema-message">{schemaMessage}</div> : null}
+        {saveError ? (
+          <div className="flex items-start justify-between gap-2 rounded border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs" role="alert" data-testid="save-view-error">
+            <span>{saveError}</span>
+            <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Dismiss save error" onClick={() => setSaveError(null)}>✕</button>
+          </div>
+        ) : null}
         {collapsed ? (
           <div className="space-y-1.5">
             <button type="button" className="flex h-8 w-full items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-sm" onClick={() => { setPanelOpen(true); markDirty(); }} data-testid="search-collapsed-query">
@@ -2277,10 +2359,11 @@ export default function SearchPage() {
               visible={(viewId || sessionLayout) ? new Set(displayKeys) : undefined}
               onToggle={(viewId || sessionLayout) ? toggleViewCol : undefined}
               onReorder={(viewId || sessionLayout) ? (order) => {
+                const next = withLeadingIdentityColumns(order);
                 if (viewId && viewLayout) {
-                  setViewLayout({ ...viewLayout, order, cols: order });
+                  setViewLayout({ ...viewLayout, order: next, cols: next });
                   markDirty();
-                } else if (sessionLayout) setSessionLayout({ ...sessionLayout, order, cols: order });
+                } else if (sessionLayout) setSessionLayout({ ...sessionLayout, order: next, cols: next });
               } : undefined}
               onApplyPreset={applyFocusPreset}
               onSaveToView={viewId ? () => { void saveCurrentView(); } : undefined}
@@ -2553,7 +2636,7 @@ export default function SearchPage() {
                       const layoutPinned = key === "_actions";
                       const pinned = viewId || sessionLayout ? layoutPinned : (PINNED_START as readonly string[]).includes(key) || (PINNED_END as readonly string[]).includes(key);
                       const focusLocked = isFocusColumn(key) && !fullSetLoaded;
-                      const stickyLeft = key === "marks" ? "sticky left-9 z-30 bg-muted/40" : key === "car_number" ? "sticky left-[7.75rem] z-30 bg-muted/40" : "";
+                      const headerSticky = stickyOffsets[key];
                       return (
                         <GridColumnTh
                           key={key}
@@ -2561,9 +2644,10 @@ export default function SearchPage() {
                           colKey={key}
                           width={columnWidth(key)}
                           pinned={pinned}
+                          stickyLeft={headerSticky}
                           className={cn(
                             "px-3 py-2 font-medium text-[11px] uppercase tracking-wider bg-muted/40",
-                            stickyLeft,
+                            headerSticky != null && "sticky z-40 bg-muted/40",
                             key === "marks" && "hidden sm:table-cell",
                             key === "type" && "hidden sm:table-cell",
                           )}

@@ -117,6 +117,18 @@ export const GLOBAL_PROGRAM_CAR_COLUMN_ORDER = [
   "cf:trace_state",
 ] as const;
 
+/** SUMMARY label or tab name → the workbook tab that actually exists. */
+export function resolveTrackerSheet(name: string, sheetNames: readonly string[]): string | null {
+  const names = new Set(sheetNames);
+  if (names.has(name)) return name;
+  const want = name.trim().toLowerCase();
+  for (const [tab, program] of Object.entries(TAB_PROGRAM_ALIASES)) {
+    if (program.trim().toLowerCase() === want && names.has(tab)) return tab;
+    if (tab.trim().toLowerCase() === want && names.has(program)) return program;
+  }
+  return sheetNames.find((n) => n.trim().toLowerCase() === want) ?? null;
+}
+
 export function programCarsListKey(programId: number): string {
   return `program_cars:${programId}`;
 }

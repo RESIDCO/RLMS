@@ -24,6 +24,7 @@ import {
   normalizeShopName,
   parseSheetCars,
   reclassifyEvidenceRow,
+  resolveTrackerSheet,
   summaryPrograms,
   writesOnly,
   type PlannedChange,
@@ -160,13 +161,16 @@ for (const row of inactive) {
 }
 
 const scope = summaryPrograms(tracker.get("SUMMARY") ?? []).filter((row) => row.active_scope);
-const carCounts: { sheet: string; parsed: number; evidence: number | null }[] = [];
+const carCounts: { program: string; sheet: string; parsed: number; evidence: number | null }[] = [];
 const layouts: Record<string, unknown>[] = [];
 const unmapped: Record<string, unknown>[] = [];
+const trackerNames = Array.from(tracker.keys());
 for (const row of scope) {
-  const rows = tracker.get(row.sheet) ?? [];
-  const parsed = parseSheetCars(row.sheet, rows);
-  carCounts.push({ sheet: row.sheet, parsed: parsed.cars.length, evidence: expectedCars.get(row.sheet) ?? null });
+  const sheetName = resolveTrackerSheet(row.sheet, trackerNames);
+  const rows = sheetName ? tracker.get(sheetName) ?? [] : [];
+  const parsed = parseSheetCars(sheetName ?? row.sheet, rows);
+  const evidence = (sheetName ? expectedCars.get(sheetName) : undefined) ?? expectedCars.get(row.sheet) ?? null;
+  carCounts.push({ program: row.sheet, sheet: sheetName ?? "", parsed: parsed.cars.length, evidence });
   const order = columnOrderFromHeaders(parsed.headers.map((h) => h.header));
   layouts.push({
     program: row.sheet,
@@ -176,7 +180,7 @@ for (const row of scope) {
     is_default: true,
     cols: order.join("|"),
   });
-  for (const header of parsed.unmapped) unmapped.push({ header, sheet: row.sheet });
+  for (const header of parsed.unmapped) unmapped.push({ header, sheet: sheetName ?? row.sheet });
 }
 
 const shopsToAdd = NEW_SHOPS.filter((name) => !shops.some((shop) => normalizeShopName(shop.name) === normalizeShopName(name))).map((name) => ({ name }));
@@ -226,7 +230,7 @@ writeFileSync(resolve(outDir, "summary_by_program.csv"), csv(summary));
 writeFileSync(resolve(outDir, "unmapped_headers.csv"), csv(unmapped));
 writeFileSync(resolve(outDir, "car_counts.csv"), csv(carCounts));
 
-const mismatched = carCounts.filter((row) => row.evidence != null && row.parsed !== row.evidence);
+const mismatched = carCounts.filter((row) => row.evidence == null || row.parsed !== row.evidence);
 const counts = {
   fill_blank: tally["fill blank"],
   change: tally.change,

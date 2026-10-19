@@ -21,6 +21,7 @@ import {
   parseSheetCars,
   planCarChanges,
   programCarsListKey,
+  resolveTrackerSheet,
   summaryPrograms,
   trackerOrderForProgram,
   undoCarFields,
@@ -115,7 +116,8 @@ export async function buildTrackerPreview(buffer: Buffer) {
   let sheetCars = 0;
 
   for (const scope of activeSheets) {
-    const rows = sheets.get(scope.sheet);
+    const sheetName = resolveTrackerSheet(scope.sheet, Array.from(sheets.keys()));
+    const rows = sheetName ? sheets.get(sheetName) : undefined;
     if (!rows) {
       reviews.push({ program: scope.sheet, car: "", note: "sheet missing from the workbook" });
       continue;

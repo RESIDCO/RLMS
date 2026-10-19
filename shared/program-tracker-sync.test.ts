@@ -23,6 +23,7 @@ import {
   planTouchesRentEvents,
   reclassifyEvidenceRow,
   resolveColumnLayout,
+  resolveTrackerSheet,
   snapshotMatches,
   summaryPrograms,
   trackerOrderForProgram,
@@ -314,6 +315,9 @@ const summary = summaryPrograms([
   [null, "ADM", "N/A", "Shop details", "Shop Selection Details"],
 ]);
 ok(summary.filter((s) => s.active_scope).map((s) => s.sheet).join(",") === "CP ACQUISITION", "ADM and reference tabs are out of scope");
+ok(resolveTrackerSheet("OL2405 - The Andersons", ["OL2405 - Andersons"]) === "OL2405 - Andersons", "Andersons summary name opens the tracker tab");
+ok(resolveTrackerSheet("VARIES - SOLD TO TRIPLE M", ["OL-VARIES - SOLD TO TRIPLE M"]) === "OL-VARIES - SOLD TO TRIPLE M", "Triple M summary name opens the tracker tab");
+ok(resolveTrackerSheet("CP ACQUISITION", ["CP ACQUISITION"]) === "CP ACQUISITION", "matching tab names stay put");
 
 ok(NEW_SHOPS.length === 2, "two shops are approved");
 

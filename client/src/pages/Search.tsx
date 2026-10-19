@@ -58,10 +58,12 @@ import {
   FOCUS_COLUMN_LABELS,
   SAVED_VIEWS_SCHEMA_MESSAGE,
   VIEWS_UNAVAILABLE_MESSAGE,
+  comparePinnedOrder,
   emptyViewFilters,
   focusPresetLayout,
   isFocusColumn,
   layoutNeedsFocus,
+  openedViewQuery,
   pasteMemberIds,
   pasteSearchBody,
   runViewCreate,
@@ -827,6 +829,7 @@ export default function SearchPage() {
   const replaceFromView = useRef<number | null>(null);
   const savingLock = useRef(false);
   const pendingLayout = useRef<ViewLayout | null>(null);
+  const appliedView = useRef<number | null>(null);
   const pasteFocusSeen = useRef(false);
   const suppressDirty = useRef(false);
   committedRef.current = committed;
@@ -863,17 +866,19 @@ export default function SearchPage() {
     focus: layoutNeedsFocus(viewLayout?.order?.length ? viewLayout.order : Array.from(visibleCols)) ? 1 : undefined,
   };
 
+  const queryViewLive = activeView?.kind === "query" && Boolean(viewId);
+  const textSearchLive = (Boolean(committed) || queryViewLive) && !isPaste && !fixedMode && live;
   const textQuery = useQuery<RailcarPage>({
     queryKey: ["/api/railcars", "search-page", listParams],
     queryFn: ({ signal }) => apiGet<RailcarPage>(railcarsQs(listParams), { timeoutMs: 20_000, signal }),
-    enabled: Boolean(committed) && !isPaste && !fixedMode && live,
+    enabled: textSearchLive,
     staleTime: 30_000,
   });
   const summaryParams = { ...listParams, page: undefined, pageSize: undefined };
   const summaryQuery = useQuery<Summary & { match?: FleetMatch }>({
     queryKey: ["/api/railcars/summary", "search-page", summaryParams],
     queryFn: ({ signal }) => apiGet(railcarsQs(summaryParams).replace("/api/railcars", "/api/railcars/summary"), { timeoutMs: 20_000, signal }),
-    enabled: Boolean(committed) && !isPaste && !fixedMode && live,
+    enabled: textSearchLive,
     staleTime: 30_000,
   });
   const peopleQuery = useQuery<DirectoryPage>({
@@ -890,12 +895,12 @@ export default function SearchPage() {
     staleTime: 15_000,
   });
   const views = viewsQuery.data?.schema_ready ? viewsQuery.data.views : [];
-  const pinIds = views.filter((view) => view.pinned).map((view) => view.id).slice(0, 12);
+  const pinIds = views.filter((view) => view.pinned).sort(comparePinnedOrder).map((view) => view.id).slice(0, 12);
   const countsQuery = useQuery<{ counts: Record<string, { count: number; active: number; inactive: number; ms: number } | null> }>({
     queryKey: ["/api/views/counts", pinIds.join(",")],
     queryFn: ({ signal }) => apiGet(`/api/views/counts?ids=${pinIds.join(",")}`, { timeoutMs: 20_000, signal }),
     enabled: pinIds.length > 0 && viewsQuery.data?.schema_ready === true,
-    staleTime: 30_000,
+    staleTime: 60_000,
   });
   const detailQuery = useQuery<ViewDetail>({
     queryKey: ["/api/views", viewId],
@@ -1238,11 +1243,15 @@ export default function SearchPage() {
       updated_at: detail.updated_at,
       updated_at_et: detail.updated_at_et,
       member_count: detail.member_count,
+      query: detail.query,
+      layout: detail.layout,
     });
     const opening = replaceFromView.current === detail.id;
     const stored = loadSearchState(sidRef.current)?.draft;
     const keepDraft = !opening && stored?.dirty && stored.viewId === detail.id;
-    if (opening) {
+    const install = opening || (!keepDraft && appliedView.current !== detail.id);
+    if (install) {
+      appliedView.current = detail.id;
       suppressDirty.current = true;
       const layout = pendingLayout.current ?? detail.layout;
       pendingLayout.current = null;
@@ -1252,12 +1261,18 @@ export default function SearchPage() {
         setQuery(detail.query?.q ?? "");
         setPasteRows(null);
         setPasteMeta(null);
-      } else if (!committedRef.current && detail.query?.q) {
-        setQuery(detail.query.q);
-        setCommitted(detail.query.q);
-        setExactFleet(detail.query.fleet !== false);
-        if (detail.query.scope) setScope(detail.query.scope);
-        setLive(true);
+      } else {
+        const q = openedViewQuery(detail.kind, detail.query);
+        const already = committedRef.current === q;
+        setQuery(q);
+        setCommitted(q);
+        if (!already) {
+          setPasteRows(null);
+          setPasteMeta(null);
+          if (q && carListSearchTokens(q)) {
+            void runPaste(q, detail.query?.scope ?? { cars: true, leases: true, carData: false }, layout.filters?.active || "active");
+          }
+        }
       }
       setViewDirty(false);
       replaceFromView.current = null;
@@ -1359,6 +1374,7 @@ export default function SearchPage() {
 
   function openView(id: number) {
     if (id === viewId) return;
+    const summary = views.find((view) => view.id === id);
     replaceFromView.current = id;
     setViewId(id);
     setPage(1);
@@ -1366,6 +1382,24 @@ export default function SearchPage() {
     setLive(true);
     setError(null);
     ensureSid();
+    if (summary) setActiveView(summary);
+    if (summary?.layout) applyLayout(summary.layout, summary.kind === "query" ? summary.query ?? null : null);
+    if (!summary) return;
+    if (summary.kind === "fixed") {
+      setCommitted("");
+      setQuery(summary.query?.q ?? "");
+      setPasteRows(null);
+      setPasteMeta(null);
+      return;
+    }
+    const q = openedViewQuery(summary.kind, summary.query);
+    setQuery(q);
+    setCommitted(q);
+    setPasteRows(null);
+    setPasteMeta(null);
+    if (q && carListSearchTokens(q)) {
+      void runPaste(q, summary.query?.scope ?? scope, summary.layout?.filters.active || activeMode);
+    }
   }
 
   function focusLayoutKeys(): string[] {
@@ -1493,8 +1527,6 @@ export default function SearchPage() {
     if (committed && carListSearchTokens(committed)) void runPaste(committed, scope, next);
   }
 
-  const exportKeys = [...PINNED_START, ...CORE_MOVABLE, ...OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => c.key)];
-
   function filterLabel() {
     return [
       `active=${activeMode}`,
@@ -1511,7 +1543,13 @@ export default function SearchPage() {
     if (isPaste) {
       const ids = filteredPaste.map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0).slice(0, EXPORT_CAP);
       if (!ids.length) return [];
-      return asRailcarList(await apiGet<any[] | { rows?: any[] }>(railcarsQs({ all: 1, ids: ids.join(","), active: "all" }), { timeoutMs: 60_000 }));
+      return asRailcarList(await apiGet<any[] | { rows?: any[] }>(railcarsQs({
+        all: 1,
+        ids: ids.join(","),
+        active: "all",
+        focus: layoutNeedsFocus(exportKeys) ? 1 : undefined,
+        view_id: viewId || undefined,
+      }), { timeoutMs: 60_000 }));
     }
     const all = asRailcarList(await apiGet<any[] | { rows?: any[] }>(railcarsQs({ ...listParams, page: undefined, pageSize: undefined, all: 1 }), { timeoutMs: 60_000 }));
     return all.slice(0, EXPORT_CAP);
@@ -1561,6 +1599,7 @@ export default function SearchPage() {
     const movable = [...CORE_MOVABLE, ...OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => c.key)];
     return [...PINNED_START, ...mergeColOrder(movable, colOrder), ...PINNED_END];
   }, [viewId, viewLayout, sessionLayout, visibleCols, colOrder, fixedMode]);
+  const exportKeys = displayKeys.filter((key) => key !== "_actions" && key !== "_select");
   const movableKeys = displayKeys.filter((k) => k !== "_actions" && (!(viewId || sessionLayout) ? !(PINNED_START as readonly string[]).includes(k) && !(PINNED_END as readonly string[]).includes(k) : true));
   const pasteCount = pasteMeta?.counts.pasted ?? (committed ? carListSearchTokens(committed)?.length ?? 0 : 0);
   const committedLabel = pasteCount > 1 ? `${pasteCount} cars` : `"${committed}"`;
@@ -1878,10 +1917,22 @@ export default function SearchPage() {
   }
 
   async function reorderPins(ids: number[]) {
+    const key = ["/api/views"] as const;
+    const previous = queryClient.getQueryData<{ schema_ready?: boolean; views?: ViewSummary[] }>(key);
+    if (previous?.views) {
+      const order = new Map(ids.map((id, index) => [id, index]));
+      queryClient.setQueryData(key, {
+        ...previous,
+        views: previous.views.map((view) => (
+          order.has(view.id) ? { ...view, pinned: true, pin_order: order.get(view.id) ?? null } : view
+        )),
+      });
+    }
     try {
       await apiRequest("PUT", "/api/views/pins", { order: ids });
       refreshViews();
     } catch (e: any) {
+      if (previous) queryClient.setQueryData(key, previous);
       toast({ title: "Could not reorder pins", description: e.message, variant: "destructive" });
     }
   }
@@ -2183,6 +2234,7 @@ export default function SearchPage() {
         <PinnedViewStrip
           views={views}
           counts={Object.fromEntries(Object.entries(viewCounts).map(([key, value]) => [key, value ?? undefined]))}
+          countsLoading={countsQuery.isFetching && !countsQuery.data}
           activeId={viewId}
           canPin={canEdit}
           onOpen={openView}

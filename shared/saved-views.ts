@@ -16,6 +16,8 @@ export const INACTIVE_NOTE_MESSAGE = "inactive – left alone";
 export const CAR_LIST_NOT_NULL = ["name", "shared", "created_at", "kind", "layout", "pinned", "updated_at"] as const;
 export const VIEW_MEMBER_CAP = 2000;
 export const VIEW_PIN_CAP = 12;
+/** Tile counts stay cached briefly so a row of pins is one cheap read. */
+export const VIEW_COUNT_TTL_MS = 60_000;
 /** Member rows and their activity_log rows are written in slices of this size, not one round trip per car. */
 export const VIEW_MEMBER_WRITE_BATCH = 200;
 
@@ -714,9 +716,11 @@ export function daysStopped(stopDate: string | null | undefined, now = new Date(
   return Math.round((today - start) / 86_400_000);
 }
 
-/** Closed stops (actual resume date set) are never shown. */
+/** Closed stops (actual resume date set) are never shown. The latest open stop wins. */
 export function pickOpenStop<T extends OpenStopRow>(stops: T[]): T | null {
-  return stops.find((stop) => stop.actual_resume_date == null || stop.actual_resume_date === "") ?? null;
+  const open = stops.filter((stop) => stop.actual_resume_date == null || stop.actual_resume_date === "");
+  open.sort((a, b) => String(b.stop_date ?? "").localeCompare(String(a.stop_date ?? "")));
+  return open[0] ?? null;
 }
 
 export function openStopReason(stop: OpenStopRow | null): { text: string; note: string } {
@@ -931,6 +935,75 @@ export function viewCreateRoundTrips(memberCount: number): {
     memberActivityInserts: slices,
     total: 2 + slices * 2 + idLookups,
   };
+}
+
+/** Shared pin order. Nulls sort after any saved index, then by name. */
+export function comparePinnedOrder(
+  a: { pin_order: number | null; name: string; id?: number },
+  b: { pin_order: number | null; name: string; id?: number },
+): number {
+  const order = (a.pin_order ?? 1_000_000) - (b.pin_order ?? 1_000_000);
+  if (order !== 0) return order;
+  const name = a.name.localeCompare(b.name);
+  if (name !== 0) return name;
+  return (a.id ?? 0) - (b.id ?? 0);
+}
+
+/** Next shared index, after the highest pin still on the row. */
+export function nextPinOrder(orders: Array<number | null | undefined>): number {
+  let max = -1;
+  for (const order of orders) {
+    if (order == null || !Number.isFinite(order)) continue;
+    if (order > max) max = order;
+  }
+  return max + 1;
+}
+
+/** Move one pin earlier (-1) or later (1). The returned ids are the shared order. */
+export function movePinnedOrder(ids: number[], id: number, direction: -1 | 1): number[] | null {
+  const index = ids.indexOf(id);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= ids.length) return null;
+  const next = ids.slice();
+  const [moved] = next.splice(index, 1);
+  next.splice(target, 0, moved!);
+  return next;
+}
+
+/** Drop a dragged pin onto another. Same shared order the arrows use. */
+export function reorderPinnedIds(ids: number[], fromId: number, toId: number): number[] | null {
+  if (fromId === toId) return null;
+  const from = ids.indexOf(fromId);
+  const to = ids.indexOf(toId);
+  if (from < 0 || to < 0) return null;
+  const next = ids.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved!);
+  return next;
+}
+
+export type ViewCountMode = "active" | "inactive" | "all";
+
+/** A fixed list counts active cars unless the view is showing inactive or every car. */
+export function viewCountMode(showInactive: boolean, active: string | null | undefined): ViewCountMode {
+  if (showInactive || active === "all") return "all";
+  if (active === "inactive") return "inactive";
+  return "active";
+}
+
+export function viewCountFromSplit(
+  active: number,
+  inactive: number,
+  mode: ViewCountMode,
+): { count: number; active: number; inactive: number } {
+  const count = mode === "all" ? active + inactive : mode === "inactive" ? inactive : active;
+  return { count, active, inactive };
+}
+
+/** Search text a tile should run. A fixed list opens its cars, not the old paste. */
+export function openedViewQuery(kind: ViewKind, query: { q?: string | null } | null | undefined): string {
+  if (kind !== "query") return "";
+  return String(query?.q ?? "");
 }
 
 /** A pinned view is listed only under Pinned, not again under Shared or Mine. */

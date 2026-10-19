@@ -1,0 +1,26 @@
+# Phase 0 scratch test. Put on a scratch branch (e.g. scratch/rrpa-reachability) of RESIDCO/RLMS as
+# .github/workflows/rrpa-reachability.yml. Runs only on push to that branch or by hand. Read-only:
+# 3 RRPA requests, 5 s apart, identifying user agent. No secrets used. Delete the branch afterwards.
+name: rrpa-reachability
+on:
+  push:
+    branches: [scratch/rrpa-reachability]
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Egress network
+        run: curl -s https://ipinfo.io/json | jq '{org, city, region}' || true
+      - name: Probe RRPA (1 request per 5 s)
+        run: |
+          UA="RESIDCO-RLMS-PhotoIndex-probe/0.1 (contact bruceharbridge@gmail.com)"
+          for u in \
+            "https://www.rrpicturearchives.net/robots.txt" \
+            "https://www.rrpicturearchives.net/rsRange.aspx?id=TFOX" \
+            "https://www.rrpicturearchives.net/picturefiles/52861/thumbnails/TFOX%203267%20gondola%20South%20Connellsville.jpg"; do
+            curl -s -o /dev/null -A "$UA" --max-time 20 \
+              -w "%{http_code} %{content_type} %{size_download}B %{time_total}s  $u\n" "$u" || echo "FAIL $u"
+            sleep 5
+          done

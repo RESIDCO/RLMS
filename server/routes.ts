@@ -377,6 +377,14 @@ type DashboardCacheEntry = { expiresAt: number; body: unknown };
 
 let dashboardCache: DashboardCacheEntry | null = null;
 let dashboardInflight: Promise<unknown> | null = null;
+let dashboardGeneration = 0;
+
+/** Drop the cached dashboard payload. A load that already started will not be stored. */
+export function invalidateDashboardCache(): void {
+  dashboardGeneration += 1;
+  dashboardCache = null;
+  dashboardInflight = null;
+}
 
 class DashboardUnavailableError extends Error {
   readonly status = 503;
@@ -1284,14 +1292,18 @@ export async function registerRoutes(
         return;
       }
       if (!dashboardInflight) {
-        dashboardInflight = loadDashboardPayload()
+        const generation = dashboardGeneration;
+        const run = loadDashboardPayload()
           .then((body) => {
-            dashboardCache = { expiresAt: Date.now() + DASHBOARD_CACHE_MS, body };
+            if (generation === dashboardGeneration) {
+              dashboardCache = { expiresAt: Date.now() + DASHBOARD_CACHE_MS, body };
+            }
             return body;
           })
           .finally(() => {
-            dashboardInflight = null;
+            if (dashboardInflight === run) dashboardInflight = null;
           });
+        dashboardInflight = run;
       }
       res.json(await dashboardInflight);
     } catch (err) {

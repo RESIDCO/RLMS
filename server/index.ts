@@ -3,7 +3,7 @@ dotenv.config({ path: ".env.local" });
 dotenv.config();
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
-import { registerRoutes } from "./routes";
+import { invalidateDashboardCache, registerRoutes } from "./routes";
 import { purgeExpiredPreviews } from "./commitment";
 import { serveStatic } from "./static";
 import { createServer, type IncomingMessage } from "http";
@@ -83,6 +83,9 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
+      if (req.method !== "GET" && res.statusCode >= 200 && res.statusCode < 300) {
+        invalidateDashboardCache();
+      }
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;

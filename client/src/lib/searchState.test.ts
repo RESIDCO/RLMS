@@ -286,6 +286,28 @@ ok(oldest?.useCache === false && oldest.query === "q1" && oldest.selection.join(
 ok(second?.useCache === false && second.query === "q2" && second.scrollY === 20, "the second trimmed search is re-run too");
 ok(newest?.useCache === true && (loadSearchState("slim7")?.results?.rows.length ?? 0) === 2, "a search that still has rows stays a cache hit");
 
+const viewHash = emptySearchHash("viewsid");
+viewHash.q = "J312";
+viewHash.view = "12";
+viewHash.openStop = "Abatement";
+viewHash.program = "scrap";
+viewHash.tag = "JSS";
+viewHash.page = 2;
+const viewRoundTrip = decodeHash("#" + encodeHash(viewHash));
+ok(viewRoundTrip.view === "12" && viewRoundTrip.openStop === "Abatement" && viewRoundTrip.program === "scrap" && viewRoundTrip.tag === "JSS" && viewRoundTrip.page === 2 && viewRoundTrip.q === "J312", "view, stop, program, and tag survive the hash");
+ok(shouldRebootSearch({ q: "J312", sid: "viewsid", view: "" }, { q: "J312", sid: "viewsid", view: "12" }), "opening a view reboots search");
+saveSearchState("viewsid", {
+  hash: viewHash,
+  pastedText: "J312",
+  ids: [1, 2, 3],
+  selection: [1, 2, 3],
+  scrollY: 40,
+  results: results("text", [{ id: 1 }, { id: 2 }, { id: 3 }], 3),
+  draft: { viewId: 12, dirty: true, density: "compact", panelCollapsed: true, cols: ["program_status"], order: ["marks", "car_number", "program_status"], widths: { marks: 90 } },
+});
+const restored = loadSearchState("viewsid");
+ok(restored?.draft?.dirty === true && restored.draft.order[2] === "program_status" && restored.selection.join(",") === "1,2,3", "a dirty view draft comes back with the selection");
+
 const pending = emptySearchHash("pending");
 pending.q = "FL";
 saveSearchState("pending", {

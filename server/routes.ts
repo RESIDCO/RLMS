@@ -121,6 +121,7 @@ import { applyPutOnRent, previewPutOnRent } from "./program-put-on-rent";
 import { registerRentStartRoutes } from "./rent-start";
 import { registerRentStopRoutes } from "./rent-stops";
 import { registerRailcarBulkRoutes } from "./railcar-bulk";
+import { applyViewToParams, registerSavedViewRoutes } from "./saved-views";
 import { registerKpiCarRoutes } from "./kpi-cars";
 import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } from "./lease-mgmt";
 import { registerCrmRoutes } from "./crm";
@@ -425,6 +426,7 @@ export async function registerRoutes(
   registerRentStartRoutes(app, requireWrite);
   registerRentStopRoutes(app, requireWrite);
   registerRailcarBulkRoutes(app, requireWrite);
+  registerSavedViewRoutes(app, requireUser);
   registerKpiCarRoutes(app);
   registerLeaseMgmtRoutes(app, requireWrite);
 
@@ -1458,7 +1460,10 @@ export async function registerRoutes(
   // ---------- Railcars ----------
   app.get("/api/railcars", async (req: Request, res: Response) => {
     try {
-      const params = parseRailcarListParams(req.query as Record<string, unknown>);
+      const params = await applyViewToParams(
+        parseRailcarListParams(req.query as Record<string, unknown>),
+        req.query as Record<string, unknown>,
+      );
       const result = await queryRailcars(params);
       if (params.all) {
         res.json(result.rows);
@@ -1466,25 +1471,37 @@ export async function registerRoutes(
       }
       res.json(result);
     } catch (err) {
+      const status = Number((err as { status?: number })?.status);
+      if (status >= 400 && status < 600 && err instanceof Error) return res.status(status).json({ message: err.message });
       errHandler(res, err);
     }
   });
 
   app.get("/api/railcars/ids", async (req: Request, res: Response) => {
     try {
-      const params = parseRailcarListParams(req.query as Record<string, unknown>);
+      const params = await applyViewToParams(
+        parseRailcarListParams(req.query as Record<string, unknown>),
+        req.query as Record<string, unknown>,
+      );
       const ids = await queryRailcarIds({ ...params, all: true });
       res.json({ ids, total_count: ids.length });
     } catch (err) {
+      const status = Number((err as { status?: number })?.status);
+      if (status >= 400 && status < 600 && err instanceof Error) return res.status(status).json({ message: err.message });
       errHandler(res, err);
     }
   });
 
   app.get("/api/railcars/summary", async (req: Request, res: Response) => {
     try {
-      const params = parseRailcarListParams(req.query as Record<string, unknown>);
+      const params = await applyViewToParams(
+        parseRailcarListParams(req.query as Record<string, unknown>),
+        req.query as Record<string, unknown>,
+      );
       res.json(await queryRailcarSummary(params));
     } catch (err) {
+      const status = Number((err as { status?: number })?.status);
+      if (status >= 400 && status < 600 && err instanceof Error) return res.status(status).json({ message: err.message });
       errHandler(res, err);
     }
   });

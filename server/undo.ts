@@ -1,5 +1,7 @@
+import { viewUndoNameConflict } from "@shared/saved-views";
 import { supabaseAdmin } from "./supabase";
 import { syncCurrentAssignmentHistoryActive } from "./car-status-history";
+import { clearViewCountCache } from "./saved-views";
 import {
   UNDO_WINDOW_HOURS,
   currentMatchesAfter,
@@ -156,7 +158,15 @@ export async function applyUndo(group: string, actor: string) {
     p_group: group,
     p_actor: actor,
   });
-  if (error) throw error;
+  if (error) {
+    const conflict = viewUndoNameConflict(error);
+    if (conflict) {
+      const err: any = new Error(conflict);
+      err.status = 409;
+      throw err;
+    }
+    throw error;
+  }
   const result = (data ?? {}) as Record<string, unknown>;
   if (result.ok === false) {
     const status = Number(result.status) || 400;
@@ -178,6 +188,9 @@ export async function applyUndo(group: string, actor: string) {
     if (r.table_name === "railcars" && r.railcar_id && r.before && "active" in r.before) {
       await syncCurrentAssignmentHistoryActive(r.railcar_id, r.before.active === true);
     }
+  }
+  if (rows.some((r) => r.table_name === "car_lists" || r.table_name === "car_list_members")) {
+    clearViewCountCache();
   }
   return { ...result, preview };
 }

@@ -3,6 +3,8 @@ import type { Express, Request, Response } from "express";
 import { supabaseAdmin } from "./supabase";
 import { addNote, resolveRailcarsByAnyIdentity } from "./activity-log";
 import { recordChange, withChangeGroupResult } from "./change-log";
+import { clearViewCountCache, createSavedView, legacyListCarLists } from "./saved-views";
+import { requireUser } from "./auth";
 import { applyCarStatusChange } from "./car-status-history";
 import { applyMarkSold, applyRemoveSold, clearCommitment, putPreview, getPreview, setCommitment } from "./commitment";
 import { setOffRent, setAbatement } from "./rent-stops";
@@ -308,6 +310,7 @@ export async function applyRailcarBulk(token: string, hash: string, actor: strin
         errors.push({ car: row.car, reason: e.message });
       }
     }
+    clearViewCountCache();
     return { applied, errors, undoable: true };
   });
 }
@@ -478,20 +481,36 @@ export function registerRailcarBulkRoutes(
   });
   app.get("/api/railcars/lists", async (req, res) => {
     try {
-      const actor = await requireWrite(req, res);
+      const actor = await requireUser(req, res);
       if (!actor) return;
-      const { data, error } = await supabaseAdmin
-        .from("car_lists")
-        .select("*")
-        .or(`owner.eq.${actor},shared.eq.true`)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      res.json(data ?? []);
+      res.json(await legacyListCarLists(actor));
     } catch (e: any) {
       res.status(e?.status || 500).json({ message: e.message });
     }
   });
   app.post("/api/railcars/lists", async (req, res) => {
+    try {
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
+      const role = req.authRole || "editor";
+      const result = await createSavedView({ id: actor, role }, {
+        name: req.body?.name,
+        kind: Array.isArray(req.body?.railcar_ids) && req.body.railcar_ids.length ? "fixed" : (req.body?.kind ?? "fixed"),
+        shared: req.body?.shared === true,
+        query: req.body?.query ?? {},
+        layout: req.body?.layout ?? {},
+        pinned: false,
+        railcar_ids: req.body?.railcar_ids,
+        text: req.body?.text,
+      });
+      res.json(result);
+      return;
+    } catch (e: any) {
+      if (e?.status !== 503) {
+        res.status(e?.status || 500).json({ message: e.message });
+        return;
+      }
+    }
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;

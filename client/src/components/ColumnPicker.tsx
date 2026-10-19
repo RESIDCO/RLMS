@@ -25,16 +25,36 @@ type Prefs = ReturnType<typeof useColumnPrefs>;
 export function ColumnPicker({
   columns,
   prefs,
+  visible,
+  onToggle,
+  onApplyPreset,
+  onSaveToView,
+  onReorder,
 }: {
   columns: PickerColumn[];
   prefs: Prefs;
+  /** When a saved view is open, the grid's columns rather than personal prefs. */
+  visible?: Set<string>;
+  onToggle?: (key: string) => void;
+  onApplyPreset?: () => void;
+  onSaveToView?: () => void;
+  onReorder?: (order: string[]) => void;
 }) {
   const { toast } = useToast();
   const [saveOpen, setSaveOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [name, setName] = useState("");
+  const shown = visible ?? prefs.visibleCols;
   const toggleable = columns.filter((c) => !c.pinned);
   const movableKeys = toggleable.map((c) => c.key);
+  function nudge(key: string, delta: number) {
+    const base = onReorder ? Array.from(shown).filter((item) => item !== "_actions") : (prefs.colOrder.length ? prefs.colOrder : movableKeys);
+    const index = base.indexOf(key);
+    const target = base[Math.max(0, Math.min(base.length - 1, (index < 0 ? 0 : index) + delta))] ?? key;
+    const next = moveCol(base, key, target);
+    if (onReorder) onReorder(next);
+    else prefs.setColOrder(next);
+  }
 
   async function run(label: string, fn: () => Promise<void>) {
     try {
@@ -53,9 +73,9 @@ export function ColumnPicker({
             Columns
             {!prefs.prefsLoaded ? (
               <span className="h-3.5 w-3.5 rounded-full bg-muted animate-pulse" />
-            ) : prefs.visibleCols.size > 0 ? (
+            ) : shown.size > 0 ? (
               <span className="ml-0.5 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none">
-                {prefs.visibleCols.size}
+                {shown.size}
               </span>
             ) : null}
           </Button>
@@ -82,15 +102,15 @@ export function ColumnPicker({
           {toggleable.map(({ key, label }) => (
             <DropdownMenuCheckboxItem
               key={key}
-              checked={prefs.visibleCols.has(key)}
-              onCheckedChange={() => prefs.toggleCol(key)}
+              checked={shown.has(key)}
+              onCheckedChange={() => (onToggle ? onToggle(key) : prefs.toggleCol(key))}
               onSelect={(e) => e.preventDefault()}
             >
               <span className="flex-1 inline-flex items-center gap-1">
                 {columnLabel(prefs.listKey, key, label)}
                 <ColumnHelp listKey={prefs.listKey} colKey={key} />
               </span>
-              {movableKeys.length > 1 && prefs.visibleCols.has(key) ? (
+              {movableKeys.length > 1 && shown.has(key) ? (
                 <span className="ml-2 inline-flex gap-1 text-[10px] text-muted-foreground">
                   <button
                     type="button"
@@ -98,7 +118,7 @@ export function ColumnPicker({
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      prefs.setColOrder(moveCol(prefs.colOrder.length ? prefs.colOrder : movableKeys, key, movableKeys[Math.max(0, movableKeys.indexOf(key) - 1)]));
+                      nudge(key, -1);
                     }}
                   >
                     ↑
@@ -109,7 +129,7 @@ export function ColumnPicker({
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      prefs.setColOrder(moveCol(prefs.colOrder.length ? prefs.colOrder : movableKeys, key, movableKeys[Math.min(movableKeys.length - 1, movableKeys.indexOf(key) + 1)]));
+                      nudge(key, 1);
                     }}
                   >
                     ↓
@@ -119,6 +139,16 @@ export function ColumnPicker({
             </DropdownMenuCheckboxItem>
           ))}
           <DropdownMenuSeparator />
+          {onApplyPreset ? (
+            <DropdownMenuItem className="text-xs" onClick={onApplyPreset}>
+              Apply preset · Focus: rent stops & scrap
+            </DropdownMenuItem>
+          ) : null}
+          {onSaveToView ? (
+            <DropdownMenuItem className="text-xs" onClick={onSaveToView}>
+              Save to this view
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem className="text-xs" onClick={() => { setName(""); setSaveOpen(true); }}>
             Save as…
           </DropdownMenuItem>

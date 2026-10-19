@@ -1,6 +1,6 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { useHashSearch } from "@/lib/hash-location";
+import { useHashSearch, navigateHash } from "@/lib/hash-location";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -10,6 +10,7 @@ import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-s
 import { CommitmentPanel } from "@/pages/CommitmentOps";
 import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
+import { RAILCARS_HANDOFF_KEY, markSearchRefresh } from "@/lib/searchState";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { ReassignCarForm } from "@/components/ReassignCarForm";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
@@ -456,6 +457,33 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [pasteOnPage, setPasteOnPage] = useState(false);
   const [pasteMatch, setPasteMatch] = useState<{ ids: number[]; unmatched: string[]; tokenCount: number } | null>(null);
+  const [handoff, setHandoff] = useState<{ label: string; count: number; returnHash: string } | null>(null);
+  const handoffKey = useRef("");
+  useEffect(() => {
+    const params = new URLSearchParams(wouterSearch.startsWith("?") ? wouterSearch.slice(1) : wouterSearch);
+    if (params.get("handoff") !== "1") return;
+    let raw = "";
+    try {
+      raw = sessionStorage.getItem(RAILCARS_HANDOFF_KEY) ?? "";
+    } catch {
+      return;
+    }
+    if (!raw || handoffKey.current === raw) return;
+    handoffKey.current = raw;
+    try {
+      const parsed = JSON.parse(raw) as { ids?: number[]; label?: string; sid?: string; returnHash?: string };
+      const ids = (parsed.ids ?? []).map(Number).filter((id) => id > 0);
+      setPasteMatch({ ids, unmatched: [], tokenCount: ids.length });
+      setHandoff({
+        label: parsed.label || "Search",
+        count: ids.length,
+        returnHash: parsed.returnHash || (parsed.sid ? `/search?sid=${encodeURIComponent(parsed.sid)}` : "/search"),
+      });
+      setPage(1);
+    } catch {
+      /* ignore a bad hand-off payload */
+    }
+  }, [wouterSearch]);
   const [pasteBusy, setPasteBusy] = useState(false);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -743,6 +771,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/history"] });
+      markSearchRefresh();
       toast({ title: `${d.updated ?? soldPreview.ids?.length ?? 0} car(s) marked Sold` });
       setBulkRentalOpen(false);
       setBulkRentalTarget(null);
@@ -769,6 +798,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     try {
       await apiRequest("POST", "/api/railcars/bulk-ops-flag", { ids, ops_flag });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      markSearchRefresh();
       toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${label}` });
       clearSelection();
     } catch (e: any) {
@@ -792,6 +822,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         needs_completion: false,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      markSearchRefresh();
       toast({ title: `Needs Completion cleared on ${ids.length} car${ids.length !== 1 ? "s" : ""}` });
       clearSelection();
     } catch (e: any) {
@@ -813,6 +844,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       await apiRequest("POST", "/api/railcars/bulk-entity", { ids, entity: label });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      markSearchRefresh();
       toast({ title: `${ids.length} railcar${ids.length !== 1 ? "s" : ""} moved to ${label}` });
       clearSelection();
     } catch (e: any) {
@@ -1231,11 +1263,37 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
         scopedRiderId ? "gap-3" : "gap-4 px-4 py-4 sm:px-8 sm:py-6",
       )}>
+        {handoff ? (
+          <div className="flex flex-wrap items-center gap-1.5 text-sm" data-testid="railcars-handoff-chip">
+            <Link href={handoff.returnHash} className="text-primary hover:underline">Search</Link>
+            <span className="text-muted-foreground">›</span>
+            <span>{handoff.label} ({handoff.count.toLocaleString()})</span>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Clear search hand-off"
+              onClick={() => {
+                setHandoff(null);
+                setPasteMatch(null);
+                handoffKey.current = "";
+                try { sessionStorage.removeItem(RAILCARS_HANDOFF_KEY); } catch { /* private mode */ }
+                navigateHash("/railcars", { replace: true });
+              }}
+            >
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : null}
         <PasteSearchBar
           busy={pasteBusy}
           unmatched={pasteMatch?.unmatched ?? []}
           matchedCount={pasteMatch ? pasteMatch.ids.length : null}
-          onClear={() => setPasteMatch(null)}
+          onClear={() => {
+            setPasteMatch(null);
+            setHandoff(null);
+            handoffKey.current = "";
+            try { sessionStorage.removeItem(RAILCARS_HANDOFF_KEY); } catch { /* private mode */ }
+          }}
           onMatch={(tokens) => {
             void (async () => {
               setPasteBusy(true);

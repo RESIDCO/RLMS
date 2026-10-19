@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/saved-views.test.ts */
 
-import { activityLogRailcarFkAllows } from "./change-log";
+import { activityLogRailcarFkAllows, buildActivityLogRow } from "./change-log";
 import { currentMatchesAfter, opOf } from "./undo";
 import {
   CAR_LIST_NOT_NULL,
@@ -17,6 +17,9 @@ import {
   abandonedListPatch,
   applyJsonbPatch,
   countCacheKey,
+  createSkipsPasteMatch,
+  partitionSavedViews,
+  pasteMemberIds,
   daysStopped,
   focusPresetLayout,
   formatEtTime,
@@ -25,6 +28,7 @@ import {
   runViewCreate,
   stickyLeftOffsets,
   viewSavedToast,
+  withFocusColumnsAfterIdentity,
   withLeadingIdentityColumns,
   idsWithoutInactive,
   isMissingViewSchema,
@@ -41,6 +45,8 @@ import {
   pickOpenStop,
   schemaProbeResult,
   snapshotBeforePatch,
+  viewCreateRoundTrips,
+  viewCountLabel,
   viewCreateSnapshots,
   viewDeleteSnapshots,
   viewNamesCollide,
@@ -272,6 +278,90 @@ const saved = await runViewCreate({
   refetch: async () => [{ id: 7, name: "Graymont PD" }],
 });
 ok(posts === 1 && saved.posts === 1 && saved.selected.name === "Graymont PD", "save posts once, then selects the refetched view");
+
+const activeIds = Array.from({ length: 29 }, (_, index) => 1000 + index);
+const inactiveIds = [1406, 1416];
+const members = pasteMemberIds(activeIds, inactiveIds);
+ok(members.length === 31 && members.includes(1406) && members.includes(1416), "a resolved paste keeps the 29 active cars and the 2 inactive ones");
+ok(createSkipsPasteMatch({ railcar_ids: members, text: "TFOX 401" }), "railcar ids skip a second paste match");
+ok(!createSkipsPasteMatch({ text: "TFOX 401" }), "text alone still matches on the server");
+const smallCreate = viewCreateRoundTrips(31);
+const largeCreate = viewCreateRoundTrips(500);
+ok(smallCreate.total === 4 && smallCreate.memberActivityInserts === 1 && smallCreate.memberInserts === 1, "31 cars are four database writes");
+ok(largeCreate.total === 8 && largeCreate.memberActivityInserts === 3 && largeCreate.total < 20, "500 cars stay under a handful of writes");
+ok(smallCreate.total !== 31 && largeCreate.memberActivityInserts !== 500, "creates are not one write per car");
+
+const pinnedShared = { id: 2, name: "Graymont PD", pinned: true, shared: true, owner: "bruce" };
+const privateMine = { id: 3, name: "Mine", pinned: false, shared: false, owner: "bruce" };
+const sharedOnly = { id: 4, name: "Fleet", pinned: false, shared: true, owner: "bruce" };
+const sections = partitionSavedViews([pinnedShared, privateMine, sharedOnly], "bruce");
+ok(sections.pinned.length === 1 && sections.pinned[0].id === 2, "a pinned view is listed under Pinned");
+ok(sections.shared.every((view) => view.id !== 2) && sections.mine.every((view) => view.id !== 2), "a pinned view is not repeated under Shared or Mine");
+ok(sections.shared.some((view) => view.id === 4) && sections.mine.some((view) => view.id === 3), "unpinned shared and private views stay in their sections");
+ok(viewCountLabel({ count: 29, active: 29, inactive: 2 }) === "29 active of 31", "the header names the hidden inactive cars");
+ok(viewCountLabel({ count: 12, active: 12, inactive: 0 }) === "12", "a list with no inactive cars stays a plain count");
+
+const buried = withFocusColumnsAfterIdentity([
+  "marks", "car_number", "lessee", "expires", "description", "mechanical_designation", "equipment_type",
+  "open_stop_type", "open_stop_since", "open_stop_days", "open_stop_reason",
+]);
+ok(buried[0] === "marks" && buried[1] === "car_number" && buried[2] === "open_stop_type" && buried[3] === "open_stop_since" && buried[5] === "open_stop_reason", "stop columns move to just after the car number");
+const presetNear = focusPresetLayout().order;
+ok(presetNear.indexOf("open_stop_reason") === presetNear.indexOf("open_stop_days") + 1, "the focus preset keeps the stop reason next to the days");
+ok(withFocusColumnsAfterIdentity(presetNear).join(",") === presetNear.join(","), "a focus preset that is already near the front stays put");
+
+const graymontGroup = "graymont-view-2";
+const graymontAt = "2026-10-19T16:00:48.000Z";
+const graymontView = 2;
+const graymontCars = Array.from({ length: 31 }, (_, index) => 5000 + index);
+const listIds = listChangeLogIds(graymontView);
+const createdSnaps = viewCreateSnapshots({ id: graymontView, name: "Graymont PD", kind: "fixed", shared: true, deleted_at: null }, graymontAt);
+const listLog = buildActivityLogRow({
+  table: "car_lists",
+  pk: graymontView,
+  before: createdSnaps.before,
+  after: createdSnaps.after,
+  action: "view_create",
+  entity_type: "railcar",
+  entity_id: listIds.entity_id,
+  railcar_id: listIds.railcar_id,
+  actor: "bruce",
+  detail: { view_id: graymontView },
+}, { group: graymontGroup, actor: "bruce", occurred_at: graymontAt });
+ok(listLog != null && listLog.railcar_id == null && listLog.change_group === graymontGroup && listLog.entity_id === graymontView, "undo of create still keys the list row, with a null railcar_id");
+const memberLogs = graymontCars.map((railcarId, index) => buildActivityLogRow({
+  table: "car_list_members",
+  pk: index + 10,
+  before: {},
+  after: { id: index + 10, list_id: graymontView, railcar_id: railcarId, removed_at: null },
+  action: "view_member_add",
+  entity_type: "railcar",
+  entity_id: railcarId,
+  railcar_id: railcarId,
+  actor: "bruce",
+  detail: { view_id: graymontView },
+}, { group: graymontGroup, actor: "bruce", occurred_at: graymontAt }));
+ok(memberLogs.length === 31 && memberLogs.every((row) => row != null && row.change_group === graymontGroup && row.railcar_id !== graymontView && row.action === "view_member_add"), "31 member adds are one batch and never store the view id as railcar_id");
+const liveList = { id: graymontView, name: "Graymont PD", deleted_at: null as string | null };
+const undoneCreate = applyJsonbPatch(liveList, (listLog?.before ?? {}) as Record<string, unknown>);
+ok(undoneCreate.deleted_at === graymontAt && undoneCreate.name === "Graymont PD", "undo create hides the view without nulling the name");
+const graymontRename = { name: "Graymont PD x", updated_at: "2026-10-19T16:05:00.000Z", updated_by: "bruce" };
+const graymontRenameBefore = snapshotBeforePatch({ name: "Graymont PD", updated_at: graymontAt, updated_by: "bruce" }, graymontRename);
+const graymontRenameChange = persistableChange(graymontRenameBefore, graymontRename);
+ok(currentMatchesAfter({ ...graymontRename }, graymontRenameChange.after) && applyJsonbPatch(graymontRename, graymontRenameChange.before).name === "Graymont PD", "undo rename restores the name");
+const pinPatch = { pinned: true, pin_order: 0 };
+const pinChange = persistableChange({ pinned: false, pin_order: null }, pinPatch);
+ok(pinChange.op === "update" && applyJsonbPatch(pinPatch, pinChange.before).pinned === false, "undo pin clears pinned");
+const removeSnaps = memberRemoveSnapshots(graymontAt);
+const removeChange = persistableChange(removeSnaps.before, removeSnaps.after);
+ok(removeChange.op === "update" && applyJsonbPatch({ removed_at: graymontAt }, removeChange.before).removed_at == null, "undo remove puts the car back");
+const noteChange = persistableChange({ note: null }, { note: "scrap" });
+ok(applyJsonbPatch({ note: "scrap" }, noteChange.before).note == null, "undo note clears the note");
+const deleteSnaps = viewDeleteSnapshots(graymontAt);
+const deleteChange = persistableChange(deleteSnaps.before, deleteSnaps.after);
+ok(opOf({ id: 1, change_group: graymontGroup, table_name: "car_lists", row_pk: graymontView, before: deleteChange.before, after: deleteChange.after, detail: { op: "update" }, railcar_id: null }) === "update", "undo delete still finds the list when railcar_id is null");
+ok(applyJsonbPatch({ deleted_at: graymontAt }, deleteChange.before).deleted_at == null, "undo delete restores the view");
+ok(memberLogs.every((row) => row != null && opOf({ id: 1, change_group: graymontGroup, table_name: "car_list_members", row_pk: Number(row.row_pk), before: row.before as Record<string, unknown>, after: row.after as Record<string, unknown>, detail: row.detail as Record<string, unknown>, railcar_id: Number(row.railcar_id) }) === "insert"), "undo of each member add deletes that new row");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

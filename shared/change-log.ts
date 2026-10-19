@@ -89,3 +89,64 @@ export function activityLogRailcarFkAllows(railcarId: number | null, existingRai
   if (railcarId == null) return true;
   return existingRailcarIds.has(railcarId);
 }
+
+export type ActivityLogInput = {
+  table: string;
+  pk: number | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  action: string;
+  entity_type: string;
+  entity_id: number;
+  railcar_id?: number | null;
+  rider_id?: number | null;
+  actor?: string | null;
+  undoable?: boolean;
+  source?: string;
+  source_table?: string | null;
+  source_id?: number | null;
+  detail?: Record<string, unknown>;
+  occurred_at?: string;
+  force?: boolean;
+};
+
+/** One activity_log row, or null when nothing changed. Same shape recordChange inserts. */
+export function buildActivityLogRow(
+  opts: ActivityLogInput,
+  ctx: { group: string; actor: string | null; occurred_at: string },
+): Record<string, unknown> | null {
+  const diff = changedKeys(opts.before ?? {}, opts.after ?? {});
+  const isInsert = !opts.before || Object.keys(opts.before).length === 0;
+  const isDelete = !opts.after || Object.keys(opts.after).length === 0;
+  if (!opts.force && !isInsert && !isDelete && Object.keys(diff.before).length === 0) return null;
+  const before = isInsert ? {} : diff.before;
+  const after = isDelete ? {} : isInsert ? (opts.after ?? {}) : diff.after;
+  const actor = opts.actor ?? ctx.actor;
+  return {
+    entity_type: opts.entity_type,
+    entity_id: opts.entity_id,
+    action: opts.action,
+    actor: actor ?? null,
+    railcar_id: activityRailcarId(opts),
+    rider_id:
+      opts.rider_id !== undefined
+        ? opts.rider_id
+        : opts.entity_type === "rider"
+          ? opts.entity_id
+          : null,
+    detail: {
+      ...(opts.detail ?? {}),
+      op: isInsert ? "insert" : isDelete ? "delete" : "update",
+    },
+    source: opts.source ?? "ui",
+    occurred_at: opts.occurred_at ?? ctx.occurred_at,
+    source_table: opts.source_table ?? null,
+    source_id: opts.source_id ?? null,
+    change_group: ctx.group,
+    table_name: opts.table,
+    row_pk: opts.pk,
+    before,
+    after,
+    undoable: opts.undoable !== false,
+  };
+}

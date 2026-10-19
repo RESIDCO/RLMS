@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { activityRailcarId, changedKeys, type ActivityEntityType } from "@shared/change-log";
+import { buildActivityLogRow, type ActivityEntityType, type ActivityLogInput } from "@shared/change-log";
 import { supabaseAdmin } from "./supabase";
 
 type GroupStore = { group: string; actor: string };
@@ -33,69 +33,30 @@ export async function withChangeGroupResult<T extends object>(
   });
 }
 
-export type RecordChangeOpts = {
-  table: string;
-  pk: number | null;
-  before?: Record<string, unknown> | null;
-  after?: Record<string, unknown> | null;
-  action: string;
-  entity_type: ActivityEntityType;
-  entity_id: number;
-  railcar_id?: number | null;
-  rider_id?: number | null;
-  actor?: string | null;
-  undoable?: boolean;
-  source?: string;
-  source_table?: string | null;
-  source_id?: number | null;
-  detail?: Record<string, unknown>;
-  occurred_at?: string;
-  /** Write even when before/after keys are identical (timeline-only events). */
-  force?: boolean;
-};
+export type RecordChangeOpts = ActivityLogInput & { entity_type: ActivityEntityType };
 
 export async function recordChange(opts: RecordChangeOpts): Promise<{ id: number; change_group: string } | null> {
-  const diff = changedKeys(opts.before ?? {}, opts.after ?? {});
-  const isInsert = !opts.before || Object.keys(opts.before).length === 0;
-  const isDelete = !opts.after || Object.keys(opts.after).length === 0;
-  if (!opts.force && !isInsert && !isDelete && Object.keys(diff.before).length === 0) return null;
+  const written = await recordChanges([opts]);
+  if (!written || written.ids.length === 0) return null;
+  return { id: written.ids[0], change_group: written.change_group };
+}
 
+/** One activity_log insert for the whole list. Rows share change_group and the same payload shape as recordChange. */
+export async function recordChanges(batch: RecordChangeOpts[]): Promise<{ ids: number[]; change_group: string } | null> {
+  if (!batch.length) return null;
   const group = currentChangeGroup() ?? randomUUID();
-  const actor = opts.actor ?? currentChangeActor();
-  const before = isInsert ? {} : isDelete ? diff.before : diff.before;
-  const after = isDelete ? {} : isInsert ? (opts.after ?? {}) : diff.after;
-
-  const payload: Record<string, unknown> = {
-    entity_type: opts.entity_type,
-    entity_id: opts.entity_id,
-    action: opts.action,
-    actor: actor ?? null,
-    railcar_id: activityRailcarId(opts),
-    rider_id:
-      opts.rider_id !== undefined
-        ? opts.rider_id
-        : opts.entity_type === "rider"
-          ? opts.entity_id
-          : null,
-    detail: {
-      ...(opts.detail ?? {}),
-      op: isInsert ? "insert" : isDelete ? "delete" : "update",
-    },
-    source: opts.source ?? "ui",
-    occurred_at: opts.occurred_at ?? new Date().toISOString(),
-    source_table: opts.source_table ?? null,
-    source_id: opts.source_id ?? null,
-    change_group: group,
-    table_name: opts.table,
-    row_pk: opts.pk,
-    before,
-    after,
-    undoable: opts.undoable !== false,
-  };
-
-  const { data, error } = await supabaseAdmin.from("activity_log").insert(payload).select("id").single();
+  const actor = currentChangeActor();
+  const occurred_at = new Date().toISOString();
+  const rows: Record<string, unknown>[] = [];
+  for (const opts of batch) {
+    const row = buildActivityLogRow(opts, { group, actor, occurred_at });
+    if (row) rows.push(row);
+  }
+  if (!rows.length) return null;
+  const { data, error } = await supabaseAdmin.from("activity_log").insert(rows).select("id");
   if (error) throw error;
-  return { id: Number(data.id), change_group: group };
+  const list = Array.isArray(data) ? data : data ? [data] : [];
+  return { ids: list.map((row) => Number(row.id)), change_group: group };
 }
 
 export async function recordNonUndoable(opts: Omit<RecordChangeOpts, "undoable" | "before" | "after"> & {

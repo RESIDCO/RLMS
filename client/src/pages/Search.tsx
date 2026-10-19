@@ -61,10 +61,13 @@ import {
   focusPresetLayout,
   isFocusColumn,
   layoutNeedsFocus,
+  pasteMemberIds,
   pasteSearchBody,
   runViewCreate,
   stickyLeftOffsets,
+  viewCountLabel,
   viewSavedToast,
+  withFocusColumnsAfterIdentity,
   withLeadingIdentityColumns,
   type ViewFilters,
   type ViewKind,
@@ -821,6 +824,7 @@ export default function SearchPage() {
   const lastSeenHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
   const hashBooted = useRef(false);
   const replaceFromView = useRef<number | null>(null);
+  const savingLock = useRef(false);
   const pendingLayout = useRef<ViewLayout | null>(null);
   const pasteFocusSeen = useRef(false);
   const suppressDirty = useRef(false);
@@ -1306,7 +1310,8 @@ export default function SearchPage() {
 
   function layoutSnapshot(preset?: ViewLayout): ViewLayout {
     if (preset) return preset;
-    const order = withLeadingIdentityColumns((viewId && viewLayout?.order.length ? viewLayout.order : displayKeys).filter((key) => key !== "_actions"));
+    const rawOrder = (viewId && viewLayout?.order.length ? viewLayout.order : displayKeys).filter((key) => key !== "_actions");
+    const order = fixedMode ? withFocusColumnsAfterIdentity(rawOrder) : withLeadingIdentityColumns(rawOrder);
     const pageSizeValue = ps === "all" || ps === 500 ? 500 : ps === 200 ? 200 : 75;
     return {
       v: 1,
@@ -1548,12 +1553,13 @@ export default function SearchPage() {
   const displayKeys = useMemo(() => {
     const layoutOrder = (viewId ? viewLayout?.order : sessionLayout?.order) ?? [];
     if (layoutOrder.length) {
-      const order = withLeadingIdentityColumns(layoutOrder.filter((key) => key !== "_actions" && key !== "_select"));
+      const keys = layoutOrder.filter((key) => key !== "_actions" && key !== "_select");
+      const order = fixedMode ? withFocusColumnsAfterIdentity(keys) : withLeadingIdentityColumns(keys);
       return [...order, ...PINNED_END];
     }
     const movable = [...CORE_MOVABLE, ...OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => c.key)];
     return [...PINNED_START, ...mergeColOrder(movable, colOrder), ...PINNED_END];
-  }, [viewId, viewLayout, sessionLayout, visibleCols, colOrder]);
+  }, [viewId, viewLayout, sessionLayout, visibleCols, colOrder, fixedMode]);
   const movableKeys = displayKeys.filter((k) => k !== "_actions" && (!(viewId || sessionLayout) ? !(PINNED_START as readonly string[]).includes(k) && !(PINNED_END as readonly string[]).includes(k) : true));
   const pasteCount = pasteMeta?.counts.pasted ?? (committed ? carListSearchTokens(committed)?.length ?? 0 : 0);
   const committedLabel = pasteCount > 1 ? `${pasteCount} cars` : `"${committed}"`;
@@ -1701,6 +1707,9 @@ export default function SearchPage() {
     ...(countsQuery.data?.counts ?? {}),
   };
   const crumbCount = viewId ? (viewCounts[String(viewId)]?.count ?? totalCount) : totalCount;
+  const crumbFigures = viewId
+    ? (viewCounts[String(viewId)] ? viewCountLabel(viewCounts[String(viewId)]) : crumbCount.toLocaleString())
+    : `${crumbCount.toLocaleString()} cars`;
   const collapsed = (Boolean(committed) || Boolean(viewId)) && !panelOpen;
   const filterCount = [typeFilter, mechFilter, aarFilter, entityFilter, statusFilter, openStop, programFilter, tagFilter].filter(Boolean).length
     + (activeMode !== "active" ? 1 : 0);
@@ -1759,6 +1768,8 @@ export default function SearchPage() {
       setSaveOpen(true);
       return;
     }
+    if (savingLock.current) return;
+    savingLock.current = true;
     setSavingView(true);
     try {
       const layout = layoutSnapshot();
@@ -1777,11 +1788,14 @@ export default function SearchPage() {
       setSaveError(message);
       toast({ title: "Could not save view", description: message, variant: "destructive" });
     } finally {
+      savingLock.current = false;
       setSavingView(false);
     }
   }
 
   async function saveNewView(body: { name: string; kind: ViewKind; shared: boolean; pinned: boolean; description: string; preset: "current" | "focus" }) {
+    if (savingLock.current) return;
+    savingLock.current = true;
     setSavingView(true);
     try {
       const layout = body.preset === "focus" ? focusPresetLayout(currentFilters()) : layoutSnapshot();
@@ -1796,7 +1810,25 @@ export default function SearchPage() {
       if (body.kind === "query") {
         payload.query = { v: 1, q: committed || query, scope, fleet: exactFleet, filters: layout.filters };
       } else if (committed && carListSearchTokens(committed)) {
-        payload.text = committed;
+        const resolved = pasteMemberIds(
+          (pasteRows ?? []).map((row) => Number(row.id)),
+          (pasteMeta?.inactive ?? []).map((row) => Number(row.id)),
+        );
+        if (resolved.length) {
+          payload.railcar_ids = resolved;
+          payload.query = {
+            v: 1,
+            q: committed,
+            source: "paste",
+            unmatched: pasteMeta?.notFound ?? [],
+            ambiguous: pasteMeta?.ambiguous ?? [],
+            scope,
+            fleet: exactFleet,
+            filters: layout.filters,
+          };
+        } else {
+          payload.text = committed;
+        }
       } else if (fixedMode && viewId) {
         payload.railcar_ids = filteredFixed.map((row) => Number(row.id)).filter((id) => id > 0);
       } else {
@@ -1838,6 +1870,7 @@ export default function SearchPage() {
       setSaveError(message);
       toast({ title: "Could not save view", description: message, variant: "destructive" });
     } finally {
+      savingLock.current = false;
       setSavingView(false);
     }
   }
@@ -2174,7 +2207,7 @@ export default function SearchPage() {
               <>
                 <span className="text-muted-foreground">›</span>
                 <span className="truncate text-foreground">
-                  {activeView?.name || crumbQuery} ({crumbCount.toLocaleString()}{activeView ? "" : " cars"})
+                  {activeView?.name || crumbQuery} ({crumbFigures})
                   {viewDirty ? <span className="ml-1 text-amber-400" title="Unsaved changes">●</span> : null}
                 </span>
               </>
@@ -2182,9 +2215,9 @@ export default function SearchPage() {
           </nav>
           <ViewMeta view={activeView} />
           <div className="ml-auto flex flex-wrap items-center gap-1">
-            <Button type="button" size="sm" className="h-7 gap-1 text-xs" disabled={Boolean(schemaMessage) || savingView} title={!canEdit ? "Viewers can save a private copy" : undefined} data-testid="button-save-view" onClick={() => { if (viewId && canEdit && viewDirty) void saveCurrentView(); else setSaveOpen(true); }}>
-              <Save className="h-3.5 w-3.5" />
-              {viewId && canEdit && viewDirty ? "Save changes" : "Save view"}
+            <Button type="button" size="sm" className="h-7 gap-1 text-xs" disabled={Boolean(schemaMessage) || savingView} aria-busy={savingView} title={!canEdit ? "Viewers can save a private copy" : undefined} data-testid="button-save-view" onClick={() => { if (savingView) return; if (viewId && canEdit && viewDirty) void saveCurrentView(); else setSaveOpen(true); }}>
+              {savingView ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {savingView ? "Saving…" : viewId && canEdit && viewDirty ? "Save changes" : "Save view"}
             </Button>
             {viewId ? (
               <DropdownMenu>
@@ -2741,7 +2774,7 @@ export default function SearchPage() {
         views={views}
         defaultName={activeView ? `${activeView.name} copy` : (isPaste ? "Pasted cars" : committed.slice(0, 48))}
         defaultKind={isPaste || fixedMode ? "fixed" : "query"}
-        carCount={fixedMode ? filteredFixed.length : isPaste ? (pasteRows?.length ?? 0) : totalCount}
+        carCount={fixedMode ? (activeView?.member_count ?? filteredFixed.length) : isPaste ? pasteMemberIds((pasteRows ?? []).map((row) => Number(row.id)), (pasteMeta?.inactive ?? []).map((row) => Number(row.id))).length : totalCount}
         canShare={canEdit}
         busy={savingView}
         onSave={(body) => { void saveNewView(body); }}

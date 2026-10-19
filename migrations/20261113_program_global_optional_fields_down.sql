@@ -1,4 +1,4 @@
--- Reverses migrations/20261112_program_global_optional_fields.sql
+-- Reverses migrations/20261113_program_global_optional_fields.sql
 -- Does not rewrite program_cars or rent_events.
 
 DROP FUNCTION IF EXISTS public.rlms_apply_program_tracker_sync(uuid, text, text);
@@ -14,7 +14,8 @@ ALTER TABLE public.program_field_defs DROP COLUMN IF EXISTS is_optional;
 ALTER TABLE public.program_field_defs
   ALTER COLUMN category_id SET NOT NULL;
 
--- Restore the undo functions from 20261111_crm_p1_1.sql.
+-- Restore rlms_apply_jsonb_patch to the pre-sync allowlist, and restore
+-- rlms_undo_change_group from migrations/20261112_remark_in_place.sql.
 CREATE OR REPLACE FUNCTION public.rlms_apply_jsonb_patch(p_table text, p_id bigint, p_patch jsonb)
  RETURNS void
  LANGUAGE plpgsql
@@ -72,6 +73,7 @@ DECLARE
   k text;
   undo_group uuid := gen_random_uuid();
   restored int := 0;
+  hist_removed int := 0;
   conflicts jsonb := '[]'::jsonb;
   orig_actor text;
   oldest timestamptz;
@@ -161,8 +163,25 @@ BEGIN
     INSERT INTO public.activity_log (entity_type, entity_id, action, actor, railcar_id, rider_id, detail, source, occurred_at, change_group, table_name, row_pk, before, after, undoable, undo_of)
     VALUES (rec.entity_type, rec.entity_id, 'undo', p_actor, rec.railcar_id, rec.rider_id, jsonb_build_object('op', 'update', 'undid', rec.action, 'original_group', p_group::text), 'undo', now(), undo_group, rec.table_name, rec.row_pk, rec.after, rec.before, false, rec.id);
   END LOOP;
+
+  DELETE FROM public.car_number_history AS h
+   WHERE h.reason LIKE '%change_group ' || p_group::text
+     AND h.railcar_id IN (
+       SELECT a.railcar_id
+         FROM public.activity_log AS a
+        WHERE a.change_group = p_group
+          AND a.railcar_id IS NOT NULL
+     );
+  GET DIAGNOSTICS hist_removed = ROW_COUNT;
+
   UPDATE public.activity_log SET undone_at = now(), undone_by = p_actor WHERE change_group = p_group;
-  RETURN jsonb_build_object('ok', true, 'restored', restored, 'undo_group', undo_group, 'original_group', p_group);
+  RETURN jsonb_build_object(
+    'ok', true,
+    'restored', restored,
+    'history_removed', hist_removed,
+    'undo_group', undo_group,
+    'original_group', p_group
+  );
 END;
 $function$;
 

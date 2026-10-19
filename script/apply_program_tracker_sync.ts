@@ -81,7 +81,7 @@ function refuseApply(): never {
     console.error("refusing --apply: DATABASE_URL is not set. This script never stores credentials.");
     process.exit(2);
   }
-  console.error("refusing --apply: this CLI does not open a database connection. Install migrations/20261112_program_global_optional_fields.sql, then apply from Programs → Tracker sync. Undo uses the same change group.");
+  console.error("refusing --apply: this CLI does not open a database connection. Install migrations/20261113_program_global_optional_fields.sql after migrations/20261112_remark_in_place.sql, then apply from Programs → Tracker sync. Undo uses the same change group.");
   process.exit(2);
 }
 

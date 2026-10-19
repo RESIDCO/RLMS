@@ -1,7 +1,10 @@
 -- Programs: global optional field defs, and the tracker-sync apply function.
 -- Does not update program_cars, railcars, shops, user_column_prefs, or rent_events.
 -- Safe to re-run. Bruce applies this only after sign-off. Down script:
--- migrations/20261112_program_global_optional_fields_down.sql
+-- migrations/20261113_program_global_optional_fields_down.sql
+-- Runs after migrations/20261112_remark_in_place.sql. rlms_undo_change_group
+-- keeps that function's car_number_history removal and adds shops,
+-- user_column_prefs, and deletion of an empty sync-created program.
 
 ALTER TABLE public.program_field_defs
   ALTER COLUMN category_id DROP NOT NULL;
@@ -405,6 +408,7 @@ DECLARE
   k text;
   undo_group uuid := gen_random_uuid();
   restored int := 0;
+  hist_removed int := 0;
   conflicts jsonb := '[]'::jsonb;
   orig_actor text;
   oldest timestamptz;
@@ -500,8 +504,25 @@ BEGIN
     INSERT INTO public.activity_log (entity_type, entity_id, action, actor, railcar_id, rider_id, detail, source, occurred_at, change_group, table_name, row_pk, before, after, undoable, undo_of)
     VALUES (rec.entity_type, rec.entity_id, 'undo', p_actor, rec.railcar_id, rec.rider_id, jsonb_build_object('op', 'update', 'undid', rec.action, 'original_group', p_group::text), 'undo', now(), undo_group, rec.table_name, rec.row_pk, rec.after, rec.before, false, rec.id);
   END LOOP;
+
+  DELETE FROM public.car_number_history AS h
+   WHERE h.reason LIKE '%change_group ' || p_group::text
+     AND h.railcar_id IN (
+       SELECT a.railcar_id
+         FROM public.activity_log AS a
+        WHERE a.change_group = p_group
+          AND a.railcar_id IS NOT NULL
+     );
+  GET DIAGNOSTICS hist_removed = ROW_COUNT;
+
   UPDATE public.activity_log SET undone_at = now(), undone_by = p_actor WHERE change_group = p_group;
-  RETURN jsonb_build_object('ok', true, 'restored', restored, 'undo_group', undo_group, 'original_group', p_group);
+  RETURN jsonb_build_object(
+    'ok', true,
+    'restored', restored,
+    'history_removed', hist_removed,
+    'undo_group', undo_group,
+    'original_group', p_group
+  );
 END;
 $function$;
 

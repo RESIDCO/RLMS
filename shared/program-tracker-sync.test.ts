@@ -381,13 +381,17 @@ ok(cars.filter(Boolean).length === 3200 && Date.now() - started < 1500, "3k-row 
 const moved = placeTraceDetails(["cf:trace_loaded_or_empty", "cf:trace_date", "shop"]);
 ok(moved.indexOf("cf:trace_date") < moved.indexOf("cf:trace_loaded_or_empty"), "trace detail is moved after trace date");
 
-const migration = readFileSync(new URL("../migrations/20261112_program_global_optional_fields.sql", import.meta.url), "utf8");
+const migration = readFileSync(new URL("../migrations/20261113_program_global_optional_fields.sql", import.meta.url), "utf8");
 ok(!/insert\s+into\s+(public\.)?rent_events/i.test(migration), "migration does not insert rent_events");
 ok(!/update\s+(public\.)?rent_events/i.test(migration), "migration does not update rent_events");
 ok(migration.includes("r.active IS NOT TRUE"), "apply fails closed when a car is inactive");
 ok(migration.includes("rent_events are out of scope"), "snapshot cannot carry rent_events");
 ok(migration.includes("v_list_key text") && migration.includes("v_view_name text"), "layout plpgsql variables are prefixed");
 ok(!/(^|\n)\s*list_key text;/.test(migration) && !/(^|\n)\s*view_name text;/.test(migration), "layout variables do not clash with user_column_prefs columns");
+ok(migration.includes("hist_removed") && migration.includes("'history_removed', hist_removed"), "undo still reports remark history removal");
+ok(migration.includes("DELETE FROM public.car_number_history"), "undo still deletes car_number_history rows");
+ok(migration.includes("'shops', 'user_column_prefs'"), "shops and column prefs are on the undo allowlist");
+ok(migration.includes("undo: program % still has cars"), "sync undo deletes a program only when it has no cars");
 
 if (process.env.RLMS_DATE_TZ_CHILD === "1") {
   const sample = new Date(Date.UTC(2026, 6, 15));

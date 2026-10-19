@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, Copy, GripVertical, List, MoreHorizontal, Pin, Plus, RefreshCw } from "lucide-react";
+import { Check, Copy, GripVertical, List, Loader2, MoreHorizontal, Pin, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { EMPTY_VIEWS_HINT, FOCUS_PRESET_LABEL, formatEtTime, viewNamesCollide, type ViewKind } from "@shared/saved-views";
+import { EMPTY_VIEWS_HINT, FOCUS_PRESET_LABEL, formatEtTime, partitionSavedViews, viewCountLabel, viewNamesCollide, type ViewKind } from "@shared/saved-views";
 
 export type ViewSummary = {
   id: number;
@@ -56,8 +56,7 @@ export function writeViewsSidebarOpen(open: boolean) {
 }
 
 function countLabel(count: ViewCount | undefined): string {
-  if (!count) return "—";
-  return count.count.toLocaleString();
+  return viewCountLabel(count);
 }
 
 function countTitle(count: ViewCount | undefined): string {
@@ -224,9 +223,10 @@ export function ViewsMenu({
   const [filter, setFilter] = useState("");
   const needle = filter.trim().toLowerCase();
   const match = (view: ViewSummary) => !needle || view.name.toLowerCase().includes(needle);
-  const pinned = views.filter((view) => view.pinned && match(view));
-  const shared = views.filter((view) => view.shared && match(view));
-  const mine = views.filter((view) => !view.shared && view.owner === userId && match(view));
+  const grouped = partitionSavedViews(views.filter(match), userId);
+  const pinned = grouped.pinned;
+  const shared = grouped.shared;
+  const mine = grouped.mine;
   if (views.length === 0) {
     return (
       <div className="min-w-0">
@@ -295,7 +295,7 @@ export function SaveViewDialog({
   const [shared, setShared] = useState(canShare);
   const [pinned, setPinned] = useState(true);
   const [description, setDescription] = useState("");
-  const [preset, setPreset] = useState<"current" | "focus">("current");
+  const [preset, setPreset] = useState<"current" | "focus">(defaultKind === "fixed" ? "focus" : "current");
   useEffect(() => {
     if (!open) return;
     setName(defaultName);
@@ -303,7 +303,7 @@ export function SaveViewDialog({
     setShared(canShare);
     setPinned(true);
     setDescription("");
-    setPreset("current");
+    setPreset(defaultKind === "fixed" ? "focus" : "current");
   }, [open, defaultName, defaultKind, canShare]);
   const taken = views.some((view) => viewNamesCollide(view.name, name));
   return (
@@ -347,7 +347,8 @@ export function SaveViewDialog({
             <option value="focus">{FOCUS_PRESET_LABEL}</option>
           </select>
         </label>
-        <Button type="button" disabled={!name.trim() || taken || busy} onClick={() => onSave({ name: name.trim(), kind, shared: canShare ? shared : false, pinned: canShare ? pinned : false, description, preset })}>
+        <Button type="button" disabled={!name.trim() || taken || busy} aria-busy={busy} onClick={() => { if (busy) return; onSave({ name: name.trim(), kind, shared: canShare ? shared : false, pinned: canShare ? pinned : false, description, preset }); }}>
+          {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
           {busy ? "Saving…" : "Save"}
         </Button>
       </DialogContent>

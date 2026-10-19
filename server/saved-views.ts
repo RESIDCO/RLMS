@@ -6,10 +6,13 @@ import {
   SAVED_VIEWS_SCHEMA_MESSAGE,
   VIEWS_UNAVAILABLE_MESSAGE,
   VIEW_MEMBER_CAP,
+  VIEW_MEMBER_WRITE_BATCH,
   VIEW_PIN_CAP,
   abandonedListPatch,
   canonicalViewName,
   countCacheKey,
+  createSkipsPasteMatch,
+  filterSuppliedRailcars,
   formatEtTime,
   isMissingViewSchema,
   idsWithoutInactive,
@@ -19,12 +22,12 @@ import {
   memberRemoveSnapshots,
   parseViewLayout,
   parseViewQuery,
+  positiveIds,
   schemaProbeResult,
   snapshotBeforePatch,
   viewCreateSnapshots,
   viewDeleteSnapshots,
   viewNameKey,
-  viewNamesCollide,
   viewUpdatedAtConflicts,
   viewWriteError,
   viewWriteStatus,
@@ -32,7 +35,7 @@ import {
   type ViewLayout,
   type ViewQuery,
 } from "@shared/saved-views";
-import { recordChange, withChangeGroupResult } from "./change-log";
+import { recordChange, recordChanges, withChangeGroupResult } from "./change-log";
 import { countRailcars, parseRailcarListParams, type RailcarListParams } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
 import { supabaseAdmin } from "./supabase";
@@ -185,13 +188,6 @@ async function liveNames(exceptId?: number): Promise<{ id: number; name: string 
     .filter((row) => row.id !== exceptId);
 }
 
-async function assertUniqueName(name: string, exceptId?: number) {
-  const names = await liveNames(exceptId);
-  if (names.some((row) => viewNamesCollide(row.name, name))) {
-    throw httpError(409, "A view with that name already exists");
-  }
-}
-
 async function liveMemberIds(listId: number): Promise<number[]> {
   const { data, error } = await supabaseAdmin
     .from("car_list_members")
@@ -240,7 +236,7 @@ async function abandonCreatedList(id: number) {
   }
 }
 
-async function recordMemberChange(opts: {
+async function recordMemberChanges(rows: {
   id: number;
   listId: number;
   railcarId: number;
@@ -248,19 +244,22 @@ async function recordMemberChange(opts: {
   after: Record<string, unknown>;
   action: string;
   actor: string;
-}) {
-  await recordChange({
-    table: "car_list_members",
-    pk: opts.id,
-    before: opts.before,
-    after: opts.after,
-    action: opts.action,
-    entity_type: "railcar",
-    entity_id: opts.railcarId,
-    railcar_id: opts.railcarId,
-    actor: opts.actor,
-    detail: { view_id: opts.listId },
-  });
+}[]) {
+  for (let i = 0; i < rows.length; i += VIEW_MEMBER_WRITE_BATCH) {
+    const slice = rows.slice(i, i + VIEW_MEMBER_WRITE_BATCH);
+    await recordChanges(slice.map((opts) => ({
+      table: "car_list_members",
+      pk: opts.id,
+      before: opts.before,
+      after: opts.after,
+      action: opts.action,
+      entity_type: "railcar" as const,
+      entity_id: opts.railcarId,
+      railcar_id: opts.railcarId,
+      actor: opts.actor,
+      detail: { view_id: opts.listId },
+    })));
+  }
 }
 
 function summary(view: ViewRow, names: Map<string, string>, memberCount: number | null) {
@@ -389,7 +388,47 @@ function stamp(actor: string) {
   return { updated_at: new Date().toISOString(), updated_by: actor };
 }
 
+function mergeUnmatched(existing: string[] | undefined, extra: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const token of [...(existing ?? []), ...extra]) {
+    const value = String(token).trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+    if (out.length >= 500) break;
+  }
+  return out;
+}
+
+/** One railcars read per 200 ids. Extra chunks run at the same time. */
+async function loadSuppliedCars(ids: number[]) {
+  const chunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += VIEW_MEMBER_WRITE_BATCH) {
+    chunks.push(ids.slice(i, i + VIEW_MEMBER_WRITE_BATCH));
+  }
+  const batches = await Promise.all(
+    chunks.map(async (slice) => {
+      const { data, error } = await supabaseAdmin
+        .from("railcars")
+        .select("id, active, reporting_marks, car_number")
+        .in("id", slice);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: Number(row.id),
+        active: row.active == null ? null : row.active !== false,
+        reporting_marks: row.reporting_marks == null ? null : String(row.reporting_marks),
+        car_number: row.car_number == null ? null : String(row.car_number),
+      }));
+    }),
+  );
+  return batches.flat();
+}
+
 export async function createSavedView(actor: Actor, body: Record<string, unknown>) {
+  const started = Date.now();
+  let memberCount = 0;
+  try {
   await assertSchema();
   const kind: ViewKind = body.kind === "query" ? "query" : "fixed";
   const shared = body.shared === false ? false : true;
@@ -398,24 +437,40 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
   const name = canonicalViewName(String(body.name ?? ""));
   if (!name) throw httpError(400, "Name is required");
   if (name.length > 80) throw httpError(400, "Name is too long");
-  await assertUniqueName(name);
   const layout = layoutOf(body.layout ?? {});
   let query = queryOf(body.query ?? {}, kind);
   let railcarIds: number[] = Array.isArray(body.railcar_ids) ? body.railcar_ids.map(Number).filter((id) => id > 0) : [];
   let paste: Awaited<ReturnType<typeof matchPaste>> | null = null;
-  if (kind === "fixed" && typeof body.text === "string" && body.text.trim()) {
-    paste = await matchPaste(body.text);
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (kind === "fixed" && createSkipsPasteMatch(body)) {
+    const requested = positiveIds(body.railcar_ids).slice(0, VIEW_MEMBER_CAP);
+    const pasteText = query.q.trim() || text;
+    const found = await loadSuppliedCars(requested);
+    const filtered = filterSuppliedRailcars({ requestedIds: requested, cars: found, pasteText });
+    railcarIds = filtered.ids;
+    const unmatched = mergeUnmatched(query.unmatched, filtered.unmatched);
+    query = { ...query, source: "paste", q: query.q || text, unmatched };
+    paste = {
+      ids: railcarIds,
+      inactiveIds: filtered.inactiveIds,
+      notFound: unmatched,
+      ambiguous: query.ambiguous ?? [],
+      pasted: pasteText ? pasteText.split(/\s+/).length : railcarIds.length,
+    };
+  } else if (kind === "fixed" && text) {
+    paste = await matchPaste(text);
     railcarIds = paste.ids;
     query = {
       ...query,
       source: "paste",
-      q: body.text.trim(),
+      q: text,
       unmatched: paste.notFound,
       ambiguous: paste.ambiguous,
     };
   }
   // A paste create keeps inactive cars. Graymont is 29 active plus 406 and 416.
   railcarIds = Array.from(new Set(railcarIds)).slice(0, VIEW_MEMBER_CAP);
+  memberCount = railcarIds.length;
   if (railcarIds.length > VIEW_MEMBER_CAP) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
   const pinned = body.pinned !== false;
   const hiddenAt = new Date().toISOString();
@@ -453,8 +508,8 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
         actor: actor.id,
       });
       const members = [];
-      for (let i = 0; i < railcarIds.length; i += 200) {
-        const slice = railcarIds.slice(i, i + 200).map((railcar_id, index) => ({
+      for (let i = 0; i < railcarIds.length; i += VIEW_MEMBER_WRITE_BATCH) {
+        const slice = railcarIds.slice(i, i + VIEW_MEMBER_WRITE_BATCH).map((railcar_id, index) => ({
           list_id: row.id,
           railcar_id,
           added_by: actor.id,
@@ -464,18 +519,17 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
         }));
         const { data: inserted, error: memberError } = await supabaseAdmin.from("car_list_members").insert(slice).select("*");
         if (memberError) throw memberError;
-        for (const member of inserted ?? []) {
-          await recordMemberChange({
-            id: Number(member.id),
-            listId: Number(row.id),
-            railcarId: Number(member.railcar_id),
-            before: {},
-            after: member as Record<string, unknown>,
-            action: "view_member_add",
-            actor: actor.id,
-          });
-          members.push(member);
-        }
+        const insertedMembers = inserted ?? [];
+        await recordMemberChanges(insertedMembers.map((member) => ({
+          id: Number(member.id),
+          listId: Number(row.id),
+          railcarId: Number(member.railcar_id),
+          before: {},
+          after: member as Record<string, unknown>,
+          action: "view_member_add",
+          actor: actor.id,
+        })));
+        for (const member of insertedMembers) members.push(member);
       }
       clearViewCountCache();
       return { view: asView(row), members, paste };
@@ -485,6 +539,9 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
     }
   });
   return result;
+  } finally {
+    console.log(`[views] create ms=${Date.now() - started} n=${memberCount}`);
+  }
 }
 
 export async function patchSavedView(id: number, actor: Actor, body: Record<string, unknown>) {
@@ -499,7 +556,6 @@ export async function patchSavedView(id: number, actor: Actor, body: Record<stri
   if (body.name != null) {
     const name = canonicalViewName(String(body.name));
     if (!name) throw httpError(400, "Name is required");
-    await assertUniqueName(name, id);
     patch.name = name;
   }
   if (body.description !== undefined) patch.description = body.description == null ? null : String(body.description).slice(0, 500);
@@ -606,48 +662,57 @@ async function addMemberIds(listId: number, actor: Actor, ids: number[]) {
   const byCar = new Map((prior ?? []).map((row) => [Number(row.railcar_id), row]));
   const live = new Set(await liveMemberIds(listId));
   const room = VIEW_MEMBER_CAP - live.size;
-  let added = 0;
+  const readd: { id: number; railcarId: number; removedAt: string }[] = [];
+  const fresh: number[] = [];
   for (const railcarId of ids) {
     if (live.has(railcarId)) continue;
-    if (added >= room) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
+    if (readd.length + fresh.length >= room) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
     const previous = byCar.get(railcarId);
-    if (previous?.removed_at) {
-      const snaps = memberReaddSnapshots(String(previous.removed_at));
-      const { error: updateError } = await supabaseAdmin
-        .from("car_list_members")
-        .update({ removed_at: null, added_by: actor.id, added_at: new Date().toISOString() })
-        .eq("id", previous.id);
-      if (updateError) throw updateError;
-      await recordMemberChange({
-        id: Number(previous.id),
+    if (previous?.removed_at) readd.push({ id: Number(previous.id), railcarId, removedAt: String(previous.removed_at) });
+    else if (!previous) fresh.push(railcarId);
+    live.add(railcarId);
+  }
+  const addedAt = new Date().toISOString();
+  for (let i = 0; i < fresh.length; i += VIEW_MEMBER_WRITE_BATCH) {
+    const slice = fresh.slice(i, i + VIEW_MEMBER_WRITE_BATCH).map((railcar_id) => ({
+      list_id: listId,
+      railcar_id,
+      added_by: actor.id,
+      removed_at: null,
+    }));
+    const { data, error: insertError } = await supabaseAdmin.from("car_list_members").insert(slice).select("*");
+    if (insertError) throw insertError;
+    await recordMemberChanges((data ?? []).map((member) => ({
+      id: Number(member.id),
+      listId,
+      railcarId: Number(member.railcar_id),
+      before: {},
+      after: member as Record<string, unknown>,
+      action: "view_member_add",
+      actor: actor.id,
+    })));
+  }
+  for (let i = 0; i < readd.length; i += VIEW_MEMBER_WRITE_BATCH) {
+    const slice = readd.slice(i, i + VIEW_MEMBER_WRITE_BATCH);
+    const { error: updateError } = await supabaseAdmin
+      .from("car_list_members")
+      .update({ removed_at: null, added_by: actor.id, added_at: addedAt })
+      .in("id", slice.map((row) => row.id));
+    if (updateError) throw updateError;
+    await recordMemberChanges(slice.map((row) => {
+      const snaps = memberReaddSnapshots(row.removedAt);
+      return {
+        id: row.id,
         listId,
-        railcarId,
+        railcarId: row.railcarId,
         before: snaps.before,
         after: snaps.after,
         action: "view_member_add",
         actor: actor.id,
-      });
-    } else if (!previous) {
-      const { data, error: insertError } = await supabaseAdmin
-        .from("car_list_members")
-        .insert({ list_id: listId, railcar_id: railcarId, added_by: actor.id, removed_at: null })
-        .select("*")
-        .single();
-      if (insertError) throw insertError;
-      await recordMemberChange({
-        id: Number(data.id),
-        listId,
-        railcarId,
-        before: {},
-        after: data as Record<string, unknown>,
-        action: "view_member_add",
-        actor: actor.id,
-      });
-    }
-    live.add(railcarId);
-    added += 1;
+      };
+    }));
   }
-  return added;
+  return readd.length + fresh.length;
 }
 
 export async function addViewMembers(id: number, actor: Actor, body: Record<string, unknown>) {
@@ -686,10 +751,15 @@ export async function removeViewMembers(id: number, actor: Actor, ids: number[])
       .is("removed_at", null);
     if (error) throw error;
     const snaps = memberRemoveSnapshots(hiddenAt);
-    for (const row of data ?? []) {
-      const { error: updateError } = await supabaseAdmin.from("car_list_members").update({ removed_at: hiddenAt }).eq("id", row.id);
+    const rows = data ?? [];
+    for (let i = 0; i < rows.length; i += VIEW_MEMBER_WRITE_BATCH) {
+      const slice = rows.slice(i, i + VIEW_MEMBER_WRITE_BATCH);
+      const { error: updateError } = await supabaseAdmin
+        .from("car_list_members")
+        .update({ removed_at: hiddenAt })
+        .in("id", slice.map((row) => Number(row.id)));
       if (updateError) throw updateError;
-      await recordMemberChange({
+      await recordMemberChanges(slice.map((row) => ({
         id: Number(row.id),
         listId: id,
         railcarId: Number(row.railcar_id),
@@ -697,7 +767,7 @@ export async function removeViewMembers(id: number, actor: Actor, ids: number[])
         after: snaps.after,
         action: "view_member_remove",
         actor: actor.id,
-      });
+      })));
     }
     await recordListStamp(view, actor);
     clearViewCountCache();
@@ -726,7 +796,7 @@ export async function patchMemberNote(id: number, railcarId: number, actor: Acto
   return withChangeGroupResult(actor.id, async () => {
     const { error: updateError } = await supabaseAdmin.from("car_list_members").update({ note: next }).eq("id", member.id);
     if (updateError) throw updateError;
-    await recordMemberChange({
+    await recordMemberChanges([{
       id: Number(member.id),
       listId: id,
       railcarId,
@@ -734,7 +804,7 @@ export async function patchMemberNote(id: number, railcarId: number, actor: Acto
       after: { note: next },
       action: "view_member_note",
       actor: actor.id,
-    });
+    }]);
     clearViewCountCache();
     return { railcar_id: railcarId, note: next };
   });

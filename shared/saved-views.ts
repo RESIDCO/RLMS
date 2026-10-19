@@ -4,6 +4,8 @@
  */
 
 import { activityRailcarId, changedKeys } from "./change-log";
+import { parseCarPasteListDetailed } from "./programs";
+import { splitCarNumber } from "./residco-import";
 
 export const SAVED_VIEWS_SCHEMA_MESSAGE = "Saved views need a database update";
 export const VIEWS_UNAVAILABLE_MESSAGE = "Views unavailable";
@@ -14,6 +16,8 @@ export const INACTIVE_NOTE_MESSAGE = "inactive – left alone";
 export const CAR_LIST_NOT_NULL = ["name", "shared", "created_at", "kind", "layout", "pinned", "updated_at"] as const;
 export const VIEW_MEMBER_CAP = 2000;
 export const VIEW_PIN_CAP = 12;
+/** Member rows and their activity_log rows are written in slices of this size, not one round trip per car. */
+export const VIEW_MEMBER_WRITE_BATCH = 200;
 
 export const FOCUS_COLUMN_KEYS = [
   "open_stop_type",
@@ -354,6 +358,7 @@ export function focusPresetLayout(filters?: Partial<ViewFilters>): ViewLayout {
       "open_stop_type",
       "open_stop_since",
       "open_stop_days",
+      "open_stop_reason",
       "program_status",
       "program_milestone",
       "latest_note",
@@ -368,6 +373,7 @@ export function focusPresetLayout(filters?: Partial<ViewFilters>): ViewLayout {
       "open_stop_type",
       "open_stop_since",
       "open_stop_days",
+      "open_stop_reason",
       "program_status",
       "program_milestone",
       "latest_note",
@@ -392,6 +398,26 @@ export function withLeadingIdentityColumns(order: string[]): string[] {
   const lead = IDENTITY_COLUMNS.filter((key) => order.includes(key));
   const rest = order.filter((key) => key !== "marks" && key !== "car_number");
   return [...lead, ...rest];
+}
+
+const NEAR_FOCUS_COLUMNS = ["open_stop_type", "open_stop_since", "open_stop_days", "open_stop_reason"] as const;
+
+/**
+ * On a fixed list, stop type, since, days, and reason sit just after the car number
+ * when the saved order left them off-screen. A layout that already has them within
+ * two columns of the car number is left as saved.
+ */
+export function withFocusColumnsAfterIdentity(order: string[]): string[] {
+  const lead = withLeadingIdentityColumns(order);
+  const focus = NEAR_FOCUS_COLUMNS.filter((key) => lead.includes(key));
+  if (!focus.length) return lead;
+  let identityEnd = 0;
+  if (lead[0] === "marks") identityEnd = 1;
+  if (lead[identityEnd] === "car_number") identityEnd += 1;
+  const firstFocus = lead.findIndex((key) => (NEAR_FOCUS_COLUMNS as readonly string[]).includes(key));
+  if (firstFocus >= 0 && firstFocus <= identityEnd + 2) return lead;
+  const rest = lead.filter((key) => !(NEAR_FOCUS_COLUMNS as readonly string[]).includes(key));
+  return [...rest.slice(0, identityEnd), ...focus, ...rest.slice(identityEnd)];
 }
 
 export function withLeadingIdentityColumnsLayout<T extends { order: string[]; cols: string[] }>(layout: T): T {
@@ -773,6 +799,160 @@ export function abandonedListPatch(hiddenAt: string): { deleted_at: string } {
 
 export function liveViewNameHeld(deletedAt: string | null | undefined): boolean {
   return deletedAt == null || String(deletedAt).trim() === "";
+}
+
+export function positiveIds(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const value of raw) {
+    const id = Number(value);
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/** A create that already has railcar ids does not re-run the paste match. */
+export function createSkipsPasteMatch(body: { railcar_ids?: unknown }): boolean {
+  return positiveIds(body.railcar_ids).length > 0;
+}
+
+/** Active rows from search, plus inactive matches, so a paste keeps cars the grid hid. */
+export function pasteMemberIds(activeIds: number[], inactiveIds: number[]): number[] {
+  return positiveIds([...activeIds, ...inactiveIds]).slice(0, VIEW_MEMBER_CAP);
+}
+
+export type SuppliedRailcar = {
+  id: number;
+  active: boolean | null;
+  reporting_marks: string | null;
+  car_number: string | null;
+};
+
+/** "000406" and "406" are the same car number. */
+function strippedCarNumber(raw: string | null | undefined): string {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.replace(/^0+/, "") || "0";
+}
+
+/**
+ * Tokens from the pasted text, compared without a database lookup.
+ * A marked token is "TFOX 406". A bare number is only the digits.
+ */
+function pasteCarKeys(text: string): { marked: Set<string>; bare: Set<string> } {
+  const marked = new Set<string>();
+  const bare = new Set<string>();
+  for (const token of parseCarPasteListDetailed(text).tokens) {
+    const split = splitCarNumber(token);
+    const num = strippedCarNumber(split.car_number);
+    const marks = String(split.reporting_marks ?? "").trim().toUpperCase();
+    if (!num) continue;
+    if (marks) marked.add(`${marks} ${num}`);
+    else bare.add(num);
+  }
+  return { marked, bare };
+}
+
+function inactiveCarWasPasted(car: SuppliedRailcar, keys: { marked: Set<string>; bare: Set<string> }): boolean {
+  const num = strippedCarNumber(car.car_number);
+  if (!num) return false;
+  const marks = String(car.reporting_marks ?? "").trim().toUpperCase();
+  if (marks && keys.marked.has(`${marks} ${num}`)) return true;
+  return keys.bare.has(num);
+}
+
+/**
+ * Client-supplied ids are checked against the railcars that were looked up.
+ * An unknown id is unmatched and is not inserted. An inactive car is kept
+ * only when the pasted text names its marks and number. With no paste, only
+ * active cars are kept.
+ */
+export function filterSuppliedRailcars(opts: {
+  requestedIds: number[];
+  cars: SuppliedRailcar[];
+  pasteText: string;
+}): { ids: number[]; inactiveIds: number[]; unmatched: string[] } {
+  const byId = new Map<number, SuppliedRailcar>();
+  for (const car of opts.cars) {
+    const id = Number(car.id);
+    if (Number.isFinite(id) && id > 0) byId.set(id, car);
+  }
+  const pasteText = String(opts.pasteText ?? "").trim();
+  const keys = pasteText ? pasteCarKeys(pasteText) : null;
+  const ids: number[] = [];
+  const inactiveIds: number[] = [];
+  const unmatched: string[] = [];
+  const seen = new Set<number>();
+  for (const raw of opts.requestedIds) {
+    const id = Number(raw);
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    const car = byId.get(id);
+    if (!car) {
+      unmatched.push(String(id));
+      continue;
+    }
+    if (car.active !== false) {
+      ids.push(id);
+      continue;
+    }
+    if (keys && inactiveCarWasPasted(car, keys)) {
+      ids.push(id);
+      inactiveIds.push(id);
+    }
+  }
+  return { ids, inactiveIds, unmatched };
+}
+
+/**
+ * Calls for a saved-view create: one railcars lookup per 200 ids (those run
+ * together), one list insert, one list activity insert, then one member
+ * insert and one activity_log insert per 200 kept cars.
+ */
+export function viewCreateRoundTrips(memberCount: number): {
+  listInserts: 1;
+  listActivityInserts: 1;
+  idLookups: number;
+  memberInserts: number;
+  memberActivityInserts: number;
+  total: number;
+} {
+  const n = Number.isFinite(memberCount) ? Math.max(0, Math.floor(memberCount)) : 0;
+  const slices = n === 0 ? 0 : Math.ceil(n / VIEW_MEMBER_WRITE_BATCH);
+  const idLookups = slices;
+  return {
+    listInserts: 1,
+    listActivityInserts: 1,
+    idLookups,
+    memberInserts: slices,
+    memberActivityInserts: slices,
+    total: 2 + slices * 2 + idLookups,
+  };
+}
+
+/** A pinned view is listed only under Pinned, not again under Shared or Mine. */
+export function partitionSavedViews<T extends { pinned: boolean; shared: boolean; owner?: string | null }>(
+  views: T[],
+  userId: string,
+): { pinned: T[]; shared: T[]; mine: T[] } {
+  return {
+    pinned: views.filter((view) => view.pinned),
+    shared: views.filter((view) => view.shared && !view.pinned),
+    mine: views.filter((view) => !view.shared && !view.pinned && view.owner === userId),
+  };
+}
+
+/** "29 active of 31" when the grid hides inactive members of a larger list. */
+export function viewCountLabel(count: { count: number; active: number; inactive: number } | null | undefined): string {
+  if (!count) return "—";
+  const total = count.active + count.inactive;
+  if (total > 0 && count.inactive > 0 && count.count === count.active && count.count !== total) {
+    return `${count.count.toLocaleString()} active of ${total.toLocaleString()}`;
+  }
+  return count.count.toLocaleString();
 }
 
 export function countCacheKey(id: number, updatedAt: string, showInactive: boolean, active: string): string {

@@ -67,3 +67,25 @@ export function pickRow(row: Record<string, unknown> | null | undefined, keys: s
   }
   return out;
 }
+
+/**
+ * Value written to activity_log.railcar_id.
+ * An explicit null stays null. Omitting the field still defaults a railcar
+ * entity to entity_id. View rows must pass null: entity_id is the view id,
+ * and activity_log_railcar_id_fkey rejects a view id that is not a railcar.
+ */
+export function activityRailcarId(opts: {
+  railcar_id?: number | null;
+  entity_type: string;
+  entity_id: number;
+}): number | null {
+  if (opts.railcar_id !== undefined) return opts.railcar_id;
+  if (opts.entity_type === "railcar") return opts.entity_id;
+  return null;
+}
+
+/** Null satisfies the FK. Any other id must already exist in railcars. */
+export function activityLogRailcarFkAllows(railcarId: number | null, existingRailcarIds: ReadonlySet<number>): boolean {
+  if (railcarId == null) return true;
+  return existingRailcarIds.has(railcarId);
+}

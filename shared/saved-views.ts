@@ -3,7 +3,7 @@
  * The database migration is preview-only; callers must tolerate missing columns.
  */
 
-import { changedKeys } from "./change-log";
+import { activityRailcarId, changedKeys } from "./change-log";
 
 export const SAVED_VIEWS_SCHEMA_MESSAGE = "Saved views need a database update";
 export const VIEWS_UNAVAILABLE_MESSAGE = "Views unavailable";
@@ -711,13 +711,68 @@ export function memberNoteAllowed(active: boolean | null | undefined): { ok: tru
   return { ok: true };
 }
 
+function errorText(error: unknown): { code: string; message: string } {
+  const row = error as { code?: unknown; message?: unknown } | null;
+  const code = row && typeof row === "object" && row.code != null ? String(row.code) : "";
+  const message = error instanceof Error
+    ? error.message
+    : row && typeof row === "object" && typeof row.message === "string"
+      ? row.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return { code, message };
+}
+
+/** Missing column (42703 / PGRST204) or missing table (42P01 / PGRST205) only. */
 export function isMissingViewSchema(error: unknown): boolean {
-  const row = error as { code?: string; message?: string } | null;
-  const code = String(row?.code ?? "");
-  const msg = String(row?.message ?? error ?? "");
-  if (code === "42703" || code === "PGRST204") return true;
-  return /schema cache|could not find the|column .* does not exist/i.test(msg)
-    && /kind|deleted_at|layout|pinned|pin_order|updated_at|updated_by|removed_at|added_at|added_by|sort_order|\bnote\b/i.test(msg);
+  const { code, message } = errorText(error);
+  if (code === "42703" || code === "42P01" || code === "PGRST204" || code === "PGRST205") return true;
+  if (/relation ["']?[\w.]+["']? does not exist/i.test(message)) return true;
+  if (/could not find the table/i.test(message)) return true;
+  return /schema cache|could not find the|column .* does not exist/i.test(message)
+    && /kind|deleted_at|layout|pinned|pin_order|updated_at|updated_by|removed_at|added_at|added_by|sort_order|\bnote\b/i.test(message);
+}
+
+export type ViewWriteErrorBody = {
+  status: number;
+  message: string;
+  code?: string;
+  schema_ready?: false;
+};
+
+/** HTTP body for a view route failure. Schema gaps stay the database-update message. */
+export function viewWriteError(error: unknown): ViewWriteErrorBody {
+  if (isMissingViewSchema(error)) {
+    return { status: 503, schema_ready: false, message: SAVED_VIEWS_SCHEMA_MESSAGE };
+  }
+  const row = (error && typeof error === "object" ? error : {}) as { status?: unknown; code?: unknown };
+  const statusNum = Number(row.status);
+  const status = Number.isFinite(statusNum) && statusNum >= 400 && statusNum < 600 ? statusNum : 500;
+  const { code, message } = errorText(error);
+  const body: ViewWriteErrorBody = { status, message: message || "Request failed" };
+  if (code) body.code = code;
+  return body;
+}
+
+/**
+ * List changes keep entity_id = the view id and railcar_id null.
+ * Undo of car_lists (rlms_undo_change_group) patches by row_pk and copies
+ * railcar_id onto its own activity_log row. That column is a nullable FK.
+ */
+export function listChangeLogIds(viewId: number): { entity_id: number; railcar_id: null } {
+  const railcarId = activityRailcarId({ railcar_id: null, entity_type: "railcar", entity_id: viewId });
+  if (railcarId != null) throw new Error("view id must not be stored as railcar_id");
+  return { entity_id: viewId, railcar_id: null };
+}
+
+/** Soft-delete after a failed create. A non-null deleted_at releases car_lists_name_live_uq. */
+export function abandonedListPatch(hiddenAt: string): { deleted_at: string } {
+  return { deleted_at: hiddenAt };
+}
+
+export function liveViewNameHeld(deletedAt: string | null | undefined): boolean {
+  return deletedAt == null || String(deletedAt).trim() === "";
 }
 
 export function countCacheKey(id: number, updatedAt: string, showInactive: boolean, active: string): string {

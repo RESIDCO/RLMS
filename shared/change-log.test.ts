@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/change-log.test.ts */
 
-import { changedKeys, jsonEqual } from "./change-log";
+import { activityLogRailcarFkAllows, activityRailcarId, changedKeys, jsonEqual } from "./change-log";
 
 let passed = 0;
 let failed = 0;
@@ -34,6 +34,18 @@ ok(insert.before.fleet_status === null && insert.after.fleet_status === "Sold", 
 
 const none = changedKeys({ a: 1 }, { a: 1 });
 ok(Object.keys(none.before).length === 0 && Object.keys(none.after).length === 0, "identical rows yield empty diff");
+
+const existingRailcars = new Set<number>([29330]);
+for (const viewId of [1, 2]) {
+  ok(!existingRailcars.has(viewId), `view id ${viewId} is not a railcar`);
+  const stored = activityRailcarId({ railcar_id: null, entity_type: "railcar", entity_id: viewId });
+  ok(stored === null, `explicit null stays null for view ${viewId}`);
+  ok(stored !== viewId, `view id ${viewId} is not written as railcar_id`);
+  ok(activityLogRailcarFkAllows(stored, existingRailcars), `null railcar_id satisfies activity_log_railcar_id_fkey for view ${viewId}`);
+  ok(!activityLogRailcarFkAllows(viewId, existingRailcars), `writing view id ${viewId} would violate activity_log_railcar_id_fkey`);
+}
+ok(activityRailcarId({ entity_type: "railcar", entity_id: 29330 }) === 29330, "a railcar row still defaults railcar_id to entity_id");
+ok(activityRailcarId({ railcar_id: 29330, entity_type: "railcar", entity_id: 29330 }) === 29330, "an explicit railcar id is kept");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

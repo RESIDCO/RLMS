@@ -1735,10 +1735,23 @@ export default function SearchPage() {
     return ids.filter((id) => !inactive.has(id));
   }
 
+  async function refetchViewsAfterFailure() {
+    try {
+      await refetchViewLists();
+    } catch {
+      // The write error is the one to show. A failed refetch leaves the last list.
+    }
+  }
+
   async function patchView(id: number, body: Record<string, unknown>) {
-    const res = await apiRequest("PATCH", `/api/views/${id}`, body);
-    refreshViews();
-    return res.json();
+    try {
+      const res = await apiRequest("PATCH", `/api/views/${id}`, body);
+      refreshViews();
+      return res.json();
+    } catch (error) {
+      await refetchViewsAfterFailure();
+      throw error;
+    }
   }
 
   async function saveCurrentView() {
@@ -1880,6 +1893,7 @@ export default function SearchPage() {
       }
       toast({ title: "View deleted" });
     } catch (e: any) {
+      await refetchViewsAfterFailure();
       toast({ title: "Could not delete", description: e.message, variant: "destructive" });
     }
   }

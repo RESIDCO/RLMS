@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { changedKeys, type ActivityEntityType } from "@shared/change-log";
+import { activityRailcarId, changedKeys, type ActivityEntityType } from "@shared/change-log";
 import { supabaseAdmin } from "./supabase";
 
 type GroupStore = { group: string; actor: string };
@@ -70,12 +70,7 @@ export async function recordChange(opts: RecordChangeOpts): Promise<{ id: number
     entity_id: opts.entity_id,
     action: opts.action,
     actor: actor ?? null,
-    railcar_id:
-      opts.railcar_id !== undefined
-        ? opts.railcar_id
-        : opts.entity_type === "railcar"
-          ? opts.entity_id
-          : null,
+    railcar_id: activityRailcarId(opts),
     rider_id:
       opts.rider_id !== undefined
         ? opts.rider_id

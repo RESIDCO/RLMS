@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/saved-views.test.ts */
 
+import { activityLogRailcarFkAllows } from "./change-log";
 import { currentMatchesAfter, opOf } from "./undo";
 import {
   CAR_LIST_NOT_NULL,
@@ -13,6 +14,7 @@ import {
   SAVED_VIEWS_SCHEMA_MESSAGE,
   VIEWS_UNAVAILABLE_MESSAGE,
   VIEW_NAME_UNDO_CONFLICT,
+  abandonedListPatch,
   applyJsonbPatch,
   countCacheKey,
   daysStopped,
@@ -26,6 +28,8 @@ import {
   withLeadingIdentityColumns,
   idsWithoutInactive,
   isMissingViewSchema,
+  listChangeLogIds,
+  liveViewNameHeld,
   layoutNeedsFocus,
   memberNoteAllowed,
   memberReaddSnapshots,
@@ -42,6 +46,7 @@ import {
   viewNamesCollide,
   viewUndoNameConflict,
   viewUpdatedAtConflicts,
+  viewWriteError,
   viewWriteStatus,
 } from "./saved-views";
 
@@ -197,6 +202,33 @@ ok(preset.sort?.key === "program_status" && preset.order.includes("view_note") &
 ok(FOCUS_COLUMN_KEYS.includes("open_stop_type") && FOCUS_COLUMN_KEYS.includes("tags"), "focus keys include rent stop and tags");
 ok(isMissingViewSchema({ code: "42703", message: "column car_lists.kind does not exist" }), "missing kind column is the schema gap");
 ok(!isMissingViewSchema({ code: "23505", message: "duplicate key" }), "a unique-name error is not a schema gap");
+const fkError = {
+  code: "23503",
+  message: 'insert or update on table "activity_log" violates foreign key constraint "activity_log_railcar_id_fkey"',
+  details: 'Key (railcar_id)=(1) is not present in table "railcars".',
+};
+ok(!isMissingViewSchema(fkError), "a railcar foreign key error is not a missing column");
+const fkBody = viewWriteError(fkError);
+ok(fkBody.status === 500 && fkBody.code === "23503" && fkBody.message === fkError.message && fkBody.schema_ready == null, "a Supabase error keeps its message and code");
+ok(fkBody.message !== SAVED_VIEWS_SCHEMA_MESSAGE, "the foreign key is not reported as a database update");
+const missingTable = viewWriteError({ code: "42P01", message: 'relation "public.car_lists" does not exist' });
+ok(missingTable.status === 503 && missingTable.message === SAVED_VIEWS_SCHEMA_MESSAGE && missingTable.schema_ready === false, "a missing table uses the database update message");
+ok(isMissingViewSchema({ code: "PGRST205", message: "Could not find the table 'public.car_lists' in the schema cache" }), "a missing PostgREST table is the schema gap");
+ok(viewWriteError(Object.assign(new Error("A view with that name already exists"), { status: 409 })).message === "A view with that name already exists", "an Error keeps its own message");
+
+const existingRailcars = new Set<number>([29330]);
+for (const viewId of [1, 2]) {
+  ok(!existingRailcars.has(viewId), `view id ${viewId} is not a railcar`);
+  const ids = listChangeLogIds(viewId);
+  ok(ids.entity_id === viewId && ids.railcar_id === null, `view ${viewId} is logged with a null railcar_id`);
+  ok(activityLogRailcarFkAllows(ids.railcar_id, existingRailcars), `view ${viewId} satisfies activity_log_railcar_id_fkey`);
+  ok(!activityLogRailcarFkAllows(viewId, existingRailcars), `writing view id ${viewId} as railcar_id would violate the FK`);
+}
+const ghost = { id: 1, name: "Graymont PD", deleted_at: null as string | null };
+ok(liveViewNameHeld(ghost.deleted_at), "a half-created row holds its name");
+const hidden = abandonedListPatch("2026-10-19T15:01:00.000Z");
+ghost.deleted_at = hidden.deleted_at;
+ok(!liveViewNameHeld(ghost.deleted_at) && ghost.deleted_at === "2026-10-19T15:01:00.000Z", "soft-delete releases the live name");
 ok(countCacheKey(3, "2026-10-19T13:00:00.000Z", false, "active").includes("3|"), "count cache key includes the view and updated_at");
 ok(GRAYMONT_NUMBERS.length === 31 && new Set(GRAYMONT_NUMBERS).size === 31, "the Graymont check list is 31 cars");
 ok(GRAYMONT_INACTIVE_NUMBERS.join(",") === "406,416" && GRAYMONT_NUMBERS.filter((n) => (GRAYMONT_INACTIVE_NUMBERS as readonly string[]).includes(n)).length === 2, "406 and 416 are the two inactive cars");

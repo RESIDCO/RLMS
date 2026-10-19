@@ -7,11 +7,13 @@ import {
   VIEWS_UNAVAILABLE_MESSAGE,
   VIEW_MEMBER_CAP,
   VIEW_PIN_CAP,
+  abandonedListPatch,
   canonicalViewName,
   countCacheKey,
   formatEtTime,
   isMissingViewSchema,
   idsWithoutInactive,
+  listChangeLogIds,
   memberNoteAllowed,
   memberReaddSnapshots,
   memberRemoveSnapshots,
@@ -24,6 +26,7 @@ import {
   viewNameKey,
   viewNamesCollide,
   viewUpdatedAtConflicts,
+  viewWriteError,
   viewWriteStatus,
   type ViewKind,
   type ViewLayout,
@@ -206,6 +209,7 @@ async function recordListChange(opts: {
   action: string;
   actor: string;
 }) {
+  const ids = listChangeLogIds(opts.id);
   await recordChange({
     table: "car_lists",
     pk: opts.id,
@@ -213,10 +217,27 @@ async function recordListChange(opts: {
     after: opts.after,
     action: opts.action,
     entity_type: "railcar",
-    entity_id: opts.id,
+    entity_id: ids.entity_id,
+    railcar_id: ids.railcar_id,
     actor: opts.actor,
     detail: { view_id: opts.id },
   });
+}
+
+/** Hide a row whose later create step failed, so the live-name index does not keep it. */
+async function abandonCreatedList(id: number) {
+  if (!Number.isFinite(id) || id <= 0) return;
+  try {
+    const { error } = await supabaseAdmin
+      .from("car_lists")
+      .update(abandonedListPatch(new Date().toISOString()))
+      .eq("id", id)
+      .is("deleted_at", null);
+    if (error) console.error("[views] half-created view left live", id, error.message ?? error.code ?? error);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[views] half-created view left live", id, message);
+  }
 }
 
 async function recordMemberChange(opts: {
@@ -421,41 +442,47 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
       throw error;
     }
     const row = data as Record<string, unknown>;
-    const snaps = viewCreateSnapshots(row, hiddenAt);
-    await recordListChange({
-      id: Number(row.id),
-      before: snaps.before,
-      after: snaps.after,
-      action: "view_create",
-      actor: actor.id,
-    });
-    const members = [];
-    for (let i = 0; i < railcarIds.length; i += 200) {
-      const slice = railcarIds.slice(i, i + 200).map((railcar_id, index) => ({
-        list_id: row.id,
-        railcar_id,
-        added_by: actor.id,
-        sort_order: i + index,
-        note: null,
-        removed_at: null,
-      }));
-      const { data: inserted, error: memberError } = await supabaseAdmin.from("car_list_members").insert(slice).select("*");
-      if (memberError) throw memberError;
-      for (const member of inserted ?? []) {
-        await recordMemberChange({
-          id: Number(member.id),
-          listId: Number(row.id),
-          railcarId: Number(member.railcar_id),
-          before: {},
-          after: member as Record<string, unknown>,
-          action: "view_member_add",
-          actor: actor.id,
-        });
-        members.push(member);
+    const id = Number(row.id);
+    try {
+      const snaps = viewCreateSnapshots(row, hiddenAt);
+      await recordListChange({
+        id,
+        before: snaps.before,
+        after: snaps.after,
+        action: "view_create",
+        actor: actor.id,
+      });
+      const members = [];
+      for (let i = 0; i < railcarIds.length; i += 200) {
+        const slice = railcarIds.slice(i, i + 200).map((railcar_id, index) => ({
+          list_id: row.id,
+          railcar_id,
+          added_by: actor.id,
+          sort_order: i + index,
+          note: null,
+          removed_at: null,
+        }));
+        const { data: inserted, error: memberError } = await supabaseAdmin.from("car_list_members").insert(slice).select("*");
+        if (memberError) throw memberError;
+        for (const member of inserted ?? []) {
+          await recordMemberChange({
+            id: Number(member.id),
+            listId: Number(row.id),
+            railcarId: Number(member.railcar_id),
+            before: {},
+            after: member as Record<string, unknown>,
+            action: "view_member_add",
+            actor: actor.id,
+          });
+          members.push(member);
+        }
       }
+      clearViewCountCache();
+      return { view: asView(row), members, paste };
+    } catch (later) {
+      await abandonCreatedList(id);
+      throw later;
     }
-    clearViewCountCache();
-    return { view: asView(row), members, paste };
   });
   return result;
 }
@@ -911,14 +938,11 @@ function actorFrom(req: Request): Actor | null {
 }
 
 function sendError(res: Response, error: unknown) {
-  const status = Number((error as { status?: number })?.status) || 500;
-  const message = error instanceof Error ? error.message : SAVED_VIEWS_SCHEMA_MESSAGE;
   if (isMissingViewSchema(error)) {
     schemaCache = { at: Date.now(), ready: false, unavailable: false };
-    res.status(503).json({ schema_ready: false, message: SAVED_VIEWS_SCHEMA_MESSAGE });
-    return;
   }
-  res.status(status).json({ message });
+  const { status, ...body } = viewWriteError(error);
+  res.status(status).json(body);
 }
 
 export function registerSavedViewRoutes(

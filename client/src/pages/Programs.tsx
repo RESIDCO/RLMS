@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
-import { useCanEdit } from "@/lib/AuthContext";
+import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +23,7 @@ import { navigateHash, programPathWithFrom, useHashSearch } from "@/lib/hash-loc
 import ProgramCarPicker, { type PickedCar } from "@/components/ProgramCarPicker";
 import AccountCombobox from "@/components/AccountCombobox";
 import { ProgramPreviewDialog } from "@/components/ProgramPreviewDialog";
+import { ProgramTrackerSyncDialog } from "@/components/ProgramTrackerSyncDialog";
 import {
   LIFECYCLE_BADGE,
   LIFECYCLE_LABEL,
@@ -123,6 +124,8 @@ export default function ProgramsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const canEdit = useCanEdit();
+  const isAdmin = useIsAdmin();
+  const [trackerOpen, setTrackerOpen] = useState(false);
   const hashSearch = useHashSearch();
   const hashFilters = useMemo(
     () => readListFilters(new URLSearchParams(hashSearch.replace(/^\?/, ""))),
@@ -259,6 +262,7 @@ export default function ProgramsPage() {
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
+      <ProgramTrackerSyncDialog open={trackerOpen} onClose={() => setTrackerOpen(false)} />
       <PageHeader
         title="Programs"
         subtitle="Open work across the fleet — returns, remarks, acquisitions, qualifications, inspections"
@@ -270,6 +274,11 @@ export default function ProgramsPage() {
             <Button size="sm" variant="outline" onClick={exportSelected} disabled={!selected.size} data-testid="button-export-selected-programs">
               <Download className="h-4 w-4" /> Export selected
             </Button>
+            {isAdmin && (
+              <Button size="sm" variant="outline" onClick={() => setTrackerOpen(true)} data-testid="button-tracker-sync">
+                <FileSpreadsheet className="h-4 w-4" /> Tracker sync
+              </Button>
+            )}
             {canEdit && (
               <Button size="sm" onClick={() => setCreateOpen(true)} data-testid="button-create-program">
                 <Plus className="h-4 w-4" /> New Program

@@ -236,13 +236,15 @@ export type ProgramFieldType = "text" | "number" | "currency" | "date" | "boolea
 
 export type ProgramFieldDef = {
   id: number;
-  category_id: number;
+  category_id: number | null;
   field_key: string;
   label: string;
   field_type: ProgramFieldType;
   section: string | null;
   sort_order: number;
   select_options: string[] | null;
+  /** Global optional fields (category_id null) stay hidden until added from Columns. */
+  is_optional?: boolean;
 };
 
 export const CATEGORY_BADGE: Record<string, string> = {

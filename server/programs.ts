@@ -350,15 +350,18 @@ export async function listCategories() {
   return data ?? [];
 }
 
-export async function listFieldDefs(categoryId: number): Promise<ProgramFieldDef[]> {
-  const { data, error } = await supabaseAdmin
-    .from("program_field_defs")
-    .select("*")
-    .eq("category_id", categoryId)
-    .order("sort_order", { ascending: true })
-    .order("id", { ascending: true });
+export async function listFieldDefs(categoryId: number | null): Promise<ProgramFieldDef[]> {
+  let q = supabaseAdmin.from("program_field_defs").select("*");
+  if (categoryId) q = q.or(`category_id.eq.${categoryId},category_id.is.null`);
+  else q = q.is("category_id", null);
+  const { data, error } = await q.order("sort_order", { ascending: true }).order("id", { ascending: true });
   if (error) throw error;
-  return (data ?? []) as ProgramFieldDef[];
+  const byKey = new Map<string, ProgramFieldDef>();
+  for (const row of (data ?? []) as ProgramFieldDef[]) {
+    const existing = byKey.get(row.field_key);
+    if (!existing || (existing.category_id == null && row.category_id != null)) byKey.set(row.field_key, row);
+  }
+  return Array.from(byKey.values());
 }
 
 export async function getProgram(id: number) {
@@ -378,7 +381,7 @@ export async function getProgram(id: number) {
   if (!data) return null;
   const category = Array.isArray(data.category) ? data.category[0] ?? null : data.category;
   const account = Array.isArray(data.account) ? data.account[0] ?? null : data.account ?? null;
-  const field_defs = data.category_id ? await listFieldDefs(Number(data.category_id)) : [];
+  const field_defs = await listFieldDefs(data.category_id ? Number(data.category_id) : null);
   const { data: progress } = await supabaseAdmin.from("v_program_progress").select("*").eq("program_id", id).maybeSingle();
   return {
     ...data,

@@ -1,0 +1,1330 @@
+program,program_car_id,car,field,action
+xOL2526 - Solvay Return,163,SMNX 702,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,163,SMNX 702,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,163,SMNX 702,return_location,inactive car - no change
+xOL2526 - Solvay Return,163,SMNX 702,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,163,SMNX 702,remark_date,inactive car - no change
+xOL2526 - Solvay Return,163,SMNX 702,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,164,SMNX 594,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,164,SMNX 594,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,164,SMNX 594,return_location,inactive car - no change
+xOL2526 - Solvay Return,164,SMNX 594,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,164,SMNX 594,remark_date,inactive car - no change
+xOL2526 - Solvay Return,164,SMNX 594,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,165,SMNX 595,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,165,SMNX 595,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,165,SMNX 595,return_location,inactive car - no change
+xOL2526 - Solvay Return,165,SMNX 595,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,165,SMNX 595,remark_date,inactive car - no change
+xOL2526 - Solvay Return,165,SMNX 595,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,166,SMNX 659,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,166,SMNX 659,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,166,SMNX 659,return_location,inactive car - no change
+xOL2526 - Solvay Return,166,SMNX 659,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,166,SMNX 659,remark_date,inactive car - no change
+xOL2526 - Solvay Return,166,SMNX 659,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,167,SMNX 661,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,167,SMNX 661,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,167,SMNX 661,return_location,inactive car - no change
+xOL2526 - Solvay Return,167,SMNX 661,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,167,SMNX 661,remark_date,inactive car - no change
+xOL2526 - Solvay Return,167,SMNX 661,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,168,SMNX 699,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,168,SMNX 699,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,168,SMNX 699,return_location,inactive car - no change
+xOL2526 - Solvay Return,168,SMNX 699,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,168,SMNX 699,remark_date,inactive car - no change
+xOL2526 - Solvay Return,168,SMNX 699,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,169,SMNX 781,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,169,SMNX 781,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,169,SMNX 781,return_location,inactive car - no change
+xOL2526 - Solvay Return,169,SMNX 781,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,169,SMNX 781,remark_date,inactive car - no change
+xOL2526 - Solvay Return,169,SMNX 781,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,170,SMNX 801,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,170,SMNX 801,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,170,SMNX 801,return_location,inactive car - no change
+xOL2526 - Solvay Return,170,SMNX 801,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,170,SMNX 801,remark_date,inactive car - no change
+xOL2526 - Solvay Return,170,SMNX 801,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,171,SMNX 921,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,171,SMNX 921,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,171,SMNX 921,return_location,inactive car - no change
+xOL2526 - Solvay Return,171,SMNX 921,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,171,SMNX 921,remark_date,inactive car - no change
+xOL2526 - Solvay Return,171,SMNX 921,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,172,SMNX 931,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,172,SMNX 931,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,172,SMNX 931,return_location,inactive car - no change
+xOL2526 - Solvay Return,172,SMNX 931,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,172,SMNX 931,remark_date,inactive car - no change
+xOL2526 - Solvay Return,172,SMNX 931,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,173,SMNX 575,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,173,SMNX 575,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,173,SMNX 575,return_location,inactive car - no change
+xOL2526 - Solvay Return,173,SMNX 575,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,173,SMNX 575,remark_date,inactive car - no change
+xOL2526 - Solvay Return,173,SMNX 575,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,174,SMNX 599,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,174,SMNX 599,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,174,SMNX 599,return_location,inactive car - no change
+xOL2526 - Solvay Return,174,SMNX 599,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,174,SMNX 599,remark_date,inactive car - no change
+xOL2526 - Solvay Return,174,SMNX 599,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,175,SMNX 636,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,175,SMNX 636,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,175,SMNX 636,return_location,inactive car - no change
+xOL2526 - Solvay Return,175,SMNX 636,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,175,SMNX 636,remark_date,inactive car - no change
+xOL2526 - Solvay Return,175,SMNX 636,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,176,SMNX 778,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,176,SMNX 778,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,176,SMNX 778,return_location,inactive car - no change
+xOL2526 - Solvay Return,176,SMNX 778,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,176,SMNX 778,remark_date,inactive car - no change
+xOL2526 - Solvay Return,176,SMNX 778,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,177,SMNX 883,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,177,SMNX 883,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,177,SMNX 883,return_location,inactive car - no change
+xOL2526 - Solvay Return,177,SMNX 883,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,177,SMNX 883,remark_date,inactive car - no change
+xOL2526 - Solvay Return,177,SMNX 883,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,178,SMNX 948,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,178,SMNX 948,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,178,SMNX 948,return_location,inactive car - no change
+xOL2526 - Solvay Return,178,SMNX 948,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,178,SMNX 948,remark_date,inactive car - no change
+xOL2526 - Solvay Return,178,SMNX 948,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,179,SMNX 949,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,179,SMNX 949,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,179,SMNX 949,return_location,inactive car - no change
+xOL2526 - Solvay Return,179,SMNX 949,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,179,SMNX 949,remark_date,inactive car - no change
+xOL2526 - Solvay Return,179,SMNX 949,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,180,SMNX 950,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,180,SMNX 950,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,180,SMNX 950,return_location,inactive car - no change
+xOL2526 - Solvay Return,180,SMNX 950,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,180,SMNX 950,remark_date,inactive car - no change
+xOL2526 - Solvay Return,180,SMNX 950,loaded_by_lessee,inactive car - no change
+xOL2526 - Solvay Return,225,SMNX 750,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,225,SMNX 750,status,inactive car - no change
+xOL2526 - Solvay Return,225,SMNX 750,remark_date,inactive car - no change
+xOL2526 - Solvay Return,232,SMNX 910,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,232,SMNX 910,status,inactive car - no change
+xOL2526 - Solvay Return,232,SMNX 910,remark_date,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,umler_rights_granted,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,status,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,return_location,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,arrived_lessee_destination,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,246,SMNX 936,remark_date,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,umler_rights_granted,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,status,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,return_location,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,arrived_lessee_destination,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,remark_date,inactive car - no change
+xOL2526 - Solvay Return,245,SMNX 922,trace_date,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,operating_lease,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,umler_rights_granted,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,pre_registered,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,status,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,return_location,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,arrived_lessee_destination,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,remark_material_ordered,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,remark_date,inactive car - no change
+xOL2526 - Solvay Return,247,SMNX 951,trace_date,inactive car - no change
+OL1826 - Ingevity,1056,TFOX 9345,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1057,TFOX 9322,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,original_code6,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,original_code7,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,final_code6,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,final_code7,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1054,TFOX 7802,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1055,TFOX 9900,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,final_code6,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,final_code7,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1078,TFOX 8703,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,original_code6,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,original_code7,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,final_code6,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,final_code7,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1058,TFOX 9323,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,original_code6,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,original_code7,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,final_code6,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,final_code7,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1059,TFOX 9326,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,original_code6,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,original_code7,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,final_code6,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,final_code7,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1060,TFOX 8802,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,original_code6,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,original_code7,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,final_code6,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,final_code7,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1061,TFOX 9310,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,original_code6,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,original_code7,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,final_code6,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,final_code7,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1062,TFOX 960005,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,original_code6,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,original_code7,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,final_code6,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,final_code7,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1063,TFOX 960015,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,original_code6,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,original_code7,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,final_code6,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,final_code7,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1064,TFOX 9901,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,original_code6,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,original_code7,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,final_code6,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,final_code7,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1065,TFOX 8704,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,original_code6,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,original_code7,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,final_code6,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,final_code7,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1066,TFOX 8807,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,original_code6,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,original_code7,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,final_code6,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,final_code7,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1067,TFOX 960023,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,original_code6,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,original_code7,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,final_code6,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,final_code7,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1068,TFOX 9309,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,original_code6,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,original_code7,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,final_code6,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,final_code7,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1069,TFOX 960002,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,original_code6,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,original_code7,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,final_code6,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,final_code7,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1070,TFOX 9138,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,original_code6,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,original_code7,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,final_code6,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,final_code7,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1071,TFOX 9321,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,original_code6,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,original_code7,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,final_code6,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,final_code7,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1072,TFOX 9328,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,original_code6,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,original_code7,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,final_code6,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,final_code7,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1073,TFOX 9325,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,original_code6,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,original_code7,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,final_code6,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,final_code7,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1074,TFOX 9303,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,original_code6,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,original_code7,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,final_code6,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,final_code7,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1075,TFOX 9304,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,original_code6,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,original_code7,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,final_code6,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,final_code7,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1076,TFOX 9315,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,original_code6,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,original_code7,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,final_code6,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,final_code7,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1077,TFOX 960022,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,original_code6,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,original_code7,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,final_code6,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,final_code7,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1080,TFOX 9287,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,original_code6,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,original_code7,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,final_code6,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,final_code7,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1082,TFOX 8808,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,original_code6,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,original_code7,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,final_code6,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,final_code7,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1083,TFOX 9305,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,original_code6,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,original_code7,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,final_code6,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,final_code7,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1084,TFOX 9155,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,original_code6,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,original_code7,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,final_code6,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,final_code7,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1085,TFOX 9157,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,original_code6,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,original_code7,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,final_code6,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,final_code7,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1081,TFOX 9165,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,original_code6,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,original_code7,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,final_code6,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,final_code7,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1086,TFOX 9172,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,original_code6,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,original_code7,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,final_code6,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,final_code7,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1087,TFOX 9300,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,original_code6,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,original_code7,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,final_code6,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,final_code7,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1088,TFOX 9301,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,original_code6,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,original_code7,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,final_code6,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,final_code7,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1089,TFOX 9349,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,original_code6,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,original_code7,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,final_code6,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,final_code7,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1090,TFOX 960021,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,original_code6,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,original_code7,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,final_code6,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,final_code7,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1091,TFOX 960003,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,original_code6,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,original_code7,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,final_code6,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,final_code7,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1092,TFOX 960008,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,original_code6,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,original_code7,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,final_code6,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,final_code7,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1093,TFOX 960011,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,original_code6,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,original_code7,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,final_code6,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,final_code7,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1094,TFOX 9494,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,original_code6,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,original_code7,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,final_code6,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,final_code7,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1095,TFOX 960012,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,original_code6,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,original_code7,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,final_code6,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,final_code7,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1096,TFOX 9347,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,original_code6,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,original_code7,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,final_code6,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,final_code7,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1097,TFOX 9318,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1098,TFOX 960007,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1098,TFOX 960007,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1099,TFOX 8804,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1099,TFOX 8804,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1100,TFOX 8705,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1100,TFOX 8705,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1101,TFOX 8805,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1101,TFOX 8805,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,original_code6,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,original_code7,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,final_code6,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,final_code7,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1079,TFOX 9171,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1102,TFOX 9384,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1102,TFOX 9384,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1103,TFOX 9307,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1103,TFOX 9307,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1103,TFOX 9307,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1115,TFOX 8800,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1115,TFOX 8800,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1116,TFOX 9381,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1116,TFOX 9381,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1117,TFOX 9382,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1117,TFOX 9382,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1118,TFOX 960009,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1118,TFOX 960009,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1119,TFOX 960020,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1119,TFOX 960020,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1119,TFOX 960020,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1120,TFOX 9317,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1120,TFOX 9317,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,original_code6,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,original_code7,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,final_code6,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,final_code7,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1104,TFOX 9164,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,original_code6,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,original_code7,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,final_code6,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,final_code7,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1105,TFOX 9158,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,original_code6,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,original_code7,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,final_code6,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,final_code7,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1106,TFOX 9159,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,original_code6,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,original_code7,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,final_code6,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,final_code7,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1107,TFOX 9163,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1121,TFOX 8809,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1121,TFOX 8809,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1121,TFOX 8809,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1121,TFOX 8809,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,original_code6,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,original_code7,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,final_code6,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,final_code7,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1109,TFOX 8806,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1122,TFOX 960018,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1122,TFOX 960018,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1122,TFOX 960018,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1122,TFOX 960018,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1123,TFOX 960019,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1123,TFOX 960019,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1123,TFOX 960019,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1123,TFOX 960019,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1124,TFOX 9327,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1124,TFOX 9327,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1125,TFOX 9306,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1125,TFOX 9306,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1125,TFOX 9306,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1126,TFOX 960001,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1126,TFOX 960001,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1126,TFOX 960001,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1126,TFOX 960001,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1127,TFOX 9136,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1127,TFOX 9136,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,original_code6,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,original_code7,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,final_code6,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,final_code7,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1110,TFOX 9166,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,original_code6,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,original_code7,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,final_code6,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,final_code7,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1111,TFOX 9348,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,original_code6,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,original_code7,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,final_code6,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,final_code7,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1112,TFOX 9151,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,original_code6,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,original_code7,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,final_code6,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,final_code7,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1113,TFOX 9285,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,original_code6,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,original_code7,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,final_code6,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,final_code7,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1114,TFOX 9491,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,original_code6,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,original_code7,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,final_code6,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,final_code7,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1108,TFOX 9493,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1128,TFOX 9311,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1128,TFOX 9311,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,original_code6,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,original_code7,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,final_code6,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,final_code7,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1147,TFOX 9316,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,original_code6,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,original_code7,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,final_code6,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,final_code7,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1148,TFOX 9150,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,original_code6,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,original_code7,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,final_code6,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,final_code7,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1149,TFOX 9346,trace_date,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,original_code6,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,original_code7,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,final_code6,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,final_code7,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1150,TFOX 960013,trace_date,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,original_code6,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,original_code7,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,final_code6,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,final_code7,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1151,TFOX 9286,trace_date,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,original_code6,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,original_code7,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,final_code6,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,final_code7,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1152,TFOX 960024,trace_date,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,shop_location,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,original_code6,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,original_code7,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,final_code6,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,final_code7,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1134,TFOX 9154,trace_date,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,shop_location,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,original_code6,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,original_code7,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,final_code6,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,final_code7,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1135,TFOX 9160,trace_date,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,shop_location,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,original_code6,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,original_code7,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,final_code6,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,final_code7,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1153,TFOX 9168,trace_date,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,shop_location,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,original_code6,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,original_code7,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,final_code6,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,final_code7,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1138,TFOX 9178,trace_date,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,shop_location,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,original_code6,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,original_code7,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,final_code6,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,final_code7,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1139,TFOX 9288,trace_date,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,shop_location,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,original_code6,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,original_code7,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,final_code6,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,final_code7,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,arrived_lessee_destination,inactive car - no change
+OL1826 - Ingevity,1145,TFOX 9492,trace_date,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,cleaning_certificate_received,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,shop_location,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,arrived_shop_date,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,original_code6,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,original_code7,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,original_brc_total,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,original_approval_date,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,final_code6,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,final_code7,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,final_brc_total,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,final_approval_date,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,outbound_target_date,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,dispo_requested,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,dispo_provided,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,dispo_instructions,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,released_from_shop,inactive car - no change
+OL1826 - Ingevity,1129,TFOX 960010,trace_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,original_approval_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,outbound_target_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,b_o_estimate_cost,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,b_o_estimate_approved,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,650,MCEX 417,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,original_approval_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,outbound_target_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,b_o_estimate_cost,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,b_o_estimate_approved,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,651,MCEX 418,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,original_approval_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,outbound_target_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,b_o_estimate_cost,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,b_o_estimate_approved,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,released_from_shop,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,657,MCEX 405,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,original_approval_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,outbound_target_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,b_o_estimate_cost,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,b_o_estimate_approved,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,released_from_shop,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,658,MCEX 445,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,693,TFOX 415,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,693,TFOX 415,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,693,TFOX 415,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,693,TFOX 415,released_from_shop,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,693,TFOX 415,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,693,TFOX 415,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,694,TFOX 412,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,694,TFOX 412,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,694,TFOX 412,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,694,TFOX 412,released_from_shop,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,694,TFOX 412,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,694,TFOX 412,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,695,TFOX 414,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,695,TFOX 414,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,695,TFOX 414,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,695,TFOX 414,released_from_shop,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,695,TFOX 414,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,695,TFOX 414,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,686,TFOX 416,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,686,TFOX 416,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,686,TFOX 416,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,686,TFOX 416,lease_start_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,676,TFOX 406,operating_lease,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,676,TFOX 406,outbound_target_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,676,TFOX 406,brc_complete,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,676,TFOX 406,brc_complete_date,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,676,TFOX 406,released_from_shop,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,676,TFOX 406,arrived_lessee_destination,inactive car - no change
+EA2330 - xMidwest Railcar MCEX,676,TFOX 406,trace_date,inactive car - no change
+OL1801 & 1818 - OXY,1175,OCCX 1054,operating_lease,inactive car - no change
+OL1801 & 1818 - OXY,1175,OCCX 1054,eol_date,inactive car - no change
+OL1801 & 1818 - OXY,1175,OCCX 1054,trace_date,inactive car - no change
+OL1940 - West Plains,1200,OFOX 74986,eol_date,inactive car - no change
+OL1940 - West Plains,1200,OFOX 74986,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1200,OFOX 74986,trace_date,inactive car - no change
+OL1940 - West Plains,1201,OFOX 74990,eol_date,inactive car - no change
+OL1940 - West Plains,1201,OFOX 74990,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1201,OFOX 74990,trace_date,inactive car - no change
+OL1940 - West Plains,1202,OFOX 75291,eol_date,inactive car - no change
+OL1940 - West Plains,1202,OFOX 75291,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1202,OFOX 75291,trace_date,inactive car - no change
+OL1940 - West Plains,1203,OFOX 385120,eol_date,inactive car - no change
+OL1940 - West Plains,1203,OFOX 385120,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1203,OFOX 385120,trace_date,inactive car - no change
+OL1940 - West Plains,1204,OFOX 385138,eol_date,inactive car - no change
+OL1940 - West Plains,1204,OFOX 385138,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1204,OFOX 385138,trace_date,inactive car - no change
+OL1940 - West Plains,1205,OFOX 385174,eol_date,inactive car - no change
+OL1940 - West Plains,1205,OFOX 385174,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1205,OFOX 385174,trace_date,inactive car - no change
+OL1940 - West Plains,1206,OFOX 385192,eol_date,inactive car - no change
+OL1940 - West Plains,1206,OFOX 385192,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1206,OFOX 385192,trace_date,inactive car - no change
+OL1940 - West Plains,1207,OFOX 385352,eol_date,inactive car - no change
+OL1940 - West Plains,1207,OFOX 385352,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1207,OFOX 385352,trace_date,inactive car - no change
+OL1940 - West Plains,1208,OFOX 385443,eol_date,inactive car - no change
+OL1940 - West Plains,1208,OFOX 385443,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1208,OFOX 385443,trace_date,inactive car - no change
+OL1940 - West Plains,1209,OFOX 385447,eol_date,inactive car - no change
+OL1940 - West Plains,1209,OFOX 385447,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1209,OFOX 385447,trace_date,inactive car - no change
+OL1940 - West Plains,1210,OFOX 385448,eol_date,inactive car - no change
+OL1940 - West Plains,1210,OFOX 385448,scrap_arrival_date,inactive car - no change
+OL1940 - West Plains,1210,OFOX 385448,trace_date,inactive car - no change
+OL1940 - West Plains,1212,OFOX 385421,eol_date,inactive car - no change
+OL1940 - West Plains,1212,OFOX 385421,trace_date,inactive car - no change
+OL1940 - West Plains,1232,OFOX 385154,eol_date,inactive car - no change
+OL1940 - West Plains,1232,OFOX 385154,trace_date,inactive car - no change
+OL1937 - Hutchinson Transport,732,OFCX 74500,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,733,OFCX 743371,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,734,OFCX 348,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,735,OFCX 364,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,736,OFCX 370,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,737,OFCX 372,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,738,OFCX 2195,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,740,OFCX 67008,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,741,OFCX 75073,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,742,OFCX 120103,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,743,OFCX 125010,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,744,OFCX 125028,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,745,OFCX 125121,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,746,OFCX 390197,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,747,OFOX 74725,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,748,OFOX 125089,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,749,OFCX 125061,scrap_location,inactive car - no change
+OL1937 - Hutchinson Transport,749,OFCX 125061,scrap_arrival_date,inactive car - no change
+OL1937 - Hutchinson Transport,749,OFCX 125061,trace_date,inactive car - no change
+OL1716 - Southwest Salt,750,OFOX 3073,scrap_location,inactive car - no change
+OL1716 - Southwest Salt,750,OFOX 3073,scrap_arrival_date,inactive car - no change
+OL1716 - Southwest Salt,750,OFOX 3073,trace_date,inactive car - no change
+OL1716 - Southwest Salt,751,OFOX 3156,scrap_location,inactive car - no change
+OL1716 - Southwest Salt,751,OFOX 3156,scrap_arrival_date,inactive car - no change
+OL1716 - Southwest Salt,751,OFOX 3156,trace_date,inactive car - no change
+OL1716 - Southwest Salt,752,OFOX 3100,scrap_location,inactive car - no change
+OL1716 - Southwest Salt,752,OFOX 3100,scrap_arrival_date,inactive car - no change
+OL1716 - Southwest Salt,752,OFOX 3100,trace_date,inactive car - no change
+OL1716 - Southwest Salt,753,OFOX 3136,scrap_location,inactive car - no change
+OL1716 - Southwest Salt,753,OFOX 3136,scrap_arrival_date,inactive car - no change
+OL1716 - Southwest Salt,753,OFOX 3136,trace_date,inactive car - no change
+OL1716 - Southwest Salt,754,OFOX 3181,scrap_location,inactive car - no change
+OL1716 - Southwest Salt,754,OFOX 3181,scrap_arrival_date,inactive car - no change
+OL1716 - Southwest Salt,754,OFOX 3181,trace_date,inactive car - no change
+OL1716 - Southwest Salt,755,OFOX 3220,scrap_location,inactive car - no change
+OL1716 - Southwest Salt,755,OFOX 3220,scrap_arrival_date,inactive car - no change
+OL1716 - Southwest Salt,755,OFOX 3220,trace_date,inactive car - no change
+OL1806 - Olin - Scrap,1052,OLNX 115016,scrap_arrival_date,inactive car - no change
+OL1806 - Olin - Scrap,1052,OLNX 115016,settlement_amount,inactive car - no change
+OL1806 - Olin - Scrap,1052,OLNX 115016,trace_date,inactive car - no change
+OL1806 - Olin - Scrap,948,OLNX 116007,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,949,OLNX 116052,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,950,OLNX 116136,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,951,OLNX 115013,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,952,OLNX 116017,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,953,OLNX 116021,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,954,OLNX 116128,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,955,OLNX 116001,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,956,OLNX 116042,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,957,OLNX 115004,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,958,OLNX 115011,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,959,OLNX 117109,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,960,OLNX 116131,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,961,OLNX 115006,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,966,OLNX 116024,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,967,OLNX 116041,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,968,OLNX 117104,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,969,OLNX 117106,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,970,OLNX 116033,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,973,OLNX 117100,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,974,OLNX 115018,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,975,OLNX 116037,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,976,OLNX 116059,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,977,OLNX 116029,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,978,OLNX 116043,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,979,OLNX 117105,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,980,OLNX 115022,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,981,OLNX 117102,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,982,OLNX 116048,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,983,OLNX 117112,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,984,OLNX 116057,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,985,OLNX 116040,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,986,OLNX 116050,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,987,OLNX 116135,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,988,OLNX 115001,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,989,OLNX 117101,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,990,OLNX 115017,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,991,OLNX 117107,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,992,OLNX 116053,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,993,OLNX 116035,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,994,OLNX 116014,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,995,OLNX 116130,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,996,OLNX 116061,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,997,OLNX 115009,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,998,OLNX 117108,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,999,OLNX 116134,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1000,OLNX 116006,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1001,OLNX 116038,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1002,OLNX 117111,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1003,OLNX 116016,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1004,OLNX 116028,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1005,OLNX 115010,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1006,OLNX 116022,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1007,OLNX 116058,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1008,OLNX 116010,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1009,OLNX 116045,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1010,OLNX 116051,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1011,OLNX 116019,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1012,OLNX 116005,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1013,OLNX 116009,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1015,OLNX 117114,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1016,OLNX 116049,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1020,OLNX 117110,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1021,OLNX 116008,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1022,OLNX 115023,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1024,OLNX 115005,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1025,OLNX 116002,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1026,OLNX 116046,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1027,OLNX 115008,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1028,OLNX 116054,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1029,OLNX 117113,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1031,OLNX 115014,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1032,OLNX 116031,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1035,OLNX 116047,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1036,OLNX 116056,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1037,OLNX 115020,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1038,OLNX 115021,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1039,OLNX 116034,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1040,OLNX 116060,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1047,OLNX 116000,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1048,OLNX 116011,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1050,OLNX 115012,cleaning_certificate_received,inactive car - no change
+OL1806 - Olin - Scrap,1051,OLNX 116044,cleaning_certificate_received,inactive car - no change
+OL2405 - The Andersons,759,AEX 22722,operating_lease,inactive car - no change
+OL2405 - The Andersons,759,AEX 22722,remark_date,inactive car - no change
+OL2405 - The Andersons,767,TFOX 22805,operating_lease,inactive car - no change
+OL2405 - The Andersons,795,TFOX 22835,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,701,TFOX 3107,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,701,TFOX 3107,status,inactive car - no change
+VARIES - SOLD TO TRIPLE M,701,TFOX 3107,trace_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,699,TFOX 3084,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,710,TFOX 3242,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,702,TFOX 3253,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,696,TFOX 3000,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,700,TFOX 3310,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,697,TFOX 3272,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,711,TFOX 3040,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,705,TFOX 3115,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,706,TFOX 3200,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,708,TFOX 3290,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,698,TFOX 3061,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,716,TFOX 3035,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,716,TFOX 3035,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,717,TFOX 3086,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,717,TFOX 3086,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,718,TFOX 3088,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,718,TFOX 3088,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,719,TFOX 3117,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,719,TFOX 3117,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,720,TFOX 3123,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,720,TFOX 3123,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,721,TFOX 3131,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,721,TFOX 3131,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,722,TFOX 3156,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,722,TFOX 3156,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,723,TFOX 3213,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,723,TFOX 3213,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,724,TFOX 3228,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,724,TFOX 3228,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,725,TFOX 3236,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,725,TFOX 3236,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,726,TFOX 3321,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,726,TFOX 3321,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,727,TFOX 3347,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,727,TFOX 3347,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,728,TFOX 3316,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,728,TFOX 3316,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,729,TFOX 3351,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,729,TFOX 3351,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,730,TFOX 3327,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,730,TFOX 3327,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,731,TFOX 3301,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,731,TFOX 3301,remark_date,inactive car - no change
+VARIES - SOLD TO TRIPLE M,715,TFOX 3085,operating_lease,inactive car - no change
+VARIES - SOLD TO TRIPLE M,715,TFOX 3085,remark_date,inactive car - no change

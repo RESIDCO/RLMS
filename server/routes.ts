@@ -131,6 +131,7 @@ import { loadVcfRemarkAliases } from "./remark-in-place";
 import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } from "./lease-mgmt";
 import { registerCrmRoutes } from "./crm";
 import { registerColumnPrefRoutes } from "./column-prefs";
+import { createShopRecord, registerProgramTrackerRoutes } from "./program-tracker-sync";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
@@ -4507,6 +4508,7 @@ export async function registerRoutes(
   });
 
   registerColumnPrefRoutes(app);
+  registerProgramTrackerRoutes(app, upload);
 
   // GET /api/admin/users — list all users with roles (admin only)
   app.get("/api/admin/users", async (req, res) => {
@@ -6026,18 +6028,15 @@ export async function registerRoutes(
 
   app.post("/api/programs/shops", async (req, res) => {
     try {
-      if (!(await requireWrite(req, res))) return;
+      const actor = await requireWrite(req, res);
+      if (!actor) return;
       const name = String(req.body.name ?? "").trim();
       if (!name) return res.status(400).json({ error: "Shop name is required" });
-      const { data: existing } = await supabaseAdmin.from("shops").select("*").ilike("name", name).limit(1);
-      if (existing && existing.length) return res.json(existing[0]);
-      const { data, error } = await supabaseAdmin.from("shops").insert({
-        name,
+      const programId = req.body.program_id == null || req.body.program_id === "" ? null : Number(req.body.program_id);
+      res.json(await createShopRecord(name, actor, Number.isFinite(programId) ? programId : null, {
         location: req.body.location || null,
         shop_type: req.body.shop_type || null,
-      }).select().single();
-      if (error) throw error;
-      res.json(data);
+      }));
     } catch (err) { errHandler(res, err); }
   });
 

@@ -1,7 +1,7 @@
 /**
  * Persists column visibility, order, and widths via /api/prefs/columns.
  * Named views, admin-published defaults, Reset to default.
- * Program car tables share list key `program_cars` (not per program).
+ * Program car tables use `program_cars:<program id>`, then category and global fallbacks.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -45,10 +45,11 @@ function cacheKey(userId: string, listKey: string, viewName: string) {
   return `${userId}:${listKey}:${viewName}`;
 }
 
-export function useColumnPrefs(page: string, defaultCols: Set<string>) {
+export function useColumnPrefs(page: string, defaultCols: Set<string>, opts?: { categoryId?: number | null }) {
   const { session } = useAuth();
   const isAdmin = useIsAdmin();
   const listKey = normalizeListKey(page);
+  const categoryId = opts?.categoryId ?? null;
   const defaultColsRef = useRef(defaultCols);
   defaultColsRef.current = defaultCols;
   const [visibleCols, setVisibleCols] = useState<Set<string>>(defaultCols);
@@ -82,6 +83,7 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
       }
       const qs = new URLSearchParams({ list_key: listKey });
       if (wantedView) qs.set("view_name", wantedView);
+      if (categoryId != null && categoryId > 0) qs.set("category_id", String(categoryId));
       const r = await fetch(`/api/prefs/columns?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
@@ -99,7 +101,7 @@ export function useColumnPrefs(page: string, defaultCols: Set<string>) {
       }
       setPrefsLoaded(true);
     },
-    [session?.access_token, session?.user?.id, listKey, applyCached],
+    [session?.access_token, session?.user?.id, listKey, categoryId, applyCached],
   );
 
   useEffect(() => {

@@ -58,6 +58,7 @@ import {
   type ProgramType,
 } from "@shared/programs";
 import { COMMITMENT_TYPES } from "@shared/commitment";
+import { GLOBAL_PROGRAM_CAR_COLUMN_ORDER } from "@shared/program-tracker-sync";
 import { diffProgramPatch } from "@shared/program-patch";
 
 type Category = { id: number; name: string };
@@ -258,7 +259,6 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
 }
 
 const PD_CORE = ["completion", "active", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi"] as const;
-const PD_DEFAULT_COLS = new Set<string>(PD_CORE);
 const PD_LABELS: Record<string, string> = {
   car: "Car",
   complete: "Outcome",
@@ -458,7 +458,12 @@ export default function ProgramDetailPage() {
 
   const defs = program?.field_defs ?? [];
   const catName = program?.category?.name ?? "";
-  const colPrefs = useColumnPrefs("program_cars", PD_DEFAULT_COLS);
+  const defaultProgramCols = useMemo(() => new Set<string>(GLOBAL_PROGRAM_CAR_COLUMN_ORDER), []);
+  const colPrefs = useColumnPrefs(
+    Number.isFinite(id) && id > 0 ? `program_cars:${id}` : "program_cars",
+    defaultProgramCols,
+    { categoryId: program?.category_id ?? null },
+  );
   const {
     visibleCols,
     colOrder,
@@ -470,9 +475,12 @@ export default function ProgramDetailPage() {
   } = colPrefs;
   const displayKeys = useMemo(() => {
     const pinnedStart = canEdit ? ["_select", "car", "complete"] : ["car", "complete"];
+    const cfKeys = defs
+      .map((d) => `cf:${d.field_key}`)
+      .filter((key) => moreFields || visibleCols.has(key));
     const movable = [
       ...PD_CORE.filter((k) => visibleCols.has(k)),
-      ...(moreFields ? defs.map((d) => `cf:${d.field_key}`) : []),
+      ...cfKeys,
     ];
     return [...pinnedStart, ...mergeColOrder(movable, colOrder), "_actions"];
   }, [canEdit, defs, colOrder, moreFields, visibleCols]);
@@ -576,6 +584,39 @@ export default function ProgramDetailPage() {
       window.setTimeout(() => setCarSavedFlash(false), 2500);
     } catch {
       /* toast already shown */
+    }
+  }
+
+  async function undoCarActivity(row: { id: number }) {
+    try {
+      const applied = await apiRequest("POST", `/api/programs/${id}/activity/${row.id}/undo`, {}).then((r) => r.json());
+      offerUndoToast(applied);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: carsKey }),
+        qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] }),
+      ]);
+    } catch (e: any) {
+      toast({ title: "Undo failed", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function saveProgramLayout(mode: "tracker" | "save") {
+    try {
+      const body: Record<string, unknown> = { mode };
+      if (mode === "save") {
+        body.visible_cols = {
+          cols: Array.from(visibleCols),
+          order: colOrder,
+          sort: sort ?? null,
+          widths: colWidths,
+        };
+      }
+      const applied = await apiRequest("POST", `/api/programs/${id}/column-layout`, body).then((r) => r.json());
+      offerUndoToast(applied);
+      toast({ title: mode === "tracker" ? "Tracker column order saved" : "Program default saved" });
+      colPrefs.selectView(colPrefs.viewName);
+    } catch (e: any) {
+      toast({ title: "Could not save column layout", description: e.message, variant: "destructive" });
     }
   }
 
@@ -792,6 +833,7 @@ export default function ProgramDetailPage() {
               <ShopCombobox
                 compact
                 shops={shops}
+                programId={id}
                 value={c.shop_id}
                 onChange={(shopId) => queueCarPatch(c.id, { shop_id: shopId })}
               />
@@ -1146,6 +1188,11 @@ export default function ProgramDetailPage() {
           <HeaderField label="Tags">
             <Input className="h-8 text-xs" value={header.tags} readOnly={!canEdit} onChange={(e) => setHeader({ ...header, tags: e.target.value })} placeholder="NLD, Sale" />
           </HeaderField>
+          {canEdit && (
+            <HeaderField label="Add shop">
+              <ShopCombobox shops={shops} value={null} programId={id} onChange={() => {}} compact />
+            </HeaderField>
+          )}
         </div>
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Description</div>
@@ -1314,9 +1361,25 @@ export default function ProgramDetailPage() {
                 </Button>
               )}
               <ColumnPicker
-                columns={PD_CORE.map((key) => ({ key, label: PD_LABELS[key] ?? key }))}
+                columns={[
+                  ...PD_CORE.map((key) => ({ key, label: PD_LABELS[key] ?? key })),
+                  ...defs.map((d) => ({
+                    key: `cf:${d.field_key}`,
+                    label: d.category_id == null ? `${d.label} (optional)` : d.label,
+                  })),
+                ]}
                 prefs={colPrefs}
               />
+              {isAdmin && (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => void saveProgramLayout("tracker")}>
+                    Apply tracker order
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => void saveProgramLayout("save")}>
+                    Save as program default
+                  </Button>
+                </>
+              )}
               <span className="text-xs text-muted-foreground ml-auto">
                 {sortedCars.filter((c) => !c.completed).length} open
                 {sortedCars.some((c) => c.completed) ? ` · ${sortedCars.filter((c) => c.completed).length} complete` : ""}
@@ -1338,6 +1401,7 @@ export default function ProgramDetailPage() {
                 shops={shops}
                 statusOptions={statusOptions}
                 defs={defs}
+                programId={id}
                 saving={carSaving}
                 onApply={async (label, updates) => {
                   const ok = await confirmSave({
@@ -1455,7 +1519,7 @@ export default function ProgramDetailPage() {
           </TabsContent>
           <TabsContent value="activity" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             {canEdit ? <div className="mb-2"><UndoLastChange programId={id} /></div> : null}
-            <ActivityList rows={activity} />
+            <ActivityList rows={activity} onUndoCar={canEdit ? undoCarActivity : undefined} />
           </TabsContent>
         </Tabs>
       </div>
@@ -1615,15 +1679,34 @@ function CarDetailPanel({
   );
 }
 
-function ActivityList({ rows, empty }: { rows: any[]; empty?: string }) {
+function ActivityList({
+  rows,
+  empty,
+  onUndoCar,
+}: {
+  rows: any[];
+  empty?: string;
+  onUndoCar?: (row: { id: number }) => void;
+}) {
   return (
     <ul className="space-y-2">
-      {rows.map((a) => (
-        <li key={a.id} className="text-xs border-l-2 border-primary/40 pl-3 py-1">
-          <div className="text-muted-foreground font-mono-num">{new Date(a.created_at).toLocaleString()}</div>
-          <div>{formatActivity(a)}</div>
-        </li>
-      ))}
+      {rows.map((a) => {
+        const detail = a.detail && typeof a.detail === "object" ? a.detail : {};
+        const canUndoCar = Boolean(onUndoCar && detail.source === "program_tracker_sync" && detail.fields);
+        return (
+          <li key={a.id} className="text-xs border-l-2 border-primary/40 pl-3 py-1">
+            <div className="text-muted-foreground font-mono-num">{new Date(a.created_at).toLocaleString()}</div>
+            <div className="flex items-center gap-2">
+              <span>{formatActivity(a)}</span>
+              {canUndoCar ? (
+                <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => onUndoCar?.(a)}>
+                  Undo this car
+                </Button>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
       {rows.length === 0 && <p className="text-xs text-muted-foreground italic">{empty ?? "No activity yet."}</p>}
     </ul>
   );
@@ -1785,6 +1868,7 @@ function BulkEditBar({
   statusOptions,
   defs,
   saving,
+  programId,
   onApply,
 }: {
   count: number;
@@ -1792,6 +1876,7 @@ function BulkEditBar({
   statusOptions: StatusOption[];
   defs: ProgramFieldDef[];
   saving?: boolean;
+  programId: number;
   onApply: (label: string, updates: Record<string, unknown>) => Promise<void>;
 }) {
   const [field, setField] = useState("shop_id");
@@ -1872,7 +1957,7 @@ function BulkEditBar({
         </SelectContent>
       </Select>
       {field === "shop_id" ? (
-        <ShopCombobox shops={shops} value={shopId} onChange={setShopId} compact />
+        <ShopCombobox shops={shops} value={shopId} programId={programId} onChange={setShopId} compact />
       ) : field === "status" ? (
         <select
           className="h-8 bg-background border border-border rounded px-2 text-xs max-w-[220px] [color-scheme:dark]"

@@ -16,6 +16,7 @@ export const DEFAULT_VIEW_NAME = "Default";
 
 export function normalizeListKey(raw: string): string {
   const s = String(raw ?? "").trim();
+  if (/^program_cars:[0-9]+$/.test(s) || /^program_cars:category:[0-9]+$/.test(s)) return s;
   if (/^program_cars(_[0-9]+)?$/.test(s)) return "program_cars";
   return s;
 }

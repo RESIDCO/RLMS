@@ -8,7 +8,7 @@ export default function PhotoSearch() {
         title="Photo Search"
         subtitle="Find railcar photos by reporting mark and number"
       />
-      <div className="px-4 sm:px-8 py-5 sm:py-8 max-w-3xl">
+      <div className="min-w-0 max-w-5xl px-4 py-5 sm:px-8 sm:py-8">
         <PhotoFinderPanel />
       </div>
     </div>

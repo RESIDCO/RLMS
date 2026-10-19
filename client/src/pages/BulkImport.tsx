@@ -113,6 +113,8 @@ interface VcfReviewResult {
   deactivatedCars?: number;
   skippedManualCount?: number;
   skippedManualCars?: Array<{ car_initial: string; car_number: string }>;
+  skippedInactiveCount?: number;
+  skippedInactiveCars?: Array<{ car_initial: string; car_number: string }>;
   notInFileCount?: number;
   projectedTotalCars?: number;
   projectedActiveCars?: number;
@@ -148,6 +150,7 @@ interface VcfCommitResult {
   reactivated: number;
   deactivated: number;
   skippedManual: number;
+  skippedInactive?: number;
   notInFile: number;
   assignmentInserted: number;
   assignmentClosed: number;
@@ -652,6 +655,7 @@ export default function BulkImportPage() {
         fileName || vcfReview.fileName || "this file",
         `${vcfReview.newCars.toLocaleString()} new (${vcfReview.newActiveCars ?? 0} active, ${vcfReview.newInactiveCars ?? 0} inactive)`,
         `${vcfReview.reactivatedCars ?? 0} reactivated · ${vcfReview.deactivatedCars ?? 0} deactivated`,
+        `${vcfReview.skippedInactiveCount ?? 0} inactive cars left unchanged`,
         `After load: ${(vcfReview.projectedTotalCars ?? 0).toLocaleString()} cars, ${(vcfReview.projectedActiveCars ?? 0).toLocaleString()} active`,
       ].join(" · "),
       confirmLabel: "Commit to production",
@@ -924,6 +928,7 @@ export default function BulkImportPage() {
                 <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Reactivated" value={vcfReview.reactivatedCars ?? 0} />
                 <StatChip icon={<Info className="h-3.5 w-3.5" />} label="Deactivated" value={vcfReview.deactivatedCars ?? 0} />
                 <StatChip icon={<Info className="h-3.5 w-3.5" />} label="skipped, manual" value={vcfReview.skippedManualCount ?? 0} />
+                <StatChip icon={<Info className="h-3.5 w-3.5" />} label="skipped, inactive" value={vcfReview.skippedInactiveCount ?? 0} />
                 <StatChip icon={<Info className="h-3.5 w-3.5" />} label="not in file, left alone" value={vcfReview.notInFileCount ?? 0} />
                 <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="After load, cars" value={vcfReview.projectedTotalCars ?? 0} />
                 <StatChip icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="After load, active" value={vcfReview.projectedActiveCars ?? 0} />
@@ -961,6 +966,19 @@ export default function BulkImportPage() {
                   </div>
                   <div className="text-xs font-mono text-muted-foreground space-y-0.5">
                     {(vcfReview.skippedManualCars ?? []).map((c) => (
+                      <div key={`${c.car_initial}-${c.car_number}`}>{c.car_initial} {c.car_number}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(vcfReview.skippedInactiveCount ?? 0) > 0 && (
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <div className="text-sm font-medium text-foreground mb-2">
+                    skipped, inactive ({vcfReview.skippedInactiveCount}) — frozen cars are not modified
+                  </div>
+                  <div className="text-xs font-mono text-muted-foreground space-y-0.5">
+                    {(vcfReview.skippedInactiveCars ?? []).slice(0, 50).map((c) => (
                       <div key={`${c.car_initial}-${c.car_number}`}>{c.car_initial} {c.car_number}</div>
                     ))}
                   </div>
@@ -1069,6 +1087,7 @@ export default function BulkImportPage() {
                 <div>car_number_history added: <span className="font-mono-num">{vcfCommitted.remarkInserted.toLocaleString()}</span></div>
                 <div>old marks skipped: <span className="font-mono-num">{(vcfCommitted.remarkedAliases ?? 0).toLocaleString()}</span></div>
                 <div>skipped, manual: <span className="font-mono-num">{vcfCommitted.skippedManual.toLocaleString()}</span></div>
+                <div>skipped, inactive: <span className="font-mono-num">{(vcfCommitted.skippedInactive ?? 0).toLocaleString()}</span></div>
                 <div>not in file: <span className="font-mono-num">{vcfCommitted.notInFile.toLocaleString()}</span></div>
               </div>
               {vcfCommitted.integrityChecks && vcfCommitted.integrityChecks.length > 0 && (

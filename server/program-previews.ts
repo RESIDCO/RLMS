@@ -1,4 +1,6 @@
 import { changedKeys, pickRow } from "@shared/change-log";
+import { isFrozenRailcar } from "@shared/car-lifecycle-status";
+import { findFrozenRailcarIds } from "./frozen-cars";
 import { supabaseAdmin } from "./supabase";
 import { annotateKpiDelta } from "./kpi-delta";
 import { recordChange, withChangeGroupResult } from "./change-log";
@@ -90,8 +92,8 @@ async function openCommitment(railcarId: number) {
 }
 
 async function syncProgramCommitment(railcarId: number, actor: string) {
-  const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", railcarId).maybeSingle();
-  if (!car || car.active !== true) return { skipped: "inactive" as const };
+  const { data: car } = await supabaseAdmin.from("railcars").select("id, active, status").eq("id", railcarId).maybeSingle();
+  if (!car || car.active !== true || isFrozenRailcar(car)) return { skipped: "inactive" as const };
   const flags = (await kpiFlags([railcarId])).get(railcarId);
   const links = (await openProgramLinksForCars([railcarId])).map((l: any) => ({
     program_id: Number(l.program_id),
@@ -194,7 +196,7 @@ export async function previewAddProgramCars(
   const { data: cars } = matchedIds.length
     ? await supabaseAdmin
         .from("railcars")
-        .select("id, reporting_marks, car_number, entity, active")
+        .select("id, reporting_marks, car_number, entity, active, status")
         .in("id", matchedIds)
     : { data: [] as any[] };
   const byId = new Map((cars ?? []).map((c: any) => [Number(c.id), c]));
@@ -221,7 +223,7 @@ export async function previewAddProgramCars(
   for (const m of resolved.matched) {
     const car = byId.get(m.railcar_id);
     if (!car) continue;
-    if (car.active !== true) {
+    if (isFrozenRailcar(car)) {
       inactive.push({ ...m, skipped: "inactive" });
       continue;
     }
@@ -275,11 +277,10 @@ export async function applyAddProgramCars(token: string, actor: string) {
   for (const row of preview.matched ?? []) {
     const { data: car } = await supabaseAdmin
       .from("railcars")
-      .select("id, active, rider_external_id")
+      .select("id, active, status, rider_external_id")
       .eq("id", row.railcar_id)
-      .eq("active", true)
       .maybeSingle();
-    if (!car) continue;
+    if (!car || isFrozenRailcar(car)) continue;
     const { data: existing } = await supabaseAdmin
       .from("program_cars")
       .select("id")
@@ -341,7 +342,7 @@ export async function previewRemoveProgramCars(
   }
   const { data: links, error } = await supabaseAdmin
     .from("program_cars")
-    .select("id, railcar_id, exited_date, railcar:railcars(id, reporting_marks, car_number, active)")
+    .select("id, railcar_id, exited_date, railcar:railcars(id, reporting_marks, car_number, active, status)")
     .eq("program_id", programId)
     .in("id", linkIds.length ? linkIds : [0]);
   if (error) throw error;
@@ -351,7 +352,7 @@ export async function previewRemoveProgramCars(
       link_id: l.id,
       railcar_id: l.railcar_id,
       label: rc ? formatCarId(rc) : String(l.railcar_id),
-      active: rc?.active === true,
+      active: Boolean(rc) && rc.active === true && !isFrozenRailcar(rc),
     };
   });
   const activeIds = rows.filter((r) => r.active).map((r) => r.railcar_id);
@@ -546,8 +547,8 @@ async function applyOneCarUpdates(
   actor: string,
 ): Promise<{ wrote: boolean; commitment: boolean }> {
   const commitment = commitmentPatch(updates ?? {});
-  const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", row.railcar_id).maybeSingle();
-  if (car?.active !== true) return { wrote: false, commitment: false };
+  const { data: car } = await supabaseAdmin.from("railcars").select("id, active, status").eq("id", row.railcar_id).maybeSingle();
+  if (!car || isFrozenRailcar(car)) return { wrote: false, commitment: false };
   const { data: prior, error: priorErr } = await supabaseAdmin
     .from("program_cars")
     .select("*")
@@ -717,7 +718,9 @@ export async function applyCloseProgram(token: string, actor: string) {
     .eq("program_id", program.id)
     .is("cleared_at", null);
   const commitmentIds: number[] = [];
+  const frozenIds = new Set(await findFrozenRailcarIds((commits ?? []).map((c) => Number(c.railcar_id))));
   for (const c of commits ?? []) {
+    if (frozenIds.has(Number(c.railcar_id))) continue;
     const cleared_at = new Date().toISOString();
     await supabaseAdmin
       .from("car_commitments")
@@ -743,14 +746,14 @@ export async function applyCloseProgram(token: string, actor: string) {
     actor,
     detail: {
       closed_date: today,
-      commitments_released: commits?.length ?? 0,
+      commitments_released: commitmentIds.length,
       commitment_ids: commitmentIds,
       links_kept: true,
     },
     before: pickRow(program, ["lifecycle", "closed_date"]),
     after: { lifecycle: "closed", closed_date: today },
   });
-  return { preview, closed: true, commitments_released: commits?.length ?? 0 };
+  return { preview, closed: true, commitments_released: commitmentIds.length };
   });
 }
 

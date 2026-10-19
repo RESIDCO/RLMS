@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useHashSearch, navigateHash } from "@/lib/hash-location";
-import { useCanEdit } from "@/lib/AuthContext";
+import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
@@ -84,9 +84,11 @@ import { glanceRiderFromCar, type LeaseGlanceRider } from "@/lib/glance-rider";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
 import {
   CAR_STATUS_EDIT_OPTIONS,
-  crossesInactiveBoundary,
+  isFrozenRailcar,
   isInactiveCarStatus,
 } from "@shared/car-lifecycle-status";
+import { INACTIVATE_BATCH_MAX } from "@shared/inactivate-cars";
+import { InactivateCarsDialog } from "@/pages/railcars/InactivateCarsDialog";
 import { PasteSearchBar } from "@/pages/railcars/PasteSearchBar";
 import { BulkEditDrawer } from "@/pages/railcars/BulkEditDrawer";
 import { SavedFilters } from "@/pages/railcars/SavedFilters";
@@ -429,6 +431,7 @@ function isMultiCarListQuery(raw: string): boolean {
 
 export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: number } = {}) {
   const canEdit = useCanEdit();
+  const isAdmin = useIsAdmin();
   const wouterSearch = useHashSearch();
   const [location, setLocation] = useLocation();
   const initQ = parseFleetQuery(wouterSearch);
@@ -490,6 +493,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoSeed, setPhotoSeed] = useState("");
   const [bulkStatusPending, setBulkStatusPending] = useState(false);
+  const [inactivateIds, setInactivateIds] = useState<number[] | null>(null);
   const [bulkFleetStatusPending, setBulkFleetStatusPending] = useState(false);
   const [selectingAllMatching, setSelectingAllMatching] = useState(false);
   const [bulkRiderPending, setBulkRiderPending] = useState(false);
@@ -697,6 +701,10 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     () => (showSelectedOnly ? filtered.filter((r) => selectedIds.has(r.id)) : filtered),
     [filtered, showSelectedOnly, selectedIds],
   );
+  const selectionTouchesFrozen = useMemo(
+    () => filtered.some((r) => selectedIds.has(r.id) && isFrozenRailcar({ active: r.active, status: r.status })),
+    [filtered, selectedIds],
+  );
 
   // ── Multi-select helpers ──────────────────────────────────────────────────
   const allFilteredIds = filtered.map((r) => r.id);
@@ -858,34 +866,42 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const bulkUpdateStatus = async (newStatus: string) => {
     const ids = Array.from(selectedIds);
     const n = ids.length;
-    const goingInactive = isInactiveCarStatus(newStatus);
+    if (isInactiveCarStatus(newStatus)) {
+      if (n > INACTIVATE_BATCH_MAX) {
+        toast({
+          title: `Inactivate at most ${INACTIVATE_BATCH_MAX} cars at a time`,
+          variant: "destructive",
+        });
+        return;
+      }
+      setInactivateIds(ids);
+      return;
+    }
     const selectedRows = filtered.filter((r) => selectedIds.has(r.id));
-    const anyInactiveOnPage = selectedRows.some((r) => isInactiveCarStatus(r.status));
-    // Select-all-matching may include Inactive cars not on this page — guard reactivations.
-    const mayReactivate =
-      !goingInactive && (anyInactiveOnPage || selectedIds.size > filtered.length);
-    const needsGuard = goingInactive || mayReactivate;
-
+    const anyFrozen = selectedRows.some((r) => isFrozenRailcar({ active: r.active, status: r.status }));
+    const unseen = ids.length > selectedRows.length;
+    if (anyFrozen && !isAdmin) {
+      toast({
+        title: "Inactive cars are read-only",
+        description: "Only an admin can reactivate an inactive car.",
+        variant: "destructive",
+      });
+      return;
+    }
     let reason: string | null = null;
-    if (needsGuard) {
+    if (anyFrozen || (unseen && isAdmin)) {
       reason = await confirmWithReason({
-        title: goingInactive
-          ? `Mark ${n} car${n !== 1 ? "s" : ""} Inactive?`
-          : `Set car status to ${newStatus} for ${n} selected railcar${n !== 1 ? "s" : ""}?`,
-        description: goingInactive
-          ? "This removes them from active fleet counts, and any Lease Management OL/lease may be reclassified as inactive if this was its last active car."
-          : "If any selected cars are currently Inactive, this reactivates them into the active fleet. A reason is required for that change.",
-        confirmLabel: goingInactive ? "Mark Inactive" : "Confirm",
-        variant: goingInactive ? "destructive" : "default",
+        title: `Set car status to ${newStatus} for ${n} selected railcar${n !== 1 ? "s" : ""}?`,
+        description: "Inactive cars stay frozen until an admin reactivates them. A reason is required. Every other status keeps the car active.",
+        confirmLabel: "Reactivate",
         reasonLabel: "Reason (required)",
-        reasonPlaceholder: goingInactive
-          ? "Why are these cars being marked Inactive?"
-          : "Why are Inactive cars being reactivated (or status changed)?",
+        reasonPlaceholder: "Why are inactive cars being reactivated?",
       });
       if (reason == null) return;
     } else {
       const ok = await confirmSave({
         title: `Set car status to ${newStatus} for ${n} selected railcar${n !== 1 ? "s" : ""}?`,
+        description: "This keeps the car active. Only Inactive freezes the asset.",
       });
       if (!ok) return;
     }
@@ -1496,9 +1512,13 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <span className="text-xs text-muted-foreground">All matching cars selected</span>
             )}
             <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+              {selectionTouchesFrozen && (
+                <span className="text-xs text-muted-foreground">Inactive cars in this selection are read-only.</span>
+              )}
               <Button
                 variant="outline"
                 size="sm"
+                disabled={selectionTouchesFrozen}
                 onClick={() => setWorkbenchOpen(true)}
                 data-testid="bulk-workbench"
               >
@@ -1528,7 +1548,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <Button
                 variant="outline"
                 size="sm"
-                disabled={bulkFleetStatusPending || selectedIds.size === 0}
+                disabled={bulkFleetStatusPending || selectedIds.size === 0 || selectionTouchesFrozen}
                 onClick={bulkPreviewSold}
                 data-testid="bulk-mark-sold"
               >
@@ -1543,11 +1563,11 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="max-h-[360px] overflow-y-auto">
-                  <DropdownMenuLabel>Change car status for selected cars</DropdownMenuLabel>
+                  <DropdownMenuLabel>Only Inactive freezes the car. Other statuses stay active.</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     data-testid="bulk-status-inactive"
-                    onSelect={() => bulkUpdateStatus("Inactive")}
+                    onSelect={() => void bulkUpdateStatus("Inactive")}
                   >
                     Inactive
                   </DropdownMenuItem>
@@ -1562,7 +1582,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               {/* Bulk transit/repair status */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={bulkTransitPending} data-testid="bulk-transit-dropdown">
+                  <Button variant="outline" size="sm" disabled={bulkTransitPending || selectionTouchesFrozen} data-testid="bulk-transit-dropdown">
                     Set Transit Flag
                     <ChevronDown className="ml-1 h-3.5 w-3.5" />
                   </Button>
@@ -1582,7 +1602,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               </DropdownMenu>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={bulkFlagPending} data-testid="bulk-ops-flag-dropdown">
+                  <Button variant="outline" size="sm" disabled={bulkFlagPending || selectionTouchesFrozen} data-testid="bulk-ops-flag-dropdown">
                     Set Flag
                     <ChevronDown className="ml-1 h-3.5 w-3.5" />
                   </Button>
@@ -1624,7 +1644,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <Button
                 variant="outline"
                 size="sm"
-                disabled={bulkNeedsCompletionPending}
+                disabled={bulkNeedsCompletionPending || selectionTouchesFrozen}
                 onClick={bulkClearNeedsCompletion}
                 data-testid="bulk-clear-needs-completion"
               >
@@ -1633,7 +1653,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={bulkEntityPending} data-testid="bulk-entity-dropdown">
+                  <Button variant="outline" size="sm" disabled={bulkEntityPending || selectionTouchesFrozen} data-testid="bulk-entity-dropdown">
                     Move to Entity
                     <ChevronDown className="ml-1 h-3.5 w-3.5" />
                   </Button>
@@ -1651,7 +1671,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <SearchableSelect
                 value=""
                 actionMode
-                disabled={bulkRiderPending}
+                disabled={bulkRiderPending || selectionTouchesFrozen}
                 onChange={(v) => {
                   const r = (riders ?? []).find((x: any) => String(x.id) === v);
                   if (r) bulkAssignRider(r.id, r.rider_name);
@@ -1667,6 +1687,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <Button
                 variant="outline"
                 size="sm"
+                disabled={selectionTouchesFrozen}
                 onClick={() => { setBulkNbv(""); setBulkOac(""); setBulkOec(""); setBulkValuesOpen(true); }}
                 data-testid="bulk-values-btn"
               >
@@ -1910,6 +1931,15 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
           onClose={() => setWorkbenchOpen(false)}
         />
       ) : null}
+      <InactivateCarsDialog
+        open={inactivateIds != null}
+        ids={inactivateIds ?? []}
+        onClose={() => setInactivateIds(null)}
+        onApplied={() => {
+          setInactivateIds(null);
+          clearSelection();
+        }}
+      />
     </div>
   );
 }
@@ -2649,6 +2679,10 @@ export function RailcarFormDialog({
   car: Row | null;
 }) {
   const { toast } = useToast();
+  const isAdmin = useIsAdmin();
+  const [inactivateOpen, setInactivateOpen] = useState(false);
+  const frozenCar = Boolean(car && isFrozenRailcar({ active: car.active, status: car.status }));
+  const fieldsLocked = Boolean(car) && frozenCar;
   const [form, setForm] = useState(() => ({
     car_number: car?.car_number ?? "",
     reporting_marks: car?.reporting_marks ?? "HWCX",
@@ -2694,9 +2728,9 @@ export function RailcarFormDialog({
   const allRiders: any[] = ridersData ?? [];
 
   const save = useMutation({
-    mutationFn: async (inactiveReason?: string | null) => {
-      const payload: Record<string, unknown> = { ...form };
-      delete payload.notes;
+    mutationFn: async (opts?: { reason?: string | null; statusOnly?: boolean } | null) => {
+      const payload: Record<string, unknown> = opts?.statusOnly ? { status: form.status } : { ...form };
+      if (!opts?.statusOnly) delete payload.notes;
       if (!car) {
         const num = normalizeStoredCarNumber(form.car_number);
         if (!num.ok) throw new Error(num.message);
@@ -2705,7 +2739,7 @@ export function RailcarFormDialog({
       if (car) {
         delete payload.car_number;
         delete payload.reporting_marks;
-        if (inactiveReason) payload.inactive_change_reason = inactiveReason;
+        if (opts?.reason) payload.inactive_change_reason = opts.reason;
         await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
       } else {
         const res = await apiRequest("POST", `/api/railcars`, payload);
@@ -2755,25 +2789,35 @@ export function RailcarFormDialog({
       const mark = [form.reporting_marks, form.car_number].filter(Boolean).join(" ")
         || [car.reporting_marks, car.car_number].filter(Boolean).join(" ")
         || "this railcar";
-      const crosses = crossesInactiveBoundary(car.status, form.status);
-      if (crosses) {
-        const goingInactive = isInactiveCarStatus(form.status);
+      if (!frozenCar && isInactiveCarStatus(form.status)) {
+        setInactivateOpen(true);
+        return;
+      }
+      if (frozenCar) {
+        if (!isAdmin) {
+          toast({
+            title: "Inactive cars are read-only",
+            description: "An admin can reactivate this car with a reason.",
+            variant: "destructive",
+          });
+          return;
+        }
+        if (isInactiveCarStatus(form.status)) {
+          toast({
+            title: "This car stays inactive",
+            description: "Choose another car status to reactivate it.",
+          });
+          return;
+        }
         const reason = await confirmWithReason({
-          title: goingInactive
-            ? `Mark ${mark} Inactive?`
-            : `Reactivate ${mark}?`,
-          description: goingInactive
-            ? "This removes the car from active fleet counts, and its Lease Management OL/lease may be reclassified as inactive if this was its last active car."
-            : `This returns the car to the active fleet with Car Status “${form.status}”.`,
-          confirmLabel: goingInactive ? "Mark Inactive" : "Reactivate",
-          variant: goingInactive ? "destructive" : "default",
+          title: `Reactivate ${mark}?`,
+          description: `This returns the car to the active fleet with Car Status “${form.status}”.`,
+          confirmLabel: "Reactivate",
           reasonLabel: "Reason (required)",
-          reasonPlaceholder: goingInactive
-            ? "Why is this car being marked Inactive?"
-            : "Why is this car being reactivated?",
+          reasonPlaceholder: "Why is this car being reactivated?",
         });
         if (reason == null) return;
-        save.mutate(reason);
+        save.mutate({ reason, statusOnly: true });
         return;
       }
       const ok = await confirmSave({ title: `Save changes to ${mark}?` });
@@ -2783,12 +2827,22 @@ export function RailcarFormDialog({
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{car ? "Edit Railcar" : "Add Railcar"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 overflow-y-auto pr-1" style={{ maxHeight: 'calc(80vh - 120px)' }}>
+          {frozenCar && (
+            <p className="text-sm rounded-md border border-border bg-muted/40 px-3 py-2">
+              This car is inactive and its data is frozen.
+              {isAdmin
+                ? " Choose a car status other than Inactive and save to reactivate it. A reason is required."
+                : " An admin can reactivate it with a reason."}
+            </p>
+          )}
+          <div className={fieldsLocked ? "space-y-3 pointer-events-none opacity-70" : "space-y-3"}>
           {/* ── Car ID block with live preview ─────────────────────────────── */}
           <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2.5">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Car Identification</div>
@@ -2870,12 +2924,16 @@ export function RailcarFormDialog({
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className={fieldsLocked && isAdmin ? "pointer-events-auto opacity-100" : undefined}>
               <Label>Car Status</Label>
               <p className="text-[11px] text-muted-foreground mb-1.5">
-                Inactive requires confirm + reason and is logged permanently.
+                Only Inactive kills the car and freezes it. Storage, Bad Order, Off-Lease, and the others stay active.
               </p>
-              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+              <Select
+                value={form.status}
+                onValueChange={(v) => setForm({ ...form, status: v })}
+                disabled={fieldsLocked && !isAdmin}
+              >
                 <SelectTrigger data-testid="select-car-status">
                   <SelectValue placeholder="Select car status" />
                 </SelectTrigger>
@@ -3071,16 +3129,27 @@ export function RailcarFormDialog({
             </div>
           )}
         </div>
+        </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={save.isPending}>
+          <Button onClick={handleSave} disabled={save.isPending || (fieldsLocked && !isAdmin)}>
             {save.isPending ? "Saving…" : car ? "Save" : (assignRiderId.trim() ? "Create & Assign" : "Create")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <InactivateCarsDialog
+      open={inactivateOpen}
+      ids={car ? [car.id] : []}
+      onClose={() => setInactivateOpen(false)}
+      onApplied={() => {
+        setInactivateOpen(false);
+        onClose();
+      }}
+    />
+    </>
   );
 }
 

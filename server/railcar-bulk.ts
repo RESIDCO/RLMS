@@ -8,6 +8,7 @@ import { requireUser } from "./auth";
 import { applyCarStatusChange } from "./car-status-history";
 import { applyMarkSold, applyRemoveSold, clearCommitment, putPreview, getPreview, setCommitment } from "./commitment";
 import { setOffRent, setAbatement } from "./rent-stops";
+import { isFrozenRailcar, isInactiveCarStatus } from "@shared/car-lifecycle-status";
 import { formatCarId } from "@shared/residco-import";
 import { parseCarPasteList } from "@shared/programs";
 import { pickRow } from "@shared/change-log";
@@ -129,7 +130,7 @@ export async function previewRailcarBulk(body: {
       rows.push({ railcar_id: id, car: label, field: "identity", before: null, after: null, status: "reject", reason: "not found", op: "add_note" });
       continue;
     }
-    if (car.active !== true) {
+    if (isFrozenRailcar(car)) {
       rows.push({
         railcar_id: id,
         car: label,
@@ -180,6 +181,9 @@ async function previewOp(car: any, op: BulkOp, value: unknown, label: string): P
     case "set_status": {
       const status = String(value ?? "").trim();
       if (!status) return { ...base, field: "status", before: car.status, after: null, status: "reject", reason: "status required" };
+      if (isInactiveCarStatus(status)) {
+        return { ...base, field: "status", before: car.status, after: status, status: "reject", reason: "Use Set Car Status → Inactive" };
+      }
       return { ...base, field: "status", before: car.status, after: status, status: "ok", reason: "set_status" };
     }
     case "mark_sold": {
@@ -257,12 +261,15 @@ async function previewOp(car: any, op: BulkOp, value: unknown, label: string): P
       }
       return { ...base, field: "umler_status", before: car.umler_status, after: st, status: "ok", reason: "set_umler_status" };
     }
-    case "deactivate": {
-      if (car.fleet_status === "Sold" && !car.scrapped_at) {
-        return { ...base, field: "active", before: true, after: false, status: "reject", reason: "Sold cars cannot be deactivated until scrapped_at is set" };
-      }
-      return { ...base, field: "active", before: true, after: false, status: "ok", reason: "deactivate" };
-    }
+    case "deactivate":
+      return {
+        ...base,
+        field: "active",
+        before: car.active === true,
+        after: false,
+        status: "reject",
+        reason: "Use Set Car Status → Inactive",
+      };
     case "end_assignment": {
       const { data: open } = await supabaseAdmin
         .from("assignment_history")
@@ -364,9 +371,12 @@ async function applyRow(row: BulkRow, ops: BulkOp[], actor: string) {
       });
       return;
     }
-    case "set_status":
-      await applyCarStatusChange({ ids: [id], status: String(row.after ?? ""), reason: op.reason, userId: actor });
+    case "set_status": {
+      const nextStatus = String(row.after ?? "");
+      if (isInactiveCarStatus(nextStatus)) throw new Error("Use Set Car Status → Inactive");
+      await applyCarStatusChange({ ids: [id], status: nextStatus, reason: op.reason, userId: actor });
       return;
+    }
     case "mark_sold": {
       const after = row.after as any;
       const preview = await putPreview("sold", {
@@ -437,8 +447,7 @@ async function applyRow(row: BulkRow, ops: BulkOp[], actor: string) {
       return;
     }
     case "deactivate":
-      await applyCarStatusChange({ ids: [id], status: "Inactive", reason: op.reason || "scrapped / UMLER deleted", userId: actor });
-      return;
+      throw new Error("Use Set Car Status → Inactive");
     case "end_assignment": {
       const after = row.after as any;
       const pk = Number(after?.id ?? (row.before && (row.before as any).id));

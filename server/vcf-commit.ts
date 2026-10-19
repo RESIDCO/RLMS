@@ -21,6 +21,7 @@ import {
   planVcfAssignmentCloseout,
   applyVcfLeaseDateGuard,
   skipVcfAssignmentWrites,
+  skipVcfRailcarPatch,
   type ExistingHistoryRow,
 } from "@shared/vcf-assignment-closeout";
 import { loadVcfRemarkAliases } from "./remark-in-place";
@@ -63,6 +64,7 @@ export type VcfCommitResult = {
   reactivated: number;
   deactivated: number;
   skippedManual: number;
+  skippedInactive: number;
   notInFile: number;
   carsProcessed: number;
   assignmentInserted: number;
@@ -163,6 +165,7 @@ export async function runVcfCommit(opts: {
       existingCars.set(k, {
         active: (r.active as boolean | null) ?? null,
         active_source: (r.active_source as string | null) ?? null,
+        status: (r.status as string | null) ?? null,
       });
     }
 
@@ -253,8 +256,12 @@ export async function runVcfCommit(opts: {
         if (existingCar.entity === payload.entity) delete updatePayload.entity;
         delete updatePayload.fleet_status;
         delete updatePayload.fleet_status_source;
-        const activeManual = existingCar.active_source === "manual";
-        if (activeManual) {
+        const held = skipVcfRailcarPatch({
+          active_source: existingCar.active_source as string | null,
+          active: existingCar.active as boolean | null,
+          status: existingCar.status as string | null,
+        });
+        if (held) {
           updatePayload = null;
         } else {
           updatePayload.active_source = "auto";
@@ -292,10 +299,10 @@ export async function runVcfCommit(opts: {
         assertRailcarImporterPatch(insertPayload);
       }
 
-      const incomingActive = payload.active === true;
       const skipHistory = skipVcfAssignmentWrites({
         active_source: existingId ? (existingCar?.active_source as string | null) : "auto",
-        active: incomingActive,
+        active: existingId ? (existingCar?.active as boolean | null) : true,
+        status: existingId ? (existingCar?.status as string | null) : null,
       });
       let actions: ReturnType<typeof planVcfAssignmentCloseout> = [];
       if (!skipHistory && (existingId || insertPayload)) {
@@ -505,6 +512,7 @@ export async function runVcfCommit(opts: {
       reactivated: review.reactivatedCars,
       deactivated: review.deactivatedCars,
       skippedManual: review.skippedManualCount,
+      skippedInactive: review.skippedInactiveCount,
       notInFile: review.notInFileCount,
       assignmentInserted: written.assignmentInserted,
       assignmentUpdated: written.assignmentUpdated,
@@ -539,6 +547,7 @@ export async function runVcfCommit(opts: {
       reactivated: review.reactivatedCars,
       deactivated: review.deactivatedCars,
       skippedManual: review.skippedManualCount,
+      skippedInactive: review.skippedInactiveCount,
       notInFile: review.notInFileCount,
       carsProcessed: review.cars.length,
       assignmentInserted: written.assignmentInserted,

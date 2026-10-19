@@ -9,6 +9,7 @@ export function GridColumnTh({
   width,
   minWidth = GRID_COL_MIN,
   pinned,
+  stickyLeft,
   className,
   children,
   onResize,
@@ -21,6 +22,7 @@ export function GridColumnTh({
   width?: number;
   minWidth?: number;
   pinned?: boolean;
+  stickyLeft?: number;
   className?: string;
   children: ReactNode;
   onResize?: (key: string, width: number) => void;
@@ -75,7 +77,10 @@ export function GridColumnTh({
         const from = e.dataTransfer.getData("text/plain");
         if (from) onMove(from, colKey);
       }}
-      style={width ? { width, minWidth: width, maxWidth: width } : undefined}
+      style={{
+        ...(width ? { width, minWidth: width, maxWidth: width } : {}),
+        ...(stickyLeft != null ? { left: stickyLeft } : {}),
+      }}
       className={cn(
         "relative whitespace-nowrap select-none",
         !pinned && onMove && "cursor-grab active:cursor-grabbing",

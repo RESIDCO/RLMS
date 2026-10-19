@@ -18,8 +18,15 @@ import {
   daysStopped,
   focusPresetLayout,
   formatEtTime,
+  openStopFocusFields,
+  pasteSearchBody,
+  runViewCreate,
+  stickyLeftOffsets,
+  viewSavedToast,
+  withLeadingIdentityColumns,
   idsWithoutInactive,
   isMissingViewSchema,
+  layoutNeedsFocus,
   memberNoteAllowed,
   memberReaddSnapshots,
   memberRemoveSnapshots,
@@ -194,6 +201,45 @@ ok(countCacheKey(3, "2026-10-19T13:00:00.000Z", false, "active").includes("3|"),
 ok(GRAYMONT_NUMBERS.length === 31 && new Set(GRAYMONT_NUMBERS).size === 31, "the Graymont check list is 31 cars");
 ok(GRAYMONT_INACTIVE_NUMBERS.join(",") === "406,416" && GRAYMONT_NUMBERS.filter((n) => (GRAYMONT_INACTIVE_NUMBERS as readonly string[]).includes(n)).length === 2, "406 and 416 are the two inactive cars");
 ok(GRAYMONT_MARKS === "TFOX", "the Graymont check list is TFOX");
+
+const presetOrder = focusPresetLayout().order;
+ok(presetOrder[0] === "marks" && presetOrder[1] === "car_number", "the focus preset keeps marks and car number first");
+ok(layoutNeedsFocus(presetOrder), "the focus preset needs focus columns");
+const pasteBody = pasteSearchBody({
+  q: "TFOX 430",
+  active: "all",
+  scope: { cars: true, leases: true, carData: false },
+  layoutKeys: presetOrder,
+});
+ok(pasteBody.focus === 1 && pasteBody.q === "TFOX 430", "a paste whose layout needs focus sends focus=1");
+const plainPaste = pasteSearchBody({
+  q: "TFOX 430",
+  active: "active",
+  scope: { cars: true, leases: true, carData: false },
+  layoutKeys: ["marks", "car_number", "lessee"],
+});
+ok(plainPaste.focus == null, "a paste without focus columns does not send focus");
+
+const foxStop = openStopFocusFields([{ type: "Abatement", stop_date: "2026-10-16", reason: "quality repair", actual_resume_date: null }], new Date("2026-10-19T16:00:00.000Z"));
+ok(foxStop.open_stop_type === "Abatement" && foxStop.open_stop_since === "2026-10-16" && String(foxStop.open_stop_reason).includes("quality repair"), "TFOX 430's open stop fills the focus fields");
+const closedOnly = openStopFocusFields([{ type: "Abatement", stop_date: "2026-01-01", reason: "old", actual_resume_date: "2026-02-01" }]);
+ok(closedOnly.open_stop_type == null && closedOnly.open_stop_since == null && closedOnly.open_stop_reason == null, "a closed stop is not attached");
+
+const stickyOrder = withLeadingIdentityColumns(["open_stop_since", "open_stop_days", "marks", "car_number", "lessee"]);
+ok(stickyOrder[0] === "marks" && stickyOrder[1] === "car_number" && stickyOrder[2] === "open_stop_since", "marks and car number move to the front");
+const offsets = stickyLeftOffsets(stickyOrder, (key) => (key === "marks" ? 80 : 120), 36);
+ok(offsets.marks === 36 && offsets.car_number === 116 && offsets.open_stop_since == null, "sticky left offsets follow the real widths and do not overlap");
+
+ok(viewSavedToast("Graymont PD", true, true) === "Saved 'Graymont PD' — shared with RESIDCO, pinned", "a shared pinned save names the view");
+let posts = 0;
+const saved = await runViewCreate({
+  post: async () => {
+    posts += 1;
+    return { id: 7, name: "Graymont PD" };
+  },
+  refetch: async () => [{ id: 7, name: "Graymont PD" }],
+});
+ok(posts === 1 && saved.posts === 1 && saved.selected.name === "Graymont PD", "save posts once, then selects the refetched view");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

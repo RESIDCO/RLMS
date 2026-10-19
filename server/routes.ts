@@ -11,6 +11,8 @@ import { AD_HOC_LEASE_NUMBER } from "@shared/ol-identity";
 import { queryRailcars, queryRailcarIds, queryRailcarSummary, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
+import { attachFocusColumns } from "./focus-columns";
+import { decoratePasteSearch } from "./search-focus";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, resolveAccountIdForNewLease, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
 import {
   attachLatestAmNotes,
@@ -4260,10 +4262,11 @@ export async function registerRoutes(
       const raw = String((req.body as any)?.q ?? "").trim();
       if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], inactive_matches: [], ambiguous: [], terms: [], truncated: false, match: null, counts: { railcars: 0, riders: 0, leases: 0, total: 0, pasted: 0, inactive: 0, ambiguous: 0, not_found: 0 } });
       const body = (req.body ?? {}) as Record<string, unknown>;
-      res.json(await runGlobalSearch(raw, {
+      const found = await runGlobalSearch(raw, {
         active: typeof body.active === "string" ? body.active : "active",
         searchScope: parseSearchScope(body),
-      }));
+      });
+      res.json(await decoratePasteSearch(found, body, (rows, opts) => attachFocusColumns(rows, opts)));
     } catch (err) {
       errHandler(res, err);
     }

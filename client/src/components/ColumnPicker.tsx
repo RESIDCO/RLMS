@@ -150,7 +150,7 @@ export function ColumnPicker({
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuItem className="text-xs" onClick={() => { setName(""); setSaveOpen(true); }}>
-            Save as…
+            Save column preset
           </DropdownMenuItem>
           <DropdownMenuItem className="text-xs" onClick={() => { setName(prefs.viewName); setRenameOpen(true); }}>
             Rename view
@@ -181,7 +181,7 @@ export function ColumnPicker({
             size="sm"
             disabled={!name.trim()}
             onClick={() =>
-              void run("Save view", async () => {
+              void run("Save column preset", async () => {
                 await prefs.saveAs(name.trim());
                 setSaveOpen(false);
               })

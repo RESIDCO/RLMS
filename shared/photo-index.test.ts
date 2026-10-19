@@ -33,6 +33,7 @@ const requested: IndexCarKey[] = [
   { mark: "HLTX", number: "6026" },
   { mark: "NDYX", number: "360129" },
   { mark: "GATX", number: "62487" },
+  { mark: "TILX", number: "302211" },
   { mark: "NS", number: "148098" },
 ];
 
@@ -81,13 +82,20 @@ const lookup = {
     { mark: "HLTX", number: "6026", state: "no_album", albums: [], photos: [] },
     { mark: "NDYX", number: "360129", state: "not_indexed", albums: [], photos: [] },
     { mark: "GATX", number: "62487", state: "fallback", albums: [], photos: [] },
+    {
+      mark: "TILX",
+      number: "302211",
+      state: "no_photos",
+      albums: [{ album_url: "https://www.rrpicturearchives.net/rsPicture.aspx?id=9", title: "TILX 302211", photo_count: 0 }],
+      photos: [],
+    },
   ],
 };
 
 const view = mapIndexLookup(lookup, requested);
 ok(view.fallback === false, "successful lookup is not a fallback");
 if (!view.fallback) {
-  const [soo, bnsf, hltx, ndyx, gatx, ns] = view.cars;
+  const [soo, bnsf, hltx, ndyx, gatx, tilx, ns] = view.cars;
   ok(soo?.mark === "SOO" && soo.number === "600612", "leading zeros are stripped");
   ok(soo?.state === "photos" && soo.needsDeepSearch === false, "cars with photos do not need deep search");
   ok(soo?.photos.length === 2, "unsafe image hosts are dropped");
@@ -96,13 +104,15 @@ if (!view.fallback) {
   ok(photoCredit(soo?.photos[0]?.photographer) === "Photo: Andrew Goblirsch · RRPA", "credit uses the photographer");
   ok(photoCredit(soo?.photos[1]?.photographer) === "Photo: RRPA contributor · RRPA", "blank photographer uses the contributor credit");
   ok(soo?.photos[0]?.thumb_url.includes("/thumbnails/"), "thumb url is passed through");
-  ok(bnsf?.state === "album_pending" && bnsf.needsDeepSearch === false, "album_pending is still indexing");
+  ok(bnsf?.state === "album_pending" && bnsf.needsDeepSearch === true, "album_pending still offers deep search");
   ok(bnsf?.albums[0]?.album_url.startsWith("https://www.rrpicturearchives.net/"), "album link is kept");
   ok(hltx?.state === "no_album" && hltx.needsDeepSearch, "no_album offers deep search");
   ok(ndyx?.state === "not_indexed" && ndyx.needsDeepSearch, "not_indexed offers deep search");
   ok(gatx?.state === "fallback" && gatx.needsDeepSearch, "per-car fallback offers deep search");
+  ok(tilx?.state === "no_photos" && tilx.needsDeepSearch === true, "no_photos offers deep search");
+  ok(tilx?.albums.length === 1, "no_photos keeps an album link");
   ok(ns?.state === "not_indexed" && ns.needsDeepSearch, "a car missing from the index is not_indexed");
-  ok(carsNeedingDeepSearch(view.cars).map((car) => car.mark).join(",") === "HLTX,NDYX,GATX,NS", "deep search misses");
+  ok(carsNeedingDeepSearch(view.cars).map((car) => car.mark).join(",") === "BNSF,HLTX,NDYX,GATX,TILX,NS", "deep search misses");
 
   const csv = buildIndexLinksCsv(view.cars);
   const lines = csv.split("\n");
@@ -135,6 +145,25 @@ const quoted = buildIndexLinksCsv([
   },
 ]);
 ok(quoted.includes('"Gob, Andy"'), "csv quotes a photographer that contains a comma");
+
+const keptPhoto = mapIndexLookup({
+  cars: [{
+    mark: "TILX",
+    number: "1",
+    state: "no_photos",
+    albums: [{ album_url: "https://www.rrpicturearchives.net/rsPicture.aspx?id=9", title: "TILX 1", photo_count: 1 }],
+    photos: [{
+      thumb_url: "https://www.rrpicturearchives.net/picturefiles/12/thumbnails/c.jpg",
+      image_url: "https://www.rrpicturearchives.net/picturefiles/12/c.jpg",
+      picture_url: "https://www.rrpicturearchives.net/showPicture.aspx?id=99",
+      photographer: "A",
+    }],
+  }],
+}, [{ mark: "TILX", number: "1" }]);
+ok(
+  !keptPhoto.fallback && keptPhoto.cars[0]?.state === "no_photos" && keptPhoto.cars[0].needsDeepSearch && keptPhoto.cars[0].photos.length === 1 && keptPhoto.cars[0].albums.length === 1,
+  "no_photos keeps a photo and an album and still offers deep search",
+);
 
 ok(mapIndexLookup({ fallback: true }, requested).fallback === true, "fallback flag uses the legacy search");
 ok(mapIndexLookup(null, requested).fallback === true, "empty body uses the legacy search");

@@ -429,7 +429,7 @@ export default function PhotoFinderPanel({
             Classic photo search
           </label>
         )}
-        {!legacyBuild && isAdmin && (
+        {isAdmin && (
           <Button
             type="button"
             variant="outline"

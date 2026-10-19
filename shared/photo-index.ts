@@ -37,7 +37,7 @@ export type IndexAlbum = {
   photo_count: number | null;
 };
 
-export type IndexCarState = "photos" | "album_pending" | "no_album" | "not_indexed" | "fallback";
+export type IndexCarState = "photos" | "album_pending" | "no_photos" | "no_album" | "not_indexed" | "fallback";
 
 export type IndexCar = IndexCarKey & {
   state: IndexCarState;
@@ -58,6 +58,7 @@ export type IndexSearchPlan =
 const INDEX_STATES: readonly IndexCarState[] = [
   "photos",
   "album_pending",
+  "no_photos",
   "no_album",
   "not_indexed",
   "fallback",
@@ -201,8 +202,9 @@ function isIndexState(value: string): value is IndexCarState {
 export function needsDeepSearch(state: IndexCarState): boolean {
   switch (state) {
     case "photos":
-    case "album_pending":
       return false;
+    case "album_pending":
+    case "no_photos":
     case "no_album":
     case "not_indexed":
     case "fallback":

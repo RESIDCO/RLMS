@@ -8,7 +8,6 @@ import {
   needsDeepSearch,
   photoCredit,
   type IndexCar,
-  type IndexCarState,
   type IndexPhoto,
 } from "@shared/photo-index";
 
@@ -27,11 +26,9 @@ function triggerCsvDownload(csv: string): void {
 }
 
 function carStillNeedsDeepSearch(car: IndexCar, hidden: ReadonlySet<HiddenKey>): boolean {
-  if (car.state === "album_pending") return false;
   const visible = car.photos.filter((photo) => !hidden.has(indexPhotoKey(photo)));
   if (car.state === "photos" && visible.length > 0) return false;
-  if (visible.length > 0 && !needsDeepSearch(car.state)) return false;
-  return car.needsDeepSearch || visible.length === 0;
+  return needsDeepSearch(car.state) || visible.length === 0;
 }
 
 export default function PhotoIndexResults({
@@ -176,7 +173,7 @@ function IndexCarBlock({
     <section className="min-w-0">
       <div className="mb-2 flex w-full min-w-0 flex-wrap items-center gap-2">
         <h3 className="font-mono text-sm font-semibold">{car.mark} {car.number}</h3>
-        <StateNote state={car.state} />
+        <StateNote car={car} />
         {needsSearch && (
           <Button type="button" size="sm" variant="outline" onClick={onDeepSearch} data-testid={`button-deep-search-${car.mark}-${car.number}`}>
             Deep search
@@ -188,18 +185,21 @@ function IndexCarBlock({
   );
 }
 
-function StateNote({ state }: { state: IndexCarState }) {
-  switch (state) {
+function StateNote({ car }: { car: IndexCar }) {
+  switch (car.state) {
     case "photos":
       return null;
     case "album_pending":
       return <span className="text-xs text-muted-foreground">Indexing on RRPA…</span>;
+    case "no_photos":
+      if (car.photos.length > 0) return null;
+      return <span className="text-xs text-muted-foreground">No indexed photos</span>;
     case "no_album":
     case "not_indexed":
     case "fallback":
       return null;
     default: {
-      const neverState: never = state;
+      const neverState: never = car.state;
       return neverState;
     }
   }
@@ -216,7 +216,53 @@ function CarBody({
 }) {
   switch (car.state) {
     case "album_pending":
-      return (
+    case "no_photos":
+      return <AlbumsAndPhotos car={car} onOpen={onOpen} onBroken={onBroken} />;
+    case "photos":
+      return <PhotoGrid car={car} onOpen={onOpen} onBroken={onBroken} />;
+    case "no_album":
+    case "not_indexed":
+    case "fallback":
+      return null;
+    default: {
+      const neverState: never = car.state;
+      return neverState;
+    }
+  }
+}
+
+function PhotoGrid({
+  car,
+  onOpen,
+  onBroken,
+}: {
+  car: IndexCar;
+  onOpen: (photo: IndexPhoto) => void;
+  onBroken: (photo: IndexPhoto) => void;
+}) {
+  if (car.photos.length === 0) return null;
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {car.photos.map((photo) => (
+        <PhotoTile key={indexPhotoKey(photo)} car={car} photo={photo} onOpen={onOpen} onBroken={onBroken} />
+      ))}
+    </div>
+  );
+}
+
+function AlbumsAndPhotos({
+  car,
+  onOpen,
+  onBroken,
+}: {
+  car: IndexCar;
+  onOpen: (photo: IndexPhoto) => void;
+  onBroken: (photo: IndexPhoto) => void;
+}) {
+  if (car.albums.length === 0 && car.photos.length === 0) return null;
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      {car.albums.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {car.albums.map((album) => (
             <a
@@ -231,24 +277,10 @@ function CarBody({
             </a>
           ))}
         </div>
-      );
-    case "photos":
-      return (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {car.photos.map((photo) => (
-            <PhotoTile key={indexPhotoKey(photo)} car={car} photo={photo} onOpen={onOpen} onBroken={onBroken} />
-          ))}
-        </div>
-      );
-    case "no_album":
-    case "not_indexed":
-    case "fallback":
-      return null;
-    default: {
-      const neverState: never = car.state;
-      return neverState;
-    }
-  }
+      )}
+      <PhotoGrid car={car} onOpen={onOpen} onBroken={onBroken} />
+    </div>
+  );
 }
 
 function PhotoTile({

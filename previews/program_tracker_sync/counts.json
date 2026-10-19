@@ -1,15 +1,16 @@
 {
-  "fill_blank": 2484,
-  "change": 622,
+  "fill_blank": 2478,
+  "change": 620,
   "clear": 460,
-  "review": 0,
-  "inactive": 1329,
-  "dropped": 0,
+  "review": 244,
+  "code6_zero": 57,
+  "inactive_cars": 273,
   "shops_to_add": [
     "PFL-St Louis TRRA",
     "Port Harbor RR-Granite City, IL"
   ],
   "layouts": 19,
   "column_file_rows": 1015,
-  "mismatched_sheets": []
+  "mismatched_sheets": [],
+  "unused_active_cars": []
 }

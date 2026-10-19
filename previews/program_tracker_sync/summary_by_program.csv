@@ -1,18 +1,18 @@
-program,fill_blank,change,clear,review,inactive
-345-cars xTrinity cars,741,338,216,0,0
-CP ACQUISITION - 60 4750's,443,3,0,0,0
-EA2330 - xMidwest Railcar MCEX,79,47,65,0,67
-OL1503 - NLD to Washington Penn,57,16,0,0,0
-OL1716 - Southwest Salt,1,1,0,0,18
-OL1739&OL1816 - KBX GON Return,224,27,0,0,0
-OL1801 & 1818 - OXY,44,22,0,0,3
-OL1806 - Olin - Scrap,0,1,0,0,86
-OL1826 - Ingevity,17,13,169,0,907
-OL1937 - Hutchinson Transport,1,1,0,0,19
-OL1940 - West Plains,140,0,0,0,37
-OL2405 - The Andersons,109,0,0,0,4
-OL2420 - NLD to Scotwood,193,52,10,0,0
-Residco Leasing Tank Quals,12,6,0,0,0
-VARIES - SOLD TO TRIPLE M,11,3,0,0,48
-xOL2312 - xScoular,32,0,0,0,0
-xOL2526 - Solvay Return,380,92,0,0,140
+program,fill_blank,change,clear,review,code6_zero,inactive
+345-cars xTrinity cars,741,338,216,215,57,0
+CP ACQUISITION - 60 4750's,443,3,0,0,0,0
+EA2330 - xMidwest Railcar MCEX,79,46,65,8,0,9
+OL1503 - NLD to Washington Penn,57,15,0,2,0,0
+OL1716 - Southwest Salt,1,1,0,0,0,6
+OL1739&OL1816 - KBX GON Return,224,27,0,0,0,0
+OL1801 & 1818 - OXY,44,22,0,0,0,1
+OL1806 - Olin - Scrap,0,1,0,0,0,84
+OL1826 - Ingevity,17,13,169,13,0,88
+OL1937 - Hutchinson Transport,1,1,0,0,0,17
+OL1940 - West Plains,140,0,0,0,0,13
+OL2405 - The Andersons,109,0,0,0,0,3
+OL2420 - NLD to Scotwood,193,52,10,0,0,0
+Residco Leasing Tank Quals,6,6,0,6,0,0
+VARIES - SOLD TO TRIPLE M,11,3,0,0,0,29
+xOL2312 - xScoular,32,0,0,0,0,0
+xOL2526 - Solvay Return,380,92,0,0,0,23

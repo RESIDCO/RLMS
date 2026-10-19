@@ -15,6 +15,7 @@ type PreviewGroup = {
   change: number;
   clear: number;
   review: number;
+  "code6 zero"?: number;
 };
 
 type TrackerPreview = {
@@ -121,6 +122,7 @@ export function ProgramTrackerSyncDialog({ open, onClose }: { open: boolean; onC
                       <th className="text-right px-2 py-1">Change</th>
                       <th className="text-right px-2 py-1">Clear</th>
                       <th className="text-right px-2 py-1">Review</th>
+                      <th className="text-right px-2 py-1">Code 6 zero</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -131,6 +133,7 @@ export function ProgramTrackerSyncDialog({ open, onClose }: { open: boolean; onC
                         <td className="px-2 py-1 text-right tabular-nums">{group.change}</td>
                         <td className="px-2 py-1 text-right tabular-nums">{group.clear}</td>
                         <td className="px-2 py-1 text-right tabular-nums">{group.review}</td>
+                        <td className="px-2 py-1 text-right tabular-nums">{group["code6 zero"] ?? 0}</td>
                       </tr>
                     ))}
                   </tbody>

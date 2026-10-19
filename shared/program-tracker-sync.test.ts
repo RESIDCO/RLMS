@@ -1,7 +1,9 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/program-tracker-sync.test.ts */
 
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   APPLY_TABLES,
   GLOBAL_PROGRAM_CAR_COLUMN_ORDER,
@@ -19,6 +21,7 @@ import {
   parseCurrency,
   parseDate,
   parseBoolean,
+  typeValue,
   placeTraceDetails,
   planTouchesRentEvents,
   reclassifyEvidenceRow,
@@ -55,7 +58,35 @@ const keys = carMatchKeys({
 ok(keys.has("TGCX|3370") && keys.has("ELTX|3370"), "match on old or new mark and number");
 
 ok(parseDate("7/6/2026") === "2026-07-06", "m/d/yyyy date");
-ok(parseDate(new Date(2026, 7, 2)) === "2026-08-02", "Date object");
+ok(parseDate(new Date(Date.UTC(2026, 6, 15))) === "2026-07-15", "UTC midnight date stays on that calendar day");
+ok(typeValue(new Date(Date.UTC(2026, 1, 25)), "text") === "2026-02-25", "text column stores an Excel date as ISO");
+const sameDay = classifyCell({
+  field: "return_location",
+  column: "custom_fields",
+  type: "text",
+  current: "2026-02-25",
+  raw: new Date(Date.UTC(2026, 1, 25)),
+  inactive: false,
+});
+ok(sameDay.action === "skip", "ISO text date matches the Excel date and is not rewritten");
+const code6Zero = classifyCell({
+  field: "original_code6",
+  column: "custom_fields",
+  type: "currency",
+  current: null,
+  raw: 0,
+  inactive: false,
+});
+ok(code6Zero.action === "code6 zero" && code6Zero.proposed === 0, "Code 6 zero into a blank cell is its own category");
+const badDate = classifyCell({
+  field: "arrived_shop_date",
+  column: "custom_fields",
+  type: "date",
+  current: null,
+  raw: "4//8/2026",
+  inactive: false,
+});
+ok(badDate.action === "review" && badDate.note === "value doesn't fit the field type" && badDate.proposed === "4//8/2026", "typo date is a review with the reason");
 ok(parseCurrency("$2,978.769") === 2978.77, "currency to 2dp");
 ok(parseBoolean("Y") === true && parseBoolean("N") === false, "Y/N booleans");
 
@@ -357,6 +388,18 @@ ok(migration.includes("r.active IS NOT TRUE"), "apply fails closed when a car is
 ok(migration.includes("rent_events are out of scope"), "snapshot cannot carry rent_events");
 ok(migration.includes("v_list_key text") && migration.includes("v_view_name text"), "layout plpgsql variables are prefixed");
 ok(!/(^|\n)\s*list_key text;/.test(migration) && !/(^|\n)\s*view_name text;/.test(migration), "layout variables do not clash with user_column_prefs columns");
+
+if (process.env.RLMS_DATE_TZ_CHILD === "1") {
+  const sample = new Date(Date.UTC(2026, 6, 15));
+  ok(sample.getTimezoneOffset() === 240, `child process is America/New_York (offset ${sample.getTimezoneOffset()})`);
+} else {
+  const child = spawnSync(process.execPath, ["--import", "tsx", "shared/program-tracker-sync.test.ts"], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    env: { ...process.env, TZ: "America/New_York", RLMS_DATE_TZ_CHILD: "1" },
+    encoding: "utf8",
+  });
+  ok(child.status === 0, `dates parsed under TZ=America/New_York\n${child.stdout}\n${child.stderr}`);
+}
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

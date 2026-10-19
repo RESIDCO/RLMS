@@ -12,21 +12,15 @@ import {
   applyCustomPatch,
   buildApplyCar,
   carChangedSince,
-  columnOrderFromHeaders,
   columnPrefsPayload,
-  findRlmsCars,
+  excelCellValue,
   groupByProgram,
-  matchProgramName,
   normalizeShopName,
-  parseSheetCars,
-  planCarChanges,
+  planTrackerSync,
   programCarsListKey,
-  resolveTrackerSheet,
-  summaryPrograms,
   trackerOrderForProgram,
   undoCarFields,
   writesOnly,
-  type PlannedChange,
   type RlmsCar,
   type ShopRecord,
 } from "@shared/program-tracker-sync";
@@ -37,18 +31,6 @@ function escapeIlike(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
-function cellValue(value: unknown): unknown {
-  if (value == null) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === "object") {
-    const row = value as { result?: unknown; text?: unknown; richText?: { text?: string }[] };
-    if (Array.isArray(row.richText)) return row.richText.map((part) => part.text ?? "").join("");
-    if ("result" in row && row.result != null) return cellValue(row.result);
-    if (typeof row.text === "string") return row.text;
-  }
-  return value;
-}
-
 export async function workbookRows(buffer: Buffer): Promise<Map<string, unknown[][]>> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as any);
@@ -56,7 +38,7 @@ export async function workbookRows(buffer: Buffer): Promise<Map<string, unknown[
   wb.eachSheet((sheet) => {
     const rows: unknown[][] = [];
     sheet.eachRow({ includeEmpty: true }, (row) => {
-      const values = (row.values as unknown[]).slice(1).map(cellValue);
+      const values = (row.values as unknown[]).slice(1).map(excelCellValue);
       rows.push(values);
     });
     sheets.set(sheet.name, rows);
@@ -107,65 +89,23 @@ async function loadProgramCars(program: { id: number; name: string }): Promise<R
 
 export async function buildTrackerPreview(buffer: Buffer) {
   const sheets = await workbookRows(buffer);
-  const summary = summaryPrograms(sheets.get("SUMMARY") ?? []);
-  const activeSheets = summary.filter((row) => row.active_scope);
   const programs = await loadPrograms();
   const shops = await loadShops();
-  const changes: PlannedChange[] = [];
-  const reviews: { program: string; car: string; note: string }[] = [];
   const carsByProgram = new Map<number, RlmsCar[]>();
-  const programsToCreate: { name: string; sheet: string }[] = [];
-  const layouts: { program_id: number; program: string; list_key: string; view_name: string; visible_cols: ReturnType<typeof columnPrefsPayload> }[] = [];
-  let inactiveSkipped = 0;
-  let sheetCars = 0;
-
-  for (const scope of activeSheets) {
-    const sheetName = resolveTrackerSheet(scope.sheet, Array.from(sheets.keys()));
-    const rows = sheetName ? sheets.get(sheetName) : undefined;
-    if (!rows) {
-      reviews.push({ program: scope.sheet, car: "", note: "sheet missing from the workbook" });
-      continue;
-    }
-    const program = matchProgramName(scope.sheet, programs);
-    const parsed = parseSheetCars(scope.sheet, rows);
-    sheetCars += parsed.cars.length;
-    if (!program) {
-      programsToCreate.push({ name: scope.sheet, sheet: scope.sheet });
-      reviews.push({ program: scope.sheet, car: "", note: "no RLMS program — preview includes create program" });
-      continue;
-    }
-    const order = columnOrderFromHeaders(parsed.headers.map((h) => h.header));
-    const saved = order.length ? order : trackerOrderForProgram(program.name) ?? [];
-    if (saved.length) {
-      layouts.push({
-        program_id: program.id,
-        program: program.name,
-        list_key: programCarsListKey(program.id),
-        view_name: TRACKER_ORDER_VIEW,
-        visible_cols: columnPrefsPayload(saved),
-      });
-    }
-    const rlmsCars = await loadProgramCars(program);
-    carsByProgram.set(program.id, rlmsCars);
-    for (const sheetCar of parsed.cars) {
-      const hits = findRlmsCars(sheetCar, rlmsCars);
-      const open = hits.filter((h) => !h.exited);
-      const hit = hits.length === 1 ? hits[0] : open.length === 1 ? open[0] : null;
-      if (!hit) {
-        reviews.push({
-          program: program.name,
-          car: [sheetCar.mark, sheetCar.number].filter(Boolean).join(" "),
-          note: hits.length > 1 ? "ambiguous car" : "car not on this program",
-        });
-        continue;
-      }
-      if (hit.active !== true || hit.exited) {
-        inactiveSkipped += 1;
-        continue;
-      }
-      changes.push(...planCarChanges(sheetCar, hit, shops));
-    }
-  }
+  const plan = await planTrackerSync({
+    summaryRows: sheets.get("SUMMARY") ?? [],
+    sheetNames: Array.from(sheets.keys()),
+    rowsFor: (name) => sheets.get(name),
+    programs,
+    shops,
+    carsFor: async (program) => {
+      const cars = await loadProgramCars(program);
+      carsByProgram.set(program.id, cars);
+      return cars;
+    },
+  });
+  const changes = plan.changes;
+  const reviews = plan.carReviews;
 
   const shopsToAdd = NEW_SHOPS.filter((name) => !shops.some((shop) => normalizeShopName(shop.name) === normalizeShopName(name))).map((name) => ({ name }));
   const writes = writesOnly(changes);
@@ -182,13 +122,14 @@ export async function buildTrackerPreview(buffer: Buffer) {
   const snapshot = {
     shops: shopsToAdd,
     cars: applyCars,
-    layouts,
-    programs_to_create: programsToCreate,
+    layouts: plan.layouts,
+    programs_to_create: plan.programsToCreate,
     summary: {
-      sheet_cars: sheetCars,
-      inactive_skipped: inactiveSkipped,
+      sheet_cars: plan.sheetCars,
+      inactive_skipped: plan.inactiveSkipped,
       writes: writes.length,
       reviews: changes.filter((c) => c.action === "review").length + reviews.length,
+      code6_zero: changes.filter((c) => c.action === "code6 zero").length,
     },
   };
   const { error } = await supabaseAdmin.from("rlms_preview_tokens").insert({
@@ -205,12 +146,13 @@ export async function buildTrackerPreview(buffer: Buffer) {
     expires_at: expires,
     groups: Object.entries(groups).map(([program, counts]) => ({ program, ...counts })),
     shops: shopsToAdd,
-    programs_to_create: programsToCreate,
-    layouts: layouts.map((layout) => ({ program: layout.program, list_key: layout.list_key, view_name: layout.view_name, cols: layout.visible_cols.cols })),
-    inactive_skipped: inactiveSkipped,
-    sheet_cars: sheetCars,
+    programs_to_create: plan.programsToCreate,
+    layouts: plan.layouts.map((layout) => ({ program: layout.program, list_key: layout.list_key, view_name: layout.view_name, cols: layout.visible_cols.cols })),
+    inactive_skipped: plan.inactiveSkipped,
+    sheet_cars: plan.sheetCars,
     writes: writes.length,
-    reviews: [...changes.filter((c) => c.action === "review").map((c) => ({ program: c.program, car: c.car, field: c.field, note: c.note })), ...reviews],
+    code6_zero: changes.filter((c) => c.action === "code6 zero").map((c) => ({ program: c.program, car: c.car, field: c.field, current: c.current, proposed: c.proposed, note: c.note })),
+    reviews: [...changes.filter((c) => c.action === "review").map((c) => ({ program: c.program, car: c.car, field: c.field, current: c.current, proposed: c.proposed, note: c.note })), ...reviews],
   };
 }
 

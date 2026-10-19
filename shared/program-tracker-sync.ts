@@ -30,7 +30,7 @@ export const REFERENCE_TABS = new Set([
   "shop selection details",
 ]);
 
-export type SyncAction = "fill blank" | "change" | "clear" | "review" | "skip";
+export type SyncAction = "fill blank" | "change" | "clear" | "review" | "code6 zero" | "skip";
 
 export type FieldType = "text" | "number" | "currency" | "date" | "boolean";
 
@@ -419,12 +419,13 @@ export function resolveColumnLayout(input: {
   );
 }
 
+/** ExcelJS turns a date-only cell into UTC midnight. Read the UTC calendar day so America/New_York does not move it back one day. */
 export function parseDate(raw: unknown): string | null {
   if (raw == null || raw === "") return null;
   if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
-    const y = raw.getFullYear();
-    const m = String(raw.getMonth() + 1).padStart(2, "0");
-    const d = String(raw.getDate()).padStart(2, "0");
+    const y = raw.getUTCFullYear();
+    const m = String(raw.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(raw.getUTCDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
   }
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 20000 && raw < 80000) {
@@ -467,12 +468,37 @@ export function parseBoolean(raw: unknown): boolean | null {
   return null;
 }
 
+/** ExcelJS cell value, including formula results and rich text. Dates stay Date objects. */
+export function excelCellValue(value: unknown): unknown {
+  if (value == null) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === "object") {
+    const row = value as { result?: unknown; text?: unknown; richText?: { text?: string }[] };
+    if (Array.isArray(row.richText)) return row.richText.map((part) => part.text ?? "").join("");
+    if ("result" in row && row.result != null) return excelCellValue(row.result);
+    if (typeof row.text === "string") return row.text;
+  }
+  return value;
+}
+
+export function rawLabel(raw: unknown): string {
+  if (raw instanceof Date) return parseDate(raw) ?? raw.toISOString();
+  return String(raw ?? "").replace(/\s+/g, " ").trim();
+}
+
 export function typeValue(raw: unknown, type: FieldType): unknown {
   if (isBlankValue(raw) || isNaValue(raw)) return null;
   if (type === "date") return parseDate(raw);
   if (type === "currency" || type === "number") return parseCurrency(raw);
   if (type === "boolean") return parseBoolean(raw);
-  return String(raw).replace(/\s+/g, " ").trim();
+  if (raw instanceof Date) return parseDate(raw) ?? rawLabel(raw);
+  return rawLabel(raw);
+}
+
+function isCode6ZeroFill(field: string, current: unknown, proposed: unknown): boolean {
+  if (field !== "original_code6" && field !== "final_code6") return false;
+  if (proposed !== 0) return false;
+  return isBlankValue(current) || isNaValue(current);
 }
 
 export function canonical(raw: unknown, type: FieldType): unknown {
@@ -553,7 +579,10 @@ export function classifyCell(input: {
   if (isBlankValue(input.raw)) return { ...base, action: "skip", proposed: null, note: "" };
   const proposed = typeValue(input.raw, input.type);
   if (proposed == null) {
-    return { ...base, action: "review", proposed: null, note: "value did not match the field type" };
+    return { ...base, action: "review", proposed: rawLabel(input.raw), note: "value doesn't fit the field type" };
+  }
+  if (isCode6ZeroFill(input.field, input.current, proposed)) {
+    return { ...base, action: "code6 zero", proposed, note: "Code 6 value 0 filling a blank cell" };
   }
   if (isBlankValue(input.current) || isNaValue(input.current)) {
     return { ...base, action: "fill blank", proposed, note: "" };
@@ -878,14 +907,118 @@ export function writesOnly(rows: PlannedChange[]): PlannedChange[] {
   return rows.filter((r) => r.active && (r.action === "fill blank" || r.action === "change" || r.action === "clear"));
 }
 
+export function emptyActionCounts(): Record<SyncAction, number> {
+  return { "fill blank": 0, change: 0, clear: 0, review: 0, "code6 zero": 0, skip: 0 };
+}
+
 export function groupByProgram(rows: PlannedChange[]): Record<string, Record<SyncAction, number>> {
   const out: Record<string, Record<SyncAction, number>> = {};
   for (const row of rows) {
-    const bucket = out[row.program] ?? { "fill blank": 0, change: 0, clear: 0, review: 0, skip: 0 };
+    const bucket = out[row.program] ?? emptyActionCounts();
     bucket[row.action] += 1;
     out[row.program] = bucket;
   }
   return out;
+}
+
+export type TrackerCarReview = { program: string; car: string; note: string };
+
+export type TrackerLayoutPlan = {
+  program_id: number;
+  program: string;
+  list_key: string;
+  view_name: string;
+  visible_cols: ReturnType<typeof columnPrefsPayload>;
+};
+
+export type TrackerSyncPlan = {
+  changes: PlannedChange[];
+  carReviews: TrackerCarReview[];
+  layouts: TrackerLayoutPlan[];
+  inactiveSkipped: number;
+  inactiveCars: { program: string; program_car_id: number; car: string }[];
+  sheetCars: number;
+  programsToCreate: { name: string; sheet: string }[];
+  unmapped: { header: string; sheet: string }[];
+  carCounts: { program: string; sheet: string; parsed: number }[];
+};
+
+/** Same plan the preview route stores and --apply would write. No I/O. */
+export async function planTrackerSync(input: {
+  summaryRows: unknown[][];
+  sheetNames: readonly string[];
+  rowsFor: (sheetName: string) => unknown[][] | undefined;
+  programs: { id: number; name: string }[];
+  carsFor: (program: { id: number; name: string }) => Promise<RlmsCar[]>;
+  shops: ShopRecord[];
+}): Promise<TrackerSyncPlan> {
+  const activeSheets = summaryPrograms(input.summaryRows).filter((row) => row.active_scope);
+  const changes: PlannedChange[] = [];
+  const carReviews: TrackerCarReview[] = [];
+  const layouts: TrackerLayoutPlan[] = [];
+  const programsToCreate: { name: string; sheet: string }[] = [];
+  const unmapped: { header: string; sheet: string }[] = [];
+  const carCounts: { program: string; sheet: string; parsed: number }[] = [];
+  const inactiveCars: TrackerSyncPlan["inactiveCars"] = [];
+  let inactiveSkipped = 0;
+  let sheetCars = 0;
+
+  for (const scope of activeSheets) {
+    const sheetName = resolveTrackerSheet(scope.sheet, input.sheetNames);
+    const rows = sheetName ? input.rowsFor(sheetName) : undefined;
+    if (!rows) {
+      carReviews.push({ program: scope.sheet, car: "", note: "sheet missing from the workbook" });
+      carCounts.push({ program: scope.sheet, sheet: "", parsed: 0 });
+      continue;
+    }
+    const program = matchProgramName(scope.sheet, input.programs);
+    const parsed = parseSheetCars(scope.sheet, rows);
+    sheetCars += parsed.cars.length;
+    carCounts.push({ program: scope.sheet, sheet: sheetName ?? "", parsed: parsed.cars.length });
+    for (const header of parsed.unmapped) unmapped.push({ header, sheet: sheetName ?? scope.sheet });
+    if (!program) {
+      programsToCreate.push({ name: scope.sheet, sheet: scope.sheet });
+      carReviews.push({ program: scope.sheet, car: "", note: "no RLMS program — preview includes create program" });
+      continue;
+    }
+    const order = columnOrderFromHeaders(parsed.headers.map((h) => h.header));
+    const saved = order.length ? order : trackerOrderForProgram(program.name) ?? [];
+    if (saved.length) {
+      layouts.push({
+        program_id: program.id,
+        program: program.name,
+        list_key: programCarsListKey(program.id),
+        view_name: TRACKER_ORDER_VIEW,
+        visible_cols: columnPrefsPayload(saved),
+      });
+    }
+    const rlmsCars = await input.carsFor(program);
+    for (const sheetCar of parsed.cars) {
+      const hits = findRlmsCars(sheetCar, rlmsCars);
+      const open = hits.filter((h) => !h.exited);
+      const hit = hits.length === 1 ? hits[0] : open.length === 1 ? open[0] : null;
+      if (!hit) {
+        carReviews.push({
+          program: program.name,
+          car: [sheetCar.mark, sheetCar.number].filter(Boolean).join(" "),
+          note: hits.length > 1 ? "ambiguous car" : "car not on this program",
+        });
+        continue;
+      }
+      if (hit.active !== true || hit.exited) {
+        inactiveSkipped += 1;
+        inactiveCars.push({
+          program: program.name,
+          program_car_id: hit.program_car_id,
+          car: `${hit.reporting_marks} ${hit.car_number}`.trim(),
+        });
+        continue;
+      }
+      changes.push(...planCarChanges(sheetCar, hit, input.shops));
+    }
+  }
+
+  return { changes, carReviews, layouts, inactiveSkipped, inactiveCars, sheetCars, programsToCreate, unmapped, carCounts };
 }
 
 export type CarExpect = {

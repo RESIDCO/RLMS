@@ -566,7 +566,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <div className="shrink-0">
             <FreshnessBanner />
           </div>
-          <div className="flex-1 min-h-0 overflow-auto">
+          <div className="flex-1 min-h-0 overflow-auto" data-app-scroll="">
             {children}
           </div>
         </main>

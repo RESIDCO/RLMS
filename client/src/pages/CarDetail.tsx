@@ -27,7 +27,7 @@ import {
   turning50OlPath,
   turning50Path,
 } from "@/lib/browse-nav";
-import { hasSearchSession, searchReturnPath } from "@/lib/search-query";
+import { BackToSearch } from "@/components/BackToSearch";
 import { CarDetail, RailcarFormDialog } from "@/pages/FleetRegistry";
 import { CommitmentPanel } from "@/pages/CommitmentOps";
 
@@ -149,7 +149,6 @@ export default function CarDetailPage() {
     document.getElementById("assignment")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [focus, r]);
 
-  const searchBackPath = hasSearchSession() ? searchReturnPath() : null;
   const abs = Array.isArray(r?.railcar_ab_items) ? r.railcar_ab_items : [];
 
   return (
@@ -192,18 +191,7 @@ export default function CarDetailPage() {
             </Link>
           </div>
         )}
-        {searchBackPath && (
-          <div className="mb-3">
-            <Link
-              href={searchBackPath}
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
-              data-testid="link-back-to-search"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to search results
-            </Link>
-          </div>
-        )}
+        <BackToSearch />
         <nav className="flex items-center gap-1.5 flex-wrap mb-5" aria-label="Breadcrumb">
           {crumbs.map((it, i) => (
             <span key={`${it.label}-${i}`} className="flex items-center gap-1.5">

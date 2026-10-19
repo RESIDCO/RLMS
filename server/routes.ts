@@ -8,7 +8,7 @@ import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExpor
 import { pointCurrentAssignmentAt } from "./current-assignment";
 import { loadOlIdentity, matchRiderByCompactLabel, railcarIdentityPatch } from "./ol-identity";
 import { AD_HOC_LEASE_NUMBER } from "@shared/ol-identity";
-import { queryRailcars, queryRailcarIds, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
+import { queryRailcars, queryRailcarIds, queryRailcarSummary, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
 import { listAccounts, getAccount, createAccount, updateAccount, ensureAccountForLessee, resolveAccountIdForNewLease, accountManagerByAccountIds, listAccountManagementOverview, isStatusTag, patchRiderStatusTag, listRiderCarsForAccountMgmt } from "./accounts";
@@ -1475,6 +1475,15 @@ export async function registerRoutes(
       const params = parseRailcarListParams(req.query as Record<string, unknown>);
       const ids = await queryRailcarIds({ ...params, all: true });
       res.json({ ids, total_count: ids.length });
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/railcars/summary", async (req: Request, res: Response) => {
+    try {
+      const params = parseRailcarListParams(req.query as Record<string, unknown>);
+      res.json(await queryRailcarSummary(params));
     } catch (err) {
       errHandler(res, err);
     }
@@ -4219,7 +4228,7 @@ export async function registerRoutes(
   app.get("/api/search", async (req: Request, res: Response) => {
     try {
       const raw = (req.query.q as string | undefined)?.trim() ?? "";
-      if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], terms: [], counts: { railcars: 0, riders: 0, leases: 0, total: 0 } });
+      if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], inactive_matches: [], ambiguous: [], terms: [], truncated: false, match: null, counts: { railcars: 0, riders: 0, leases: 0, total: 0, pasted: 0, inactive: 0, ambiguous: 0, not_found: 0 } });
       res.json(await runGlobalSearch(raw, {
         active: typeof req.query.active === "string" ? req.query.active : "active",
         searchScope: parseSearchScope(req.query as Record<string, unknown>),
@@ -4232,7 +4241,7 @@ export async function registerRoutes(
   app.post("/api/search", async (req: Request, res: Response) => {
     try {
       const raw = String((req.body as any)?.q ?? "").trim();
-      if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], terms: [], counts: { railcars: 0, riders: 0, leases: 0, total: 0 } });
+      if (!raw) return res.json({ railcars: [], riders: [], leases: [], not_found: [], inactive_matches: [], ambiguous: [], terms: [], truncated: false, match: null, counts: { railcars: 0, riders: 0, leases: 0, total: 0, pasted: 0, inactive: 0, ambiguous: 0, not_found: 0 } });
       const body = (req.body ?? {}) as Record<string, unknown>;
       res.json(await runGlobalSearch(raw, {
         active: typeof body.active === "string" ? body.active : "active",

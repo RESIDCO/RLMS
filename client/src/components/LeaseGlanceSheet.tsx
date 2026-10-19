@@ -30,9 +30,12 @@ function fmtMoney(n: number | string | null | undefined) {
 export function LeaseGlanceSheet({
   rider,
   onClose,
+  searchQuery,
 }: {
   rider: LeaseGlanceRider | null;
   onClose: () => void;
+  /** `from=search&sid=&return=` so the lease page can offer Back to results. */
+  searchQuery?: string | null;
 }) {
   const lease = asOne(rider?.master_lease);
   const soldTo = String(lease?.sold_to ?? "").trim();
@@ -114,7 +117,8 @@ export function LeaseGlanceSheet({
             onClick={() => {
               if (!rider?.id) return;
               onClose();
-              navigateHash(`/leases?rider=${rider.id}`);
+              if (searchQuery) navigateHash(`/leases/rider/${rider.id}?${searchQuery}`);
+              else navigateHash(`/leases?rider=${rider.id}`);
             }}
           >
             View full lease

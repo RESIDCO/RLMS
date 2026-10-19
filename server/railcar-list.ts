@@ -3,6 +3,13 @@ import { parseFleetStatus } from "@shared/fleet-status";
 import { carNumberSearchPattern, isOlNumberToken, splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag, OPS_FLAG_FALLBACK_PREFIX } from "@shared/ops-flag";
+import {
+  classifyFleetQuery,
+  fleetMatchLabel,
+  fleetOrClause,
+  fleetPatternToLike,
+  summaryCarTypeKey,
+} from "@shared/carTypeAliases";
 import { fetchAllRows } from "./fetch-all";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachLatestAmNotes } from "./rider-account-comments";
@@ -64,6 +71,32 @@ export type RailcarListParams = {
   flag?: string;
   /** Filter/store flags in comment_event_note because ops_flag is not on the table yet. */
   opsFlagFallback?: boolean;
+  /** Car type / equipment type code. `J31*` is a prefix. */
+  carType?: string;
+  /** Mechanical designation, exact or `GB*` prefix. */
+  mech?: string;
+  /** AAR designation, exact or prefix. */
+  aar?: string;
+  /**
+   * Exact car-type / mechanical / alias match. Search sends `fleet=1`.
+   * Omitted everywhere else so Railcars and select-all keep text search.
+   */
+  fleetCodes?: boolean;
+  /** Set by attachFleetMatch. Not a query-string param. */
+  fleetOr?: string | null;
+  fleetMatch?: FleetMatchReport | null;
+  fleetReady?: boolean;
+};
+
+export type FleetMatchReport = {
+  kind: "car_type" | "mechanical" | "alias";
+  label: string;
+  code?: string;
+  ruleId?: string;
+  ruleLabel?: string;
+  activeCount: number | null;
+  /** How many cars the same query would return as ordinary text. */
+  textCount?: number | null;
 };
 
 export function parseRailcarListParams(query: Record<string, unknown>): RailcarListParams {
@@ -110,7 +143,11 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
     sort: str(query.sort) ?? "car_number",
     dir: query.dir === "desc" ? "desc" : "asc",
     page: Math.max(1, num(query.page) ?? 1),
-    pageSize: Math.min(200, Math.max(1, num(query.pageSize) ?? 75)),
+    pageSize: Math.min(500, Math.max(1, num(query.pageSize) ?? 75)),
+    carType: str(query.type) ?? str(query.car_type),
+    mech: str(query.mech),
+    aar: str(query.aar),
+    fleetCodes: truthy(query.fleet),
     all: truthy(query.all) || truthy(query.export),
     acquisition_batch_id: num(query.acquisition_batch_id) ?? num(query.batch),
     needs_completion:
@@ -196,12 +233,26 @@ export function leaseSearchTokenValues(tokens: SearchToken[]): string[] {
 
 const CAR_NUMBER_FIELDS = ["reporting_marks", "car_initial", "car_number"] as const;
 const LEASE_OL_FIELDS = ["lessee_name", "rider_external_id", "assignment_label"] as const;
-const CAR_DATA_FIELDS = [
+/**
+ * Master's Car data checkbox. Used only when Search did not send `fleet=1`,
+ * so Railcars and select-all keep the filters they had before this PR.
+ */
+const MASTER_CAR_DATA_FIELDS = [
   "car_type",
   "equipment_type_code",
   "general_description",
   "mechanical_designation",
 ] as const;
+/** Searched for letter tokens only when Search sends `fleet=1`. */
+const FLEET_FIELDS = [
+  "car_type",
+  "equipment_type_code",
+  "aar_designation",
+  "mechanical_designation",
+  "general_description",
+] as const;
+/** Extra free text. Still behind the Car data checkbox on a fleet search. */
+const NOTE_FIELDS = ["description", "notes"] as const;
 
 export function parseSearchScope(query: Record<string, unknown> | undefined): SearchScope {
   const flag = (key: string, fallback: boolean) => {
@@ -331,11 +382,12 @@ export function applySearchFilter(
   query: any,
   rawSearch: string | undefined,
   scope?: SearchScope,
-  extra?: { railcarIds?: number[] },
+  extra?: { railcarIds?: number[]; fleetCodes?: boolean },
 ) {
   if (!rawSearch) return query;
   const tokens = railcarSearchTokens(rawSearch);
   const sc = scopeOrDefault(scope);
+  const fleetCodes = Boolean(extra?.fleetCodes);
   const railcarIns = idInOrClauses(extra?.railcarIds ?? []);
   for (const tok of tokens) {
     const t = tok.value;
@@ -360,8 +412,14 @@ export function applySearchFilter(
     if (sc.leases) {
       for (const col of LEASE_OL_FIELDS) ors.push(`${col}.ilike.%${t}%`);
     }
+    if (fleetCodes && hasLetter) {
+      for (const col of FLEET_FIELDS) ors.push(`${col}.ilike.%${t}%`);
+    }
     if (sc.carData) {
-      for (const col of CAR_DATA_FIELDS) ors.push(`${col}.ilike.%${t}%`);
+      const fields = fleetCodes ? NOTE_FIELDS : MASTER_CAR_DATA_FIELDS;
+      if (!fleetCodes || hasLetter) {
+        for (const col of fields) ors.push(`${col}.ilike.%${t}%`);
+      }
     }
     ors.push(...railcarIns);
     if (!ors.length) continue;
@@ -370,9 +428,106 @@ export function applySearchFilter(
   return query;
 }
 
+function quoteLike(value: string) {
+  return `"${value.replace(/"/g, "")}"`;
+}
+
+function applyColumnPattern(query: any, columns: string[], raw: string | undefined) {
+  const like = fleetPatternToLike(raw ?? "");
+  if (!like) return query;
+  if (columns.length === 1) return query.ilike(columns[0], like);
+  return query.or(columns.map((c) => `${c}.ilike.${quoteLike(like)}`).join(","));
+}
+
+async function countActiveFleetOr(orClause: string): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from("railcars")
+    .select("id", { count: "exact", head: true })
+    .or(orClause)
+    .neq("active", false);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
+ * Car-type codes and mechanical designations match exactly (case-insensitive),
+ * not as substrings. A mechanical-shaped token with zero cars falls back to
+ * text search so "BNSF" still finds the lessee. Alias phrases always use the rule.
+ */
+export async function resolveFleetMatch(search: string | undefined): Promise<{
+  orClause: string | null;
+  match: FleetMatchReport | null;
+}> {
+  const cls = classifyFleetQuery(search ?? "");
+  switch (cls.kind) {
+    case "text":
+      return { orClause: null, match: null };
+    case "alias":
+    case "car_type":
+    case "mechanical": {
+      const orClause = fleetOrClause(cls);
+      if (!orClause) return { orClause: null, match: null };
+      const activeCount = await countActiveFleetOr(orClause);
+      if (cls.kind !== "alias" && activeCount <= 0) return { orClause: null, match: null };
+      return {
+        orClause,
+        match: {
+          kind: cls.kind,
+          label: fleetMatchLabel(cls, cls.kind === "alias" ? undefined : activeCount),
+          code: cls.kind === "alias" ? undefined : cls.code,
+          ruleId: cls.kind === "alias" ? cls.rule.id : undefined,
+          ruleLabel: cls.kind === "alias" ? cls.rule.label : undefined,
+          activeCount,
+        },
+      };
+    }
+    default: {
+      const _never: never = cls;
+      return _never;
+    }
+  }
+}
+
+async function countTextMatches(p: RailcarListParams): Promise<number> {
+  const plain: RailcarListParams = {
+    ...p,
+    fleetCodes: false,
+    fleetReady: true,
+    fleetOr: null,
+    fleetMatch: null,
+    searchRiderIds: undefined,
+    searchLeaseIds: undefined,
+  };
+  let q = supabaseAdmin.from("railcars").select("id", { count: "exact", head: true });
+  q = await applyRailcarFilters(q, plain);
+  const { count, error } = await q;
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function attachFleetMatch(p: RailcarListParams) {
+  if (p.fleetReady) return;
+  p.fleetReady = true;
+  if (!p.fleetCodes || !p.search || p.ids?.length) {
+    p.fleetOr = null;
+    p.fleetMatch = null;
+    return;
+  }
+  const resolved = await resolveFleetMatch(p.search);
+  p.fleetOr = resolved.orClause;
+  p.fleetMatch = resolved.match;
+  if (!p.fleetMatch || !p.fleetOr) return;
+  try {
+    p.fleetMatch = { ...p.fleetMatch, textCount: await countTextMatches(p) };
+  } catch (err) {
+    console.log(`[railcars] text-count skipped: ${String((err as { message?: string })?.message ?? err)}`);
+  }
+}
+
 async function applyRailcarFilters(query: any, p: RailcarListParams) {
+  await attachFleetMatch(p);
   const scope = scopeOrDefault(p.searchScope);
-  if (p.search && !p.ids?.length && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
+  if (p.search && !p.fleetOr && !p.ids?.length && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
     const matched = await matchingLeaseAndRiderIds(leaseSearchTokenValues(railcarSearchTokens(p.search)));
     p.searchRiderIds = matched.riderIds;
     p.searchLeaseIds = matched.leaseIds;
@@ -388,7 +543,7 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
 
   if (p.turning50) {
     query = query.eq("active", true).eq("build_year", p.turning50 - 50);
-    query = applySearchFilter(query, p.search, scope, extra);
+    query = applySearchFilter(query, p.search, scope, { ...extra, fleetCodes: p.fleetCodes });
     return query;
   }
 
@@ -442,7 +597,12 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
     );
   }
 
-  query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, extra);
+  if (p.carType) query = applyColumnPattern(query, ["car_type", "equipment_type_code"], p.carType);
+  if (p.mech) query = applyColumnPattern(query, ["mechanical_designation"], p.mech);
+  if (p.aar) query = applyColumnPattern(query, ["aar_designation"], p.aar);
+
+  if (p.fleetOr) query = query.or(p.fleetOr);
+  else query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, { ...extra, fleetCodes: p.fleetCodes });
   query = applyOpsFlagFilter(query, p.flag, p.opsFlagFallback);
   return query;
 }
@@ -625,41 +785,54 @@ async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]
   return data.map((r) => r.id);
 }
 
+function orderRailcarQuery(query: any, p: RailcarListParams) {
+  const orderCol = p.sort === "id" ? "id" : "car_number";
+  const ordered = query.order(orderCol, { ascending: p.dir !== "desc" });
+  if (orderCol === "id") return ordered;
+  return ordered.order("id", { ascending: true });
+}
+
 async function queryRailcarsByAssignedIds(p: RailcarListParams, select: string) {
   const ids = await railcarIdsForAssignmentFilter(p);
-  if (!ids?.length) {
-    return { rows: [] as any[], total_count: 0, page: 1, pageSize: p.pageSize ?? 0 };
+    if (!ids?.length) {
+    return { rows: [] as any[], total_count: 0, page: 1, pageSize: p.pageSize ?? 0, match: p.fleetMatch ?? null };
   }
-  const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
   const rows: any[] = [];
   for (let i = 0; i < ids.length; i += 150) {
     const slice = ids.slice(i, i + 150);
-    let q = supabaseAdmin
-      .from("railcars")
-      .select(select)
-      .order(orderCol, { ascending: p.dir !== "desc" });
+    let q = orderRailcarQuery(
+      supabaseAdmin.from("railcars").select(select),
+      p,
+    );
     q = await applyRailcarFilters(q, { ...p, assignedRailcarIds: slice });
     const { data, error } = await q;
     if (error) throw error;
     rows.push(...(data ?? []).map(mapRow));
   }
   const merged = await attachAccountJoins(rows);
-  if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
+  if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
   const start = ((p.page ?? 1) - 1) * (p.pageSize ?? merged.length);
   return {
     rows: merged.slice(start, start + (p.pageSize ?? merged.length)),
     total_count: merged.length,
     page: p.page ?? 1,
     pageSize: p.pageSize ?? merged.length,
+    match: p.fleetMatch ?? null,
   };
 }
 
 async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, haveIds: Set<number>) {
-  if (!p.search) return [];
+  if (!p.search || p.fleetOr) return [];
   const ids = (await resolveRailcarsByAnyIdentity(p.search)).filter((id) => !haveIds.has(id));
   if (!ids.length) return [];
   let q = supabaseAdmin.from("railcars").select(select).in("id", ids.slice(0, 80));
-  q = await applyRailcarFilters(q, { ...p, search: undefined });
+  q = await applyRailcarFilters(q, {
+    ...p,
+    search: undefined,
+    fleetOr: null,
+    fleetMatch: null,
+    fleetReady: true,
+  });
   const { data, error } = await q;
   if (error) {
     console.log(`[railcars] prior-identity hydrate skipped: ${error.message}`);
@@ -670,7 +843,6 @@ async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, ha
 
 async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   const db = supabaseAdmin;
-  const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
 
   if (p.assigned === "nolink") {
     // Left-anti-join: cars with no assignment row.
@@ -679,42 +851,42 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     );
     const assignedSet = new Set(assigned.map((a) => a.railcar_id));
     const all = await fetchAllRows(async (from, to) => {
-      let q = db.from("railcars").select(select).order(orderCol, { ascending: p.dir !== "desc" }).range(from, to);
+      let q = orderRailcarQuery(db.from("railcars").select(select), p).range(from, to);
       q = await applyRailcarFilters(q, { ...p, assigned: undefined });
       return q;
     });
     const rows = all.map(mapRow).filter((r: any) => !assignedSet.has(r.id) && !r.assignment);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
     const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
-    if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
+    if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
     const start = (p.page! - 1) * p.pageSize!;
     return {
       rows: merged.slice(start, start + p.pageSize!),
       total_count: merged.length,
       page: p.page,
       pageSize: p.pageSize,
+      match: p.fleetMatch ?? null,
     };
   }
 
   if (p.all) {
     const data = await fetchAllRows(async (from, to) => {
-      let q = db.from("railcars").select(select).order(orderCol, { ascending: p.dir !== "desc" }).range(from, to);
+      let q = orderRailcarQuery(db.from("railcars").select(select), p).range(from, to);
       q = await applyRailcarFilters(q, p);
       return q;
     });
     const rows = data.map(mapRow);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
     const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
-    return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
+    return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
   }
 
   const from = (p.page! - 1) * p.pageSize!;
   const to = from + p.pageSize! - 1;
-  let q = db
-    .from("railcars")
-    .select(select, { count: "estimated" })
-    .order(orderCol, { ascending: p.dir !== "desc" })
-    .range(from, to);
+  let q = orderRailcarQuery(
+    db.from("railcars").select(select, { count: "estimated" }),
+    p,
+  ).range(from, to);
   q = await applyRailcarFilters(q, p);
   const { data, error, count } = await q;
   if (error) throw error;
@@ -726,6 +898,58 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     total_count: (count ?? 0) + extra.length,
     page: p.page,
     pageSize: p.pageSize,
+    match: p.fleetMatch ?? null,
+  };
+}
+
+export type RailcarSummary = {
+  total: number;
+  by_type: { key: string; count: number }[];
+  by_entity: { key: string; count: number }[];
+  by_status: { key: string; count: number }[];
+  match: FleetMatchReport | null;
+};
+
+function bumpCount(map: Map<string, number>, key: string) {
+  const k = key.trim() || "—";
+  map.set(k, (map.get(k) ?? 0) + 1);
+}
+
+function rankedCounts(map: Map<string, number>) {
+  return Array.from(map.entries())
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
+
+/** Same filters as the list. Grouped counts for the summary above the grid. */
+export async function queryRailcarSummary(p: RailcarListParams): Promise<RailcarSummary> {
+  await attachFleetMatch(p);
+  const select = "id, car_type, equipment_type_code, entity, fleet_status";
+  const data = await fetchAllRows<{
+    id: number;
+    car_type: string | null;
+    equipment_type_code: string | null;
+    entity: string | null;
+    fleet_status: string | null;
+  }>(async (from, to) => {
+    let q = supabaseAdmin.from("railcars").select(select).order("id", { ascending: true }).range(from, to);
+    q = await applyRailcarFilters(q, p);
+    return q;
+  });
+  const byType = new Map<string, number>();
+  const byEntity = new Map<string, number>();
+  const byStatus = new Map<string, number>();
+  for (const row of data) {
+    bumpCount(byType, summaryCarTypeKey(row.car_type, row.equipment_type_code));
+    bumpCount(byEntity, String(row.entity ?? ""));
+    bumpCount(byStatus, String(row.fleet_status ?? ""));
+  }
+  return {
+    total: data.length,
+    by_type: rankedCounts(byType),
+    by_entity: rankedCounts(byEntity),
+    by_status: rankedCounts(byStatus),
+    match: p.fleetMatch ?? null,
   };
 }
 

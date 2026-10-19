@@ -355,17 +355,97 @@ export function canonicalPasteCarToken(token: string): string {
   return mark ? `${mark} ${num}` : num;
 }
 
-export function parseCarPasteList(raw: string): string[] {
+export type PasteRangeExpansion = { raw: string; count: number; from: string; to: string };
+export type PasteRangeRejection = { raw: string; message: string };
+
+export type ParsedCarPaste = {
+  tokens: string[];
+  expandedFrom: PasteRangeExpansion[];
+  rejectedRanges: PasteRangeRejection[];
+};
+
+const RANGE_CONNECTOR = /^(?:thru|through|to|[-–—])$/i;
+const HYPHEN_RANGE = /^(\d+)[-–—](\d+)$/;
+const MARK_WORD = /^[A-Za-z]{2,8}$/;
+
+function isRangeConnector(word: string): boolean {
+  return RANGE_CONNECTOR.test(word);
+}
+
+/** THRU / THROUGH / TO are range words, never reporting marks. */
+function isMarkWord(word: string): boolean {
+  return MARK_WORD.test(word) && !/^(?:thru|through|to)$/i.test(word);
+}
+
+/**
+ * When the end number is shorter, keep the start's leading digits.
+ * `401-49` means 401–449. Same-length ends are used as written.
+ */
+export function expandRangeEnd(start: string, end: string): string {
+  if (end.length < start.length) return start.slice(0, start.length - end.length) + end;
+  return end;
+}
+
+function pushToken(seen: Set<string>, out: string[], token: string, canonicalize: boolean) {
+  const t = canonicalize ? canonicalPasteCarToken(token) : token.trim().replace(/\s+/g, " ").toUpperCase();
+  if (!t) return;
+  const key = t.replace(/\s+/g, "");
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push(t);
+}
+
+/**
+ * Expand `MARK? N1 (-|–|thru|through|to) N2` before the token split.
+ * A range is expanded when the end is ≥ the start and the span (end − start) is ≤ 500.
+ * A mark earlier on the same line applies to a bare range. Descending ranges and
+ * ranges over 500 stay as a single token and are flagged.
+ * `parseCarPasteList` still returns `string[]` for existing callers.
+ */
+export function parseCarPasteListDetailed(raw: string): ParsedCarPaste {
   const seen = new Set<string>();
   const out: string[] = [];
+  const expandedFrom: PasteRangeExpansion[] = [];
+  const rejectedRanges: PasteRangeRejection[] = [];
 
   function push(token: string) {
-    const t = canonicalPasteCarToken(token);
-    if (!t) return;
-    const key = t.replace(/\s+/g, "");
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(t);
+    pushToken(seen, out, token, true);
+  }
+
+  function pushRaw(token: string) {
+    pushToken(seen, out, token, false);
+  }
+
+  function takeRange(mark: string | null, start: string, endRaw: string, rawLabel: string): boolean {
+    const label = rawLabel.replace(/\s+/g, " ").trim();
+    const end = expandRangeEnd(start, endRaw);
+    if (!/^\d+$/.test(start) || !/^\d+$/.test(end)) {
+      rejectedRanges.push({ raw: label, message: `Range ${label} could not be read` });
+      pushRaw(label);
+      return true;
+    }
+    const a = BigInt(start);
+    const b = BigInt(end);
+    if (b < a) {
+      const message = `Range ${label} runs backwards and was not expanded`;
+      rejectedRanges.push({ raw: label, message });
+      pushRaw(label);
+      return true;
+    }
+    if (b - a > BigInt(500)) {
+      const message = `Range ${label} is longer than 500 and was not expanded`;
+      rejectedRanges.push({ raw: label, message });
+      pushRaw(label);
+      return true;
+    }
+    const width = Math.max(start.length, end.length);
+    const count = Number(b - a + BigInt(1));
+    for (let n = a; n <= b; n += BigInt(1)) {
+      const num = n.toString().padStart(width, "0");
+      push(mark ? `${mark} ${num}` : num);
+    }
+    expandedFrom.push({ raw: label, count, from: start, to: end });
+    return true;
   }
 
   // Newlines separate rows (Excel paste). Tabs are mark/number columns, not car breaks.
@@ -379,15 +459,50 @@ export function parseCarPasteList(raw: string): string[] {
       for (let i = 0; i < words.length; i++) {
         const w = words[i];
         const next = words[i + 1];
-        const isMark = /^[A-Za-z]{2,8}$/.test(w);
-        const nextIsNum = next != null && /^\d/.test(next);
-        if (isMark && nextIsNum) {
+        const next2 = words[i + 2];
+        const next3 = words[i + 3];
+
+        if (isMarkWord(w) && next && HYPHEN_RANGE.test(next)) {
+          lineMark = w.toUpperCase();
+          const m = HYPHEN_RANGE.exec(next)!;
+          takeRange(lineMark, m[1], m[2], `${w} ${next}`);
+          i += 1;
+          continue;
+        }
+        if (
+          isMarkWord(w) &&
+          next &&
+          /^\d+$/.test(next) &&
+          next2 &&
+          isRangeConnector(next2) &&
+          next3 &&
+          /^\d+$/.test(next3)
+        ) {
+          lineMark = w.toUpperCase();
+          takeRange(lineMark, next, next3, `${w} ${next} ${next2} ${next3}`);
+          i += 3;
+          continue;
+        }
+        if (HYPHEN_RANGE.test(w)) {
+          const m = HYPHEN_RANGE.exec(w)!;
+          takeRange(lineMark, m[1], m[2], w);
+          continue;
+        }
+        if (/^\d+$/.test(w) && next && isRangeConnector(next) && next2 && /^\d+$/.test(next2)) {
+          takeRange(lineMark, w, next2, `${w} ${next} ${next2}`);
+          i += 2;
+          continue;
+        }
+        if (isRangeConnector(w)) continue;
+
+        const nextIsNum = next != null && /^\d/.test(next) && !HYPHEN_RANGE.test(next);
+        if (isMarkWord(w) && nextIsNum) {
           lineMark = w.toUpperCase();
           push(`${w} ${next}`);
           i += 1;
           continue;
         }
-        if (isMark) {
+        if (isMarkWord(w)) {
           lineMark = w.toUpperCase();
           continue;
         }
@@ -399,7 +514,11 @@ export function parseCarPasteList(raw: string): string[] {
       }
     }
   }
-  return out;
+  return { tokens: out, expandedFrom, rejectedRanges };
+}
+
+export function parseCarPasteList(raw: string): string[] {
+  return parseCarPasteListDetailed(raw).tokens;
 }
 
 export function looksLikeCarToken(token: string): boolean {

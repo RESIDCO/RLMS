@@ -7,6 +7,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { ChevronsUpDown, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { offerUndoToast } from "@/lib/undo";
 
 export type ShopOption = { id: number; name: string };
 
@@ -16,12 +17,14 @@ export default function ShopCombobox({
   onChange,
   disabled,
   compact,
+  programId,
 }: {
   shops: ShopOption[];
   value: number | null;
   onChange: (shopId: number | null) => void;
   disabled?: boolean;
   compact?: boolean;
+  programId?: number | null;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -37,14 +40,15 @@ export default function ShopCombobox({
 
   const create = useMutation({
     mutationFn: async (name: string) => {
-      const res = await apiRequest("POST", "/api/programs/shops", { name });
-      return res.json() as Promise<ShopOption>;
+      const res = await apiRequest("POST", "/api/programs/shops", { name, program_id: programId ?? null });
+      return res.json() as Promise<ShopOption & { change_group?: string | null; created?: boolean }>;
     },
     onSuccess: (row) => {
       qc.invalidateQueries({ queryKey: ["/api/programs/shops"] });
       onChange(row.id);
       setOpen(false);
       setQ("");
+      if (row.change_group) offerUndoToast(row);
     },
     onError: (e: Error) => toast({ title: "Could not add shop", description: e.message, variant: "destructive" }),
   });

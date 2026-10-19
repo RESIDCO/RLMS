@@ -6,6 +6,7 @@ import {
   normalizeListKey,
   parsePrefsPayload,
 } from "@shared/column-views";
+import { categoryCarsListKey } from "@shared/program-tracker-sync";
 
 type PrefRow = {
   id: number;
@@ -60,6 +61,10 @@ function pickRow(userRows: PrefRow[], sharedRows: PrefRow[], requested?: string)
   return userRows[0] ?? null;
 }
 
+function pageForListKey(listKey: string): string {
+  return listKey.startsWith("program_cars") ? "program_cars" : listKey;
+}
+
 function viewMeta(rows: PrefRow[]) {
   const seen = new Set<string>();
   const out: { view_name: string; is_default: boolean; is_shared: boolean; updated_at: string | null }[] = [];
@@ -95,7 +100,17 @@ export function registerColumnPrefRoutes(app: Express) {
       if (!listKey) return res.status(400).json({ error: "list_key or page required" });
       const requested = req.query.view_name != null ? String(req.query.view_name) : "";
       const userRows = await loadMapped(listKey, user.id);
-      const sharedRows = await loadMapped(listKey, undefined, true);
+      let sharedRows = await loadMapped(listKey, undefined, true);
+      const programScoped = /^program_cars:[0-9]+$/.test(listKey);
+      if (programScoped && userRows.length === 0 && sharedRows.length === 0) {
+        const categoryId = Number(req.query.category_id);
+        if (Number.isFinite(categoryId) && categoryId > 0) {
+          sharedRows = await loadMapped(categoryCarsListKey(categoryId), undefined, true);
+        }
+        if (sharedRows.length === 0) {
+          sharedRows = await loadMapped("program_cars", undefined, true);
+        }
+      }
       const row = pickRow(userRows, sharedRows, requested || undefined);
       const sharedDefault = sharedRows.find((r) => r.is_default) ?? sharedRows[0] ?? null;
       res.json({
@@ -137,7 +152,7 @@ export function registerColumnPrefRoutes(app: Express) {
         if (body.is_default) await clearUserDefaults(user.id, listKey);
         const { error } = await supabaseAdmin.from("user_column_prefs").insert({
           user_id: user.id,
-          page: listKey,
+          page: pageForListKey(listKey),
           list_key: listKey,
           view_name: viewName,
           is_default: Boolean(body.is_default),
@@ -170,7 +185,7 @@ export function registerColumnPrefRoutes(app: Express) {
       if (body.is_default) await clearUserDefaults(user.id, listKey);
       const { error } = await supabaseAdmin.from("user_column_prefs").insert({
         user_id: user.id,
-        page: listKey,
+        page: pageForListKey(listKey),
         list_key: listKey,
         view_name: viewName,
         is_default: Boolean(body.is_default),
@@ -289,7 +304,7 @@ export function registerColumnPrefRoutes(app: Express) {
       } else {
         const { error } = await supabaseAdmin.from("user_column_prefs").insert({
           user_id: user.id,
-          page: listKey,
+          page: pageForListKey(listKey),
           list_key: listKey,
           view_name: viewName,
           is_default: true,

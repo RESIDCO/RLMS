@@ -1,6 +1,7 @@
 import { pickRow } from "@shared/change-log";
 import { assignmentRentStartOnMove, isoDateOnly } from "@shared/commitment";
 import { putOnRentProgramTypes } from "@shared/programs";
+import { isFrozenRailcar } from "@shared/car-lifecycle-status";
 import { formatCarId } from "@shared/residco-import";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { getPreview, putPreview, recomputeStatus } from "./commitment";
@@ -42,7 +43,7 @@ export async function previewPutOnRent(
   const ids = [...new Set((body.link_ids ?? []).map(Number).filter((n) => n > 0))];
   const { data: links, error } = await supabaseAdmin
     .from("program_cars")
-    .select("id, railcar_id, exited_date, railcar:railcars(id, active, fleet_status, reporting_marks, car_number)")
+    .select("id, railcar_id, exited_date, railcar:railcars(id, active, status, fleet_status, reporting_marks, car_number)")
     .eq("program_id", programId)
     .in("id", ids.length ? ids : [0]);
   if (error) throw error;
@@ -72,7 +73,7 @@ export async function previewPutOnRent(
       not_writable.push(base);
       continue;
     }
-    if (rc?.active !== true) {
+    if (rc?.active !== true || isFrozenRailcar(rc ?? {})) {
       rejected_inactive.push(base);
       continue;
     }
@@ -137,10 +138,10 @@ export async function applyPutOnRent(token: string, actor: string) {
     for (const row of preview.to_write ?? []) {
       const { data: car } = await supabaseAdmin
         .from("railcars")
-        .select("id, active, fleet_status")
+        .select("id, active, status, fleet_status")
         .eq("id", row.railcar_id)
         .maybeSingle();
-      if (car?.active !== true || car?.fleet_status === "Sold") continue;
+      if (!car || car.active !== true || isFrozenRailcar(car) || car.fleet_status === "Sold") continue;
 
       const { data: currentAssigns, error: caErr } = await supabaseAdmin
         .from("railcar_assignments")

@@ -27,7 +27,9 @@ import {
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
 import { changedKeys, pickRow } from "@shared/change-log";
+import { isFrozenRailcar } from "@shared/car-lifecycle-status";
 import { currentChangeGroup, recordChange } from "./change-log";
+import { FROZEN_CAR_MESSAGE } from "./frozen-cars";
 
 const PROGRAM_LIST_SELECT = `
 id, name, description, status, lifecycle, type, type_other, pending_note, cancelled_at,
@@ -55,6 +57,20 @@ const COMPLETE_CF = "__complete";
 function missingCompletedColumn(err: unknown) {
   const msg = String((err as any)?.message ?? err ?? "");
   return /completed/i.test(msg) && /column|schema cache|does not exist|could not find/i.test(msg);
+}
+
+async function rejectIfFrozenRailcar(railcarId: number | null | undefined): Promise<void> {
+  const id = Number(railcarId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const { data, error } = await supabaseAdmin
+    .from("railcars")
+    .select("id, active, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (data && isFrozenRailcar(data)) {
+    throw Object.assign(new Error(FROZEN_CAR_MESSAGE), { status: 409 });
+  }
 }
 
 function isCarCompleted(row: any): boolean {
@@ -131,6 +147,13 @@ export async function appendProgramCarMilestone(opts: {
   const milestone = String(opts.milestone ?? "").trim();
   const milestoneDate = String(opts.milestoneDate ?? "").slice(0, 10);
   if (!milestone || !/^\d{4}-\d{2}-\d{2}$/.test(milestoneDate)) return null;
+  const { data: linkOwner, error: ownerErr } = await supabaseAdmin
+    .from("program_cars")
+    .select("railcar_id")
+    .eq("id", opts.programCarId)
+    .maybeSingle();
+  if (ownerErr) throw ownerErr;
+  await rejectIfFrozenRailcar(linkOwner?.railcar_id);
   const { data: last } = await supabaseAdmin
     .from("program_car_milestones")
     .select("id, milestone, milestone_date")
@@ -532,12 +555,16 @@ export async function addCarsToProgram(
 
   const { data: cars, error: carErr } = await supabaseAdmin
     .from("railcars")
-    .select("id, rider_external_id")
+    .select("id, rider_external_id, active, status")
     .in("id", toAdd);
   if (carErr) throw carErr;
+  const frozen = new Set((cars ?? []).filter((c) => isFrozenRailcar(c)).map((c) => Number(c.id)));
+  const writable = toAdd.filter((id) => !frozen.has(id));
+  skipped.push(...toAdd.filter((id) => frozen.has(id)));
+  if (!writable.length) return { added: [], skipped };
   const olById = new Map((cars ?? []).map((c: any) => [Number(c.id), c.rider_external_id ?? null]));
   const today = new Date().toISOString().slice(0, 10);
-  const insert = toAdd.map((rid) => ({
+  const insert = writable.map((rid) => ({
     program_id: programId,
     railcar_id: rid,
     joined_date: today,
@@ -569,6 +596,7 @@ export async function exitCarFromProgram(programId: number, linkId: number, acto
   if (getErr) throw getErr;
   if (!row) return null;
   if (row.exited_date) return row;
+  await rejectIfFrozenRailcar(row.railcar_id);
   const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await supabaseAdmin
     .from("program_cars")
@@ -615,6 +643,7 @@ export async function patchProgramCar(
     .maybeSingle();
   if (getErr) throw getErr;
   if (!existing) return null;
+  await rejectIfFrozenRailcar(existing.railcar_id);
   const updates: Record<string, unknown> = {};
   if (body.status !== undefined) updates.status = body.status === "" ? null : String(body.status);
   if (body.notes !== undefined) updates.notes = body.notes === "" ? null : body.notes;

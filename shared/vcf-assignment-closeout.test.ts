@@ -45,7 +45,9 @@ function hist(
 }
 
 ok(skipVcfAssignmentWrites({ active_source: "manual", active: true }), "manual skips AH");
-ok(!skipVcfAssignmentWrites({ active_source: "auto", active: false }), "inactive current still writes other periods");
+ok(skipVcfAssignmentWrites({ active_source: "auto", active: false }), "database inactive skips AH");
+ok(skipVcfAssignmentWrites({ active_source: "auto", active: true, status: "Inactive" }), "Inactive status skips AH");
+ok(!skipVcfAssignmentWrites({ active_source: "auto", active: true, status: "Off-Lease" }), "active Off-Lease still writes AH");
 ok(!skipVcfAssignmentWrites({ active_source: "auto", active: true }), "active auto writes AH");
 
 const stripped = stripManualProtectedRailcarFields({
@@ -59,7 +61,8 @@ ok(stripped.lessee_name === "KBX", "strip keeps lessee");
 ok(stripped.active === undefined, "strip drops active");
 ok(stripped.status === undefined, "strip drops status");
 ok(skipVcfRailcarPatch({ active_source: "manual" }), "manual skips all car patches");
-ok(!skipVcfRailcarPatch({ active_source: "auto" }), "auto allows car patches");
+ok(skipVcfRailcarPatch({ active_source: "auto", active: false, status: "Storage" }), "active=false skips car patches");
+ok(!skipVcfRailcarPatch({ active_source: "auto", active: true, status: "Storage" }), "active Storage allows car patches");
 
 {
   const payload = {

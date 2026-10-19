@@ -80,7 +80,14 @@ import {
   writeCarStatusHistoryRow,
   syncCurrentAssignmentHistoryActive,
 } from "./car-status-history";
-import { crossesInactiveBoundary, fieldsImpliedByCarStatus, statusAlignedToActiveFlag } from "@shared/car-lifecycle-status";
+import {
+  fieldsImpliedByCarStatus,
+  inactiveBoundaryEvent,
+  isFrozenRailcar,
+  isInactiveCarStatus,
+} from "@shared/car-lifecycle-status";
+import { assertRailcarsWritable, findFrozenRailcarIds, FROZEN_CAR_MESSAGE } from "./frozen-cars";
+import { registerInactivateRoutes } from "./inactivate-routes";
 import { fillBlankRiderMonthlyRent } from "./rider-rent-rollup";
 import { applyCarFinancialsFromSummary, loadFinancialSummaryRows } from "./refresh-car-financials";
 import { assertRailcarImporterPatch, assertRiderImporterPatch } from "@shared/rider-import-guard";
@@ -410,10 +417,14 @@ function errHandler(res: Response, err: unknown) {
   let msg: string;
   if (err instanceof Error) {
     msg = err.message;
-  } else if (err && typeof err === 'object' && 'message' in err) {
-    msg = String((err as any).message);
+  } else if (err && typeof err === "object" && "message" in err) {
+    msg = String((err as { message: unknown }).message);
   } else {
     msg = String(err);
+  }
+  const status = Number((err as { status?: number })?.status);
+  if (status >= 400 && status < 600) {
+    return res.status(status).json({ message: msg });
   }
   console.error("[api]", msg, err);
   return res.status(500).json({ message: msg });
@@ -436,6 +447,7 @@ export async function registerRoutes(
   registerKpiCarRoutes(app);
   registerLeaseMgmtRoutes(app, requireWrite);
   registerRemarkRoutes(app);
+  registerInactivateRoutes(app);
 
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
@@ -1552,6 +1564,20 @@ export async function registerRoutes(
       if (idsRaw.length > 20_000) {
         return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
       }
+      if (isInactiveCarStatus(status)) {
+        return res.status(400).json({
+          message: "Use Set Car Status → Inactive so each car can be previewed",
+        });
+      }
+      const frozen = await findFrozenRailcarIds(idsRaw);
+      if (frozen.length) {
+        if (req.authRole !== "admin") {
+          return res.status(403).json({ message: "Only an admin can reactivate an inactive car.", frozen_ids: frozen });
+        }
+        if (!String(reason ?? "").trim()) {
+          return res.status(400).json({ message: "A reason is required to reactivate an inactive car." });
+        }
+      }
       const result = await withChangeGroupResult(writerId, async () =>
         applyCarStatusChange({
           ids: idsRaw,
@@ -1598,6 +1624,7 @@ export async function registerRoutes(
       }
       const needs_completion = req.body?.needs_completion === true;
       const uniqueIds = [...new Set(idsRaw)];
+      await assertRailcarsWritable(uniqueIds);
       const CHUNK = 200;
       const result = await withChangeGroupResult(writerId, async () => {
         let updated = 0;
@@ -1661,6 +1688,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Too many cars in one request (max 20,000)" });
       }
       const uniqueIds = [...new Set(idsRaw)];
+      await assertRailcarsWritable(uniqueIds);
       const CHUNK = 200;
       const result = await withChangeGroupResult(writerId, async () => {
         let updated = 0;
@@ -1714,6 +1742,7 @@ export async function registerRoutes(
       const raw = req.body?.ops_flag;
       const ops_flag = raw == null || String(raw).trim() === "" ? null : String(raw).trim().slice(0, 80);
       const uniqueIds = [...new Set(idsRaw)];
+      await assertRailcarsWritable(uniqueIds);
       const result = await withChangeGroupResult(writerId, async () => {
         const updated = await persistOpsFlag(uniqueIds, ops_flag);
         return { ok: true as const, updated, ops_flag };
@@ -1913,7 +1942,7 @@ export async function registerRoutes(
 
       let priorStatus: string | null | undefined;
       let priorActive: boolean | null | undefined;
-      let crossedInactive = false;
+      let statusEvent: ReturnType<typeof inactiveBoundaryEvent> = null;
 
       // Never let casual PATCH bodies flip fleet membership except via Car Status save.
       delete updateRow.active;
@@ -1928,11 +1957,22 @@ export async function registerRoutes(
       if (priorErr) throw priorErr;
       priorStatus = priorRow?.status;
       priorActive = priorRow?.active;
+      const frozen = isFrozenRailcar({ active: priorActive, status: priorStatus });
+      if (frozen) {
+        if (req.authRole !== "admin") {
+          return res.status(403).json({ message: "Only an admin can reactivate an inactive car." });
+        }
+        const extra = Object.keys(updateRow).filter((key) => key !== "status");
+        if (extra.length || parsed.status == null || isInactiveCarStatus(String(parsed.status))) {
+          return res.status(409).json({ message: FROZEN_CAR_MESSAGE });
+        }
+      }
 
       if (parsed.status !== undefined) {
         try {
           assertInactivePatchAllowed({
             currentStatus: priorStatus,
+            currentActive: priorActive,
             nextStatus: parsed.status,
             reason: inactiveReason,
           });
@@ -1940,8 +1980,14 @@ export async function registerRoutes(
           if (e?.status === 400) return res.status(400).json({ message: e.message });
           throw e;
         }
-        crossedInactive = crossesInactiveBoundary(priorStatus, parsed.status);
-        Object.assign(updateRow, patchFieldsForStatusChange(priorStatus, String(parsed.status ?? "")));
+        statusEvent = inactiveBoundaryEvent(
+          { status: priorStatus, active: priorActive },
+          String(parsed.status ?? ""),
+        );
+        Object.assign(updateRow, patchFieldsForStatusChange(
+          { status: priorStatus, active: priorActive },
+          String(parsed.status ?? ""),
+        ));
       }
 
       const patched = await withChangeGroupResult(writerId, async () => {
@@ -1970,10 +2016,11 @@ export async function registerRoutes(
           await syncCurrentAssignmentHistoryActive(id, updateRow.active === true);
         }
 
-        if (crossedInactive && String(inactiveReason ?? "").trim()) {
+        if (statusEvent && String(inactiveReason ?? "").trim()) {
           await writeCarStatusHistoryRow({
             carId: id,
             fromStatus: priorStatus,
+            currentActive: priorActive,
             toStatus: String((updateRow.status as string) ?? parsed.status),
             reason: String(inactiveReason),
             userId: writerId,
@@ -1996,6 +2043,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
+      await assertRailcarsWritable([id]);
       const { new_car_number, reason, changed_by } = changeCarNumberSchema.parse(req.body);
       const split = normalizeMarkAndNumber(new_car_number);
       if (!split.ok) {
@@ -2073,6 +2121,7 @@ export async function registerRoutes(
         items.push({ id, reporting_marks: parsed.reporting_marks, car_number: parsed.car_number });
       }
       if (!items.length) return res.status(400).json({ message: "No cars to remark" });
+      await assertRailcarsWritable(items.map((item) => item.id));
       const { data, error } = await supabaseAdmin.rpc("remark_railcars", {
         p_items: items,
         p_reason: reason,
@@ -2117,6 +2166,7 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
+      await assertRailcarsWritable([id]);
       const { data: assignments, error: aErr } = await supabase
         .from("railcar_assignments")
         .select("id")
@@ -2524,6 +2574,7 @@ export async function registerRoutes(
       if (!writerId) return;
       const input = moveCarsSchema.parse(req.body);
       const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date, rent_start_date, lessee_override } = input;
+      await assertRailcarsWritable(car_ids);
       const dateSupplied = typeof rent_start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rent_start_date);
 
       const identity = await loadOlIdentity(to_rider_id);
@@ -2889,7 +2940,9 @@ export async function registerRoutes(
 
     const managedCategory = deriveManagedCategory(entityRaw);
     const activeBool = activeStatus ? deriveActiveBool(activeStatus) : true;
-    const alignedStatus = statusAlignedToActiveFlag(status, activeBool);
+    const impliedStatus = fieldsImpliedByCarStatus(
+      String(status ?? "").trim() || (activeBool ? "Active/In-Service" : "Inactive"),
+    );
 
     return {
       car_number: carNum,
@@ -2900,7 +2953,7 @@ export async function registerRoutes(
       // marks and number separately.
       full_car_number: marks ? `${marks}${carNum}` : carNum,
       car_type: carType,
-      status: alignedStatus,
+      status: impliedStatus.status,
       fleet_name: fleetName,
       rider_name: riderName,
       notes,
@@ -2916,8 +2969,8 @@ export async function registerRoutes(
       oec, nbv, oac,
       rider_external_id: riderExternalId,
       lessee_name: lesseeName,
-      active_status: activeBool ? "Active" : "Inactive",
-      active: activeBool,
+      active_status: impliedStatus.active_status,
+      active: impliedStatus.active,
       data_source: dataSource,
       assignment_label: assignmentLabel,
       lease_type: leaseType,
@@ -3370,10 +3423,11 @@ export async function registerRoutes(
         old_car_number?: string | null;
         active?: boolean | null;
         active_source?: string | null;
+        status?: string | null;
       }>((from, to) =>
         supabaseAdmin
           .from("railcars")
-          .select("id, car_initial, car_number, reporting_marks, old_car_initial, old_car_number, active, active_source")
+          .select("id, car_initial, car_number, reporting_marks, old_car_initial, old_car_number, active, active_source, status")
           .order("id", { ascending: true })
           .range(from, to)
       );
@@ -3381,7 +3435,7 @@ export async function registerRoutes(
       for (const r of existingRows) {
         const k = vcfCarKeyFromDb(r);
         if (k === "|") continue;
-        existingCars.set(k, { active: r.active ?? null, active_source: r.active_source ?? null });
+        existingCars.set(k, { active: r.active ?? null, active_source: r.active_source ?? null, status: r.status ?? null });
       }
       mem("after-existing");
 
@@ -3417,6 +3471,8 @@ export async function registerRoutes(
         deactivatedCars: review.deactivatedCars,
         skippedManualCount: review.skippedManualCount,
         skippedManualCars: review.skippedManualCars,
+        skippedInactiveCount: review.skippedInactiveCount,
+        skippedInactiveCars: review.skippedInactiveCars,
         notInFileCount: review.notInFileCount,
         notInFileSample: review.notInFileSample,
         projectedTotalCars: review.projectedTotalCars,

@@ -771,8 +771,10 @@ eq(
   eq(review.newCars, 2, "review new cars");
   eq(review.newActiveCars, 1, "review new active");
   eq(review.newInactiveCars, 1, "review new inactive");
-  eq(review.reactivatedCars, 1, "review reactivated");
+  eq(review.reactivatedCars, 0, "review does not reactivate an inactive car");
   eq(review.deactivatedCars, 0, "review deactivated");
+  eq(review.skippedInactiveCount, 1, "review skipped inactive");
+  eq(review.skippedInactiveCars[0]?.car_number, "123456", "inactive car listed");
   eq(review.skippedManualCount, 1, "review skipped manual");
   eq(review.skippedManualCars[0]?.car_number, "999011", "manual car listed");
   eq(review.notInFileCount, 1, "TEST 999012 not in file");

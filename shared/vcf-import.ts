@@ -9,6 +9,7 @@
  * See docs/IMPORT_WRITE_BOUNDARIES.md.
  */
 
+import { isFrozenRailcar } from "./car-lifecycle-status";
 import { normalizeStoredCarNumber } from "./residco-import";
 
 export type VcfRawRow = Record<string, unknown>;
@@ -104,6 +105,7 @@ export type VcfRemarkAliasHit = {
 export type VcfExistingCar = {
   active?: boolean | null;
   active_source?: string | null;
+  status?: string | null;
 };
 
 export function vcfCarKeyFromDb(r: {
@@ -133,6 +135,8 @@ export type VcfReviewSummary = {
   deactivatedCars: number;
   skippedManualCount: number;
   skippedManualCars: Array<{ car_initial: string; car_number: string }>;
+  skippedInactiveCount: number;
+  skippedInactiveCars: Array<{ car_initial: string; car_number: string }>;
   notInFileCount: number;
   notInFileSample: Array<{ carKey: string }>;
   projectedTotalCars: number;
@@ -495,6 +499,7 @@ export function buildVcfReview(
   let reactivatedCars = 0;
   let deactivatedCars = 0;
   const skippedManualCars: VcfReviewSummary["skippedManualCars"] = [];
+  const skippedInactiveCars: VcfReviewSummary["skippedInactiveCars"] = [];
   const remarkedAliases: VcfRemarkAliasHit[] = [];
   const badMap = new Map<string, { count: number; sampleRows: number[] }>();
   const umMap = new Map<string, number>();
@@ -506,6 +511,7 @@ export function buildVcfReview(
     const incomingActive = vcfIncomingActive(current);
     const prior = existingCars?.get(carKey);
     const manual = String(prior?.active_source ?? "").trim() === "manual";
+    const frozen = isFrozenRailcar({ active: prior?.active, status: prior?.status });
     const alias = !exists ? remarkAliases?.get(carKey) : undefined;
     let remarkAlias: VcfRemarkAliasHit | null = null;
     if (alias === "ambiguous") {
@@ -542,7 +548,11 @@ export function buildVcfReview(
       updatedCars += 1;
       if (manual) {
         skippedManualCars.push({ car_initial: current.car_initial, car_number: current.car_number });
-        if (prior?.active === true) projectedActiveCars += 1;
+        if (prior?.active === true && !isFrozenRailcar({ active: prior.active, status: prior.status })) {
+          projectedActiveCars += 1;
+        }
+      } else if (frozen) {
+        skippedInactiveCars.push({ car_initial: current.car_initial, car_number: current.car_number });
       } else {
         if (prior && prior.active !== true && incomingActive) reactivatedCars += 1;
         if (prior && prior.active === true && !incomingActive) deactivatedCars += 1;
@@ -627,6 +637,10 @@ export function buildVcfReview(
     deactivatedCars,
     skippedManualCount: skippedManualCars.length,
     skippedManualCars: skippedManualCars.sort((a, b) =>
+      `${a.car_initial}${a.car_number}`.localeCompare(`${b.car_initial}${b.car_number}`)
+    ),
+    skippedInactiveCount: skippedInactiveCars.length,
+    skippedInactiveCars: skippedInactiveCars.sort((a, b) =>
       `${a.car_initial}${a.car_number}`.localeCompare(`${b.car_initial}${b.car_number}`)
     ),
     notInFileCount,

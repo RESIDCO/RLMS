@@ -2,9 +2,11 @@
  * Car Status (railcars.status) — lifecycle / service state.
  * Independent of Rental Status (railcars.fleet_status: Leased/Idle/Sold/Abatement).
  *
- * "Inactive" is a deliberate fleet-membership exit: sets active=false.
- * Other values keep their historical no-guard edit behavior; only Inactive
- * transitions flip active / active_status and require a reason + history row.
+ * Bruce's rule (Oct 19): Inactive is inactive. Only the status Inactive kills
+ * the asset (active=false) and freezes its data. Storage, Bad Order, Off-Lease,
+ * Retired, Scrapped, and every other status keep active=true.
+ * Crossing into or out of that frozen state requires a reason and a history row.
+ * Reactivation is admin-only. This module does not rewrite existing rows.
  */
 
 export const CAR_STATUS_EDIT_OPTIONS = [
@@ -31,9 +33,34 @@ export function isInactiveCarStatus(status: string | null | undefined): boolean 
   return String(status ?? "").trim() === "Inactive";
 }
 
-/** Only Active/In-Service implies fleet membership active=true. */
+/**
+ * True when this status keeps the car in the fleet (active=true).
+ * Blank is treated as still active. Only the status Inactive exits.
+ */
 export function carStatusImpliesActive(status: string | null | undefined): boolean {
-  return String(status ?? "").trim() === "Active/In-Service";
+  return !isInactiveCarStatus(status);
+}
+
+/** Frozen asset: status Inactive, or the active flag is already false. */
+export function isFrozenRailcar(car: {
+  active?: boolean | null;
+  status?: string | null;
+}): boolean {
+  return car.active === false || isInactiveCarStatus(car.status);
+}
+
+/**
+ * VCF must not modify a car an operator protected (active_source = manual)
+ * or a car that is already inactive. Active cars, including Storage and
+ * Off-Lease, stay writable by the file.
+ */
+export function vcfMustNotModifyCar(car: {
+  active_source?: string | null;
+  active?: boolean | null;
+  status?: string | null;
+}): boolean {
+  if (String(car.active_source ?? "").trim() === "manual") return true;
+  return isFrozenRailcar(car);
 }
 
 export function fieldsImpliedByCarStatus(status: string | null | undefined): {
@@ -42,16 +69,17 @@ export function fieldsImpliedByCarStatus(status: string | null | undefined): {
   active_status: "Active" | "Inactive";
 } {
   const s = String(status ?? "").trim() || "Active/In-Service";
-  if (carStatusImpliesActive(s)) {
-    return { status: s, active: true, active_status: "Active" };
+  if (isInactiveCarStatus(s)) {
+    return { status: "Inactive", active: false, active_status: "Inactive" };
   }
-  return { status: s, active: false, active_status: "Inactive" };
+  return { status: s, active: true, active_status: "Active" };
 }
 
 /**
  * Keep Car Status text consistent with a boolean ACTIVE flag (VCF import).
- * Does not invent Inactive (guarded); uses Off-Lease as the historical inactive status
- * only when the current text still says Active/In-Service.
+ * An active file row keeps Storage, Bad Order, Off-Lease, and the other
+ * non-Inactive statuses. A file row that is not active does not invent the
+ * killed Inactive status; it keeps a non-service status or falls back to Off-Lease.
  */
 export function statusAlignedToActiveFlag(
   currentStatus: string | null | undefined,
@@ -59,9 +87,11 @@ export function statusAlignedToActiveFlag(
 ): string {
   const cur = String(currentStatus ?? "").trim();
   if (active) {
-    return carStatusImpliesActive(cur) ? cur : "Active/In-Service";
+    if (!cur || isInactiveCarStatus(cur)) return "Active/In-Service";
+    return cur;
   }
-  if (cur && !carStatusImpliesActive(cur)) return cur;
+  if (isInactiveCarStatus(cur)) return "Inactive";
+  if (cur && cur !== "Active/In-Service") return cur;
   return "Off-Lease";
 }
 
@@ -77,12 +107,29 @@ export function carActiveTriadIsInconsistent(row: {
   return as !== implied.active_status.toLowerCase();
 }
 
-/** True when moving onto or off of the guarded Inactive status. */
+/** True when moving onto or off of the guarded Inactive status text. */
 export function crossesInactiveBoundary(
   fromStatus: string | null | undefined,
   toStatus: string | null | undefined,
 ): boolean {
   return isInactiveCarStatus(fromStatus) !== isInactiveCarStatus(toStatus);
+}
+
+/**
+ * History event for a status save.
+ * Marking Inactive is audited even when active was already false.
+ * Leaving the frozen state (Inactive, or active=false with any other status)
+ * is a reactivation. Storage → Bad Order on an active car is neither.
+ */
+export function inactiveBoundaryEvent(
+  car: { status?: string | null; active?: boolean | null },
+  toStatus: string,
+): CarStatusHistoryEventType | null {
+  const toInactive = isInactiveCarStatus(toStatus);
+  const fromInactive = isInactiveCarStatus(car.status);
+  if (toInactive && !fromInactive) return CAR_STATUS_HISTORY_EVENT.markedInactive;
+  if (!toInactive && isFrozenRailcar(car)) return CAR_STATUS_HISTORY_EVENT.reactivated;
+  return null;
 }
 
 /**

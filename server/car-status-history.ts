@@ -1,8 +1,7 @@
 import { pickRow } from "@shared/change-log";
 import {
-  crossesInactiveBoundary,
   fieldsForCarStatusSave,
-  inactiveBoundaryEventType,
+  inactiveBoundaryEvent,
   isInactiveCarStatus,
   type CarStatusHistoryEventType,
 } from "@shared/car-lifecycle-status";
@@ -75,9 +74,9 @@ function triadAlreadyMatches(
 
 /**
  * Apply Car Status to one or more cars.
- * Always writes active/active_status implied by the submitted status (self-heals desync).
- * Crossing the Inactive *status value* requires a reason and writes history.
- * Never touches fleet_status / rental status.
+ * Only Inactive sets active=false. Every other status keeps active=true.
+ * Entering Inactive, or leaving a frozen car, requires a reason and writes history.
+ * Never touches fleet_status / rental status. Never touches rent_events.
  */
 export async function applyCarStatusChange(opts: {
   ids: number[];
@@ -133,17 +132,17 @@ export async function applyCarStatusChange(opts: {
     const car = byId.get(id);
     if (!car) continue;
     const fromStatus = car.status ?? null;
-    const crosses = crossesInactiveBoundary(fromStatus, toStatus);
-    if (crosses && !reason) {
+    const event = inactiveBoundaryEvent({ status: fromStatus, active: car.active }, toStatus);
+    if (event && !reason) {
       throw Object.assign(
         new Error(
-          "A reason is required when marking cars Inactive or reactivating them from Inactive",
+          "A reason is required when marking cars Inactive or reactivating them",
         ),
         { status: 400 },
       );
     }
 
-    const patch = fieldsForCarStatusSave(toStatus, { stampManual: crosses });
+    const patch = fieldsForCarStatusSave(toStatus, { stampManual: Boolean(event) });
     if (triadAlreadyMatches(car, patch)) {
       skipped_same += 1;
       continue;
@@ -171,10 +170,10 @@ export async function applyCarStatusChange(opts: {
       await syncCurrentAssignmentHistoryActive(id, patch.active);
     }
 
-    if (crosses) {
+    if (event) {
       historyRows.push({
         car_id: id,
-        event_type: inactiveBoundaryEventType(toStatus),
+        event_type: event,
         reason,
         created_by,
         from_status: fromStatus,
@@ -228,42 +227,57 @@ export async function applyCarStatusChange(opts: {
   return { updated, history_written, skipped_same };
 }
 
-/** Reject PATCH bodies that try to cross Inactive without inactive_change_reason. */
+/** Reject a direct PATCH that marks Inactive, or that reactivates without a reason. */
 export function assertInactivePatchAllowed(opts: {
   currentStatus: string | null | undefined;
+  currentActive?: boolean | null;
   nextStatus: string | null | undefined;
   reason: string | null | undefined;
 }): void {
   if (opts.nextStatus == null) return;
-  if (!crossesInactiveBoundary(opts.currentStatus, opts.nextStatus)) return;
+  if (isInactiveCarStatus(opts.nextStatus) && !isInactiveCarStatus(opts.currentStatus)) {
+    throw Object.assign(
+      new Error("Use Set Car Status → Inactive so each car can be previewed"),
+      { status: 400 },
+    );
+  }
+  const event = inactiveBoundaryEvent(
+    { status: opts.currentStatus, active: opts.currentActive },
+    String(opts.nextStatus),
+  );
+  if (!event) return;
   if (String(opts.reason ?? "").trim()) return;
   throw Object.assign(
-    new Error(
-      "A reason is required when marking a car Inactive or reactivating it from Inactive",
-    ),
+    new Error("A reason is required when reactivating an inactive car"),
     { status: 400 },
   );
 }
 
 export function patchFieldsForStatusChange(
-  currentStatus: string | null | undefined,
+  current: { status?: string | null; active?: boolean | null },
   nextStatus: string,
 ): Record<string, unknown> {
-  const crosses = crossesInactiveBoundary(currentStatus, nextStatus);
-  return fieldsForCarStatusSave(nextStatus, { stampManual: crosses });
+  const event = inactiveBoundaryEvent(current, nextStatus);
+  return fieldsForCarStatusSave(nextStatus, { stampManual: Boolean(event) });
 }
 
 export async function writeCarStatusHistoryRow(opts: {
   carId: number;
   fromStatus: string | null | undefined;
+  currentActive?: boolean | null;
   toStatus: string;
   reason: string;
   userId: string;
 }): Promise<void> {
   const created_by = await createdByLabel(opts.userId);
+  const event = inactiveBoundaryEvent(
+    { status: opts.fromStatus, active: opts.currentActive },
+    opts.toStatus,
+  );
+  if (!event) return;
   const { data, error } = await supabaseAdmin.from("car_status_history").insert({
     car_id: opts.carId,
-    event_type: inactiveBoundaryEventType(opts.toStatus),
+    event_type: event,
     reason: opts.reason.trim(),
     created_by,
     from_status: opts.fromStatus ?? null,
@@ -281,7 +295,7 @@ export async function writeCarStatusHistoryRow(opts: {
     railcar_id: opts.carId,
     actor: created_by,
     detail: {
-      event_type: inactiveBoundaryEventType(opts.toStatus),
+      event_type: event,
       from: opts.fromStatus ?? null,
       to: opts.toStatus,
       reason: opts.reason.trim(),
@@ -292,4 +306,4 @@ export async function writeCarStatusHistoryRow(opts: {
   });
 }
 
-export { isInactiveCarStatus, crossesInactiveBoundary };
+export { isInactiveCarStatus, inactiveBoundaryEvent };

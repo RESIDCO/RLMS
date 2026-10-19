@@ -6,6 +6,7 @@
  * Does not write railcar_assignments (Phase 2, not approved).
  */
 
+import { vcfMustNotModifyCar } from "./car-lifecycle-status";
 import {
   assignmentHistoryContentEqual,
   type AssignmentHistoryPeriodPayload,
@@ -34,18 +35,26 @@ export function openPeriodMatchKey(
   return `${railcarId}|${String(riderExternalId ?? "").trim()}|${String(startDate ?? "").trim()}`;
 }
 
-/** Skip assignment_history writes only for manually protected cars.
- * An inactive current file row must not skip the car's other periods. */
+/**
+ * Skip assignment_history writes for a car VCF must not modify.
+ * Pass the car already in the database. A file row that is inactive does
+ * not by itself skip an active car's other periods.
+ */
 export function skipVcfAssignmentWrites(car: {
   active_source?: string | null;
   active?: boolean | null;
+  status?: string | null;
 }): boolean {
-  return String(car.active_source ?? "").trim() === "manual";
+  return vcfMustNotModifyCar(car);
 }
 
-/** Skip every railcar field patch when active_source = manual (incl. managed_category). */
-export function skipVcfRailcarPatch(car: { active_source?: string | null }): boolean {
-  return String(car.active_source ?? "").trim() === "manual";
+/** Skip every railcar field patch for manual or already-inactive cars. */
+export function skipVcfRailcarPatch(car: {
+  active_source?: string | null;
+  active?: boolean | null;
+  status?: string | null;
+}): boolean {
+  return vcfMustNotModifyCar(car);
 }
 
 export const VCF_ASSET_REPORT_LEASE_SOURCES = new Set(["asset_report", "asset_report_multi_term"]);

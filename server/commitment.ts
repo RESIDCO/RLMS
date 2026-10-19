@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Express, Request, Response } from "express";
+import { isFrozenRailcar } from "@shared/car-lifecycle-status";
 import { supabaseAdmin } from "./supabase";
 import {
   COMMITMENT_TYPES,
@@ -67,7 +68,7 @@ export async function getPreview(kind: PreviewKind, token: string): Promise<any>
 }
 
 const CAR_SEL =
-  "id, reporting_marks, car_initial, car_number, entity, active, fleet_status, lessee_name, assignment_label, rider_external_id";
+  "id, reporting_marks, car_initial, car_number, entity, active, status, fleet_status, lessee_name, assignment_label, rider_external_id";
 
 function isCommitmentType(v: unknown): v is CommitmentType {
   return COMMITMENT_TYPES.includes(String(v) as CommitmentType);
@@ -157,7 +158,7 @@ export async function setCommitment(
   const { data: car, error: cErr } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", railcarId).maybeSingle();
   if (cErr) throw cErr;
   if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
-  if (car.active !== true) throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
+  if (isFrozenRailcar(car)) throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
   const { rider, assignment } = await linkForCar(railcarId);
   const off = await offRentOf(car, rider?.rider_name, assignment);
   if (!off) throw Object.assign(new Error("On-rent cars cannot take a Commitment"), { status: 400, code: "on_rent" });
@@ -239,7 +240,7 @@ export async function upsertOpenCommitment(
     .maybeSingle();
   if (cErr) throw cErr;
   if (!car) throw Object.assign(new Error("Car not found"), { status: 404 });
-  if (car.active !== true) throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
+  if (isFrozenRailcar(car)) throw Object.assign(new Error("rejected: inactive"), { status: 400, code: "inactive" });
 
   const existing = await openCommitment(railcarId);
   const now = new Date().toISOString();
@@ -327,7 +328,7 @@ export async function clearCommitment(railcarId: number, actor: string) {
 
 export async function ensureProgramCommitment(railcarId: number, program: { id: number; name: string; target_completion_date?: string | null }, actor: string) {
   const { data: car } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", railcarId).maybeSingle();
-  if (!car || car.active !== true) return { skipped: "inactive" as const };
+  if (!car || isFrozenRailcar(car)) return { skipped: "inactive" as const };
   const { data: kpi } = await supabaseAdmin
     .from("v_rlms_kpi_car_rows")
     .select("railcar_id, active, is_op, off_rent")
@@ -371,10 +372,10 @@ async function matchCarsFromText(text: string) {
     else if (hits.length === 0) notFound.push({ raw: `${t.initial} ${t.number}` });
     else notFound.push({ raw: `${t.initial} ${t.number} (ambiguous)` });
   }
-  const inactive = matched.filter((c) => c.active !== true);
+  const inactive = matched.filter((c) => isFrozenRailcar(c));
   return {
     tokens,
-    matched: matched.filter((c) => c.active === true),
+    matched: matched.filter((c) => !isFrozenRailcar(c)),
     notFound,
     inactive,
   };
@@ -387,8 +388,8 @@ export async function matchCarsFromIds(idsRaw: number[]) {
   if (error) throw error;
   const found = new Set((data ?? []).map((r: any) => r.id));
   const notFound = ids.filter((id) => !found.has(id)).map((id) => ({ raw: String(id) }));
-  const inactive = (data ?? []).filter((c: any) => c.active !== true);
-  const matched = (data ?? []).filter((c: any) => c.active === true);
+  const inactive = (data ?? []).filter((c: any) => isFrozenRailcar(c));
+  const matched = (data ?? []).filter((c: any) => !isFrozenRailcar(c));
   return { matched, notFound, inactive };
 }
 
@@ -892,12 +893,12 @@ export async function previewMarkSold(idsRaw: number[], opts?: { sold_to?: strin
   if (!ids.length) throw Object.assign(new Error("ids required"), { status: 400 });
   const { data, error } = await supabaseAdmin
     .from("railcars")
-    .select("id, reporting_marks, car_number, entity, fleet_status, active, sold_to")
+    .select("id, reporting_marks, car_number, entity, fleet_status, active, status, sold_to")
     .in("id", ids);
   if (error) throw error;
   const found = new Set((data ?? []).map((r: any) => r.id));
-  const inactive = (data ?? []).filter((r: any) => r.active !== true);
-  const activeCars = (data ?? []).filter((r: any) => r.active === true);
+  const inactive = (data ?? []).filter((r: any) => isFrozenRailcar(r));
+  const activeCars = (data ?? []).filter((r: any) => !isFrozenRailcar(r));
   const { data: rows } = await supabaseAdmin
     .from("v_rlms_kpi_car_rows")
     .select("railcar_id, buyer, current_lease")

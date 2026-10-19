@@ -255,6 +255,20 @@ try {
   `);
   ok(psql("SELECT name FROM public.programs WHERE id = 71") === "OL9998 - Has cars", "sync undo leaves a program that still has cars");
   ok(psql("SELECT count(*) FROM public.program_cars WHERE program_id = 71") === "1", "the program's cars stay in place");
+
+  psqlFile(join(migrations, "20261115_manage_columns.sql"));
+  ok(psql("SELECT count(*) FROM public.program_field_defs WHERE field_key = 'trace_date_ran' AND program_id IS NULL") === "1", "trace date ran is a global optional column");
+  const columnGroup = psql("SELECT gen_random_uuid()::text");
+  psql(`
+    INSERT INTO public.program_field_defs (id, category_id, program_id, field_key, label, field_type, section, sort_order, is_optional)
+    VALUES (33, NULL, 71, 'local_note', 'Local note', 'text', 'Program', 2000, false);
+    INSERT INTO public.activity_log (entity_type, entity_id, action, actor, detail, source, change_group, table_name, row_pk, before, after)
+    VALUES ('program', 71, 'column_added', 'actor-1', '{"op":"insert"}'::jsonb, 'app', '${columnGroup}', 'program_field_defs', 33, '{}'::jsonb, '{"id":33,"label":"Local note"}'::jsonb);
+  `);
+  const columnUndo = JSON.parse(psql(`SELECT public.rlms_undo_change_group('${columnGroup}'::uuid, 'actor-1')::text`)) as { ok: boolean; restored: number };
+  ok(columnUndo.ok === true && columnUndo.restored === 1, "undo of a new column retires it");
+  ok(psql("SELECT count(*) FROM public.program_field_defs WHERE id = 33") === "1", "undo does not delete the column definition");
+  ok(psql("SELECT retired_at IS NOT NULL FROM public.program_field_defs WHERE id = 33") === "t", "undo sets retired_at");
 } catch (err) {
   failed += 1;
   console.error("FAIL", err instanceof Error ? err.message : err);

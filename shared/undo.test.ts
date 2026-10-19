@@ -53,6 +53,7 @@ ok(isUndoAllowedTable("master_leases"), "master_leases undoable");
 ok(isUndoAllowedTable("attachments"), "attachments undoable");
 ok(isUndoAllowedTable("opportunities"), "opportunities undoable");
 ok(isUndoAllowedTable("crm_activities"), "crm_activities undoable");
+ok(isUndoAllowedTable("program_field_defs"), "program column definitions are undoable");
 ok(opOf(mileRow) === "insert", "milestone append is insert");
 ok(summarizeUndoRows([mileRow]).lines[0].includes("program_car_milestones"), "milestone summarize");
 ok(

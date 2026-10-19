@@ -1,3 +1,5 @@
+import { formatMoneyCell } from "./money";
+import { formatProgramDate } from "./program-dates";
 import { CAR_NUMBER_WIDTH, splitCarNumber } from "./residco-import";
 
 export const PROGRAM_STATUSES = ["open", "on_hold", "complete"] as const;
@@ -245,6 +247,10 @@ export type ProgramFieldDef = {
   select_options: string[] | null;
   /** Global optional fields (category_id null) stay hidden until added from Columns. */
   is_optional?: boolean;
+  /** Set when the column belongs to one program. Null is category-wide or global. */
+  program_id?: number | null;
+  /** Set when the column is retired. The definition and stored values stay. */
+  retired_at?: string | null;
 };
 
 export const CATEGORY_BADGE: Record<string, string> = {
@@ -301,13 +307,12 @@ export function isCustomFieldPopulated(v: unknown): boolean {
 export function formatCustomField(v: unknown, type: ProgramFieldType): string {
   if (v == null || v === "") return "";
   if (type === "boolean") return v === true || v === "true" ? "Yes" : v === false || v === "false" ? "No" : "";
-  if (type === "currency") {
+  if (type === "currency") return formatMoneyCell(v);
+  if (type === "date") return formatProgramDate(v);
+  if (type === "number") {
     const n = Number(v);
-    return Number.isFinite(n)
-      ? n.toLocaleString("en-US", { style: "currency", currency: "USD" })
-      : String(v);
+    return Number.isFinite(n) ? n.toLocaleString("en-US") : String(v);
   }
-  if (type === "date") return String(v).slice(0, 10);
   return String(v);
 }
 

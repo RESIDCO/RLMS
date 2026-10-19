@@ -28,6 +28,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, Download, History, Loader2, Plus,
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { ManageColumnsDialog } from "@/components/ManageColumnsDialog";
 import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
@@ -58,8 +59,13 @@ import {
   type ProgramType,
 } from "@shared/programs";
 import { COMMITMENT_TYPES } from "@shared/commitment";
-import { GLOBAL_PROGRAM_CAR_COLUMN_ORDER } from "@shared/program-tracker-sync";
+import { activeFieldDefs } from "@shared/manage-columns";
+import { formatMoneyCell, isProgramMoneyField, moneyNumber, parseUsdInput } from "@shared/money";
+import { programCarMatchesQuery } from "@shared/program-car-filter";
+import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates";
 import { diffProgramPatch } from "@shared/program-patch";
+import { isCompleteProgramStatus, mergeProgramStatusOptions, statusLeavesComplete } from "@shared/program-status";
+import { GLOBAL_PROGRAM_CAR_COLUMN_ORDER } from "@shared/program-tracker-sync";
 
 type Category = { id: number; name: string };
 type StatusOption = { id: number; value: string; sort_order: number };
@@ -237,15 +243,18 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   }
   if (patch.milestone !== undefined) next.milestone = patch.milestone === "" ? null : String(patch.milestone);
   if (patch.milestone_at !== undefined) {
-    next.milestone_at = patch.milestone_at ? String(patch.milestone_at).slice(0, 10) : null;
+    const parsed = parseProgramDateInput(String(patch.milestone_at ?? ""));
+    next.milestone_at = parsed && parsed.length === 10 ? parsed : parsed === null ? null : car.milestone_at ?? null;
   }
   if (patch.outcome_reached === true) {
     next.outcome_reached_at = new Date().toISOString().slice(0, 10);
     next.completed = true;
   }
-  if (patch.outcome_reached === false) {
+  if (patch.outcome_reached === false || patch.completed === false) {
     next.outcome_reached_at = null;
     next.completed = false;
+    next.completed_at = null;
+    next.custom_fields = { ...next.custom_fields, __complete: false };
   }
   next.completion_level = deriveCompletionLevel({
     active: next.railcar?.active,
@@ -318,7 +327,7 @@ export default function ProgramDetailPage() {
   const [includeExited, setIncludeExited] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const [levelFilter, setLevelFilter] = useState<Set<CompletionLevel>>(
-    () => new Set(["not_started", "in_progress", "work_done"]),
+    () => new Set<CompletionLevel>(["not_started", "in_progress", "work_done"]),
   );
   const [moreFields, setMoreFields] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -346,6 +355,7 @@ export default function ProgramDetailPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [headerOpen, setHeaderOpen] = useState(false);
   const [rentOpen, setRentOpen] = useState(false);
+  const [manageColsOpen, setManageColsOpen] = useState(false);
   const lastSelectId = useRef<number | null>(null);
   const leaveDirtyRef = useRef(false);
   const heldHashRef = useRef(typeof window !== "undefined" ? window.location.hash : "");
@@ -456,7 +466,12 @@ export default function ProgramDetailPage() {
     };
   }, []);
 
-  const defs = program?.field_defs ?? [];
+  const allDefs = program?.field_defs ?? [];
+  const defs = activeFieldDefs(allDefs);
+  const statusChoices = useMemo(
+    () => mergeProgramStatusOptions(statusOptions, cars.map((car) => car.status)),
+    [statusOptions, cars],
+  );
   const catName = program?.category?.name ?? "";
   const defaultProgramCols = useMemo(() => new Set<string>(GLOBAL_PROGRAM_CAR_COLUMN_ORDER), []);
   const colPrefs = useColumnPrefs(
@@ -466,6 +481,7 @@ export default function ProgramDetailPage() {
   );
   const {
     visibleCols,
+    toggleCol,
     colOrder,
     setColOrder,
     colWidths,
@@ -490,25 +506,24 @@ export default function ProgramDetailPage() {
     [cars, carDrafts, shops],
   );
   const sortedCars = useMemo(() => {
-    const q = carFilter.trim().toLowerCase();
-    const filtered = q
-      ? draftedCars.filter((c) => {
-          const hay = [
-            carLabelOf(c),
-            c.status,
-            c.notes,
-            c.milestone,
-            c.open_commitment?.name,
-            c.open_commitment?.type,
-            c.kpi?.derived_status,
-            c.shop?.name,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-          return hay.includes(q);
-        })
-      : draftedCars;
+    const filtered = draftedCars.filter((c) =>
+      programCarMatchesQuery(
+        {
+          reporting_marks: c.railcar?.reporting_marks,
+          car_number: c.railcar?.car_number,
+          status: c.status,
+          notes: c.notes,
+          milestone: c.milestone,
+          shop: c.shop?.name,
+          commitment: [c.open_commitment?.type, c.open_commitment?.name].filter(Boolean).join(" "),
+          kpi: c.kpi?.derived_status,
+          flag: c.flag_tag,
+          ol: [c.rider_external_id_snapshot, c.railcar?.rider_external_id].filter(Boolean).join(" "),
+          custom: c.custom_fields,
+        },
+        carFilter,
+      ),
+    );
     const key = sort?.key;
     const dir = sort?.dir === "desc" ? -1 : 1;
     return [...filtered].sort((a, b) => {
@@ -573,15 +588,28 @@ export default function ProgramDetailPage() {
   }
 
   async function saveCarDrafts() {
-    const entries = Object.entries(carDrafts);
-    if (!entries.length || !canEdit) return;
+    const visibleIds = new Set(visibleCars.map((car) => car.id));
+    const entries = Object.entries(carDrafts).filter(([linkId]) => visibleIds.has(Number(linkId)));
+    const hidden = Object.keys(carDrafts).length - entries.length;
+    if (!canEdit) return;
+    if (!entries.length) {
+      if (hidden) toast({ title: `${hidden} unsaved car${hidden === 1 ? "" : "s"} hidden by the filter` });
+      return;
+    }
     try {
       await runPatchApply(entries.length, {
         items: entries.map(([linkId, updates]) => ({ link_id: Number(linkId), updates })),
       });
-      setCarDrafts({});
+      setCarDrafts((prev) => {
+        const next = { ...prev };
+        for (const [linkId] of entries) delete next[Number(linkId)];
+        return next;
+      });
       setCarSavedFlash(true);
       window.setTimeout(() => setCarSavedFlash(false), 2500);
+      if (hidden) {
+        toast({ title: `Saved ${entries.length}. ${hidden} hidden car${hidden === 1 ? "" : "s"} still unsaved.` });
+      }
     } catch {
       /* toast already shown */
     }
@@ -669,9 +697,12 @@ export default function ProgramDetailPage() {
       >
         {key === "_select" ? (
           <Checkbox
-            checked={cars.filter((c) => !c.exited_date).length > 0 && cars.filter((c) => !c.exited_date).every((c) => selected.has(c.id))}
+            checked={
+              visibleCars.filter((c) => !c.exited_date).length > 0 &&
+              visibleCars.filter((c) => !c.exited_date).every((c) => selected.has(c.id))
+            }
             onCheckedChange={toggleAll}
-            aria-label="Select all cars"
+            aria-label="Select all shown cars"
           />
         ) : key === "_actions" ? null : (
           columnLabel("program_cars", key, PD_LABELS[key] ?? cf?.label ?? key)
@@ -722,7 +753,7 @@ export default function ProgramDetailPage() {
             ) : (
               label
             )}
-            {exited && <div className="text-[10px] text-muted-foreground">Exited {String(c.exited_date).slice(0, 10)}</div>}
+            {exited && <div className="text-[10px] text-muted-foreground">Exited {formatProgramDate(c.exited_date)}</div>}
           </td>
         );
       case "complete":
@@ -730,7 +761,7 @@ export default function ProgramDetailPage() {
           <td key={key} className="px-2 py-1 text-center">
             <Checkbox
               checked={Boolean(c.outcome_reached_at || c.completed)}
-              disabled={!canEdit || exited || c.railcar?.active !== true}
+              disabled={!canEdit || exited}
               onCheckedChange={(v) => queueCarPatch(c.id, { outcome_reached: v === true })}
               aria-label={`Mark ${label} outcome reached`}
             />
@@ -771,10 +802,11 @@ export default function ProgramDetailPage() {
       case "milestone_at":
         return (
           <td key={key} className="px-2 py-1">
-            <CellInput
+            <DateCell
               readOnly={!canEdit || exited || c.railcar?.active !== true}
-              value={c.milestone_at ? String(c.milestone_at).slice(0, 10) : ""}
-              onSave={(v) => queueCarPatch(c.id, { milestone_at: v })}
+              value={c.milestone_at}
+              allowMonthOnly={false}
+              onSave={(v) => queueCarPatch(c.id, { milestone_at: v ?? "" })}
             />
           </td>
         );
@@ -805,9 +837,16 @@ export default function ProgramDetailPage() {
           <td key={key} className="px-2 py-1 overflow-hidden">
             <StatusCell
               value={c.status ?? ""}
-              options={statusOptions}
+              options={statusChoices}
               readOnly={!canEdit || exited}
-              onSave={(v) => queueCarPatch(c.id, { status: v })}
+              onSave={(v) => {
+                const patch: Record<string, unknown> = { status: v };
+                if (isCompleteProgramStatus(c.status) && statusLeavesComplete(v)) {
+                  patch.outcome_reached = false;
+                  patch.completed = false;
+                }
+                queueCarPatch(c.id, patch);
+              }}
             />
           </td>
         );
@@ -845,10 +884,9 @@ export default function ProgramDetailPage() {
       case "repair":
         return (
           <td key={key} className="px-2 py-1">
-            <CellInput
+            <MoneyCell
               readOnly={!canEdit || exited}
-              className="text-right"
-              value={c.repair_cost_total != null ? String(c.repair_cost_total) : ""}
+              value={c.repair_cost_total}
               onSave={(v) => queueCarPatch(c.id, { repair_cost_total: v })}
             />
           </td>
@@ -941,8 +979,10 @@ export default function ProgramDetailPage() {
 
   const visibleCars = useMemo(() => {
     const pasteIds = pasteMatch ? new Set(pasteMatch.matched.map((m) => m.link_id)) : null;
+    const narrowing = carFilter.trim() !== "" || pasteMatch != null;
     return sortedCars.filter((c) => {
       if (pasteIds && !pasteIds.has(c.id)) return false;
+      if (narrowing) return true;
       const level = c.completion_level ?? deriveCompletionLevel({
         active: c.railcar?.active,
         status: c.status,
@@ -954,7 +994,19 @@ export default function ProgramDetailPage() {
       if (!levelFilter.has(level)) return false;
       return true;
     });
-  }, [sortedCars, pasteMatch, levelFilter]);
+  }, [sortedCars, pasteMatch, levelFilter, carFilter]);
+
+  useEffect(() => {
+    const ids = new Set(visibleCars.map((car) => car.id));
+    setSelected((prev) => {
+      const kept: number[] = [];
+      prev.forEach((linkId) => {
+        if (ids.has(linkId)) kept.push(linkId);
+      });
+      if (kept.length === prev.size) return prev;
+      return new Set(kept);
+    });
+  }, [visibleCars]);
   const detailCar = draftedCars.find((c) => c.id === detailId) ?? null;
   const splitListPct = Math.min(90, Math.max(30, Number(colWidths._split_list) || 68));
   const showPutOnRent = putOnRentProgramTypes().includes(header?.type as ProgramType);
@@ -987,7 +1039,7 @@ export default function ProgramDetailPage() {
   }
 
   function toggleAll() {
-    const openIds = cars.filter((c) => !c.exited_date).map((c) => c.id);
+    const openIds = visibleCars.filter((c) => !c.exited_date).map((c) => c.id);
     setSelected((prev) => {
       if (openIds.length && openIds.every((id) => prev.has(id))) return new Set();
       return new Set(openIds);
@@ -1317,12 +1369,14 @@ export default function ProgramDetailPage() {
                 }}
                 onPaste={(e) => {
                   const next = e.clipboardData.getData("text");
-                  if (next && /[\n\r,]/.test(next)) {
-                    window.setTimeout(() => void runPasteMatch(next), 0);
-                  }
+                  if (next.trim()) window.setTimeout(() => void runPasteMatch(next), 0);
                 }}
                 onBlur={() => {
-                  if (pasteText.trim() && (pasteText.includes("\n") || pasteText.includes(",") || pasteText.trim().split(/\s+/).length >= 2)) {
+                  if (pasteText.trim()) void runPasteMatch(pasteText);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
                     void runPasteMatch(pasteText);
                   }
                 }}
@@ -1365,11 +1419,16 @@ export default function ProgramDetailPage() {
                   ...PD_CORE.map((key) => ({ key, label: PD_LABELS[key] ?? key })),
                   ...defs.map((d) => ({
                     key: `cf:${d.field_key}`,
-                    label: d.category_id == null ? `${d.label} (optional)` : d.label,
+                    label: d.program_id == null && d.category_id == null ? `${d.label} (optional)` : d.label,
                   })),
                 ]}
                 prefs={colPrefs}
               />
+              {canEdit && (
+                <Button size="sm" variant="outline" onClick={() => setManageColsOpen(true)}>
+                  Manage columns
+                </Button>
+              )}
               {isAdmin && (
                 <>
                   <Button size="sm" variant="outline" onClick={() => void saveProgramLayout("tracker")}>
@@ -1381,9 +1440,10 @@ export default function ProgramDetailPage() {
                 </>
               )}
               <span className="text-xs text-muted-foreground ml-auto">
-                {sortedCars.filter((c) => !c.completed).length} open
-                {sortedCars.some((c) => c.completed) ? ` · ${sortedCars.filter((c) => c.completed).length} complete` : ""}
-                {` · ${sortedCars.length} rows`}
+                {visibleCars.filter((c) => !c.completed).length} open
+                {visibleCars.some((c) => c.completed) ? ` · ${visibleCars.filter((c) => c.completed).length} complete` : ""}
+                {` · ${visibleCars.length} shown`}
+                {visibleCars.length !== draftedCars.length ? ` of ${draftedCars.length}` : ""}
               </span>
             </div>
             {pasteMatch && pasteMatch.not_found.length > 0 && (
@@ -1397,19 +1457,20 @@ export default function ProgramDetailPage() {
             {canEdit && selected.size > 0 && (
               <div className="shrink-0">
               <BulkEditBar
-                count={selected.size}
+                count={visibleCars.filter((c) => selected.has(c.id) && !c.exited_date).length}
                 shops={shops}
-                statusOptions={statusOptions}
+                statusOptions={statusChoices}
                 defs={defs}
                 programId={id}
                 saving={carSaving}
                 onApply={async (label, updates) => {
+                  const ids = visibleCars.filter((c) => selected.has(c.id) && !c.exited_date).map((c) => c.id);
+                  if (!ids.length) return;
                   const ok = await confirmSave({
-                    title: `Set ${label} for ${selected.size} selected car${selected.size === 1 ? "" : "s"}?`,
+                    title: `Set ${label} for ${ids.length} selected car${ids.length === 1 ? "" : "s"}?`,
                     confirmLabel: "Apply",
                   });
                   if (!ok) return;
-                  const ids = Array.from(selected);
                   await runPatchApply(ids.length, { link_ids: ids, updates });
                   setCarDrafts((prev) => {
                     const next = { ...prev };
@@ -1535,6 +1596,20 @@ export default function ProgramDetailPage() {
           qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
         }}
       />
+      <ManageColumnsDialog
+        open={manageColsOpen}
+        programId={id}
+        defs={allDefs}
+        onClose={() => setManageColsOpen(false)}
+        onAdded={(fieldKey) => {
+          const key = `cf:${fieldKey}`;
+          if (!visibleCols.has(key)) toggleCol(key);
+          void qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+        }}
+        onChanged={() => {
+          void qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+        }}
+      />
       <PutOnRentDialog
         open={rentOpen}
         programId={id}
@@ -1641,7 +1716,7 @@ function CarDetailPanel({
       </div>
       <div>
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Latest milestone</div>
-        <div>{car.milestone || "—"}{car.milestone_at ? ` · ${String(car.milestone_at).slice(0, 10)}` : ""}</div>
+        <div>{car.milestone || "—"}{car.milestone_at ? ` · ${formatProgramDate(car.milestone_at)}` : ""}</div>
       </div>
       <div>
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trail</div>
@@ -1652,7 +1727,7 @@ function CarDetailPanel({
             {trail.map((m) => (
               <li key={m.id} className="text-xs border-l-2 border-primary/40 pl-2">
                 <span className="font-medium">{m.milestone}</span>
-                <span className="text-muted-foreground"> · {String(m.milestone_date).slice(0, 10)}</span>
+                <span className="text-muted-foreground"> · {formatProgramDate(m.milestone_date)}</span>
                 {m.note ? <div>{m.note}</div> : null}
               </li>
             ))}
@@ -1673,7 +1748,7 @@ function CarDetailPanel({
       </div>
       <div>
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Arrived (program done)</div>
-        <div className="text-xs">{car.outcome_reached_at ? String(car.outcome_reached_at).slice(0, 10) : "—"}</div>
+        <div className="text-xs">{car.outcome_reached_at ? formatProgramDate(car.outcome_reached_at) : "—"}</div>
       </div>
     </div>
   );
@@ -1760,32 +1835,32 @@ function CellInput({
   );
 }
 
-function StatusCell({
+function ProgramStatusSelect({
   value,
   options,
-  onSave,
-  readOnly,
+  onChange,
+  className,
+  allowCustom = true,
 }: {
   value: string;
-  options: StatusOption[];
-  onSave: (v: string) => void;
-  readOnly?: boolean;
+  options: string[];
+  onChange: (v: string) => void;
+  className?: string;
+  allowCustom?: boolean;
 }) {
   const [custom, setCustom] = useState(false);
-  const inList = !value || options.some((o) => o.value === value);
-  const selectValue = custom ? "__custom__" : (inList ? (value || "__none__") : "__current__");
-  if (readOnly) return <span>{value || "—"}</span>;
+  const inList = !value || options.some((option) => option.toLowerCase() === value.toLowerCase());
   if (custom) {
     return (
       <input
         autoFocus
-        className="h-7 w-full min-w-[120px] bg-transparent border border-border rounded px-1"
+        className={cn("h-7 bg-transparent border border-border rounded px-1", className)}
         defaultValue={inList ? "" : value}
         placeholder="Custom status"
         onBlur={(e) => {
-          const v = e.target.value.trim();
+          const next = e.target.value.trim();
           setCustom(false);
-          if (v && v !== value) onSave(v);
+          if (next !== value) onChange(next);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
@@ -1796,25 +1871,119 @@ function StatusCell({
   }
   return (
     <select
-      className="h-7 w-full min-w-0 max-w-full bg-transparent border border-border rounded px-1 [color-scheme:dark]"
-      value={selectValue}
+      className={cn("h-7 bg-transparent border border-border rounded px-1 [color-scheme:dark]", className)}
+      value={value}
       onChange={(e) => {
-        const v = e.target.value;
-        if (v === "__custom__") {
+        const next = e.target.value;
+        if (next === "__custom__") {
           setCustom(true);
           return;
         }
-        if (v === "__none__") onSave("");
-        else if (v !== "__current__") onSave(v);
+        onChange(next);
       }}
     >
-      <option value="__none__">—</option>
-      {!inList && value && <option value="__current__">{value}</option>}
-      {options.map((o) => (
-        <option key={o.id} value={o.value}>{o.value}</option>
+      <option value="">—</option>
+      {!inList && value ? <option value={value}>{value}</option> : null}
+      {options.map((option) => (
+        <option key={option} value={option}>{option}</option>
       ))}
-      <option value="__custom__">Custom…</option>
+      {allowCustom ? <option value="__custom__">Custom…</option> : null}
     </select>
+  );
+}
+
+function StatusCell({
+  value,
+  options,
+  onSave,
+  readOnly,
+}: {
+  value: string;
+  options: string[];
+  onSave: (v: string) => void;
+  readOnly?: boolean;
+}) {
+  if (readOnly) return <span>{value || "—"}</span>;
+  return (
+    <ProgramStatusSelect
+      value={value}
+      options={options}
+      className="w-full min-w-0 max-w-full"
+      onChange={onSave}
+    />
+  );
+}
+
+function DateCell({
+  value,
+  onSave,
+  readOnly,
+  allowMonthOnly = true,
+}: {
+  value: unknown;
+  onSave: (v: string | null) => void;
+  readOnly?: boolean;
+  allowMonthOnly?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const shown = editing ? text : formatProgramDate(value);
+  if (readOnly) return <span>{formatProgramDate(value) || "—"}</span>;
+  return (
+    <input
+      className="h-7 w-full bg-transparent border border-transparent hover:border-border rounded px-1"
+      value={shown}
+      placeholder="MM/DD/YYYY"
+      onFocus={() => {
+        setEditing(true);
+        setText(formatProgramDate(value));
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        setEditing(false);
+        const parsed = parseProgramDateInput(text);
+        if (parsed === undefined) return;
+        if (parsed && !allowMonthOnly && parsed.length !== 10) return;
+        const current = formatProgramDate(value);
+        if ((parsed == null && !current) || formatProgramDate(parsed) === current) return;
+        onSave(parsed);
+      }}
+    />
+  );
+}
+
+function MoneyCell({
+  value,
+  onSave,
+  readOnly,
+}: {
+  value: unknown;
+  onSave: (v: number | null) => void;
+  readOnly?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const shown = editing ? text : formatMoneyCell(value);
+  if (readOnly) return <span className="block text-right">{formatMoneyCell(value) || "—"}</span>;
+  return (
+    <input
+      className="h-7 w-full bg-transparent border border-transparent hover:border-border rounded px-1 text-right"
+      value={shown}
+      onFocus={() => {
+        setEditing(true);
+        const n = moneyNumber(value);
+        setText(n == null ? "" : String(n));
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        setEditing(false);
+        const parsed = parseUsdInput(text);
+        if (parsed === undefined) return;
+        const current = moneyNumber(value);
+        if (parsed === current) return;
+        onSave(parsed);
+      }}
+    />
   );
 }
 
@@ -1852,12 +2021,19 @@ function CustomCell({
       </select>
     );
   }
+  if (def.field_type === "date") {
+    return <DateCell value={value} readOnly={readOnly} onSave={onSave} />;
+  }
+  const numericMoney = value == null || value === "" || moneyNumber(value) != null;
+  if (def.field_type === "currency" || (isProgramMoneyField(def) && numericMoney)) {
+    return <MoneyCell value={value} readOnly={readOnly} onSave={(v) => onSave(v)} />;
+  }
   if (readOnly) return <span>{formatCustomField(value, def.field_type) || "—"}</span>;
   const str = value == null || value === "" ? "" : String(value);
   return (
     <CellInput
       value={str}
-      onSave={(v) => onSave(def.field_type === "number" || def.field_type === "currency" ? (v === "" ? null : Number(v)) : v || null)}
+      onSave={(v) => onSave(def.field_type === "number" ? (v === "" ? null : Number(v)) : v || null)}
     />
   );
 }
@@ -1873,7 +2049,7 @@ function BulkEditBar({
 }: {
   count: number;
   shops: ShopOption[];
-  statusOptions: StatusOption[];
+  statusOptions: string[];
   defs: ProgramFieldDef[];
   saving?: boolean;
   programId: number;
@@ -1884,6 +2060,7 @@ function BulkEditBar({
   const [commitType, setCommitType] = useState<string>("scrap");
   const [shopId, setShopId] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
+  const { toast } = useToast();
   const shopName = shops.find((s) => s.id === shopId)?.name ?? "";
   const busy = pending || Boolean(saving);
 
@@ -1926,16 +2103,41 @@ function BulkEditBar({
       updates = { commitment: { type: commitType, name: text } };
       label = `Commit ${commitType} '${text}'`;
     } else if (field === "repair_cost_total") {
-      updates = { repair_cost_total: text };
-      label = `Repair $ to '${text || "—"}'`;
+      const parsed = parseUsdInput(text);
+      if (parsed === undefined) {
+        toast({ title: "Enter an amount", variant: "destructive" });
+        return;
+      }
+      updates = { repair_cost_total: parsed };
+      label = `Repair $ to '${parsed == null ? "—" : formatMoneyCell(parsed)}'`;
     } else if (field.startsWith("custom:")) {
       const key = field.slice(7);
       const def = defs.find((d) => d.field_key === key);
       let v: unknown = text;
       if (def?.field_type === "boolean") v = text === "true";
-      else if (def?.field_type === "number" || def?.field_type === "currency") v = text === "" ? null : Number(text);
+      else if (def?.field_type === "date") {
+        const parsed = parseProgramDateInput(text);
+        if (parsed === undefined) {
+          toast({ title: "Enter a date as MM/DD/YYYY", variant: "destructive" });
+          return;
+        }
+        v = parsed;
+      } else if (def?.field_type === "currency" || (def && isProgramMoneyField(def))) {
+        const parsed = parseUsdInput(text);
+        if (parsed === undefined) {
+          toast({ title: "Enter an amount", variant: "destructive" });
+          return;
+        }
+        v = parsed;
+      } else if (def?.field_type === "number") {
+        v = text === "" ? null : Number(text);
+        if (v != null && !Number.isFinite(v as number)) {
+          toast({ title: "Enter a number", variant: "destructive" });
+          return;
+        }
+      }
       updates = { custom_fields: { [key]: v } };
-      label = `${def?.label ?? key} to '${text}'`;
+      label = `${def?.label ?? key} to '${v == null ? "—" : String(v)}'`;
     }
     setPending(true);
     try {
@@ -1959,16 +2161,12 @@ function BulkEditBar({
       {field === "shop_id" ? (
         <ShopCombobox shops={shops} value={shopId} programId={programId} onChange={setShopId} compact />
       ) : field === "status" ? (
-        <select
-          className="h-8 bg-background border border-border rounded px-2 text-xs max-w-[220px] [color-scheme:dark]"
+        <ProgramStatusSelect
           value={text}
-          onChange={(e) => setText(e.target.value)}
-        >
-          <option value="">—</option>
-          {statusOptions.map((o) => (
-            <option key={o.id} value={o.value}>{o.value}</option>
-          ))}
-        </select>
+          options={statusOptions}
+          className="h-8 max-w-[220px] bg-background"
+          onChange={setText}
+        />
       ) : field === "milestone" ? (
         <>
           <select

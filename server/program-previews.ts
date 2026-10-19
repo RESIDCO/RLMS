@@ -20,6 +20,8 @@ import {
   type ProgramLifecycle,
   type ProgramType,
 } from "@shared/programs";
+import { parseProgramDateInput } from "@shared/program-dates";
+import { isCompleteProgramStatus, statusLeavesComplete } from "@shared/program-status";
 import {
   COMMITMENT_TYPES,
   pickEarliestOpenProgram,
@@ -427,8 +429,10 @@ async function classifyPatchLinks(programId: number, ids: number[]) {
   for (const l of links ?? []) {
     const rc = Array.isArray((l as any).railcar) ? (l as any).railcar[0] : (l as any).railcar;
     const row = { link_id: l.id, railcar_id: l.railcar_id, label: rc ? formatCarId(rc) : String(l.railcar_id) };
-    if (rc?.active === true && !l.exited_date) writable.push(row);
-    else readonly_inactive.push(row);
+    // Exited links stay read-only. An inactive fleet car can still leave Complete:
+    // the program row is writable, and the railcar row is not touched.
+    if (l.exited_date || !rc) readonly_inactive.push(row);
+    else writable.push(row);
   }
   return { writable, readonly_inactive };
 }
@@ -473,12 +477,26 @@ export async function previewPatchProgramCars(
 
 const COMPLETE_CF = "__complete";
 
+function clearCompleteFlags(out: Record<string, unknown>, prior: Record<string, unknown> | null) {
+  out.outcome_reached_at = null;
+  out.completed = false;
+  out.completed_at = null;
+  const prev =
+    out.custom_fields && typeof out.custom_fields === "object"
+      ? (out.custom_fields as Record<string, unknown>)
+      : prior?.custom_fields && typeof prior.custom_fields === "object"
+        ? (prior.custom_fields as Record<string, unknown>)
+        : {};
+  out.custom_fields = { ...prev, [COMPLETE_CF]: false };
+}
+
 function patchColumns(updates: Record<string, unknown>, prior: Record<string, unknown> | null) {
   const out: Record<string, unknown> = {};
   if (updates.milestone !== undefined) out.milestone = updates.milestone === "" ? null : String(updates.milestone);
   if (updates.milestone_at !== undefined) {
-    const d = String(updates.milestone_at ?? "").slice(0, 10);
-    out.milestone_at = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+    const parsed = parseProgramDateInput(String(updates.milestone_at ?? ""));
+    if (parsed === null) out.milestone_at = null;
+    else if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) out.milestone_at = parsed;
   }
   if (updates.status !== undefined) out.status = updates.status === "" ? null : String(updates.status);
   if (updates.notes !== undefined) out.notes = updates.notes === "" ? null : updates.notes;
@@ -495,7 +513,7 @@ function patchColumns(updates: Record<string, unknown>, prior: Record<string, un
     out.outcome_reached_at = todayIso();
   }
   if (updates.outcome_reached === false || updates.outcome_reached === "false") {
-    out.outcome_reached_at = null;
+    clearCompleteFlags(out, prior);
   }
   if (updates.completed !== undefined) {
     const on = updates.completed === true || updates.completed === "true" || updates.completed === 1 || updates.completed === "1";
@@ -527,6 +545,14 @@ function patchColumns(updates: Record<string, unknown>, prior: Record<string, un
     const d = out.milestone_at != null ? String(out.milestone_at).slice(0, 10) : todayIso();
     out.outcome_reached_at = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayIso();
   }
+  const priorStatus = prior?.status == null ? "" : String(prior.status);
+  if (
+    updates.status !== undefined &&
+    isCompleteProgramStatus(priorStatus) &&
+    statusLeavesComplete(out.status == null ? "" : String(out.status))
+  ) {
+    clearCompleteFlags(out, prior);
+  }
   return out;
 }
 
@@ -547,8 +573,9 @@ async function applyOneCarUpdates(
   actor: string,
 ): Promise<{ wrote: boolean; commitment: boolean }> {
   const commitment = commitmentPatch(updates ?? {});
-  const { data: car } = await supabaseAdmin.from("railcars").select("id, active, status").eq("id", row.railcar_id).maybeSingle();
-  if (!car || isFrozenRailcar(car)) return { wrote: false, commitment: false };
+  const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", row.railcar_id).maybeSingle();
+  if (!car) return { wrote: false, commitment: false };
+  const fleetInactive = car.active !== true;
   const { data: prior, error: priorErr } = await supabaseAdmin
     .from("program_cars")
     .select("*")
@@ -595,7 +622,7 @@ async function applyOneCarUpdates(
       if (trail && (trail as { inserted?: boolean }).inserted) wrote = true;
     }
   }
-  if (commitment) {
+  if (commitment && !fleetInactive) {
     await upsertOpenCommitment(
       Number(row.railcar_id),
       { type: commitment.type, name: commitment.name, program_id: program.id },

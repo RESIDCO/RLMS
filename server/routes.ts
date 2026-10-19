@@ -139,6 +139,7 @@ import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } fr
 import { registerCrmRoutes } from "./crm";
 import { registerColumnPrefRoutes } from "./column-prefs";
 import { createShopRecord, registerProgramTrackerRoutes } from "./program-tracker-sync";
+import { registerProgramColumnRoutes } from "./program-columns";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
@@ -6000,6 +6001,8 @@ export async function registerRoutes(
   });
 
   // ── PROGRAMS MODULE ──────────────────────────────────────────────────────────
+
+  registerProgramColumnRoutes(app);
 
   app.get("/api/programs/categories", async (req, res) => {
     try {

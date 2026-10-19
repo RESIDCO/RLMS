@@ -367,8 +367,10 @@ export function splitCarNumber(raw: unknown): {
   car_number: string;
   car_initial: string | null;
 } {
-  const s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  let s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
   if (!s) return { reporting_marks: null, car_number: "", car_initial: null };
+  // A leading zero before letters is the letter O (0FOX815215 → OFOX 815215).
+  s = s.replace(/^0(?=[A-Z])/, "O");
   // Match leading alpha prefix, optional separator (space/dash already stripped),
   // then trailing digits (possibly with embedded letters like "X" suffix).
   const m = /^([A-Z]+)[-_]?(\d.*)$/.exec(s);

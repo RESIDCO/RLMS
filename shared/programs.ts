@@ -345,14 +345,23 @@ export function masterReportFilename(d = new Date()): string {
 
 export const FLAG_TAG_HINTS = ["Watch", "Priority", "Issue", "Hold"] as const;
 
-/** TFOX 3297, TFOX\t3297, and TFOX 003297 all become TFOX 003297. */
+/** TFOX 3297, TFOX\t3297, TFOX003297, and TFOX 0003297 all become TFOX 003297. */
 export function canonicalPasteCarToken(token: string): string {
   const split = splitCarNumber(token);
   const digits = String(split.car_number ?? "").replace(/\D/g, "");
-  if (!digits) return String(token ?? "").trim().replace(/\s+/g, " ").toUpperCase();
-  const num = digits.length <= CAR_NUMBER_WIDTH ? digits.padStart(CAR_NUMBER_WIDTH, "0") : digits;
+  if (!digits) {
+    if (split.reporting_marks) return split.reporting_marks;
+    return String(token ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+  }
+  const stripped = digits.replace(/^0+/, "") || "0";
+  const num = stripped.length <= CAR_NUMBER_WIDTH ? stripped.padStart(CAR_NUMBER_WIDTH, "0") : stripped;
   const mark = split.reporting_marks;
   return mark ? `${mark} ${num}` : num;
+}
+
+/** A leading 0 before letters is the letter O, so "0FOX 815215" stays one car. */
+export function normalizePasteWord(word: string): string {
+  return word.replace(/^0(?=[A-Za-z])/, "O");
 }
 
 export type PasteRangeExpansion = { raw: string; count: number; from: string; to: string };
@@ -457,7 +466,7 @@ export function parseCarPasteListDetailed(raw: string): ParsedCarPaste {
     for (const segment of normalized.split(/[,;]+/)) {
       const words = segment.trim().split(/\s+/).filter(Boolean);
       for (let i = 0; i < words.length; i++) {
-        const w = words[i];
+        const w = normalizePasteWord(words[i]);
         const next = words[i + 1];
         const next2 = words[i + 2];
         const next3 = words[i + 3];
@@ -519,6 +528,227 @@ export function parseCarPasteListDetailed(raw: string): ParsedCarPaste {
 
 export function parseCarPasteList(raw: string): string[] {
   return parseCarPasteListDetailed(raw).tokens;
+}
+
+/** Stay under Search's 500-car paste cap, and under one oversized POST. */
+export const PASTE_SEARCH_BATCH = 80;
+
+export function pasteSearchBatches(raw: string, batchSize = PASTE_SEARCH_BATCH): {
+  batches: string[];
+  rejected: PasteRangeRejection[];
+} {
+  const detailed = parseCarPasteListDetailed(raw);
+  const size = Number.isFinite(batchSize) && batchSize > 0 ? Math.floor(batchSize) : PASTE_SEARCH_BATCH;
+  const batches: string[] = [];
+  for (let i = 0; i < detailed.tokens.length; i += size) {
+    batches.push(detailed.tokens.slice(i, i + size).join("\n"));
+  }
+  return { batches, rejected: detailed.rejectedRanges };
+}
+
+export type PasteCarCandidate = {
+  id: number;
+  reporting_marks?: string | null;
+  car_initial?: string | null;
+  car_number?: string | null;
+  active?: boolean | null;
+};
+
+export type PasteHitDecision =
+  | { kind: "match"; car: PasteCarCandidate }
+  | { kind: "ambiguous"; matches: PasteCarCandidate[]; reason: string }
+  | { kind: "none" };
+
+function strippedCarDigits(raw: string | null | undefined): string {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.replace(/^0+/, "") || "0";
+}
+
+/**
+ * A reporting mark resolves to that car, preferring the active row when an
+ * inactive twin shares the mark. A bare number that hits two cars stays
+ * ambiguous so the caller can ask which one.
+ */
+export function decidePastedCar(opts: {
+  marks: string | null;
+  number: string;
+  cars: PasteCarCandidate[];
+}): PasteHitDecision {
+  const wantNum = strippedCarDigits(opts.number);
+  if (!wantNum) return { kind: "none" };
+  const numbered = opts.cars.filter((car) => strippedCarDigits(car.car_number) === wantNum);
+  const wantMark = String(opts.marks ?? "").trim().toUpperCase();
+  if (!wantMark) {
+    if (numbered.length === 0) return { kind: "none" };
+    if (numbered.length === 1) return { kind: "match", car: numbered[0] };
+    return {
+      kind: "ambiguous",
+      matches: numbered,
+      reason: "This number matches more than one car. Pick one.",
+    };
+  }
+  const exact = numbered.filter((car) => String(car.reporting_marks ?? "").trim().toUpperCase() === wantMark);
+  const hits = exact.length
+    ? exact
+    : numbered.filter((car) => {
+        const marks = String(car.reporting_marks ?? "").trim();
+        const initial = String(car.car_initial ?? "").trim().toUpperCase();
+        return !marks && initial === wantMark;
+      });
+  if (hits.length === 0) return { kind: "none" };
+  if (hits.length === 1) return { kind: "match", car: hits[0] };
+  const active = hits.filter((car) => car.active !== false);
+  if (active.length === 1) return { kind: "match", car: active[0] };
+  return {
+    kind: "ambiguous",
+    matches: active.length > 1 ? active : hits,
+    reason:
+      active.length > 1
+        ? "More than one active car has this mark and number. Pick one."
+        : "More than one car has this mark and number. Pick one.",
+  };
+}
+
+/** Current mark on the label, plus "(formerly KCS 310100)" when the paste used an older mark. */
+export function labelWithFormerly(
+  label: string,
+  token: string,
+  car: { reporting_marks?: string | null; car_initial?: string | null },
+): string {
+  const split = splitCarNumber(token);
+  const current = String(car.car_initial || car.reporting_marks || "").trim().toUpperCase();
+  if (!split.reporting_marks || split.reporting_marks === current) return label;
+  return `${label} (formerly ${split.reporting_marks} ${split.car_number})`;
+}
+
+export function formerlyOnLabel(label: string, token: string): string {
+  return labelWithFormerly(label, token, { reporting_marks: splitCarNumber(label).reporting_marks });
+}
+
+/**
+ * The current fleet missed this token. One prior identity is that car.
+ * Several prior identities stay a choice.
+ */
+export function decidePriorIdentityPaste(opts: {
+  marks: string | null;
+  number: string;
+  cars: PasteCarCandidate[];
+}): PasteHitDecision {
+  if (!opts.cars.length) return { kind: "none" };
+  const again = decidePastedCar(opts);
+  if (again.kind !== "none") return again;
+  if (opts.cars.length === 1) return { kind: "match", car: opts.cars[0] };
+  return {
+    kind: "ambiguous",
+    matches: opts.cars,
+    reason: opts.marks
+      ? "More than one car has matched this mark and number. Pick one."
+      : "This number matches more than one car. Pick one.",
+  };
+}
+
+export type PasteMatchPreview = {
+  matched: { token: string; railcar_id: number; label: string }[];
+  not_found: { token: string; reason?: string }[];
+  already_in_program: { token: string; railcar_id: number; label: string }[];
+  ambiguous: {
+    token: string;
+    reason?: string;
+    matches: { railcar_id: number; label: string; active?: boolean | null }[];
+  }[];
+};
+
+export type SearchPastePage = {
+  railcars?: PasteCarCandidate[];
+  not_found?: string[];
+  ambiguous?: {
+    token?: string;
+    reason?: string;
+    matches?: { id?: number; railcar_id?: number; label?: string; active?: boolean | null }[];
+  }[];
+  already_in_program?: { railcar_id?: number; label?: string; token?: string }[];
+  truncated?: boolean;
+};
+
+function pasteCarLabel(car: { reporting_marks?: string | null; car_number?: string | null; id?: number }): string {
+  const label = [car.reporting_marks, car.car_number].filter(Boolean).join(" ");
+  return label || (car.id != null ? String(car.id) : "");
+}
+
+/** Turn batched POST /api/search pages into the Add cars preview. */
+export function programPickerFromSearch(
+  pages: SearchPastePage[],
+  rejected: PasteRangeRejection[] = [],
+): PasteMatchPreview {
+  const alreadyIds = new Set<number>();
+  const already: PasteMatchPreview["already_in_program"] = [];
+  const ambiguousIds = new Set<number>();
+  const ambiguous: PasteMatchPreview["ambiguous"] = [];
+  const notFound: PasteMatchPreview["not_found"] = [];
+  const matched: PasteMatchPreview["matched"] = [];
+  const seenMatch = new Set<number>();
+  const seenMissing = new Set<string>();
+
+  function pushMissing(token: string, reason?: string) {
+    const key = `${token}\n${reason ?? ""}`;
+    if (seenMissing.has(key)) return;
+    seenMissing.add(key);
+    notFound.push({ token, reason });
+  }
+
+  for (const page of pages) {
+    for (const row of page.already_in_program ?? []) {
+      const id = Number(row.railcar_id);
+      if (!Number.isFinite(id) || id <= 0 || alreadyIds.has(id)) continue;
+      alreadyIds.add(id);
+      const label = String(row.label ?? row.token ?? id);
+      already.push({ token: row.token || label, railcar_id: id, label });
+    }
+    for (const row of page.ambiguous ?? []) {
+      const token = String(row.token ?? "").trim();
+      if (!token) continue;
+      const matches: PasteMatchPreview["ambiguous"][number]["matches"] = [];
+      for (const match of row.matches ?? []) {
+        const id = Number(match.railcar_id ?? match.id);
+        if (!Number.isFinite(id) || id <= 0 || alreadyIds.has(id)) continue;
+        ambiguousIds.add(id);
+        matches.push({
+          railcar_id: id,
+          label: String(match.label ?? id),
+          active: match.active !== false,
+        });
+      }
+      if (matches.length) ambiguous.push({ token, reason: row.reason, matches });
+    }
+    for (const token of page.not_found ?? []) {
+      const value = String(token ?? "").trim();
+      if (value) pushMissing(value, "Not in the fleet.");
+    }
+    if (page.truncated) {
+      pushMissing("Paste list", "Search cut this batch off at 500 cars. Shorten the list and match again.");
+    }
+  }
+
+  for (const page of pages) {
+    for (const car of page.railcars ?? []) {
+      const id = Number(car.id);
+      if (!Number.isFinite(id) || id <= 0 || seenMatch.has(id) || alreadyIds.has(id) || ambiguousIds.has(id)) continue;
+      seenMatch.add(id);
+      const label = pasteCarLabel(car);
+      if (car.active === false) {
+        pushMissing(label, "Inactive. Programs only add active cars.");
+        continue;
+      }
+      matched.push({ token: label, railcar_id: id, label });
+    }
+  }
+
+  for (const row of rejected) {
+    pushMissing(row.raw, row.message);
+  }
+
+  return { matched, not_found: notFound, already_in_program: already, ambiguous };
 }
 
 export function looksLikeCarToken(token: string): boolean {

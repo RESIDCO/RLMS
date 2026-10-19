@@ -12,8 +12,14 @@ import {
   isProgramDoneMilestone,
   isProgramStatus,
   isWorkCompleteMilestone,
+  decidePastedCar,
+  decidePriorIdentityPaste,
+  formerlyOnLabel,
+  labelWithFormerly,
   parseCarPasteList,
   percentFromProgress,
+  type PasteCarCandidate,
+  type PasteHitDecision,
   reportFilename,
   trailDate,
   type ProgramFieldDef,
@@ -191,43 +197,95 @@ export async function matchProgramCarsPaste(programId: number, text: string) {
   const tokens = parseCarPasteList(text);
   const { data: links, error } = await supabaseAdmin
     .from("program_cars")
-    .select("id, railcar_id, exited_date, railcar:railcars(id, reporting_marks, car_number)")
+    .select("id, railcar_id, exited_date, railcar:railcars(id, reporting_marks, car_number, car_initial, active)")
     .eq("program_id", programId);
   if (error) throw error;
   const byRailcar = new Map<number, { link_id: number; railcar_id: number; label: string; exited: boolean }>();
+  const fleet: PasteCarCandidate[] = [];
   for (const l of links ?? []) {
     const rc = Array.isArray((l as any).railcar) ? (l as any).railcar[0] : (l as any).railcar;
-    byRailcar.set(Number(l.railcar_id), {
+    const railcarId = Number(l.railcar_id);
+    byRailcar.set(railcarId, {
       link_id: Number(l.id),
-      railcar_id: Number(l.railcar_id),
+      railcar_id: railcarId,
       label: rc ? formatCarId(rc) : String(l.railcar_id),
       exited: Boolean(l.exited_date),
     });
+    fleet.push({
+      id: railcarId,
+      reporting_marks: rc?.reporting_marks ?? null,
+      car_initial: rc?.car_initial ?? null,
+      car_number: rc?.car_number ?? null,
+      active: rc?.active ?? null,
+    });
   }
   const matched: { token: string; link_id: number; railcar_id: number; label: string; exited: boolean }[] = [];
-  const not_found: { token: string }[] = [];
-  const ambiguous: { token: string; matches: { link_id: number; label: string }[] }[] = [];
+  const not_found: { token: string; reason?: string }[] = [];
+  const ambiguous: { token: string; reason?: string; matches: { link_id: number; label: string }[] }[] = [];
   const seenLink = new Set<number>();
+
+  function pushDecision(token: string, decision: PasteHitDecision) {
+    switch (decision.kind) {
+      case "none":
+        not_found.push({ token, reason: "No car in this program matches." });
+        return;
+      case "ambiguous": {
+        const choices = decision.matches
+          .map((car) => byRailcar.get(Number(car.id)))
+          .filter((hit): hit is NonNullable<typeof hit> => Boolean(hit))
+          .map((hit) => ({ link_id: hit.link_id, label: formerlyOnLabel(hit.label, token) }));
+        if (!choices.length) {
+          not_found.push({ token, reason: decision.reason });
+          return;
+        }
+        ambiguous.push({ token, reason: decision.reason, matches: choices });
+        return;
+      }
+      case "match": {
+        const hit = byRailcar.get(Number(decision.car.id));
+        if (!hit) {
+          not_found.push({ token, reason: "No car in this program matches." });
+          return;
+        }
+        if (seenLink.has(hit.link_id)) return;
+        seenLink.add(hit.link_id);
+        matched.push({ token, ...hit, label: formerlyOnLabel(hit.label, token) });
+        return;
+      }
+      default: {
+        const unreachable: never = decision;
+        throw new Error(`Unhandled paste decision ${String(unreachable)}`);
+      }
+    }
+  }
+
   for (const token of tokens) {
-    const ids = await resolveRailcarsByAnyIdentity(token);
-    const hits = [...new Set(ids.map(Number))].map((id) => byRailcar.get(id)).filter(Boolean) as {
-      link_id: number;
-      railcar_id: number;
-      label: string;
-      exited: boolean;
-    }[];
-    if (hits.length === 0) {
-      not_found.push({ token });
-      continue;
+    const split = splitCarNumber(token);
+    let decision = decidePastedCar({ marks: split.reporting_marks, number: split.car_number, cars: fleet });
+    if (decision.kind === "none") {
+      const ids = await resolveRailcarsByAnyIdentity(token);
+      const seenId = new Set<number>();
+      const hits: PasteCarCandidate[] = [];
+      for (const raw of ids) {
+        const id = Number(raw);
+        if (!Number.isFinite(id) || seenId.has(id)) continue;
+        seenId.add(id);
+        const car = fleet.find((item) => item.id === id);
+        if (car) hits.push(car);
+      }
+      if (hits.length === 1) decision = { kind: "match", car: hits[0] };
+      else if (hits.length > 1) {
+        decision = decidePastedCar({ marks: split.reporting_marks, number: split.car_number, cars: hits });
+        if (decision.kind === "none") {
+          decision = {
+            kind: "ambiguous",
+            matches: hits,
+            reason: "This number matches more than one car in the program. Pick one.",
+          };
+        }
+      }
     }
-    if (hits.length > 1) {
-      ambiguous.push({ token, matches: hits.map((h) => ({ link_id: h.link_id, label: formerlyOnLabel(h.label, token) })) });
-      continue;
-    }
-    const hit = hits[0];
-    if (seenLink.has(hit.link_id)) continue;
-    seenLink.add(hit.link_id);
-    matched.push({ token, ...hit, label: formerlyOnLabel(hit.label, token) });
+    pushDecision(token, decision);
   }
   return {
     requested: tokens.length,
@@ -686,23 +744,16 @@ function carLabel(c: { reporting_marks?: string | null; car_number?: string | nu
   return [c.reporting_marks, c.car_number].filter(Boolean).join(" ");
 }
 
-function labelWithFormerly(label: string, token: string, car: { reporting_marks?: string | null; car_initial?: string | null }): string {
-  const split = splitCarNumber(token);
-  const current = String(car.car_initial || car.reporting_marks || "").trim().toUpperCase();
-  if (!split.reporting_marks || split.reporting_marks === current) return label;
-  return `${label} (formerly ${split.reporting_marks} ${split.car_number})`;
-}
-
-function formerlyOnLabel(label: string, token: string): string {
-  return labelWithFormerly(label, token, { reporting_marks: splitCarNumber(label).reporting_marks });
-}
-
 export async function resolveProgramCars(opts: { text: string; programId?: number | null }) {
   const tokens = parseCarPasteList(opts.text);
   const matched: { token: string; railcar_id: number; label: string }[] = [];
   const notFound: { token: string; reason?: string }[] = [];
   const already: { token: string; railcar_id: number; label: string }[] = [];
-  const ambiguous: { token: string; matches: { railcar_id: number; label: string }[] }[] = [];
+  const ambiguous: {
+    token: string;
+    reason?: string;
+    matches: { railcar_id: number; label: string; active?: boolean }[];
+  }[] = [];
   if (!tokens.length) return { matched, not_found: notFound, already_in_program: already, ambiguous };
 
   const parsed = tokens.map((token) => {
@@ -723,7 +774,7 @@ export async function resolveProgramCars(opts: { text: string; programId?: numbe
     const slice = variantList.slice(i, i + 80);
     const { data, error } = await supabaseAdmin
       .from("railcars")
-      .select("id, car_number, reporting_marks, car_initial")
+      .select("id, car_number, reporting_marks, car_initial, active")
       .in("car_number", slice);
     if (error) throw error;
     for (const c of data ?? []) byId.set(Number(c.id), c);
@@ -741,63 +792,101 @@ export async function resolveProgramCars(opts: { text: string; programId?: numbe
     for (const r of openRows ?? []) openIds.add(Number((r as any).railcar_id));
   }
 
+  function record(token: string, decision: PasteHitDecision) {
+    switch (decision.kind) {
+      case "none":
+        notFound.push({
+          token,
+          reason: "No matching car.",
+        });
+        return;
+      case "ambiguous":
+        ambiguous.push({
+          token,
+          reason: decision.reason,
+          matches: decision.matches.map((car) => ({
+            railcar_id: Number(car.id),
+            label: labelWithFormerly(carLabel(car), token, car),
+            active: car.active !== false,
+          })),
+        });
+        return;
+      case "match": {
+        const row = {
+          token,
+          railcar_id: Number(decision.car.id),
+          label: labelWithFormerly(carLabel(decision.car), token, decision.car),
+        };
+        if (openIds.has(row.railcar_id)) already.push(row);
+        else matched.push(row);
+        return;
+      }
+      default: {
+        const unreachable: never = decision;
+        throw new Error(`Unhandled paste decision ${String(unreachable)}`);
+      }
+    }
+  }
+
   for (const p of parsed) {
     if (!p.number) {
-      notFound.push({ token: p.token, reason: "no car number" });
+      notFound.push({ token: p.token, reason: "That line has no car number." });
       continue;
     }
-    const wantNum = normCarNumber(p.number);
-    const wantMark = p.marks ? p.marks.toUpperCase() : null;
-    const hits = candidates.filter((c) => {
-      if (normCarNumber(String(c.car_number ?? "")) !== wantNum) return false;
-      if (!wantMark) return true;
-      const rm = String(c.reporting_marks ?? "").trim().toUpperCase();
-      const ci = String(c.car_initial ?? "").trim().toUpperCase();
-      return rm === wantMark || ci === wantMark;
-    });
-    if (hits.length === 0) {
-      const priorIds = await resolveRailcarsByAnyIdentity(p.token);
-      if (priorIds.length === 1) {
-        const { data: car } = await supabaseAdmin
-          .from("railcars")
-          .select("id, car_number, reporting_marks")
-          .eq("id", priorIds[0])
-          .maybeSingle();
-        if (car) {
-          const row = { token: p.token, railcar_id: Number(car.id), label: labelWithFormerly(carLabel(car), p.token, car) };
-          if (openIds.has(row.railcar_id)) already.push(row);
-          else matched.push(row);
-          continue;
-        }
-      }
-      if (priorIds.length > 1) {
-        const { data: cars } = await supabaseAdmin
-          .from("railcars")
-          .select("id, car_number, reporting_marks")
-          .in("id", priorIds.slice(0, 20));
-        ambiguous.push({
-          token: p.token,
-          matches: (cars ?? []).map((c) => ({ railcar_id: Number(c.id), label: labelWithFormerly(carLabel(c), p.token, c) })),
-        });
+    const decision = decidePastedCar({ marks: p.marks, number: p.number, cars: candidates });
+    if (decision.kind !== "none") {
+      record(p.token, decision);
+      continue;
+    }
+    const priorIds = await resolveRailcarsByAnyIdentity(p.token);
+    if (priorIds.length) {
+      const { data: priorCars, error: priorErr } = await supabaseAdmin
+        .from("railcars")
+        .select("id, car_number, reporting_marks, car_initial, active")
+        .in("id", priorIds.slice(0, 20));
+      if (priorErr) throw priorErr;
+      const priorDecision = decidePriorIdentityPaste({
+        marks: p.marks,
+        number: p.number,
+        cars: (priorCars ?? []) as PasteCarCandidate[],
+      });
+      if (priorDecision.kind !== "none") {
+        record(p.token, priorDecision);
         continue;
       }
-      notFound.push({ token: p.token });
-      continue;
     }
-    if (hits.length > 1) {
-      ambiguous.push({
-        token: p.token,
-        matches: hits.map((c) => ({ railcar_id: Number(c.id), label: carLabel(c) })),
-      });
-      continue;
-    }
-    const car = hits[0];
-    const row = { token: p.token, railcar_id: Number(car.id), label: carLabel(car) };
-    if (openIds.has(row.railcar_id)) already.push(row);
-    else matched.push(row);
+    notFound.push({
+      token: p.token,
+      reason: p.marks ? `No car found for ${p.token}.` : `No car found with number ${normCarNumber(p.number)}.`,
+    });
   }
 
   return { matched, not_found: notFound, already_in_program: already, ambiguous };
+}
+
+/** Open program_cars rows for these railcars. Used when Add cars calls POST /api/search. */
+export async function carsAlreadyInProgram(programId: number, ids: number[]): Promise<Set<number>> {
+  const open = new Set<number>();
+  const seen = new Set<number>();
+  const uniq: number[] = [];
+  for (const raw of ids) {
+    const id = Number(raw);
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    uniq.push(id);
+  }
+  for (let i = 0; i < uniq.length; i += 80) {
+    const slice = uniq.slice(i, i + 80);
+    const { data, error } = await supabaseAdmin
+      .from("program_cars")
+      .select("railcar_id")
+      .eq("program_id", programId)
+      .is("exited_date", null)
+      .in("railcar_id", slice);
+    if (error) throw error;
+    for (const row of data ?? []) open.add(Number((row as { railcar_id: number }).railcar_id));
+  }
+  return open;
 }
 
 export async function listActivity(programId: number, programCarId?: number) {

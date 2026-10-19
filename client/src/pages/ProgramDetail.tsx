@@ -339,8 +339,8 @@ export default function ProgramDetailPage() {
     requested: number;
     matched_count: number;
     matched: { token: string; link_id: number; label: string }[];
-    not_found: { token: string }[];
-    ambiguous: { token: string; matches: { label: string }[] }[];
+    not_found: { token: string; reason?: string }[];
+    ambiguous: { token: string; reason?: string; matches: { label: string }[] }[];
   } | null>(null);
   const [pastePending, setPastePending] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -1325,9 +1325,9 @@ export default function ProgramDetailPage() {
             </div>
             {pasteMatch && pasteMatch.not_found.length > 0 && (
               <div className="text-xs text-destructive mb-2">
-                Not found: {pasteMatch.not_found.map((n) => n.token).join(", ")}
+                Not found: {pasteMatch.not_found.map((n) => (n.reason ? `${n.token} (${n.reason})` : n.token)).join(", ")}
                 {pasteMatch.ambiguous?.length
-                  ? ` · Ambiguous: ${pasteMatch.ambiguous.map((a) => a.token).join(", ")}`
+                  ? ` · Needs a choice: ${pasteMatch.ambiguous.map((a) => (a.reason ? `${a.token} (${a.reason})` : a.token)).join(", ")}`
                   : ""}
               </div>
             )}

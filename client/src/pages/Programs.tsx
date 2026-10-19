@@ -541,7 +541,11 @@ function CreateProgramDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+    <>
+    <Dialog open={open} onOpenChange={(o) => {
+      if (o || addPreview) return;
+      onClose();
+    }}>
       <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New program</DialogTitle>
@@ -606,33 +610,34 @@ function CreateProgramDialog({
             <ProgramCarPicker value={cars} onChange={setCars} />
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={onClose}>Back</Button>
-            <Button variant="outline" onClick={() => save(true)} disabled={pending}>Create as Draft</Button>
-            <Button onClick={() => save(false)} disabled={pending}>{pending ? "Creating…" : "Create"}</Button>
+            <Button type="button" variant="ghost" onClick={onClose}>Back</Button>
+            <Button type="button" variant="outline" onClick={() => save(true)} disabled={pending || Boolean(addPreview)}>Create as Draft</Button>
+            <Button type="button" onClick={() => save(false)} disabled={pending || Boolean(addPreview)}>{pending ? "Creating…" : "Create"}</Button>
           </div>
         </div>
-        <ProgramPreviewDialog
-          open={Boolean(addPreview)}
-          title="Add cars"
-          preview={addPreview}
-          pending={pending}
-          onClose={() => addPreview?.programId && finish(addPreview.programId)}
-          onApply={async () => {
-            if (!addPreview?.preview_token) return;
-            setPending(true);
-            try {
-              await apiRequest("POST", `/api/programs/${addPreview.programId}/cars/apply`, {
-                preview_token: addPreview.preview_token,
-              });
-              finish(addPreview.programId);
-            } catch (e: any) {
-              toast({ title: "Could not add cars", description: e.message, variant: "destructive" });
-            } finally {
-              setPending(false);
-            }
-          }}
-        />
       </DialogContent>
     </Dialog>
+    <ProgramPreviewDialog
+      open={Boolean(addPreview)}
+      title="Add cars"
+      preview={addPreview}
+      pending={pending}
+      onClose={() => addPreview?.programId && finish(addPreview.programId)}
+      onApply={async () => {
+        if (!addPreview?.preview_token) return;
+        setPending(true);
+        try {
+          await apiRequest("POST", `/api/programs/${addPreview.programId}/cars/apply`, {
+            preview_token: addPreview.preview_token,
+          });
+          finish(addPreview.programId);
+        } catch (e: any) {
+          toast({ title: "Could not add cars", description: e.message, variant: "destructive" });
+        } finally {
+          setPending(false);
+        }
+      }}
+    />
+    </>
   );
 }

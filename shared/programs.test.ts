@@ -1,7 +1,17 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/programs.test.ts */
 
-import { expandRangeEnd, parseCarPasteList, parseCarPasteListDetailed } from "./programs";
+import {
+  decidePastedCar,
+  decidePriorIdentityPaste,
+  expandRangeEnd,
+  formerlyOnLabel,
+  labelWithFormerly,
+  parseCarPasteList,
+  parseCarPasteListDetailed,
+  pasteSearchBatches,
+  programPickerFromSearch,
+} from "./programs";
 
 let passed = 0;
 let failed = 0;
@@ -64,6 +74,111 @@ ok(shortEnd.tokens.length === 49 && shortEnd.tokens[48] === "TFOX 000449", "TFOX
 
 const enDash = parseCarPasteListDetailed("TFOX 401–403");
 ok(enDash.tokens.length === 3, "en dash is a range");
+
+const ofoxList = [
+  "OFOX815215",
+  "OFOX815220",
+  "OFOX815253",
+  "OFOX815269",
+  "OFOX815283",
+  "OFOX815321",
+  "OFOX815337",
+  "OFOX815346",
+  "OFOX815360",
+  "OFOX815412",
+  "OFOX815437",
+  "OFOX815460",
+  "OFOX815496",
+  "OFOX816411",
+  "OFOX820013",
+  "OFOX820016",
+  "OFOX820022",
+  "OFOX826940",
+].join("\n");
+const ofoxTokens = parseCarPasteList(ofoxList);
+ok(ofoxTokens.length === 18, "18 glued OFOX lines stay 18 cars");
+ok(ofoxTokens[0] === "OFOX 815215" && ofoxTokens[17] === "OFOX 826940", "glued MARKNUMBER splits and keeps the number");
+ok(parseCarPasteList("OFOX    815215").join("|") === "OFOX 815215", "several spaces still split mark and number");
+ok(parseCarPasteList("OFOX-815215").join("|") === "OFOX 815215", "MARK-NUMBER is one car");
+ok(parseCarPasteList("0FOX815215").join("|") === "OFOX 815215", "leading zero before a mark is the letter O");
+ok(parseCarPasteList("0FOX 815215").join("|") === "OFOX 815215", "spaced 0FOX stays paired with its number");
+ok(parseCarPasteList("OFOX 0815215").join("|") === "OFOX 815215", "a leading zero on the number collapses");
+ok(parseCarPasteList("OFOX 815215\nOFOX 0815215").length === 1, "padded and unpadded number are the same car");
+
+const activeOfox = { id: 2, reporting_marks: "OFOX", car_initial: "OFOX", car_number: "815215", active: true };
+const inactiveTwin = { id: 9, reporting_marks: "NDYX", car_initial: "OFOX", car_number: "815215", active: false };
+const inactiveSameMark = { id: 3, reporting_marks: "OFOX", car_initial: "OFOX", car_number: "815215", active: false };
+const marked = decidePastedCar({ marks: "OFOX", number: "815215", cars: [inactiveTwin, activeOfox] });
+ok(marked.kind === "match" && marked.car.id === 2, "a mark prefers the active car and ignores the other mark");
+const sameMark = decidePastedCar({ marks: "OFOX", number: "0815215", cars: [inactiveSameMark, activeOfox] });
+ok(sameMark.kind === "match" && sameMark.car.id === 2, "leading zeros still prefer the active car with that mark");
+const bare = decidePastedCar({ marks: null, number: "815215", cars: [inactiveTwin, activeOfox] });
+ok(bare.kind === "ambiguous" && bare.matches.length === 2 && /pick one/i.test(bare.reason), "a bare number that hits two cars asks for a choice");
+const twoActive = decidePastedCar({
+  marks: "OFOX",
+  number: "815215",
+  cars: [activeOfox, { ...activeOfox, id: 4 }],
+});
+ok(twoActive.kind === "ambiguous", "two active cars with the same mark stay a choice");
+
+const batches = pasteSearchBatches(ofoxList);
+ok(batches.batches.length === 1 && batches.batches[0].split("\n").length === 18, "18 cars are one search batch");
+const many = Array.from({ length: 81 }, (_, i) => `TFOX ${i + 1}`).join("\n");
+ok(pasteSearchBatches(many).batches.length === 2, "81 cars are two search batches");
+
+const preview = programPickerFromSearch([
+  {
+    railcars: [activeOfox, inactiveTwin, { id: 8, reporting_marks: "OFOX", car_number: "826940", active: false }],
+    not_found: ["NOPE 1"],
+    ambiguous: [{
+      token: "815215",
+      reason: "This number matches more than one car. Pick one.",
+      matches: [
+        { id: 2, label: "OFOX 815215", active: true },
+        { id: 9, label: "NDYX 815215", active: false },
+      ],
+    }],
+    already_in_program: [{ railcar_id: 7, label: "OFOX 816411", token: "OFOX 816411" }],
+  },
+]);
+ok(preview.matched.length === 0, "cars that need a choice are not auto-added");
+ok(preview.ambiguous.length === 1 && preview.ambiguous[0].matches.some((m) => m.railcar_id === 2), "the bare duplicate is a choice");
+ok(preview.not_found.some((row) => row.token === "OFOX 826940" && /inactive/i.test(row.reason ?? "")), "an inactive unique car is explained");
+ok(preview.not_found.some((row) => row.token === "NOPE 1"), "missing tokens are kept");
+ok(preview.already_in_program[0]?.railcar_id === 7, "cars already on the program are listed separately");
+const clean = programPickerFromSearch([{
+  railcars: ofoxTokens.slice(0, 3).map((token, i) => {
+    const [marks, num] = token.split(" ");
+    return { id: 100 + i, reporting_marks: marks, car_number: num, active: true };
+  }),
+  not_found: [],
+  ambiguous: [],
+}]);
+ok(clean.matched.length === 3 && clean.not_found.length === 0, "unique active cars from search are the ones to add");
+
+const remarkedOfox = {
+  id: 15570,
+  reporting_marks: "OFOX",
+  car_initial: "OFOX",
+  car_number: "310100",
+  active: true,
+};
+const pastedKcs = decidePastedCar({ marks: "KCS", number: "310100", cars: [remarkedOfox] });
+ok(pastedKcs.kind === "none", "KCS 310100 is not the current identity of the OFOX car");
+const priorKcs = decidePriorIdentityPaste({ marks: "KCS", number: "310100", cars: [remarkedOfox] });
+ok(
+  priorKcs.kind === "match" && priorKcs.car.id === 15570,
+  "one prior identity resolves KCS 310100 to OFOX 310100",
+);
+ok(
+  labelWithFormerly("OFOX 310100", "KCS 310100", remarkedOfox) === "OFOX 310100 (formerly KCS 310100)",
+  "pasting KCS 310100 labels the OFOX car with (formerly KCS 310100)",
+);
+ok(
+  formerlyOnLabel("OFOX 310100", "KCS 310100") === "OFOX 310100 (formerly KCS 310100)",
+  "a program-car label uses the same formerly suffix",
+);
+ok(labelWithFormerly("OFOX 310100", "OFOX 310100", remarkedOfox) === "OFOX 310100", "the current mark stays a plain label");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

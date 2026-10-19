@@ -23,6 +23,7 @@ import {
   skipVcfAssignmentWrites,
   type ExistingHistoryRow,
 } from "@shared/vcf-assignment-closeout";
+import { loadVcfRemarkAliases } from "./remark-in-place";
 import {
   buildVcfIntegrityChecks,
   countFleet,
@@ -33,7 +34,7 @@ import {
 } from "./vcf-load-integrity";
 
 const RAILCAR_SELECT =
-  "id, car_initial, car_number, reporting_marks, car_type, mechanical_designation, general_description, lease_type, managed, managed_category, lining_material, entity, active, active_status, rider_external_id, lessee_name, assignment_label, lease_start_date, lease_end_date, lease_expiry, lease_date_source, dot_code, dot_specification, comment_event_note, legacy_valid_car_id, client_id, cover_sheet, legal_owner, update_made, update_needed_next_vcf, data_source, status, fleet_status, fleet_status_source, active_source";
+  "id, car_initial, car_number, reporting_marks, old_car_initial, old_car_number, car_type, mechanical_designation, general_description, lease_type, managed, managed_category, lining_material, entity, active, active_status, rider_external_id, lessee_name, assignment_label, lease_start_date, lease_end_date, lease_expiry, lease_date_source, dot_code, dot_specification, comment_event_note, legacy_valid_car_id, client_id, cover_sheet, legal_owner, update_made, update_needed_next_vcf, data_source, status, fleet_status, fleet_status_source, active_source";
 
 const AH_SELECT =
   "id, railcar_id, assignment_id_ext, start_date, end_date, rider_external_id, assignment_label, active, comment, reason, moved_at, moved_by";
@@ -71,6 +72,7 @@ export type VcfCommitResult = {
   assignmentSkipped: number;
   remarkInserted: number;
   remarkUnchanged: number;
+  remarkedAliases: number;
   multipleActiveFlagged: number;
   integrityChecks: VcfIntegrityCheck[];
   riderExpirationSync: Awaited<ReturnType<typeof governLeaseDates>> | null;
@@ -166,7 +168,15 @@ export async function runVcfCommit(opts: {
 
     stage = "build_review";
     progress("Building write plan");
-    const review = buildVcfReview(rows, existingKeys, { keepCars: true, existingCars });
+    const remarkAliases = await loadVcfRemarkAliases(db, existingList as Array<{
+      id: number;
+      reporting_marks?: string | null;
+      car_initial?: string | null;
+      car_number?: string | null;
+      old_car_initial?: string | null;
+      old_car_number?: string | null;
+    }>);
+    const review = buildVcfReview(rows, existingKeys, { keepCars: true, existingCars, remarkAliases });
 
     stage = "snapshot_checks";
     progress("Recording pre-load checks");
@@ -230,6 +240,9 @@ export async function runVcfCommit(opts: {
     }> = [];
 
     for (const car of review.cars) {
+      // Old mark of a car already renamed in place: do not insert a duplicate
+      // and do not copy active/status from the old-mark row onto the current car.
+      if (car.remarkAlias) continue;
       const payload = railcarPayloadFromCurrent(car.current, { needsReview: car.needsReview });
       const existingId = keyToId.get(car.carKey);
       const existingCar = existingId ? existingByKey.get(car.carKey) : undefined;
@@ -500,6 +513,7 @@ export async function runVcfCommit(opts: {
       assignmentSkipped,
       remarkInserted: written.remarkInserted,
       remarkUnchanged,
+      remarkedAliases: review.remarkedAliasCount,
       projectedTotalCars: review.projectedTotalCars,
       projectedActiveCars: review.projectedActiveCars,
     };
@@ -534,6 +548,7 @@ export async function runVcfCommit(opts: {
       assignmentSkipped,
       remarkInserted: written.remarkInserted,
       remarkUnchanged,
+      remarkedAliases: review.remarkedAliasCount,
       multipleActiveFlagged: review.multipleActiveCount,
       integrityChecks,
       riderExpirationSync,

@@ -10,6 +10,7 @@ import { ConfirmActionHost } from "@/components/ConfirmActionDialog";
 import AppLayout from "@/components/AppLayout";
 import Dashboard from "@/pages/Dashboard";
 import FleetRegistry from "@/pages/FleetRegistry";
+import RemarkCars from "@/pages/RemarkCars";
 import UmlerQueue from "@/pages/railcars/UmlerQueue";
 import LeaseManagement from "@/pages/LeaseManagement";
 import LeaseMgmtHome from "@/pages/leases/LeaseMgmtHome";
@@ -100,6 +101,7 @@ function AppRouter() {
       <Route path="/cars/:id" component={CarDetailPage} />
       <Route path="/fleet" component={FleetRegistry} />
       <Route path="/railcars/umler-queue" component={UmlerQueue} />
+      <Route path="/railcars/remark" component={RemarkCars} />
       <Route path="/railcars" component={FleetRegistry} />
       <Route path="/opportunities" component={Opportunities} />
       <Route path="/accounts/:id" component={Account360} />

@@ -17,6 +17,7 @@ import {
 } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
+import { attachFormerly } from "./prior-marks";
 import { attachLatestAmNotes, latestAmNotesByRiderIds } from "./rider-account-comments";
 
 const CAR_LIMIT = 500;
@@ -288,7 +289,7 @@ async function runCarListSearch(raw: string, tokens: string[], active?: string):
       car_number: c.car_number ?? null,
       status: c.fleet_status ?? c.status ?? null,
     }));
-  const railcarsWithNotes = await attachLatestAmNotes(railcars);
+  const railcarsWithNotes = await attachFormerly(await attachLatestAmNotes(railcars), raw);
   return {
     query: raw,
     terms: capped,
@@ -343,7 +344,7 @@ export async function runGlobalSearch(
       if (error) throw error;
       return (data ?? []).map(mapCar);
     });
-    const carsOut = await attachLatestAmNotes(cars);
+    const carsOut = await attachFormerly(await attachLatestAmNotes(cars), raw);
     console.log(
       `[search] total ${Date.now() - tAll}ms q=${JSON.stringify(raw)} fleet=${fleet.match?.kind ?? ""} cars=${carsOut.length}`,
     );
@@ -404,7 +405,7 @@ export async function runGlobalSearch(
     car_count: countByRider.get(r.id) ?? 0,
     am_note: notesByRider.get(r.id) ?? null,
   }));
-  const carsOut = await attachLatestAmNotes(matchedCars);
+  const carsOut = await attachFormerly(await attachLatestAmNotes(matchedCars), raw);
 
   console.log(
     `[search] total ${Date.now() - tAll}ms q=${JSON.stringify(raw)} cars=${carsOut.length} riders=${ridersOut.length} leases=${matchedLeases.length}`,

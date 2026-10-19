@@ -57,7 +57,7 @@ const mainNav: { href: string; label: string; icon: React.ElementType; aliases?:
   { href: "/",         label: "Dashboard",           icon: LayoutDashboard },
   { href: "/accounts", label: "Account Management",  icon: Building2, aliases: ["/account", "/account-transitions", "/territory-map"] },
   { href: "/opportunities", label: "Opportunities", icon: Target },
-  { href: "/railcars", label: "Railcars",             icon: Train, aliases: ["/fleet", "/railcars/umler-queue"] },
+  { href: "/railcars", label: "Railcars",             icon: Train, aliases: ["/fleet", "/railcars/umler-queue", "/railcars/remark"] },
   { href: "/leases",   label: "Lease Management", icon: FileText },
   { href: "/move",     label: "Move Cars",        icon: ArrowRightLeft },
   { href: "/history",  label: "Lineage",          icon: History },

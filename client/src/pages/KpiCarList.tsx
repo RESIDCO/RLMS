@@ -27,6 +27,7 @@ import { colsQuery } from "@shared/column-views";
 import { columnLabel } from "@shared/column-dictionary";
 import { ColumnHelp, KpiReasonHelp } from "@/components/ColumnHelp";
 import { formatCarId } from "@shared/residco-import";
+import { FormerlyBadge } from "@/components/FormerlyBadge";
 import { overlayLifecycle } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { KpiCarSheet } from "@/pages/KpiCarSheet";
@@ -45,6 +46,7 @@ type Row = {
   rent_start_date: string | null;
   last_ol: string | null;
   reason: string | null;
+  formerly?: string | null;
 };
 
 function qsFrom(sp: URLSearchParams) {
@@ -117,6 +119,7 @@ function KpiCell({
         >
           {formatCarId(r)}
         </button>
+        <FormerlyBadge formerly={r.formerly} />
       </td>
     );
   }

@@ -125,6 +125,8 @@ import { registerRentStopRoutes } from "./rent-stops";
 import { registerRailcarBulkRoutes } from "./railcar-bulk";
 import { applyViewToParams, registerSavedViewRoutes } from "./saved-views";
 import { registerKpiCarRoutes } from "./kpi-cars";
+import { registerRemarkRoutes } from "./remark-routes";
+import { loadVcfRemarkAliases } from "./remark-in-place";
 import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } from "./lease-mgmt";
 import { registerCrmRoutes } from "./crm";
 import { registerColumnPrefRoutes } from "./column-prefs";
@@ -431,6 +433,7 @@ export async function registerRoutes(
   registerSavedViewRoutes(app, requireUser);
   registerKpiCarRoutes(app);
   registerLeaseMgmtRoutes(app, requireWrite);
+  registerRemarkRoutes(app);
 
   // ---------- Batch Lease Setup (wizard) ----------
   // Creates MLA + riders + new railcars + assignments in one atomic-ish call.
@@ -3357,15 +3360,18 @@ export async function registerRoutes(
       stage = "load_existing";
       mem("before-existing");
       const existingRows = await fetchAllRows<{
+        id: number;
         car_initial?: string | null;
         car_number?: string | null;
         reporting_marks?: string | null;
+        old_car_initial?: string | null;
+        old_car_number?: string | null;
         active?: boolean | null;
         active_source?: string | null;
       }>((from, to) =>
         supabaseAdmin
           .from("railcars")
-          .select("car_initial, car_number, reporting_marks, active, active_source")
+          .select("id, car_initial, car_number, reporting_marks, old_car_initial, old_car_number, active, active_source")
           .order("id", { ascending: true })
           .range(from, to)
       );
@@ -3377,8 +3383,16 @@ export async function registerRoutes(
       }
       mem("after-existing");
 
+      stage = "remark_aliases";
+      const remarkAliases = await loadVcfRemarkAliases(supabaseAdmin, existingRows);
+      mem("after-aliases");
+
       stage = "build_review";
-      const review = buildVcfReview(rows, new Set(existingCars.keys()), { keepCars: false, existingCars });
+      const review = buildVcfReview(rows, new Set(existingCars.keys()), {
+        keepCars: false,
+        existingCars,
+        remarkAliases,
+      });
       mem("after-review");
       stage = "store_preview";
       const previewId = await putVcfPreview(supabaseAdmin, writerId, rows, file?.originalname);
@@ -3411,6 +3425,8 @@ export async function registerRoutes(
         badActiveValues: review.badActiveValues,
         unmappedManagedCategoryCount: review.unmappedManagedCategoryCount,
         unmappedManagedCategories: review.unmappedManagedCategories,
+        remarkedAliasCount: review.remarkedAliasCount,
+        remarkedAliases: review.remarkedAliases.slice(0, 200),
         // Sample of needs-review cars for UI (full list is multipleActiveCars)
         needsReviewSample: review.multipleActiveCars.slice(0, 50).map((c) => ({
           car_initial: c.car_initial,

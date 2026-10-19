@@ -79,6 +79,26 @@ export type CarGroupReview = {
   periods: VcfParsedRow[];
   isNew: boolean;
   isUpdate: boolean;
+  /** Set when this file identity is an old mark of a car already renamed in RLMS. */
+  remarkAlias?: VcfRemarkAliasHit | null;
+};
+
+/** Current identity of a car that used to carry this file's mark + number. */
+export type VcfRemarkAliasTarget = {
+  railcarId: number;
+  currentMark: string;
+  currentNumber: string;
+};
+
+export type VcfRemarkAliasHit = {
+  car_initial: string;
+  car_number: string;
+  railcar_id: number | null;
+  current_mark: string | null;
+  current_number: string | null;
+  action: "skip" | "ignore_old_keep_new" | "ambiguous";
+  file_active: boolean;
+  label: string;
 };
 
 export type VcfExistingCar = {
@@ -129,6 +149,9 @@ export type VcfReviewSummary = {
   badActiveValues: Array<{ raw: string; count: number; sampleRows: number[] }>;
   unmappedManagedCategoryCount: number;
   unmappedManagedCategories: Array<{ raw: string; count: number }>;
+  /** File rows whose mark + number is a prior identity of an existing car. Not inserted. */
+  remarkedAliasCount: number;
+  remarkedAliases: VcfRemarkAliasHit[];
   cars: CarGroupReview[];
 };
 
@@ -438,10 +461,19 @@ export function pickCurrentRow(periods: VcfParsedRow[]): {
 export function buildVcfReview(
   rawRows: VcfRawRow[],
   existingKeys: Set<string> = new Set(),
-  opts?: { keepCars?: boolean; existingCars?: Map<string, VcfExistingCar> }
+  opts?: {
+    keepCars?: boolean;
+    existingCars?: Map<string, VcfExistingCar>;
+    /**
+     * Old mark|number → car that now carries a different identity.
+     * A "new" file row that hits this map is not inserted.
+     */
+    remarkAliases?: Map<string, VcfRemarkAliasTarget | "ambiguous">;
+  }
 ): VcfReviewSummary {
   const keepCars = opts?.keepCars !== false;
   const existingCars = opts?.existingCars;
+  const remarkAliases = opts?.remarkAliases;
   const keys = existingCars ? new Set(existingCars.keys()) : existingKeys;
   const byCar = new Map<string, VcfParsedRow[]>();
   let parsedCount = 0;
@@ -463,6 +495,7 @@ export function buildVcfReview(
   let reactivatedCars = 0;
   let deactivatedCars = 0;
   const skippedManualCars: VcfReviewSummary["skippedManualCars"] = [];
+  const remarkedAliases: VcfRemarkAliasHit[] = [];
   const badMap = new Map<string, { count: number; sampleRows: number[] }>();
   const umMap = new Map<string, number>();
   let projectedActiveCars = 0;
@@ -473,7 +506,39 @@ export function buildVcfReview(
     const incomingActive = vcfIncomingActive(current);
     const prior = existingCars?.get(carKey);
     const manual = String(prior?.active_source ?? "").trim() === "manual";
-    if (exists) {
+    const alias = !exists ? remarkAliases?.get(carKey) : undefined;
+    let remarkAlias: VcfRemarkAliasHit | null = null;
+    if (alias === "ambiguous") {
+      remarkAlias = {
+        car_initial: current.car_initial,
+        car_number: current.car_number,
+        railcar_id: null,
+        current_mark: null,
+        current_number: null,
+        action: "ambiguous",
+        file_active: incomingActive,
+        label: "old mark matches more than one car in RLMS; not inserted",
+      };
+    } else if (alias) {
+      const currentKey = `${alias.currentMark}|${alias.currentNumber}`;
+      if (currentKey !== carKey) {
+        const both = byCar.has(currentKey);
+        const label = `remarked in RLMS -> ${alias.currentMark} ${alias.currentNumber}`;
+        remarkAlias = {
+          car_initial: current.car_initial,
+          car_number: current.car_number,
+          railcar_id: alias.railcarId,
+          current_mark: alias.currentMark,
+          current_number: alias.currentNumber,
+          action: both ? "ignore_old_keep_new" : "skip",
+          file_active: incomingActive,
+          label,
+        };
+      }
+    }
+    if (remarkAlias) {
+      remarkedAliases.push(remarkAlias);
+    } else if (exists) {
       updatedCars += 1;
       if (manual) {
         skippedManualCars.push({ car_initial: current.car_initial, car_number: current.car_number });
@@ -502,8 +567,9 @@ export function buildVcfReview(
         needsReview,
         current,
         periods,
-        isNew: !exists,
-        isUpdate: exists,
+        isNew: remarkAlias ? false : !exists,
+        isUpdate: remarkAlias ? false : exists,
+        remarkAlias,
       });
     }
     for (const p of periods) {
@@ -575,6 +641,8 @@ export function buildVcfReview(
     badActiveValues,
     unmappedManagedCategoryCount: unmappedManagedCategories.reduce((s, x) => s + x.count, 0),
     unmappedManagedCategories,
+    remarkedAliasCount: remarkedAliases.length,
+    remarkedAliases,
     cars,
   };
 }

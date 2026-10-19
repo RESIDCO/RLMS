@@ -4,8 +4,8 @@ import { isFrozenRailcar } from "./car-lifecycle-status";
  * Whether a fleet car is frozen for program side effects.
  *
  * isFrozenRailcar is the rule: active is false, or the status is Inactive.
- * applyOneCarUpdates uses this only to skip railcar and commitment writes.
- * A program-car status or complete-flag patch still saves on a frozen car.
+ * Commitment and railcar writes stay blocked. Program-row edits on a frozen
+ * car are allowed only when that row's Keep open flag is set.
  */
 export function programCarFleetFrozen(car: {
   active?: boolean | null;

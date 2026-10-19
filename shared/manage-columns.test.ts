@@ -110,15 +110,20 @@ function programDoneBody(sql: string): string {
 }
 
 const liveDone = programDoneBody(liveDoneSql);
-const droppedActive = liveDone.replace(
-  "      rc.active IS NOT TRUE\n      OR rc.scrapped_at IS NOT NULL",
-  "      rc.scrapped_at IS NOT NULL",
+const withKeepOpen = liveDone.replace(
+  "      rc.active IS NOT TRUE\n",
+  `      (
+        rc.active IS NOT TRUE
+        AND COALESCE(pc.custom_fields->>'__keep_open', '') NOT IN ('true', 't', '1')
+      )
+`,
 );
-ok(droppedActive !== liveDone, "the live program-done function still names the fleet active check");
-ok(programDoneBody(next) === droppedActive, "program done is the live definition without the fleet active check");
-ok(!programDoneBody(next).includes("rc.active IS NOT TRUE"), "the up migration drops rc.active IS NOT TRUE");
-ok(programDoneBody(next).includes("rc.scrapped_at IS NOT NULL"), "scrapped_at stays from the live definition");
+ok(withKeepOpen !== liveDone, "the live program-done function still names the fleet active check");
+ok(programDoneBody(next) === withKeepOpen, "program done is the live definition plus the keep-open exception");
+ok(programDoneBody(next).includes("rc.active IS NOT TRUE"), "the up migration keeps rc.active IS NOT TRUE");
+ok(programDoneBody(next).includes("__keep_open"), "keep open overrides fleet inactive");
 ok(programDoneBody(downSql) === liveDone, "the down script restores the live program-done function");
+ok(!programDoneBody(downSql).includes("__keep_open"), "the down script drops the keep-open exception");
 
 const names = ["20261114_inactivate_railcars.sql", "20261115_manage_columns.sql"];
 ok(names.slice().sort().join() === names.join(), "migration filename sorts after inactivate railcars");

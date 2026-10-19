@@ -6,6 +6,8 @@ import {
   excelSheetName,
   formatCustomField,
   deriveCompletionLevel,
+  frozenProgramCarAcceptsPatch,
+  programCarKeepOpen,
   COMPLETION_LABEL,
   isArrivedMilestone,
   isCustomFieldPopulated,
@@ -62,7 +64,11 @@ function missingCompletedColumn(err: unknown) {
   return /completed/i.test(msg) && /column|schema cache|does not exist|could not find/i.test(msg);
 }
 
-async function rejectIfFrozenRailcar(railcarId: number | null | undefined): Promise<void> {
+async function rejectIfFrozenRailcar(
+  railcarId: number | null | undefined,
+  customFields?: unknown,
+  updates?: Record<string, unknown>,
+): Promise<void> {
   const id = Number(railcarId);
   if (!Number.isFinite(id) || id <= 0) return;
   const { data, error } = await supabaseAdmin
@@ -71,9 +77,16 @@ async function rejectIfFrozenRailcar(railcarId: number | null | undefined): Prom
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
-  if (data && isFrozenRailcar(data)) {
-    throw Object.assign(new Error(FROZEN_CAR_MESSAGE), { status: 409 });
+  if (!data) return;
+  if (
+    frozenProgramCarAcceptsPatch(
+      { active: data.active, railcar_status: data.status, custom_fields: customFields },
+      updates,
+    )
+  ) {
+    return;
   }
+  throw Object.assign(new Error(FROZEN_CAR_MESSAGE), { status: 409 });
 }
 
 function isCarCompleted(row: any): boolean {
@@ -152,11 +165,11 @@ export async function appendProgramCarMilestone(opts: {
   if (!milestone || !/^\d{4}-\d{2}-\d{2}$/.test(milestoneDate)) return null;
   const { data: linkOwner, error: ownerErr } = await supabaseAdmin
     .from("program_cars")
-    .select("railcar_id")
+    .select("railcar_id, custom_fields")
     .eq("id", opts.programCarId)
     .maybeSingle();
   if (ownerErr) throw ownerErr;
-  await rejectIfFrozenRailcar(linkOwner?.railcar_id);
+  await rejectIfFrozenRailcar(linkOwner?.railcar_id, linkOwner?.custom_fields);
   const { data: last } = await supabaseAdmin
     .from("program_car_milestones")
     .select("id, milestone, milestone_date")
@@ -510,12 +523,14 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
     const trail = trailBy.get(Number(r.id)) ?? [];
     const completion_level = deriveCompletionLevel({
       active: r.railcar?.active,
+      railcar_status: r.railcar?.status,
       status: r.status,
       milestone: r.milestone,
       milestones: trail,
       outcome_reached_at: r.outcome_reached_at,
       completed: r.completed,
       exited_date: r.exited_date,
+      keep_open: programCarKeepOpen(r.custom_fields),
     });
     return {
       ...r,
@@ -589,14 +604,14 @@ export async function addCarsToProgram(
 export async function exitCarFromProgram(programId: number, linkId: number, actor: string | null) {
   const { data: row, error: getErr } = await supabaseAdmin
     .from("program_cars")
-    .select("id, railcar_id, exited_date")
+    .select("id, railcar_id, exited_date, custom_fields")
     .eq("id", linkId)
     .eq("program_id", programId)
     .maybeSingle();
   if (getErr) throw getErr;
   if (!row) return null;
   if (row.exited_date) return row;
-  await rejectIfFrozenRailcar(row.railcar_id);
+  await rejectIfFrozenRailcar(row.railcar_id, row.custom_fields);
   const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await supabaseAdmin
     .from("program_cars")
@@ -643,7 +658,7 @@ export async function patchProgramCar(
     .maybeSingle();
   if (getErr) throw getErr;
   if (!existing) return null;
-  await rejectIfFrozenRailcar(existing.railcar_id);
+  await rejectIfFrozenRailcar(existing.railcar_id, existing.custom_fields, body);
   const updates: Record<string, unknown> = {};
   if (body.status !== undefined) updates.status = body.status === "" ? null : String(body.status);
   if (body.notes !== undefined) updates.notes = body.notes === "" ? null : body.notes;

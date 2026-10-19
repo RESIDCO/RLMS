@@ -17,6 +17,10 @@ import {
   overlayLifecycle,
   isArrivedMilestone,
   isProgramType,
+  frozenProgramCarAcceptsPatch,
+  programCarKeepOpen,
+  programCarPatchIsOnlyKeepOpen,
+  programCarPatchSetsKeepOpen,
   type ProgramLifecycle,
   type ProgramType,
 } from "@shared/programs";
@@ -345,17 +349,21 @@ export async function previewRemoveProgramCars(
   }
   const { data: links, error } = await supabaseAdmin
     .from("program_cars")
-    .select("id, railcar_id, exited_date, railcar:railcars(id, reporting_marks, car_number, active, status)")
+    .select("id, railcar_id, exited_date, custom_fields, railcar:railcars(id, reporting_marks, car_number, active, status)")
     .eq("program_id", programId)
     .in("id", linkIds.length ? linkIds : [0]);
   if (error) throw error;
   const rows = (links ?? []).filter((l: any) => !l.exited_date).map((l: any) => {
     const rc = Array.isArray(l.railcar) ? l.railcar[0] : l.railcar;
+    const canExit = frozenProgramCarAcceptsPatch(
+      { active: rc?.active, railcar_status: rc?.status, custom_fields: l.custom_fields },
+      null,
+    );
     return {
       link_id: l.id,
       railcar_id: l.railcar_id,
       label: rc ? formatCarId(rc) : String(l.railcar_id),
-      active: Boolean(rc) && rc.active === true && !isFrozenRailcar(rc),
+      active: Boolean(rc) && canExit,
     };
   });
   const activeIds = rows.filter((r) => r.active).map((r) => r.railcar_id);
@@ -418,22 +426,42 @@ export async function applyRemoveProgramCars(token: string, actor: string) {
   });
 }
 
-async function classifyPatchLinks(programId: number, ids: number[]) {
+async function loadPatchLinkRows(programId: number, ids: number[]) {
   const { data: links, error } = await supabaseAdmin
     .from("program_cars")
-    .select("id, railcar_id, exited_date, railcar:railcars(id, active, reporting_marks, car_number)")
+    .select("id, railcar_id, exited_date, custom_fields, railcar:railcars(id, active, status, reporting_marks, car_number)")
     .eq("program_id", programId)
     .in("id", ids.length ? ids : [0]);
   if (error) throw error;
+  return (links ?? []).map((l: any) => {
+    const rc = Array.isArray(l.railcar) ? l.railcar[0] : l.railcar;
+    return {
+      link_id: l.id as number,
+      railcar_id: l.railcar_id as number,
+      label: rc ? formatCarId(rc) : String(l.railcar_id),
+      exited: Boolean(l.exited_date),
+      present: Boolean(rc),
+      active: rc?.active ?? null,
+      railcar_status: rc?.status ?? null,
+      custom_fields: l.custom_fields,
+    };
+  });
+}
+
+function splitPatchLinks(
+  rows: Awaited<ReturnType<typeof loadPatchLinkRows>>,
+  updatesFor: (linkId: number) => Record<string, unknown> | undefined,
+) {
   const writable = [];
   const readonly_inactive = [];
-  for (const l of links ?? []) {
-    const rc = Array.isArray((l as any).railcar) ? (l as any).railcar[0] : (l as any).railcar;
-    const row = { link_id: l.id, railcar_id: l.railcar_id, label: rc ? formatCarId(rc) : String(l.railcar_id) };
-    // Exited links stay read-only. An inactive fleet car can still leave Complete:
-    // the program row is writable, and the railcar row is not touched.
-    if (l.exited_date || !rc) readonly_inactive.push(row);
-    else writable.push(row);
+  for (const row of rows) {
+    const publicRow = { link_id: row.link_id, railcar_id: row.railcar_id, label: row.label };
+    const open = row.present && !row.exited && frozenProgramCarAcceptsPatch(
+      { active: row.active, railcar_status: row.railcar_status, custom_fields: row.custom_fields },
+      updatesFor(row.link_id),
+    );
+    if (open) writable.push(publicRow);
+    else readonly_inactive.push(publicRow);
   }
   return { writable, readonly_inactive };
 }
@@ -451,7 +479,8 @@ export async function previewPatchProgramCars(
     : [];
   if (items.length) {
     const ids = [...new Set(items.map((it) => it.link_id))];
-    const classified = await classifyPatchLinks(programId, ids);
+    const updatesById = new Map(items.map((it) => [it.link_id, it.updates]));
+    const classified = splitPatchLinks(await loadPatchLinkRows(programId, ids), (linkId) => updatesById.get(linkId));
     const byId = new Map(classified.writable.map((r) => [r.link_id, r]));
     const snapshot = {
       action: "save_cars",
@@ -466,7 +495,7 @@ export async function previewPatchProgramCars(
     return { preview_token: await putPreview("program", snapshot), ...snapshot };
   }
   const ids = [...new Set((body.link_ids ?? []).map(Number).filter((n) => n > 0))];
-  const classified = await classifyPatchLinks(programId, ids);
+  const classified = splitPatchLinks(await loadPatchLinkRows(programId, ids), () => body.updates ?? {});
   const snapshot = {
     action: "patch_cars",
     program_id: programId,
@@ -576,8 +605,6 @@ async function applyOneCarUpdates(
   const commitment = commitmentPatch(updates ?? {});
   const { data: car } = await supabaseAdmin.from("railcars").select("id, active, status").eq("id", row.railcar_id).maybeSingle();
   if (!car) return { wrote: false, commitment: false };
-  // Frozen cars still take program_cars status and complete-flag writes.
-  // programCarFleetFrozen only blocks the commitment write below.
   const fleetFrozen = programCarFleetFrozen(car);
   const { data: prior, error: priorErr } = await supabaseAdmin
     .from("program_cars")
@@ -585,7 +612,20 @@ async function applyOneCarUpdates(
     .eq("id", row.link_id)
     .maybeSingle();
   if (priorErr) throw priorErr;
-  const cols = patchColumns(updates ?? {}, prior ?? {});
+  const accepts = frozenProgramCarAcceptsPatch(
+    { active: car.active, railcar_status: car.status, custom_fields: prior?.custom_fields },
+    updates,
+  );
+  let cols = accepts ? patchColumns(updates ?? {}, prior ?? {}) : {};
+  if (
+    accepts &&
+    fleetFrozen &&
+    !programCarKeepOpen(prior?.custom_fields) &&
+    !programCarPatchSetsKeepOpen(updates) &&
+    programCarPatchIsOnlyKeepOpen(updates)
+  ) {
+    cols = cols.custom_fields ? { custom_fields: cols.custom_fields } : {};
+  }
   const keys = Object.keys(cols);
   const diff = changedKeys(pickRow(prior, keys), pickRow({ ...(prior ?? {}), ...cols }, keys));
   let wrote = false;
@@ -612,7 +652,7 @@ async function applyOneCarUpdates(
   }
   const mileRaw = cols.milestone !== undefined ? cols.milestone : updates.milestone;
   const dateRaw = cols.milestone_at !== undefined ? cols.milestone_at : updates.milestone_at;
-  if (mileRaw !== undefined || dateRaw !== undefined) {
+  if (accepts && (mileRaw !== undefined || dateRaw !== undefined)) {
     const mile = String(mileRaw ?? prior?.milestone ?? "").trim();
     const d = String(dateRaw ?? prior?.milestone_at ?? todayIso()).slice(0, 10);
     if (mile) {

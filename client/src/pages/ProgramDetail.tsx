@@ -41,6 +41,9 @@ import {
   COMPLETION_LABEL,
   COMPLETION_LEVELS,
   deriveCompletionLevel,
+  frozenProgramCarAcceptsPatch,
+  PROGRAM_KEEP_OPEN_CF,
+  programCarKeepOpen,
   putOnRentProgramTypes,
   type CompletionLevel,
   PROGRAM_CAR_DOC_CATEGORIES,
@@ -129,6 +132,7 @@ type ProgramCar = {
     reporting_marks: string | null;
     rider_external_id: string | null;
     active?: boolean | null;
+    status?: string | null;
   } | null;
   shop: { id: number; name: string } | null;
   kpi?: { derived_status?: string | null; off_rent?: boolean; on_rent?: boolean } | null;
@@ -191,6 +195,8 @@ function programCarSortValue(c: ProgramCar, key: string): string {
       return c.completion_level ?? "";
     case "active":
       return c.railcar?.active === true ? "1" : "0";
+    case "keep_open":
+      return programCarKeepOpen(c.custom_fields) ? "1" : "0";
     case "milestone":
       return (c.milestone ?? "").toLowerCase();
     case "milestone_at":
@@ -258,22 +264,25 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   }
   next.completion_level = deriveCompletionLevel({
     active: next.railcar?.active,
+    railcar_status: next.railcar?.status,
     status: next.status,
     milestone: next.milestone,
     milestones: car.trail,
     outcome_reached_at: next.outcome_reached_at,
     completed: next.completed,
     exited_date: next.exited_date,
+    keep_open: programCarKeepOpen(next.custom_fields),
   });
   return next;
 }
 
-const PD_CORE = ["completion", "active", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi"] as const;
+const PD_CORE = ["completion", "active", "keep_open", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi"] as const;
 const PD_LABELS: Record<string, string> = {
   car: "Car",
   complete: "Outcome",
   completion: "Completion",
   active: "Active",
+  keep_open: "Keep open",
   milestone: "Milestone",
   milestone_at: "Milestone date",
   notes: "Notes",
@@ -286,6 +295,7 @@ const PD_WIDTHS: Record<string, number> = {
   _select: 36,
   car: 140,
   complete: 84,
+  keep_open: 96,
   status: 220,
   flag: 140,
   comment: 180,
@@ -491,17 +501,17 @@ export default function ProgramDetailPage() {
     setSort,
   } = colPrefs;
   const displayKeys = useMemo(() => {
-    const pinnedStart = canEdit ? ["_select", "car", "complete"] : ["car", "complete"];
+    const pinnedStart = canEdit ? ["_select", "car", "complete", "keep_open"] : ["car", "complete", "keep_open"];
     const cfKeys = defs
       .map((d) => `cf:${d.field_key}`)
       .filter((key) => moreFields || visibleCols.has(key));
     const movable = [
-      ...PD_CORE.filter((k) => visibleCols.has(k)),
+      ...PD_CORE.filter((k) => k !== "keep_open" && visibleCols.has(k)),
       ...cfKeys,
     ];
     return [...pinnedStart, ...mergeColOrder(movable, colOrder), "_actions"];
   }, [canEdit, defs, colOrder, moreFields, visibleCols]);
-  const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "complete" && k !== "_actions");
+  const movableKeys = displayKeys.filter((k) => k !== "_select" && k !== "car" && k !== "complete" && k !== "keep_open" && k !== "_actions");
   const draftedCars = useMemo(
     () => cars.map((c) => applyCarDraft(c, carDrafts[c.id], shops)),
     [cars, carDrafts, shops],
@@ -681,7 +691,7 @@ export default function ProgramDetailPage() {
           "px-2 py-2 font-medium bg-card",
           key === "repair" ? "text-right" : "text-left",
           key === "_select" && "w-8",
-          key === "complete" && "text-center",
+          (key === "complete" || key === "keep_open") && "text-center",
           key === "_actions" && "w-24",
         )}
         onResize={setColWidth}
@@ -713,6 +723,10 @@ export default function ProgramDetailPage() {
   }
 
   function pdCell(key: string, c: ProgramCar, label: string, exited: boolean) {
+    const rowOpen = !exited && frozenProgramCarAcceptsPatch(
+      { active: c.railcar?.active, railcar_status: c.railcar?.status, custom_fields: c.custom_fields },
+      null,
+    );
     const def = key.startsWith("cf:") ? defs.find((d) => `cf:${d.field_key}` === key) : null;
     if (def) {
       return (
@@ -720,7 +734,7 @@ export default function ProgramDetailPage() {
           <CustomCell
             def={def}
             value={c.custom_fields?.[def.field_key]}
-            readOnly={!canEdit || exited}
+            readOnly={!canEdit || !rowOpen}
             onSave={(v) => queueCarPatch(c.id, { custom_fields: { [def.field_key]: v } })}
           />
         </td>
@@ -762,7 +776,7 @@ export default function ProgramDetailPage() {
           <td key={key} className="px-2 py-1 text-center">
             <Checkbox
               checked={Boolean(c.outcome_reached_at || c.completed)}
-              disabled={!canEdit || exited}
+              disabled={!canEdit || !rowOpen}
               onCheckedChange={(v) => queueCarPatch(c.id, { outcome_reached: v === true })}
               aria-label={`Mark ${label} outcome reached`}
             />
@@ -790,11 +804,22 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1">{c.railcar?.active === true ? "Yes" : "No"}</td>
         );
+      case "keep_open":
+        return (
+          <td key={key} className="px-2 py-1 text-center">
+            <Checkbox
+              checked={programCarKeepOpen(c.custom_fields)}
+              disabled={!canEdit || exited}
+              onCheckedChange={(v) => queueCarPatch(c.id, { custom_fields: { [PROGRAM_KEEP_OPEN_CF]: v === true } })}
+              aria-label={`Keep ${label} open in program`}
+            />
+          </td>
+        );
       case "milestone":
         return (
           <td key={key} className="px-2 py-1">
             <CellInput
-              readOnly={!canEdit || exited}
+              readOnly={!canEdit || !rowOpen}
               value={c.milestone ?? ""}
               onSave={(v) => queueCarPatch(c.id, { milestone: v })}
             />
@@ -804,7 +829,7 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1">
             <DateCell
-              readOnly={!canEdit || exited}
+              readOnly={!canEdit || !rowOpen}
               value={c.milestone_at}
               allowMonthOnly={false}
               onSave={(v) => queueCarPatch(c.id, { milestone_at: v ?? "" })}
@@ -816,7 +841,7 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">
             <CellInput
-              readOnly={!canEdit || exited}
+              readOnly={!canEdit || !rowOpen}
               value={c.notes ?? ""}
               onSave={(v) => queueCarPatch(c.id, { notes: v })}
             />
@@ -839,7 +864,7 @@ export default function ProgramDetailPage() {
             <StatusCell
               value={c.status ?? ""}
               options={statusChoices}
-              readOnly={!canEdit || exited}
+              readOnly={!canEdit || !rowOpen}
               onSave={(v) => {
                 const patch: Record<string, unknown> = { status: v };
                 if (isCompleteProgramStatus(c.status) && statusLeavesComplete(v)) {
@@ -855,7 +880,7 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">
             <CellInput
-              readOnly={!canEdit || exited}
+              readOnly={!canEdit || !rowOpen}
               value={c.flag_tag ?? ""}
               placeholder="Watch, Priority…"
               onSave={(v) => queueCarPatch(c.id, { flag_tag: v })}
@@ -869,7 +894,7 @@ export default function ProgramDetailPage() {
       case "shop":
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">
-            {canEdit && !exited ? (
+            {canEdit && rowOpen ? (
               <ShopCombobox
                 compact
                 shops={shops}
@@ -886,7 +911,7 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1">
             <MoneyCell
-              readOnly={!canEdit || exited}
+              readOnly={!canEdit || !rowOpen}
               value={c.repair_cost_total}
               onSave={(v) => queueCarPatch(c.id, { repair_cost_total: v })}
             />
@@ -914,7 +939,7 @@ export default function ProgramDetailPage() {
               <Paperclip className="h-3.5 w-3.5" />
               {c.doc_count > 0 && <span className="text-[9px] ml-0.5">{c.doc_count}</span>}
             </Button>
-            {canEdit && !exited && (
+            {canEdit && rowOpen && (
               <Button
                 size="icon"
                 variant="ghost"
@@ -986,12 +1011,14 @@ export default function ProgramDetailPage() {
       if (narrowing) return true;
       const level = c.completion_level ?? deriveCompletionLevel({
         active: c.railcar?.active,
+        railcar_status: c.railcar?.status,
         status: c.status,
         milestone: c.milestone,
         milestones: c.trail,
         outcome_reached_at: c.outcome_reached_at,
         completed: c.completed,
         exited_date: c.exited_date,
+        keep_open: programCarKeepOpen(c.custom_fields),
       });
       if (!levelFilter.has(level)) return false;
       return true;
@@ -2075,6 +2102,7 @@ function BulkEditBar({
     { value: "status", label: "Status" },
     { value: "milestone", label: "Milestone" },
     { value: "completed", label: "Complete" },
+    { value: "keep_open", label: "Keep open" },
     { value: "flag_tag", label: "Flag" },
     { value: "notes", label: "Program note" },
     { value: "commitment", label: "Commit" },
@@ -2099,6 +2127,10 @@ function BulkEditBar({
       const on = text !== "false";
       updates = { completed: on };
       label = on ? "Complete" : "Not complete";
+    } else if (field === "keep_open") {
+      const on = text !== "false";
+      updates = { custom_fields: { [PROGRAM_KEEP_OPEN_CF]: on } };
+      label = on ? "Keep open in program" : "Clear keep open";
     } else if (field === "flag_tag") {
       updates = { flag_tag: text };
       label = `Flag to '${text || "—"}'`;
@@ -2156,7 +2188,7 @@ function BulkEditBar({
   return (
     <div className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
       <span className="text-sm font-medium">{count} selected</span>
-      <Select value={field} onValueChange={(v) => { setField(v); setText(v === "completed" ? "true" : ""); }}>
+      <Select value={field} onValueChange={(v) => { setField(v); setText(v === "completed" || v === "keep_open" ? "true" : ""); }}>
         <SelectTrigger className="h-8 w-40 text-xs"><SelectValue /></SelectTrigger>
         <SelectContent>
           {fieldOptions.map((f) => (
@@ -2200,6 +2232,15 @@ function BulkEditBar({
         >
           <option value="true">Mark complete</option>
           <option value="false">Clear complete</option>
+        </select>
+      ) : field === "keep_open" ? (
+        <select
+          className="h-8 bg-background border border-border rounded px-2 text-xs [color-scheme:dark]"
+          value={text || "true"}
+          onChange={(e) => setText(e.target.value)}
+        >
+          <option value="true">Keep open in program</option>
+          <option value="false">Clear keep open</option>
         </select>
       ) : field === "flag_tag" ? (
         <input

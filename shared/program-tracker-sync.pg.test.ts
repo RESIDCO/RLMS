@@ -306,7 +306,8 @@ try {
   ok(psql("SELECT retired_at IS NULL FROM public.program_field_defs WHERE id = 35") === "t", "retire undo restores the column");
   ok(psql("SELECT label FROM public.program_field_defs WHERE id = 35") === "Keep me", "retire undo leaves the label");
 
-  ok(psql("SELECT pg_get_functiondef('public.rlms_program_car_is_program_done(bigint)'::regprocedure) LIKE '%rc.active IS NOT TRUE%'") === "f", "installed program done ignores fleet inactive");
+  ok(psql("SELECT pg_get_functiondef('public.rlms_program_car_is_program_done(bigint)'::regprocedure) LIKE '%rc.active IS NOT TRUE%'") === "t", "installed program done keeps the fleet active check");
+  ok(psql("SELECT pg_get_functiondef('public.rlms_program_car_is_program_done(bigint)'::regprocedure) LIKE '%__keep_open%'") === "t", "installed program done names keep open");
   psql(`
     INSERT INTO public.programs (id, name) VALUES (80, 'Program done rule');
     INSERT INTO public.railcars (id, car_number, reporting_marks, active, scrapped_at) VALUES
@@ -317,7 +318,9 @@ try {
       (94, '000094', 'TFOX', true, NULL),
       (95, '000095', 'TFOX', true, '2026-09-18'),
       (96, '000096', 'TFOX', true, NULL),
-      (97, '000097', 'TFOX', true, NULL);
+      (97, '000097', 'TFOX', true, NULL),
+      (98, '000098', 'TFOX', false, NULL),
+      (99, '000099', 'TFOX', false, NULL);
     INSERT INTO public.program_cars (id, program_id, railcar_id, outcome_reached_at, custom_fields, milestone) VALUES
       (90, 80, 90, NULL, '{}'::jsonb, NULL),
       (91, 80, 91, '2026-10-17', '{}'::jsonb, NULL),
@@ -326,10 +329,14 @@ try {
       (94, 80, 94, NULL, '{}'::jsonb, NULL),
       (95, 80, 95, NULL, '{}'::jsonb, NULL),
       (96, 80, 96, NULL, '{}'::jsonb, 'Enroute'),
-      (97, 80, 97, NULL, '{}'::jsonb, 'Work complete');
+      (97, 80, 97, NULL, '{}'::jsonb, 'Work complete'),
+      (98, 80, 98, NULL, '{"__keep_open":true}'::jsonb, NULL),
+      (99, 80, 99, '2026-10-17', '{"__keep_open":true}'::jsonb, NULL);
     INSERT INTO public.program_car_milestones (id, program_car_id, milestone) VALUES (1, 94, 'Scrapped');
   `);
-  ok(psql("SELECT public.rlms_program_car_is_program_done(90)") === "f", "fleet inactive alone is not program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(90)") === "t", "fleet inactive is program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(98)") === "f", "inactive plus keep open is not program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(99)") === "t", "keep open plus outcome is program done");
   ok(psql("SELECT public.rlms_program_car_is_program_done(91)") === "t", "outcome still counts on an inactive car");
   ok(psql("SELECT public.rlms_program_car_is_program_done(92)") === "t", "complete checkbox is program done");
   ok(psql("SELECT public.rlms_program_car_is_program_done(93)") === "t", "on rent milestone is program done");
@@ -341,7 +348,9 @@ try {
 
   psqlFile(join(migrations, "20261115_manage_columns_down.sql"));
   ok(psql("SELECT pg_get_functiondef('public.rlms_program_car_is_program_done(bigint)'::regprocedure) LIKE '%rc.active IS NOT TRUE%'") === "t", "down script restores the fleet active check");
-  ok(psql("SELECT public.rlms_program_car_is_program_done(90)") === "t", "down script counts fleet inactive as program done again");
+  ok(psql("SELECT pg_get_functiondef('public.rlms_program_car_is_program_done(bigint)'::regprocedure) LIKE '%__keep_open%'") === "f", "down script drops the keep-open exception");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(90)") === "t", "down script counts fleet inactive as program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(98)") === "t", "down script ignores keep open and counts the inactive car done");
   ok(psql("SELECT public.rlms_program_car_is_program_done(96)") === "f", "down script still ignores status text");
 } catch (err) {
   failed += 1;

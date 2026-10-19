@@ -14,10 +14,11 @@
 -- through the patch function. Without that entry they raise
 -- 'undo: table program_field_defs is not patchable'.
 -- rlms_program_car_is_program_done is the live definition from
--- migrations/20261030_railcars_workbench.sql with one removal:
--- `rc.active IS NOT TRUE`. A fleet-inactive car stays in the program.
--- scrapped_at, the complete checkbox, outcome_reached_at, and a
--- program-done milestone still count.
+-- migrations/20261030_railcars_workbench.sql. Fleet inactive
+-- (rc.active IS NOT TRUE) is Program done unless
+-- program_cars.custom_fields.__keep_open is true. scrapped_at, the
+-- complete checkbox, outcome_reached_at, and a program-done milestone
+-- still count either way.
 
 ALTER TABLE public.program_field_defs
   ADD COLUMN IF NOT EXISTS program_id bigint REFERENCES public.programs(id) ON DELETE CASCADE;
@@ -240,7 +241,7 @@ WHERE NOT EXISTS (
   WHERE field_key = 'trace_date_ran' AND category_id IS NULL AND program_id IS NULL
 );
 
--- Live body from 20261030_railcars_workbench.sql, minus rc.active IS NOT TRUE.
+-- Live body from 20261030_railcars_workbench.sql, plus the __keep_open exception.
 CREATE OR REPLACE FUNCTION public.rlms_program_car_is_program_done(p_program_car_id bigint)
 RETURNS boolean
 LANGUAGE sql
@@ -248,7 +249,11 @@ STABLE
 AS $$
   SELECT COALESCE((
     SELECT
-      rc.scrapped_at IS NOT NULL
+      (
+        rc.active IS NOT TRUE
+        AND COALESCE(pc.custom_fields->>'__keep_open', '') NOT IN ('true', 't', '1')
+      )
+      OR rc.scrapped_at IS NOT NULL
       OR pc.outcome_reached_at IS NOT NULL
       OR COALESCE(pc.custom_fields->>'__complete', '') IN ('true', 't', '1')
       OR EXISTS (
@@ -267,4 +272,4 @@ $$;
 GRANT EXECUTE ON FUNCTION public.rlms_program_car_is_program_done(bigint) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.rlms_program_car_is_program_done(bigint) IS
-  'Program done: scrapped_at, Complete checkbox / outcome_reached_at, or trail/latest milestone On rent/Scrapped/Sold/Stored. Fleet inactive does not count.';
+  'Program done: inactive unless custom_fields.__keep_open, scrapped_at, Complete checkbox / outcome_reached_at, or trail/latest milestone On rent/Scrapped/Sold/Stored.';

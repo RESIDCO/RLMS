@@ -1,49 +1,141 @@
-// @ts-nocheck
 /**
- * Module-level photo-search jobs so searches can outlive a closed dialog.
+ * Photo-search jobs live at module scope so a closed dialog does not cancel them.
+ * The last finished job is also kept in sessionStorage for the next mount.
  */
 
-import { findPhotosBatched, PHOTO_CONCURRENCY } from "./photoFinderClient";
+import { apiRequest } from "./queryClient";
+import {
+  carHasFoundPhoto,
+  findPhotosBatched,
+  PHOTO_CONCURRENCY,
+  type PhotoCarInput,
+  type PhotoFindResponse,
+  type PhotoProgress,
+  type PhotoSearchPost,
+} from "./photoFinderClient";
 
-const listeners = new Set();
-/** @type {Map<string, object>} */
-const jobs = new Map();
-/** @type {Array<object>} */
-let toasts = [];
-/** Pending result to open in a viewer modal (set by toast click). */
-let pendingView = null;
+const STORAGE_KEY = "rlms_photo_last_job_v1";
 
-function emit() {
-  const snap = {
-    jobs: [...jobs.values()],
-    toasts: [...toasts],
-    pendingView,
-  };
-  for (const fn of listeners) {
+export type PhotoJobStatus = "running" | "done" | "error" | "aborted";
+
+export type PhotoJob = {
+  id: string;
+  title: string;
+  status: PhotoJobStatus;
+  carTotal: number;
+  cars: PhotoCarInput[];
+  progress: PhotoProgress | null;
+  result: PhotoFindResponse | null;
+  error: string | null;
+  completedAt: number | null;
+  abort: () => void;
+};
+
+export type StoredPhotoJob = {
+  result: PhotoFindResponse;
+  finishedAt: number;
+  cars: PhotoCarInput[];
+  title?: string;
+};
+
+export type PhotoJobSnapshot = {
+  jobs: PhotoJob[];
+};
+
+const listeners = new Set<(snap: PhotoJobSnapshot) => void>();
+const jobs = new Map<string, PhotoJob>();
+
+function browserSession(): Storage | null {
+  try {
+    if (typeof sessionStorage === "undefined") return null;
+    return sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function readStoredPhotoJob(): StoredPhotoJob | null {
+  const store = browserSession();
+  if (!store) return null;
+  try {
+    const raw = store.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredPhotoJob;
+    if (!parsed?.result || typeof parsed.finishedAt !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPhotoJob(row: StoredPhotoJob): void {
+  const store = browserSession();
+  if (!store) return;
+  try {
+    store.setItem(STORAGE_KEY, JSON.stringify(row));
+  } catch {
+    /* private mode or quota */
+  }
+}
+
+function jobList(): PhotoJob[] {
+  const out: PhotoJob[] = [];
+  jobs.forEach((job) => out.push(job));
+  return out;
+}
+
+function emit(): void {
+  const snap: PhotoJobSnapshot = { jobs: jobList() };
+  listeners.forEach((fn) => {
     try {
       fn(snap);
     } catch {
       /* ignore subscriber errors */
     }
-  }
+  });
 }
 
-export function subscribePhotoJobs(fn) {
+function hydrateStoredJob(): void {
+  const stored = readStoredPhotoJob();
+  if (!stored) return;
+  jobs.set("stored", {
+    id: "stored",
+    title: stored.title || "Photo Search",
+    status: "done",
+    carTotal: stored.cars?.length || stored.result.car_count || 0,
+    cars: stored.cars || [],
+    progress: null,
+    result: stored.result,
+    error: null,
+    completedAt: stored.finishedAt,
+    abort: () => {},
+  });
+}
+
+hydrateStoredJob();
+
+export function subscribePhotoJobs(fn: (snap: PhotoJobSnapshot) => void): () => void {
   listeners.add(fn);
-  fn({ jobs: [...jobs.values()], toasts: [...toasts], pendingView });
+  fn({ jobs: jobList() });
   return () => {
     listeners.delete(fn);
   };
 }
 
-export function carsWithImages(cars) {
-  return (cars || []).filter((c) => (c?.images || []).length > 0);
+export function carsWithImages(cars: PhotoFindResponse["cars"]): NonNullable<PhotoFindResponse["cars"]> {
+  return (cars || []).filter((car) => carHasFoundPhoto(car));
 }
 
-export function summarizePhotoResult(result) {
+export function summarizePhotoResult(result: PhotoFindResponse | null | undefined): {
+  carTotal: number;
+  carsWithImages: number;
+  imageCount: number;
+  notFoundCount: number;
+  hitCars: NonNullable<PhotoFindResponse["cars"]>;
+} {
   const all = result?.cars || [];
   const hits = carsWithImages(all);
-  const imageCount = hits.reduce((n, c) => n + (c.images || []).length, 0);
+  const imageCount = hits.reduce((sum, car) => sum + (car.images || []).length, 0);
   return {
     carTotal: result?.car_count ?? all.length,
     carsWithImages: hits.length,
@@ -53,30 +145,40 @@ export function summarizePhotoResult(result) {
   };
 }
 
+const postPhotoFind: PhotoSearchPost = async (body, init) => {
+  const res = await apiRequest("POST", "/api/photo-search/find", body, undefined, init);
+  return (await res.json()) as PhotoFindResponse;
+};
+
+function rememberFinished(job: PhotoJob): void {
+  if (!job.result) return;
+  writeStoredPhotoJob({
+    result: job.result,
+    finishedAt: job.completedAt || Date.now(),
+    cars: job.cars,
+    title: job.title,
+  });
+}
+
 /**
- * Start a photo search job. Returns the job object (id, abort, …).
- * Concurrent-run guard: if a search is already in flight, return that job
- * instead of launching a duplicate scrape.
+ * Start a photo search. If one is already running, that job is returned.
  */
-export function startPhotoJob({ cars, agentToken, title } = {}) {
-  const existing = [...jobs.values()].find((j) => j.status === "running");
+export function startPhotoJob({ cars, title }: { cars: PhotoCarInput[]; title?: string }): PhotoJob {
+  const existing = jobList().find((job) => job.status === "running");
   if (existing) return existing;
 
-  const id =
-    (typeof crypto !== "undefined" && crypto.randomUUID?.()) ||
-    `photo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const id = (typeof crypto !== "undefined" && crypto.randomUUID?.())
+    || `photo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const controller = new AbortController();
-  const job = {
+  const job: PhotoJob = {
     id,
     title: title || "Photo Search",
     status: "running",
-    background: false,
     carTotal: cars?.length || 0,
+    cars: cars || [],
     progress: null,
     result: null,
     error: null,
-    unread: false,
-    dismissed: false,
     completedAt: null,
     abort: () => controller.abort(),
   };
@@ -84,7 +186,7 @@ export function startPhotoJob({ cars, agentToken, title } = {}) {
   emit();
 
   findPhotosBatched(cars, {
-    agentToken,
+    post: postPhotoFind,
     fetchImages: true,
     maxPerCar: 6,
     concurrency: PHOTO_CONCURRENCY,
@@ -98,157 +200,66 @@ export function startPhotoJob({ cars, agentToken, title } = {}) {
   })
     .then((result) => {
       const cur = jobs.get(id);
-      if (!cur) return;
-      if (controller.signal.aborted && !cur.background) {
-        cur.status = "aborted";
-        emit();
-        return;
-      }
+      if (!cur || cur.status !== "running") return;
       cur.status = "done";
       cur.result = result;
       cur.progress = null;
-      cur.unread = true;
-      cur.dismissed = false;
       cur.completedAt = Date.now();
-      const s = summarizePhotoResult(result);
-      // Toast when backgrounded (user left the modal); bell always tracks unread
-      if (cur.background) {
-        pushToast({
-          id: `toast_${id}`,
-          jobId: id,
-          kind: s.carsWithImages ? "success" : "empty",
-          title: cur.title,
-          message: s.carsWithImages
-            ? `Photo search complete — ${s.carsWithImages} of ${s.carTotal} cars had photos. Click to view.`
-            : `Photo search complete — no photos found for ${s.carTotal} cars. Click for RRPA links.`,
-          result,
-          summary: s,
-        });
-      }
+      rememberFinished(cur);
       emit();
     })
-    .catch((err) => {
+    .catch((err: unknown) => {
       const cur = jobs.get(id);
-      if (!cur) return;
-      if (err?.name === "AbortError") {
+      if (!cur || cur.status !== "running") return;
+      if ((err as { name?: string } | null)?.name === "AbortError") {
         cur.status = "aborted";
         emit();
         return;
       }
       cur.status = "error";
-      cur.error = err?.message || String(err);
-      cur.unread = true;
-      cur.dismissed = false;
+      cur.error = err instanceof Error ? err.message : String(err);
       cur.completedAt = Date.now();
-      if (cur.background) {
-        pushToast({
-          id: `toast_${id}`,
-          jobId: id,
-          kind: "error",
-          title: cur.title,
-          message: `Photo search failed: ${cur.error}`,
-          result: null,
-        });
-      }
       emit();
     });
 
   return job;
 }
 
-export function markJobBackground(jobId) {
+export function abortPhotoJob(jobId: string): void {
   const job = jobs.get(jobId);
   if (!job || job.status !== "running") return;
-  job.background = true;
+  job.abort();
+  job.status = "aborted";
   emit();
 }
 
-export function abortPhotoJob(jobId) {
-  const job = jobs.get(jobId);
-  if (!job) return;
-  job.abort?.();
-  if (job.status === "running" && !job.background) {
-    job.status = "aborted";
-    emit();
-  }
-}
-
-function pushToast(toast) {
-  toasts = [toast, ...toasts.filter((t) => t.id !== toast.id)].slice(0, 5);
-  emit();
-}
-
-export function dismissToast(toastId) {
-  toasts = toasts.filter((t) => t.id !== toastId);
-  emit();
-}
-
-/** Mark a completed job as seen (clears bell badge for that job). */
-export function markPhotoJobRead(jobId) {
-  const job = jobs.get(jobId);
-  if (!job) return;
-  job.unread = false;
-  emit();
-}
-
-/** Hide a job from the notification panel. */
-export function dismissPhotoJobNotification(jobId) {
-  const job = jobs.get(jobId);
-  if (!job) return;
-  job.unread = false;
-  job.dismissed = true;
-  toasts = toasts.filter((t) => t.jobId !== jobId);
-  emit();
-}
-
-/** Clear all completed-job badges / panel entries (running jobs stay). */
-export function clearPhotoNotifications() {
-  for (const job of jobs.values()) {
-    if (job.status === "running") continue;
-    job.unread = false;
-    job.dismissed = true;
-  }
-  toasts = [];
-  emit();
-}
-
-/** Open a completed result in the global viewer (used by toast / bell). */
-export function requestPhotoResultView(payload) {
-  pendingView = payload
-    ? {
-        result: payload.result,
-        title: payload.title || "Photo Search",
-        toastId: payload.toastId || null,
-        jobId: payload.jobId || null,
-      }
-    : null;
-  if (payload?.toastId) {
-    toasts = toasts.filter((t) => t.id !== payload.toastId);
-  }
-  if (payload?.jobId) {
-    const job = jobs.get(payload.jobId);
-    if (job) job.unread = false;
+/** Drop finished results, including the session copy. A running search is left alone. */
+export function clearPhotoResults(): void {
+  const finishedIds: string[] = [];
+  jobs.forEach((job, id) => {
+    if (job.status !== "running") finishedIds.push(id);
+  });
+  finishedIds.forEach((id) => jobs.delete(id));
+  try {
+    browserSession()?.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
   }
   emit();
 }
 
-export function clearPendingPhotoView() {
-  pendingView = null;
-  emit();
+export function hasRunningPhotoJob(): boolean {
+  return jobList().some((job) => job.status === "running");
 }
 
-export function getJob(jobId) {
-  return jobs.get(jobId) || null;
+export function currentPhotoJob(): PhotoJob | null {
+  const running = jobList().find((job) => job.status === "running");
+  if (running) return running;
+  return latestFinishedPhotoJob();
 }
 
-/** True while any photo-search job is in flight (used to block duplicate submits). */
-export function hasRunningPhotoJob() {
-  for (const job of jobs.values()) {
-    if (job.status === "running") return true;
-  }
-  return false;
-}
-
-export function getRunningPhotoJobs() {
-  return [...jobs.values()].filter((j) => j.status === "running");
+export function latestFinishedPhotoJob(): PhotoJob | null {
+  const finished = jobList().filter((job) => job.status === "done" || job.status === "error");
+  finished.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+  return finished[0] || null;
 }

@@ -125,7 +125,6 @@ import { registerKpiCarRoutes } from "./kpi-cars";
 import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } from "./lease-mgmt";
 import { registerCrmRoutes } from "./crm";
 import { registerColumnPrefRoutes } from "./column-prefs";
-import { registerPhotoSearchRoutes } from "./photo-search";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
@@ -4361,7 +4360,6 @@ export async function registerRoutes(
   });
 
   registerColumnPrefRoutes(app);
-  registerPhotoSearchRoutes(app);
 
   // GET /api/admin/users — list all users with roles (admin only)
   app.get("/api/admin/users", async (req, res) => {

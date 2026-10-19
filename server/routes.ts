@@ -371,6 +371,21 @@ async function dvComputeFreshness() {
   };
 }
 
+const DASHBOARD_CACHE_MS = 90_000;
+
+type DashboardCacheEntry = { expiresAt: number; body: unknown };
+
+let dashboardCache: DashboardCacheEntry | null = null;
+let dashboardInflight: Promise<unknown> | null = null;
+
+class DashboardUnavailableError extends Error {
+  readonly status = 503;
+  constructor(message = "Dashboard KPIs are temporarily unavailable") {
+    super(message);
+    this.name = "DashboardUnavailableError";
+  }
+}
+
 function errHandler(res: Response, err: unknown) {
   if (err instanceof ZodError) {
     const msg = err.issues[0]?.message || "Invalid input";
@@ -545,16 +560,36 @@ export async function registerRoutes(
   });
 
   // ---------- Dashboard ----------
-  app.get("/api/dashboard", async (_req, res) => {
+  async function loadDashboardPayload() {
+    const started = Date.now();
+    let rpcMs = 0;
     try {
       // Lease dates: Asset Report first (via rider_financial_summary / governed
       // riders.expiration_date). V_Valid car dates only fill OLs the report omits.
       // Lessee / OL identity still come from railcars.
       // PostgREST caps at 1000 rows — paginate and verify exact count or refuse to serve.
       const db = supabaseAdmin;
-      const { data: fleetSql, error: fleetSqlErr } = await db.rpc("rlms_fleet_kpis");
+      const rpcStarted = Date.now();
+      let fleetSql: any = null;
+      let fleetSqlErr: { message?: string } | null = null;
+      try {
+        const rpc = await db.rpc("rlms_fleet_kpis");
+        fleetSql = rpc.data;
+        fleetSqlErr = rpc.error;
+      } catch (err) {
+        fleetSqlErr = { message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        rpcMs = Date.now() - rpcStarted;
+      }
       if (fleetSqlErr) {
-        console.warn("[dashboard] rlms_fleet_kpis unavailable, using row fetch:", fleetSqlErr.message);
+        const message = fleetSqlErr.message || "rlms_fleet_kpis failed";
+        if (process.env.DASHBOARD_ROW_FALLBACK === "true") {
+          console.warn("[dashboard] rlms_fleet_kpis unavailable, using row fetch:", message);
+          fleetSql = null;
+        } else {
+          console.warn("[dashboard] rlms_fleet_kpis failed:", message);
+          throw new DashboardUnavailableError("Dashboard KPIs are temporarily unavailable");
+        }
       }
       const sqlKpis = fleetSql?.kpis;
 
@@ -1084,7 +1119,7 @@ export async function registerRoutes(
         console.warn("[dashboard] Active Cars mismatch", { leased: activeAssignments, byFormula: jsActiveCars });
       }
 
-      res.json({
+      return {
         kpis: fleetKpis
           ? {
               total_fleet: fleetKpis.total_fleet,
@@ -1235,8 +1270,35 @@ export async function registerRoutes(
         expiration_timeline: riderExpirationTimeline,
         expiration_timeline_vcf: [],
         fleet_age,
-      });
+      };
+    } finally {
+      console.log(`[dashboard] rpc=${rpcMs}ms total=${Date.now() - started}ms`);
+    }
+  }
+
+  app.get("/api/dashboard", async (_req, res) => {
+    try {
+      const now = Date.now();
+      if (dashboardCache && dashboardCache.expiresAt > now) {
+        res.json(dashboardCache.body);
+        return;
+      }
+      if (!dashboardInflight) {
+        dashboardInflight = loadDashboardPayload()
+          .then((body) => {
+            dashboardCache = { expiresAt: Date.now() + DASHBOARD_CACHE_MS, body };
+            return body;
+          })
+          .finally(() => {
+            dashboardInflight = null;
+          });
+      }
+      res.json(await dashboardInflight);
     } catch (err) {
+      if (err instanceof DashboardUnavailableError) {
+        res.status(503).json({ message: err.message });
+        return;
+      }
       errHandler(res, err);
     }
   });

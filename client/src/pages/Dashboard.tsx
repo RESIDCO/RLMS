@@ -461,10 +461,13 @@ function UtilRing({ pct }: { pct: number }) {
 export default function Dashboard() {
   const { data, isLoading, isError, error, refetch } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
-    queryFn: ({ signal }) => apiGet<DashboardData>("/api/dashboard", { timeoutMs: 15_000, signal }),
+    queryFn: ({ signal }) => apiGet<DashboardData>("/api/dashboard", { timeoutMs: 30_000, signal }),
     staleTime: 45_000,
     refetchOnMount: true,
+    retry: 2,
+    retryDelay: (failureCount) => (failureCount === 0 ? 1_000 : 3_000),
   });
+  const showPanelPlaceholders = !data;
 
   const [drillKey, setDrillKey] = useState<DrillKey>(null);
 
@@ -843,7 +846,7 @@ export default function Dashboard() {
               </span>
             </header>
             <div className="p-5 space-y-2.5 max-h-[480px] overflow-auto">
-              {isLoading ? (
+              {showPanelPlaceholders ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <Skeleton key={i} className="h-7 rounded" />
                 ))
@@ -885,7 +888,7 @@ export default function Dashboard() {
               </div>
             </header>
             <div className="divide-y divide-border max-h-[480px] overflow-auto">
-              {isLoading ? (
+              {showPanelPlaceholders ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="px-5 py-4"><Skeleton className="h-10 rounded" /></div>
                 ))

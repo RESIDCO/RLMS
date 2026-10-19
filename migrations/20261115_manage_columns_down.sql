@@ -1,5 +1,6 @@
 -- Rolls back migrations/20261115_manage_columns.sql.
 -- Restores rlms_apply_jsonb_patch and rlms_undo_change_group to the 20261113 definitions.
+-- Restores rlms_program_car_is_program_done to the 20261030 definition, including rc.active IS NOT TRUE.
 -- Does not touch rent_events or program_cars.custom_fields.
 -- Program-scoped definitions cannot keep a scope without program_id, so this
 -- rollback removes only those rows. Retire in the app never deletes.
@@ -197,3 +198,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS program_field_defs_global_field_uidx
 
 ALTER TABLE public.program_field_defs DROP COLUMN IF EXISTS retired_at;
 ALTER TABLE public.program_field_defs DROP COLUMN IF EXISTS program_id;
+
+-- Exact live definition from migrations/20261030_railcars_workbench.sql.
+CREATE OR REPLACE FUNCTION public.rlms_program_car_is_program_done(p_program_car_id bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE((
+    SELECT
+      rc.active IS NOT TRUE
+      OR rc.scrapped_at IS NOT NULL
+      OR pc.outcome_reached_at IS NOT NULL
+      OR COALESCE(pc.custom_fields->>'__complete', '') IN ('true', 't', '1')
+      OR EXISTS (
+        SELECT 1
+        FROM public.program_car_milestones m
+        WHERE m.program_car_id = pc.id
+          AND lower(btrim(m.milestone)) IN ('on rent', 'scrapped', 'sold', 'stored')
+      )
+      OR lower(btrim(COALESCE(pc.milestone, ''))) IN ('on rent', 'scrapped', 'sold', 'stored')
+    FROM public.program_cars pc
+    JOIN public.railcars rc ON rc.id = pc.railcar_id
+    WHERE pc.id = p_program_car_id
+  ), false);
+$$;
+
+GRANT EXECUTE ON FUNCTION public.rlms_program_car_is_program_done(bigint) TO authenticated, service_role;
+
+COMMENT ON FUNCTION public.rlms_program_car_is_program_done(bigint) IS
+  'Program done: inactive, scrapped_at, Complete checkbox / outcome_reached_at, or trail/latest milestone On rent/Scrapped/Sold/Stored.';

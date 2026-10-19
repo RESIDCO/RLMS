@@ -100,6 +100,26 @@ ok(!/update\s+(public\.)?rent_events/i.test(next), "migration does not update re
 ok(!/delete\s+from\s+(public\.)?rent_events/i.test(next), "migration does not delete rent_events");
 ok(!/delete\s+from\s+(public\.)?program_field_defs/i.test(next), "retire path does not delete field defs");
 
+const liveDoneSql = readFileSync(new URL("../migrations/20261030_railcars_workbench.sql", import.meta.url), "utf8");
+const downSql = readFileSync(new URL("../migrations/20261115_manage_columns_down.sql", import.meta.url), "utf8");
+
+function programDoneBody(sql: string): string {
+  const start = sql.indexOf("CREATE OR REPLACE FUNCTION public.rlms_program_car_is_program_done");
+  const end = sql.indexOf("$$;", start);
+  return sql.slice(start, end);
+}
+
+const liveDone = programDoneBody(liveDoneSql);
+const droppedActive = liveDone.replace(
+  "      rc.active IS NOT TRUE\n      OR rc.scrapped_at IS NOT NULL",
+  "      rc.scrapped_at IS NOT NULL",
+);
+ok(droppedActive !== liveDone, "the live program-done function still names the fleet active check");
+ok(programDoneBody(next) === droppedActive, "program done is the live definition without the fleet active check");
+ok(!programDoneBody(next).includes("rc.active IS NOT TRUE"), "the up migration drops rc.active IS NOT TRUE");
+ok(programDoneBody(next).includes("rc.scrapped_at IS NOT NULL"), "scrapped_at stays from the live definition");
+ok(programDoneBody(downSql) === liveDone, "the down script restores the live program-done function");
+
 const names = ["20261114_inactivate_railcars.sql", "20261115_manage_columns.sql"];
 ok(names.slice().sort().join() === names.join(), "migration filename sorts after inactivate railcars");
 

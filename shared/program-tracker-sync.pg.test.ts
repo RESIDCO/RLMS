@@ -256,6 +256,19 @@ try {
   ok(psql("SELECT name FROM public.programs WHERE id = 71") === "OL9998 - Has cars", "sync undo leaves a program that still has cars");
   ok(psql("SELECT count(*) FROM public.program_cars WHERE program_id = 71") === "1", "the program's cars stay in place");
 
+  psql(`
+    ALTER TABLE public.railcars ADD COLUMN scrapped_at date;
+    ALTER TABLE public.program_cars
+      ADD COLUMN railcar_id bigint REFERENCES public.railcars(id),
+      ADD COLUMN outcome_reached_at date,
+      ADD COLUMN custom_fields jsonb NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN milestone text;
+    CREATE TABLE public.program_car_milestones (
+      id bigint PRIMARY KEY,
+      program_car_id bigint NOT NULL REFERENCES public.program_cars(id),
+      milestone text NOT NULL
+    );
+  `);
   psqlFile(join(migrations, "20261115_manage_columns.sql"));
   ok(psql("SELECT count(*) FROM public.program_field_defs WHERE field_key = 'trace_date_ran' AND program_id IS NULL") === "1", "trace date ran is a global optional column");
   const columnGroup = psql("SELECT gen_random_uuid()::text");
@@ -292,6 +305,44 @@ try {
   ok(retireUndo.ok === true && retireUndo.restored === 1, "undo of a retire clears retired_at");
   ok(psql("SELECT retired_at IS NULL FROM public.program_field_defs WHERE id = 35") === "t", "retire undo restores the column");
   ok(psql("SELECT label FROM public.program_field_defs WHERE id = 35") === "Keep me", "retire undo leaves the label");
+
+  ok(psql("SELECT pg_get_functiondef('public.rlms_program_car_is_program_done(bigint)'::regprocedure) LIKE '%rc.active IS NOT TRUE%'") === "f", "installed program done ignores fleet inactive");
+  psql(`
+    INSERT INTO public.programs (id, name) VALUES (80, 'Program done rule');
+    INSERT INTO public.railcars (id, car_number, reporting_marks, active, scrapped_at) VALUES
+      (90, '000090', 'TFOX', false, NULL),
+      (91, '000091', 'TFOX', false, NULL),
+      (92, '000092', 'TFOX', true, NULL),
+      (93, '000093', 'TFOX', true, NULL),
+      (94, '000094', 'TFOX', true, NULL),
+      (95, '000095', 'TFOX', true, '2026-09-18'),
+      (96, '000096', 'TFOX', true, NULL),
+      (97, '000097', 'TFOX', true, NULL);
+    INSERT INTO public.program_cars (id, program_id, railcar_id, outcome_reached_at, custom_fields, milestone) VALUES
+      (90, 80, 90, NULL, '{}'::jsonb, NULL),
+      (91, 80, 91, '2026-10-17', '{}'::jsonb, NULL),
+      (92, 80, 92, NULL, '{"__complete":"true"}'::jsonb, NULL),
+      (93, 80, 93, NULL, '{}'::jsonb, 'On rent'),
+      (94, 80, 94, NULL, '{}'::jsonb, NULL),
+      (95, 80, 95, NULL, '{}'::jsonb, NULL),
+      (96, 80, 96, NULL, '{}'::jsonb, 'Enroute'),
+      (97, 80, 97, NULL, '{}'::jsonb, 'Work complete');
+    INSERT INTO public.program_car_milestones (id, program_car_id, milestone) VALUES (1, 94, 'Scrapped');
+  `);
+  ok(psql("SELECT public.rlms_program_car_is_program_done(90)") === "f", "fleet inactive alone is not program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(91)") === "t", "outcome still counts on an inactive car");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(92)") === "t", "complete checkbox is program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(93)") === "t", "on rent milestone is program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(94)") === "t", "scrapped trail is program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(95)") === "t", "scrapped_at from the live definition is program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(96)") === "f", "status text is not program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(97)") === "f", "work complete is not program done");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(999)") === "f", "a missing program car is not program done");
+
+  psqlFile(join(migrations, "20261115_manage_columns_down.sql"));
+  ok(psql("SELECT pg_get_functiondef('public.rlms_program_car_is_program_done(bigint)'::regprocedure) LIKE '%rc.active IS NOT TRUE%'") === "t", "down script restores the fleet active check");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(90)") === "t", "down script counts fleet inactive as program done again");
+  ok(psql("SELECT public.rlms_program_car_is_program_done(96)") === "f", "down script still ignores status text");
 } catch (err) {
   failed += 1;
   console.error("FAIL", err instanceof Error ? err.message : err);

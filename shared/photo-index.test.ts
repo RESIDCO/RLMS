@@ -179,7 +179,9 @@ const thrown = await resolveIndexSearch(requested, async () => {
 ok(thrown.kind === "legacy", "a thrown lookup plans the legacy search");
 
 ok(PHOTO_SEARCH_MODE_KEY === "rlms.photoSearchMode", "classic toggle storage key");
-ok(effectivePhotoSearchMode(undefined, null) === "index", "index is the default");
+ok(effectivePhotoSearchMode(undefined, null) === "legacy", "unset build stays on legacy search");
+ok(effectivePhotoSearchMode("", null) === "legacy", "blank build stays on legacy search");
+ok(effectivePhotoSearchMode(undefined, "index") === "legacy", "stored index does not leave the legacy default");
 ok(effectivePhotoSearchMode("index", null) === "index", "explicit index stays index");
 ok(effectivePhotoSearchMode("legacy", null) === "legacy", "build flag legacy wins");
 ok(effectivePhotoSearchMode("index", "legacy") === "legacy", "classic toggle selects legacy");

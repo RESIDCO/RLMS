@@ -185,6 +185,7 @@ export default function PhotoFinderPanel({
 
   function startLegacy(cars: PhotoCar[], title?: string) {
     if (!cars.length) return;
+    indexInFlightRef.current = false;
     if (trackedJobIdRef.current) abortPhotoJob(trackedJobIdRef.current);
     searchingRef.current = true;
     seenRunningRef.current = true;
@@ -236,8 +237,9 @@ export default function PhotoFinderPanel({
     if (searchingRef.current || isSearching) return;
     if (!rows.length) return;
     searchingRef.current = true;
-    seenRunningRef.current = true;
     setIsSearching(true);
+    if (legacyModeRef.current) seenRunningRef.current = true;
+    else indexInFlightRef.current = true;
     let cars: PhotoCar[] = rows;
     try {
       const res = await apiRequest("POST", "/api/railcars/resolve-prior-marks", {
@@ -257,6 +259,7 @@ export default function PhotoFinderPanel({
     if (!cars.length) {
       searchingRef.current = false;
       seenRunningRef.current = false;
+      indexInFlightRef.current = false;
       setIsSearching(false);
       return;
     }

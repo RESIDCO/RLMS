@@ -73,8 +73,9 @@ export function indexCarKey(car: { mark?: unknown; number?: unknown }): string {
   return `${String(car.mark ?? "").toUpperCase().replace(/[^A-Z]/g, "")}_${looseIndexNumber(car.number)}`;
 }
 
+/** Legacy unless the build explicitly sets VITE_PHOTO_SEARCH=index. */
 export function isLegacyPhotoSearchBuild(envValue: unknown): boolean {
-  return String(envValue ?? "").trim().toLowerCase() === "legacy";
+  return String(envValue ?? "").trim().toLowerCase() !== "index";
 }
 
 /** localStorage `rlms.photoSearchMode` — "legacy" is the Classic photo search toggle. */

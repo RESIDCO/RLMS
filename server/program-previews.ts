@@ -15,7 +15,6 @@ import {
 } from "./commitment";
 import {
   overlayLifecycle,
-  isArrivedMilestone,
   isProgramType,
   frozenProgramCarAcceptsPatch,
   programCarKeepOpen,
@@ -25,8 +24,7 @@ import {
   type ProgramType,
 } from "@shared/programs";
 import { programCarFleetFrozen } from "@shared/program-car-fleet";
-import { parseProgramDateInput } from "@shared/program-dates";
-import { isCompleteProgramStatus, statusLeavesComplete } from "@shared/program-status";
+import { patchColumns } from "@shared/program-car-patch";
 import {
   COMMITMENT_TYPES,
   pickEarliestOpenProgram,
@@ -503,87 +501,6 @@ export async function previewPatchProgramCars(
     ...classified,
   };
   return { preview_token: await putPreview("program", snapshot), ...snapshot };
-}
-
-const COMPLETE_CF = "__complete";
-
-function clearCompleteFlags(out: Record<string, unknown>, prior: Record<string, unknown> | null) {
-  out.outcome_reached_at = null;
-  out.completed = false;
-  out.completed_at = null;
-  const prev =
-    out.custom_fields && typeof out.custom_fields === "object"
-      ? (out.custom_fields as Record<string, unknown>)
-      : prior?.custom_fields && typeof prior.custom_fields === "object"
-        ? (prior.custom_fields as Record<string, unknown>)
-        : {};
-  out.custom_fields = { ...prev, [COMPLETE_CF]: false };
-}
-
-function patchColumns(updates: Record<string, unknown>, prior: Record<string, unknown> | null) {
-  const out: Record<string, unknown> = {};
-  if (updates.milestone !== undefined) out.milestone = updates.milestone === "" ? null : String(updates.milestone);
-  if (updates.milestone_at !== undefined) {
-    const parsed = parseProgramDateInput(String(updates.milestone_at ?? ""));
-    if (parsed === null) out.milestone_at = null;
-    else if (parsed && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) out.milestone_at = parsed;
-  }
-  if (updates.status !== undefined) out.status = updates.status === "" ? null : String(updates.status);
-  if (updates.notes !== undefined) out.notes = updates.notes === "" ? null : updates.notes;
-  if (updates.flag_tag !== undefined) out.flag_tag = updates.flag_tag === "" ? null : String(updates.flag_tag);
-  if (updates.shop_id !== undefined) out.shop_id = updates.shop_id == null || updates.shop_id === "" ? null : Number(updates.shop_id);
-  if (updates.scrap_yard_id !== undefined) {
-    out.scrap_yard_id = updates.scrap_yard_id == null || updates.scrap_yard_id === "" ? null : Number(updates.scrap_yard_id);
-  }
-  if (updates.repair_cost_total !== undefined) {
-    const n = updates.repair_cost_total === "" || updates.repair_cost_total == null ? null : Number(updates.repair_cost_total);
-    out.repair_cost_total = n != null && Number.isFinite(n) ? n : null;
-  }
-  if (updates.outcome_reached === true || updates.outcome_reached === "true") {
-    out.outcome_reached_at = todayIso();
-  }
-  if (updates.outcome_reached === false || updates.outcome_reached === "false") {
-    clearCompleteFlags(out, prior);
-  }
-  if (updates.completed !== undefined) {
-    const on = updates.completed === true || updates.completed === "true" || updates.completed === 1 || updates.completed === "1";
-    out.completed = on;
-    out.completed_at = on ? new Date().toISOString() : null;
-    if (on && out.outcome_reached_at === undefined && !prior?.outcome_reached_at) {
-      out.outcome_reached_at = todayIso();
-    }
-    if (!on && updates.outcome_reached === undefined) {
-      out.outcome_reached_at = null;
-    }
-    const prevCf =
-      prior?.custom_fields && typeof prior.custom_fields === "object"
-        ? (prior.custom_fields as Record<string, unknown>)
-        : {};
-    out.custom_fields = { ...prevCf, [COMPLETE_CF]: on };
-  }
-  if (updates.custom_fields && typeof updates.custom_fields === "object") {
-    const prev =
-      (out.custom_fields && typeof out.custom_fields === "object"
-        ? out.custom_fields
-        : prior?.custom_fields && typeof prior.custom_fields === "object"
-          ? prior.custom_fields
-          : {}) as Record<string, unknown>;
-    out.custom_fields = { ...prev, ...(updates.custom_fields as object) };
-  }
-  const nextMilestone = (out.milestone !== undefined ? out.milestone : prior?.milestone) as string | null;
-  if (isArrivedMilestone(nextMilestone) && out.outcome_reached_at === undefined && !prior?.outcome_reached_at) {
-    const d = out.milestone_at != null ? String(out.milestone_at).slice(0, 10) : todayIso();
-    out.outcome_reached_at = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayIso();
-  }
-  const priorStatus = prior?.status == null ? "" : String(prior.status);
-  if (
-    updates.status !== undefined &&
-    isCompleteProgramStatus(priorStatus) &&
-    statusLeavesComplete(out.status == null ? "" : String(out.status))
-  ) {
-    clearCompleteFlags(out, prior);
-  }
-  return out;
 }
 
 function commitmentPatch(updates: Record<string, unknown>): { type: CommitmentType; name: string } | null {

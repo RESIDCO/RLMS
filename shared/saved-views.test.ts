@@ -1,8 +1,9 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/saved-views.test.ts */
 
-import { opOf } from "./undo";
+import { currentMatchesAfter, opOf } from "./undo";
 import {
+  CAR_LIST_NOT_NULL,
   FOCUS_COLUMN_KEYS,
   FOCUS_PRESET_LABEL,
   GRAYMONT_INACTIVE_NUMBERS,
@@ -10,10 +11,14 @@ import {
   GRAYMONT_NUMBERS,
   INACTIVE_NOTE_MESSAGE,
   SAVED_VIEWS_SCHEMA_MESSAGE,
+  VIEWS_UNAVAILABLE_MESSAGE,
+  VIEW_NAME_UNDO_CONFLICT,
+  applyJsonbPatch,
   countCacheKey,
   daysStopped,
   focusPresetLayout,
   formatEtTime,
+  idsWithoutInactive,
   isMissingViewSchema,
   memberNoteAllowed,
   memberReaddSnapshots,
@@ -23,9 +28,12 @@ import {
   persistableChange,
   pickOpenPrograms,
   pickOpenStop,
+  schemaProbeResult,
+  snapshotBeforePatch,
   viewCreateSnapshots,
   viewDeleteSnapshots,
   viewNamesCollide,
+  viewUndoNameConflict,
   viewUpdatedAtConflicts,
   viewWriteStatus,
 } from "./saved-views";
@@ -86,6 +94,56 @@ const renamed = persistableChange({ name: "Old" }, { name: "Graymont PD" });
 ok(renamed.op === "update" && renamed.before.name === "Old" && renamed.after.name === "Graymont PD", "rename is an update");
 const layoutSave = persistableChange({ layout: { pageSize: 75 } }, { layout: { pageSize: 200 } });
 ok(layoutSave.op === "update" && (layoutSave.after.layout as { pageSize: number }).pageSize === 200, "layout save is an update");
+
+const notNull = new Set<string>(CAR_LIST_NOT_NULL);
+const viewRow: Record<string, unknown> = {
+  id: 4,
+  name: "Old",
+  kind: "fixed",
+  shared: true,
+  layout: { v: 1, pageSize: 75, order: ["marks"] },
+  pinned: true,
+  created_at: "2026-10-19T12:00:00.000Z",
+  updated_at: "2026-10-19T14:00:00.000Z",
+  updated_by: "user-0",
+  deleted_at: null,
+};
+function stampedPatch(at: string, by: string, extra: Record<string, unknown>) {
+  return { updated_at: at, updated_by: by, ...extra };
+}
+function undoPatch(label: string, current: Record<string, unknown>, patch: Record<string, unknown>) {
+  const before = snapshotBeforePatch(current, patch);
+  const change = persistableChange(before, patch);
+  ok(change.op === "update", `${label} is recorded as an update`);
+  ok("updated_at" in change.before && "updated_by" in change.before, `${label} before includes the stamp`);
+  for (const key of Object.keys(change.before)) {
+    if (notNull.has(key)) ok(change.before[key] != null, `${label} before.${key} is not null`);
+  }
+  const saved = { ...current, ...patch };
+  ok(currentMatchesAfter(saved, change.after), `${label} after still matches the saved row`);
+  const undone = applyJsonbPatch(saved, change.before);
+  ok(undone.updated_at === current.updated_at && undone.updated_by === current.updated_by, `${label} undo restores updated_at and updated_by`);
+  return { change, undone };
+}
+const renamePatch = stampedPatch("2026-10-19T15:00:00.000Z", "user-1", { name: "Graymont PD" });
+const renameUndo = undoPatch("rename", viewRow, renamePatch);
+ok(renameUndo.undone.name === "Old", "undo of rename restores the name");
+const layoutPatch = stampedPatch("2026-10-19T15:00:00.000Z", "user-1", { layout: { v: 1, pageSize: 200, order: ["marks", "program_status"] } });
+const layoutUndo = undoPatch("layout save", viewRow, layoutPatch);
+ok(JSON.stringify(layoutUndo.undone.layout) === JSON.stringify(viewRow.layout), "undo of layout save restores the layout");
+const afterRename = { ...viewRow, ...renamePatch };
+const memberStamp = stampedPatch("2026-10-19T16:00:00.000Z", "user-2", {});
+const memberChange = persistableChange(snapshotBeforePatch(afterRename, memberStamp), memberStamp);
+const afterMembers = applyJsonbPatch(afterRename, memberStamp);
+ok(!currentMatchesAfter(afterMembers, renameUndo.change.after), "a later member stamp blocks undo of the rename");
+const stampRestored = applyJsonbPatch(afterMembers, memberChange.before);
+ok(currentMatchesAfter(stampRestored, renameUndo.change.after), "undo of the member stamp lets the rename undo");
+ok(idsWithoutInactive([9, 406, 406, 11], new Set([406])).join(",") === "9,11", "selected add and remove skip inactive cars");
+ok(viewUndoNameConflict({ code: "23505", message: 'duplicate key value violates unique constraint "car_lists_name_live_uq"' }) === VIEW_NAME_UNDO_CONFLICT, "undo of a reused view name is a clean conflict");
+ok(viewUndoNameConflict({ code: "23505", message: 'duplicate key value violates unique constraint "railcars_pkey"' }) == null, "a different unique violation is left alone");
+const outage = schemaProbeResult({ code: "ECONNRESET", message: "fetch failed" });
+ok(!outage.ready && outage.unavailable && outage.message === VIEWS_UNAVAILABLE_MESSAGE, "a transient probe error is Views unavailable");
+ok(schemaProbeResult({ code: "42703", message: "column car_lists.kind does not exist" }).message === SAVED_VIEWS_SCHEMA_MESSAGE, "a missing column stays the schema message");
 
 const deleted = persistableChange(...Object.values(viewDeleteSnapshots("2026-10-19T15:00:00.000Z")) as [Record<string, unknown>, Record<string, unknown>]);
 ok(deleted.op === "update" && deleted.before.deleted_at == null && typeof deleted.after.deleted_at === "string", "soft delete is an update undo can restore");

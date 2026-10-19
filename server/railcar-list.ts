@@ -638,7 +638,7 @@ async function openStopRailcarIds(type?: string): Promise<number[]> {
   if (type && type !== "any") q = q.eq("type", type);
   const { data, error } = await q;
   if (error) throw error;
-  return [...new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0))];
+  return Array.from(new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0)));
 }
 
 async function programRailcarIds(text: string): Promise<number[]> {
@@ -654,13 +654,13 @@ async function programRailcarIds(text: string): Promise<number[]> {
     .in("program_id", programIds)
     .is("exited_date", null);
   if (carError) throw carError;
-  return [...new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0))];
+  return Array.from(new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0)));
 }
 
 async function tagRailcarIds(tag: string): Promise<number[]> {
   const { data, error } = await supabaseAdmin.from("car_tags").select("railcar_id").eq("tag", tag);
   if (error) throw error;
-  return [...new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0))];
+  return Array.from(new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0)));
 }
 
 /** Include-list for open stop / program / tag. `none` is applied separately so it can exclude a short id list. */
@@ -673,9 +673,9 @@ async function railcarIdsForFocusFilters(p: RailcarListParams): Promise<number[]
   let ids = new Set(sets[0]);
   for (const next of sets.slice(1)) {
     const allow = new Set(next);
-    ids = new Set([...ids].filter((id) => allow.has(id)));
+    ids = new Set(Array.from(ids).filter((id) => allow.has(id)));
   }
-  return [...ids];
+  return Array.from(ids);
 }
 
 function applyOpsFlagFilter(query: any, flag: string | undefined, fallback?: boolean) {

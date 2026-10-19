@@ -56,6 +56,7 @@ import { carBuildYear } from "@shared/build-year";
 import {
   FOCUS_COLUMN_LABELS,
   SAVED_VIEWS_SCHEMA_MESSAGE,
+  VIEWS_UNAVAILABLE_MESSAGE,
   emptyViewFilters,
   focusPresetLayout,
   isFocusColumn,
@@ -846,7 +847,7 @@ export default function SearchPage() {
     program: programFilter || undefined,
     tag: tagFilter || undefined,
     view_id: viewId || undefined,
-    focus: layoutNeedsFocus(viewLayout?.order?.length ? viewLayout.order : [...visibleCols]) ? 1 : undefined,
+    focus: layoutNeedsFocus(viewLayout?.order?.length ? viewLayout.order : Array.from(visibleCols)) ? 1 : undefined,
   };
 
   const textQuery = useQuery<RailcarPage>({
@@ -1189,8 +1190,9 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (viewsQuery.data?.schema_ready === false) setSchemaMessage(viewsQuery.data.message || SAVED_VIEWS_SCHEMA_MESSAGE);
+    else if (viewsQuery.isError) setSchemaMessage(VIEWS_UNAVAILABLE_MESSAGE);
     else if (viewsQuery.data?.schema_ready) setSchemaMessage(null);
-  }, [viewsQuery.data]);
+  }, [viewsQuery.data, viewsQuery.isError]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

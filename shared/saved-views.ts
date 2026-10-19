@@ -6,7 +6,12 @@
 import { changedKeys } from "./change-log";
 
 export const SAVED_VIEWS_SCHEMA_MESSAGE = "Saved views need a database update";
+export const VIEWS_UNAVAILABLE_MESSAGE = "Views unavailable";
+export const VIEW_NAME_UNDO_CONFLICT = "A view with that name already exists. Rename it first.";
 export const INACTIVE_NOTE_MESSAGE = "inactive – left alone";
+
+/** car_lists columns that reject NULL. An undo before-value for one of these must be the previous value. */
+export const CAR_LIST_NOT_NULL = ["name", "shared", "created_at", "kind", "layout", "pinned", "updated_at"] as const;
 export const VIEW_MEMBER_CAP = 2000;
 export const VIEW_PIN_CAP = 12;
 
@@ -182,7 +187,7 @@ export function isFocusColumn(key: string): key is FocusColumnKey {
 }
 
 export function layoutNeedsFocus(keys: Iterable<string>): boolean {
-  for (const key of keys) {
+  for (const key of Array.from(keys)) {
     if (isFocusColumn(key) || key === "am_note") return true;
   }
   return false;
@@ -473,6 +478,72 @@ export function viewCreateSnapshots(row: Record<string, unknown>, hiddenAt: stri
 
 export function viewDeleteSnapshots(hiddenAt: string): { before: Record<string, unknown>; after: Record<string, unknown> } {
   return { before: { deleted_at: null }, after: { deleted_at: hiddenAt } };
+}
+
+/**
+ * Before-image for a view PATCH. Every key in the patch is copied from the
+ * current row, including updated_at and updated_by. Leaving a key out makes
+ * changedKeys store null, and Undo then writes NULL.
+ */
+export function snapshotBeforePatch(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const before: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) {
+    before[key] = Object.prototype.hasOwnProperty.call(current, key) ? (current[key] ?? null) : null;
+  }
+  return before;
+}
+
+/** Assign every patch key, including JSON null, the way rlms_apply_jsonb_patch does. */
+export function applyJsonbPatch(
+  row: Record<string, unknown>,
+  patch: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const next = { ...row };
+  for (const key of Object.keys(patch ?? {})) next[key] = patch?.[key] ?? null;
+  return next;
+}
+
+/** Selected add/remove skips inactive cars. Creating from a paste does not use this. */
+export function idsWithoutInactive(ids: number[], inactive: ReadonlySet<number>): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const id of ids) {
+    if (!Number.isFinite(id) || id <= 0 || inactive.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/** Unique violation when Undo restores a soft-deleted view whose name is already live. */
+export function viewUndoNameConflict(error: unknown): string | null {
+  const row = error as { code?: string; message?: string; details?: string; hint?: string } | null;
+  const text = [
+    row?.message,
+    row?.details,
+    row?.hint,
+    error instanceof Error ? error.message : "",
+  ].filter(Boolean).join(" ");
+  const code = String(row?.code ?? "");
+  const unique = code === "23505" || /\b23505\b/.test(text);
+  if (!unique || !/car_lists_name_live_uq/i.test(text)) return null;
+  return VIEW_NAME_UNDO_CONFLICT;
+}
+
+/** Probe failure: a missing column is the migration gap; anything else is a short outage. */
+export function schemaProbeResult(error: unknown | null | undefined): {
+  ready: boolean;
+  unavailable: boolean;
+  message: string;
+} {
+  if (!error) return { ready: true, unavailable: false, message: "" };
+  if (isMissingViewSchema(error)) {
+    return { ready: false, unavailable: false, message: SAVED_VIEWS_SCHEMA_MESSAGE };
+  }
+  return { ready: false, unavailable: true, message: VIEWS_UNAVAILABLE_MESSAGE };
 }
 
 export function memberRemoveSnapshots(hiddenAt: string): { before: Record<string, unknown>; after: Record<string, unknown> } {

@@ -2,7 +2,7 @@
 /** Run: npx tsx server/undo.test.ts */
 
 import { currentMatchesAfter, finalizeUndoPreview, isUndoAllowedTable, nonUndoableMessage, opOf, referencedSinceBlocksUndo } from "@shared/undo";
-import { memberReaddSnapshots, memberRemoveSnapshots, persistableChange, viewCreateSnapshots, viewDeleteSnapshots } from "@shared/saved-views";
+import { CAR_LIST_NOT_NULL, applyJsonbPatch, memberReaddSnapshots, memberRemoveSnapshots, persistableChange, snapshotBeforePatch, viewCreateSnapshots, viewDeleteSnapshots } from "@shared/saved-views";
 
 let passed = 0;
 let failed = 0;
@@ -53,10 +53,37 @@ ok(createdChange.op === "update" && createdChange.before.deleted_at === "2026-10
 ok(!("name" in createdChange.before) && !("kind" in createdChange.before), "undo create does not null name or kind");
 ok(opOf({ id: 1, change_group: "g", table_name: "car_lists", row_pk: 4, before: createdChange.before, after: createdChange.after, detail: { op: "update" } }) === "update", "undo harness treats view create as update");
 
-const renamed = persistableChange({ name: "Old" }, { name: "J312 tub gons" });
-ok(renamed.op === "update" && renamed.before.name === "Old" && renamed.after.name === "J312 tub gons", "undo rename restores the previous name");
-const layout = persistableChange({ layout: { order: ["marks"] } }, { layout: { order: ["marks", "program_status"] } });
-ok(layout.op === "update" && JSON.stringify(layout.before.layout) !== JSON.stringify(layout.after.layout), "undo layout save restores the previous layout");
+const viewRow: Record<string, unknown> = {
+  name: "Old",
+  kind: "fixed",
+  shared: true,
+  layout: { order: ["marks"] },
+  pinned: false,
+  created_at: "2026-10-19T12:00:00.000Z",
+  updated_at: "2026-10-19T13:00:00.000Z",
+  updated_by: "user-0",
+};
+const notNull = new Set<string>(CAR_LIST_NOT_NULL);
+function runUndo(label: string, patch: Record<string, unknown>) {
+  const before = snapshotBeforePatch(viewRow, patch);
+  const change = persistableChange(before, patch);
+  ok(change.op === "update", `${label} is an update`);
+  for (const key of Object.keys(change.before)) {
+    if (notNull.has(key)) ok(change.before[key] != null, `${label} before.${key} is not null`);
+  }
+  const saved = { ...viewRow, ...patch };
+  const undone = applyJsonbPatch(saved, change.before);
+  ok(currentMatchesAfter(saved, change.after), `${label} after matches the row Undo will read`);
+  return undone;
+}
+const renamed = runUndo("undo rename", { updated_at: "2026-10-19T14:00:00.000Z", updated_by: "user-1", name: "J312 tub gons" });
+ok(renamed.name === "Old" && renamed.updated_by === "user-0", "undo rename restores the previous name and updated_by");
+const layout = runUndo("undo layout save", {
+  updated_at: "2026-10-19T14:00:00.000Z",
+  updated_by: "user-1",
+  layout: { order: ["marks", "program_status"] },
+});
+ok(JSON.stringify(layout.layout) === JSON.stringify(viewRow.layout), "undo layout save restores the previous layout");
 
 const removed = memberRemoveSnapshots("2026-10-19T13:05:00.000Z");
 const removedChange = persistableChange(removed.before, removed.after);

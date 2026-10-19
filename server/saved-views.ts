@@ -4,17 +4,21 @@ import { splitCarNumber } from "@shared/residco-import";
 import {
   INACTIVE_NOTE_MESSAGE,
   SAVED_VIEWS_SCHEMA_MESSAGE,
+  VIEWS_UNAVAILABLE_MESSAGE,
   VIEW_MEMBER_CAP,
   VIEW_PIN_CAP,
   canonicalViewName,
   countCacheKey,
   formatEtTime,
   isMissingViewSchema,
+  idsWithoutInactive,
   memberNoteAllowed,
   memberReaddSnapshots,
   memberRemoveSnapshots,
   parseViewLayout,
   parseViewQuery,
+  schemaProbeResult,
+  snapshotBeforePatch,
   viewCreateSnapshots,
   viewDeleteSnapshots,
   viewNameKey,
@@ -50,7 +54,7 @@ type ViewRow = {
 type Actor = { id: string; role: string };
 
 const SCHEMA_TTL_MS = 15_000;
-let schemaCache: { at: number; ready: boolean } | null = null;
+let schemaCache: { at: number; ready: boolean; unavailable: boolean } | null = null;
 const countCache = new Map<string, { at: number; value: ViewCount }>();
 const COUNT_TTL_MS = 60_000;
 const nameCache = new Map<string, string>();
@@ -69,13 +73,24 @@ function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
 }
 
+function rememberSchema(error: unknown | null) {
+  const probe = schemaProbeResult(error);
+  schemaCache = { at: Date.now(), ready: probe.ready, unavailable: probe.unavailable };
+  return probe;
+}
+
+function notReadyMessage(): string {
+  return schemaCache?.unavailable ? VIEWS_UNAVAILABLE_MESSAGE : SAVED_VIEWS_SCHEMA_MESSAGE;
+}
+
 export async function savedViewsSchemaReady(): Promise<boolean> {
   if (schemaCache && Date.now() - schemaCache.at < SCHEMA_TTL_MS) return schemaCache.ready;
-  const { error } = await supabaseAdmin.from("car_lists").select("id, kind, deleted_at").limit(1);
-  const ready = !error || !isMissingViewSchema(error);
-  if (error && !isMissingViewSchema(error)) throw error;
-  schemaCache = { at: Date.now(), ready };
-  return ready;
+  try {
+    const { error } = await supabaseAdmin.from("car_lists").select("id, kind, deleted_at").limit(1);
+    return rememberSchema(error ?? null).ready;
+  } catch (error) {
+    return rememberSchema(error).ready;
+  }
 }
 
 async function displayName(userId: string | null | undefined): Promise<string> {
@@ -101,7 +116,7 @@ async function displayName(userId: string | null | undefined): Promise<string> {
 }
 
 async function nameMap(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  const unique = Array.from(new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean)));
   await Promise.all(unique.map((id) => displayName(id)));
   const out = new Map<string, string>();
   for (const id of unique) out.set(id, nameCache.get(id) ?? id);
@@ -141,7 +156,7 @@ function asView(row: Record<string, unknown>): ViewRow {
 }
 
 async function assertSchema() {
-  if (!(await savedViewsSchemaReady())) throw httpError(503, SAVED_VIEWS_SCHEMA_MESSAGE);
+  if (!(await savedViewsSchemaReady())) throw httpError(503, notReadyMessage());
 }
 
 async function loadRow(id: number): Promise<ViewRow | null> {
@@ -249,7 +264,7 @@ function summary(view: ViewRow, names: Map<string, string>, memberCount: number 
 
 export async function listSavedViews(actor: Actor) {
   if (!(await savedViewsSchemaReady())) {
-    return { schema_ready: false as const, message: SAVED_VIEWS_SCHEMA_MESSAGE, views: [] as ReturnType<typeof summary>[] };
+    return { schema_ready: false as const, message: notReadyMessage(), views: [] as ReturnType<typeof summary>[] };
   }
   const { data, error } = await supabaseAdmin
     .from("car_lists")
@@ -258,11 +273,8 @@ export async function listSavedViews(actor: Actor) {
     .or(`shared.eq.true,owner.eq.${actor.id}`)
     .order("created_at", { ascending: false });
   if (error) {
-    if (isMissingViewSchema(error)) {
-      schemaCache = { at: Date.now(), ready: false };
-      return { schema_ready: false as const, message: SAVED_VIEWS_SCHEMA_MESSAGE, views: [] };
-    }
-    throw error;
+    const probe = rememberSchema(error);
+    return { schema_ready: false as const, message: probe.message, views: [] };
   }
   const views = (data ?? []).map((row) => asView(row as Record<string, unknown>)).filter((view) => canRead(view, actor));
   const fixedIds = views.filter((view) => view.kind === "fixed").map((view) => view.id);
@@ -381,7 +393,8 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
       ambiguous: paste.ambiguous,
     };
   }
-  railcarIds = [...new Set(railcarIds)].slice(0, VIEW_MEMBER_CAP);
+  // A paste create keeps inactive cars. Graymont is 29 active plus 406 and 416.
+  railcarIds = Array.from(new Set(railcarIds)).slice(0, VIEW_MEMBER_CAP);
   if (railcarIds.length > VIEW_MEMBER_CAP) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
   const pinned = body.pinned !== false;
   const hiddenAt = new Date().toISOString();
@@ -468,11 +481,7 @@ export async function patchSavedView(id: number, actor: Actor, body: Record<stri
   if (body.shared != null) patch.shared = body.shared !== false;
   if (body.pinned != null) patch.pinned = body.pinned === true;
   if (body.pin_order != null) patch.pin_order = Number(body.pin_order);
-  const before: Record<string, unknown> = {};
-  for (const key of Object.keys(patch)) {
-    if (key === "updated_at" || key === "updated_by") continue;
-    before[key] = (view as unknown as Record<string, unknown>)[key] ?? null;
-  }
+  const before = snapshotBeforePatch(view as unknown as Record<string, unknown>, patch);
   const result = await withChangeGroupResult(actor.id, async () => {
     const { data, error } = await supabaseAdmin.from("car_lists").update(patch).eq("id", id).select("*").single();
     if (error) {
@@ -528,6 +537,35 @@ export async function deleteSavedView(id: number, actor: Actor) {
     clearViewCountCache();
     return { id, deleted_at: hiddenAt };
   });
+}
+
+async function recordListStamp(view: ViewRow, actor: Actor) {
+  const next = stamp(actor.id);
+  const { error } = await supabaseAdmin.from("car_lists").update(next).eq("id", view.id);
+  if (error) throw error;
+  await recordListChange({
+    id: view.id,
+    before: { updated_at: view.updated_at, updated_by: view.updated_by },
+    after: next,
+    action: "view_update",
+    actor: actor.id,
+  });
+}
+
+/** Selected ids only. Inactive cars stay in the view and are not added from a checkbox. */
+async function withoutInactive(ids: number[]): Promise<number[]> {
+  const unique = Array.from(new Set(ids.filter((id) => id > 0)));
+  if (!unique.length) return [];
+  const inactive = new Set<number>();
+  for (let i = 0; i < unique.length; i += 200) {
+    const slice = unique.slice(i, i + 200);
+    const { data, error } = await supabaseAdmin.from("railcars").select("id, active").in("id", slice);
+    if (error) throw error;
+    for (const car of data ?? []) {
+      if (car.active === false) inactive.add(Number(car.id));
+    }
+  }
+  return idsWithoutInactive(unique, inactive);
 }
 
 async function addMemberIds(listId: number, actor: Actor, ids: number[]) {
@@ -590,16 +628,15 @@ export async function addViewMembers(id: number, actor: Actor, body: Record<stri
   if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
   if (view.kind !== "fixed") throw httpError(400, "Only a fixed list can take cars");
   if (viewWriteStatus({ role: actor.role, action: "members" })) throw httpError(403, "Forbidden");
-  let ids = Array.isArray(body.ids) ? body.ids.map(Number).filter((n) => n > 0) : [];
+  let ids = Array.isArray(body.ids) ? await withoutInactive(body.ids.map(Number)) : [];
   let paste: Awaited<ReturnType<typeof matchPaste>> | null = null;
   if (typeof body.text === "string" && body.text.trim()) {
     paste = await matchPaste(body.text);
-    ids = [...ids, ...paste.ids];
+    ids = Array.from(new Set([...ids, ...paste.ids]));
   }
-  ids = [...new Set(ids)];
   const result = await withChangeGroupResult(actor.id, async () => {
     const added = await addMemberIds(id, actor, ids);
-    await supabaseAdmin.from("car_lists").update(stamp(actor.id)).eq("id", id);
+    await recordListStamp(view, actor);
     clearViewCountCache();
     return { added, paste };
   });
@@ -611,7 +648,7 @@ export async function removeViewMembers(id: number, actor: Actor, ids: number[])
   if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
   if (view.kind !== "fixed") throw httpError(400, "Only a fixed list has cars to remove");
   if (viewWriteStatus({ role: actor.role, action: "members" })) throw httpError(403, "Forbidden");
-  const unique = [...new Set(ids.filter((n) => n > 0))];
+  const unique = await withoutInactive(ids);
   const hiddenAt = new Date().toISOString();
   return withChangeGroupResult(actor.id, async () => {
     const { data, error } = await supabaseAdmin
@@ -635,7 +672,7 @@ export async function removeViewMembers(id: number, actor: Actor, ids: number[])
         actor: actor.id,
       });
     }
-    await supabaseAdmin.from("car_lists").update(stamp(actor.id)).eq("id", id);
+    await recordListStamp(view, actor);
     clearViewCountCache();
     return { removed: (data ?? []).length };
   });
@@ -678,7 +715,7 @@ export async function patchMemberNote(id: number, railcarId: number, actor: Acto
 
 export async function orderPins(actor: Actor, order: number[]) {
   if (viewWriteStatus({ role: actor.role, action: "pin" })) throw httpError(403, "Forbidden");
-  const ids = [...new Set(order.map(Number).filter((id) => id > 0))].slice(0, VIEW_PIN_CAP);
+  const ids = Array.from(new Set(order.map(Number).filter((id) => id > 0))).slice(0, VIEW_PIN_CAP);
   if (order.length > VIEW_PIN_CAP) throw httpError(400, `Pin at most ${VIEW_PIN_CAP} views`);
   await assertSchema();
   const { data, error } = await supabaseAdmin.from("car_lists").select("id, pinned, pin_order").is("deleted_at", null).eq("pinned", true);
@@ -789,9 +826,9 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | null> {
 
 export async function countSavedViews(ids: number[], actor: Actor) {
   if (!(await savedViewsSchemaReady())) {
-    return { schema_ready: false as const, counts: {} as Record<string, ViewCount | null> };
+    return { schema_ready: false as const, message: notReadyMessage(), counts: {} as Record<string, ViewCount | null> };
   }
-  const unique = [...new Set(ids.map(Number).filter((id) => id > 0))].slice(0, 12);
+  const unique = Array.from(new Set(ids.map(Number).filter((id) => id > 0))).slice(0, 12);
   const started = Date.now();
   let cold = 0;
   let cached = 0;
@@ -819,7 +856,7 @@ export async function countSavedViews(ids: number[], actor: Actor) {
 }
 
 export async function nameAvailable(name: string, exceptId?: number) {
-  if (!(await savedViewsSchemaReady())) return { schema_ready: false, available: false, message: SAVED_VIEWS_SCHEMA_MESSAGE };
+  if (!(await savedViewsSchemaReady())) return { schema_ready: false, available: false, message: notReadyMessage() };
   const canonical = canonicalViewName(name);
   if (!canonical) return { schema_ready: true, available: false };
   const names = await liveNames(exceptId);
@@ -834,7 +871,7 @@ function has(raw: Record<string, unknown>, key: string) {
 export async function applyViewToParams(params: RailcarListParams, raw: Record<string, unknown>): Promise<RailcarListParams> {
   const viewId = Number(raw.view_id);
   if (!Number.isFinite(viewId) || viewId <= 0) return params;
-  if (!(await savedViewsSchemaReady())) throw httpError(503, SAVED_VIEWS_SCHEMA_MESSAGE);
+  if (!(await savedViewsSchemaReady())) throw httpError(503, notReadyMessage());
   const { data, error } = await supabaseAdmin.from("car_lists").select("*").eq("id", viewId).maybeSingle();
   if (error) {
     if (isMissingViewSchema(error)) throw httpError(503, SAVED_VIEWS_SCHEMA_MESSAGE);
@@ -877,7 +914,7 @@ function sendError(res: Response, error: unknown) {
   const status = Number((error as { status?: number })?.status) || 500;
   const message = error instanceof Error ? error.message : SAVED_VIEWS_SCHEMA_MESSAGE;
   if (isMissingViewSchema(error)) {
-    schemaCache = { at: Date.now(), ready: false };
+    schemaCache = { at: Date.now(), ready: false, unavailable: false };
     res.status(503).json({ schema_ready: false, message: SAVED_VIEWS_SCHEMA_MESSAGE });
     return;
   }

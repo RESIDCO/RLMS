@@ -48,7 +48,7 @@ export function ColumnPicker({
   const toggleable = columns.filter((c) => !c.pinned);
   const movableKeys = toggleable.map((c) => c.key);
   function nudge(key: string, delta: number) {
-    const base = onReorder ? [...shown].filter((item) => item !== "_actions") : (prefs.colOrder.length ? prefs.colOrder : movableKeys);
+    const base = onReorder ? Array.from(shown).filter((item) => item !== "_actions") : (prefs.colOrder.length ? prefs.colOrder : movableKeys);
     const index = base.indexOf(key);
     const target = base[Math.max(0, Math.min(base.length - 1, (index < 0 ? 0 : index) + delta))] ?? key;
     const next = moveCol(base, key, target);

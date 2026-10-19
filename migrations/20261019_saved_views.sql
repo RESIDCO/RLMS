@@ -31,6 +31,10 @@ COMMIT;
 -- RLS stays enabled with no policies (server-only access via service role). No grant changes here.
 
 -- Rollback (do not run with the statements above):
+-- 1. Dropping deleted_at brings back every soft-deleted view, and dropping removed_at brings back every removed member.
+-- 2. Re-applying forward after a rollback fails if two live views now share a name
+--    (could not create unique index "car_lists_name_live_uq"). The forward migration is transactional, so it fails atomically.
+-- 3. Undo of any change group recorded against the dropped columns fails after rollback (the column doesn't exist).
 -- BEGIN;
 -- DROP INDEX IF EXISTS public.idx_car_list_members_live, public.idx_car_list_members_railcar,
 --                      public.idx_car_lists_pinned, public.car_lists_name_live_uq;

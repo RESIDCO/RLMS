@@ -90,7 +90,7 @@ async function loadOpenPrograms(ids: number[]): Promise<(ProgramJoinRow & { rail
       exited_date: string | null;
     }[];
   });
-  const programIds = [...new Set(cars.map((row) => Number(row.program_id)).filter((id) => id > 0))];
+  const programIds = Array.from(new Set(cars.map((row) => Number(row.program_id)).filter((id) => id > 0)));
   const names = new Map<number, string>();
   for (const slice of chunks(programIds, 200)) {
     const { data, error } = await supabaseAdmin.from("programs").select("id, name").in("id", slice);
@@ -118,7 +118,7 @@ export async function attachFocusColumns<T extends { id: number; notes?: string 
   opts?: { viewId?: number | null },
 ): Promise<(T & FocusFields)[]> {
   if (!rows.length) return [];
-  const ids = [...new Set(rows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0))];
+  const ids = Array.from(new Set(rows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0)));
   const started = Date.now();
   const [stops, programs, notes, tags, viewNotes] = await Promise.all([
     inBatches<OpenStopRow & { railcar_id: number }>(ids, async (slice) => {

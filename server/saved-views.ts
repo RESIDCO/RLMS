@@ -12,6 +12,7 @@ import {
   canonicalViewName,
   countCacheKey,
   createSkipsPasteMatch,
+  filterSuppliedRailcars,
   formatEtTime,
   isMissingViewSchema,
   idsWithoutInactive,
@@ -21,6 +22,7 @@ import {
   memberRemoveSnapshots,
   parseViewLayout,
   parseViewQuery,
+  positiveIds,
   schemaProbeResult,
   snapshotBeforePatch,
   viewCreateSnapshots,
@@ -386,6 +388,43 @@ function stamp(actor: string) {
   return { updated_at: new Date().toISOString(), updated_by: actor };
 }
 
+function mergeUnmatched(existing: string[] | undefined, extra: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const token of [...(existing ?? []), ...extra]) {
+    const value = String(token).trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+    if (out.length >= 500) break;
+  }
+  return out;
+}
+
+/** One railcars read per 200 ids. Extra chunks run at the same time. */
+async function loadSuppliedCars(ids: number[]) {
+  const chunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += VIEW_MEMBER_WRITE_BATCH) {
+    chunks.push(ids.slice(i, i + VIEW_MEMBER_WRITE_BATCH));
+  }
+  const batches = await Promise.all(
+    chunks.map(async (slice) => {
+      const { data, error } = await supabaseAdmin
+        .from("railcars")
+        .select("id, active, reporting_marks, car_number")
+        .in("id", slice);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        id: Number(row.id),
+        active: row.active == null ? null : row.active !== false,
+        reporting_marks: row.reporting_marks == null ? null : String(row.reporting_marks),
+        car_number: row.car_number == null ? null : String(row.car_number),
+      }));
+    }),
+  );
+  return batches.flat();
+}
+
 export async function createSavedView(actor: Actor, body: Record<string, unknown>) {
   const started = Date.now();
   let memberCount = 0;
@@ -404,13 +443,19 @@ export async function createSavedView(actor: Actor, body: Record<string, unknown
   let paste: Awaited<ReturnType<typeof matchPaste>> | null = null;
   const text = typeof body.text === "string" ? body.text.trim() : "";
   if (kind === "fixed" && createSkipsPasteMatch(body)) {
-    query = { ...query, source: "paste", q: query.q || text };
+    const requested = positiveIds(body.railcar_ids).slice(0, VIEW_MEMBER_CAP);
+    const pasteText = query.q.trim() || text;
+    const found = await loadSuppliedCars(requested);
+    const filtered = filterSuppliedRailcars({ requestedIds: requested, cars: found, pasteText });
+    railcarIds = filtered.ids;
+    const unmatched = mergeUnmatched(query.unmatched, filtered.unmatched);
+    query = { ...query, source: "paste", q: query.q || text, unmatched };
     paste = {
       ids: railcarIds,
-      inactiveIds: [],
-      notFound: query.unmatched ?? [],
+      inactiveIds: filtered.inactiveIds,
+      notFound: unmatched,
       ambiguous: query.ambiguous ?? [],
-      pasted: text ? text.split(/\s+/).length : railcarIds.length,
+      pasted: pasteText ? pasteText.split(/\s+/).length : railcarIds.length,
     };
   } else if (kind === "fixed" && text) {
     paste = await matchPaste(text);

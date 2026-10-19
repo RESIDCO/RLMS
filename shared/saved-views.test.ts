@@ -18,6 +18,7 @@ import {
   applyJsonbPatch,
   countCacheKey,
   createSkipsPasteMatch,
+  filterSuppliedRailcars,
   partitionSavedViews,
   pasteMemberIds,
   daysStopped,
@@ -287,9 +288,84 @@ ok(createSkipsPasteMatch({ railcar_ids: members, text: "TFOX 401" }), "railcar i
 ok(!createSkipsPasteMatch({ text: "TFOX 401" }), "text alone still matches on the server");
 const smallCreate = viewCreateRoundTrips(31);
 const largeCreate = viewCreateRoundTrips(500);
-ok(smallCreate.total === 4 && smallCreate.memberActivityInserts === 1 && smallCreate.memberInserts === 1, "31 cars are four database writes");
-ok(largeCreate.total === 8 && largeCreate.memberActivityInserts === 3 && largeCreate.total < 20, "500 cars stay under a handful of writes");
+ok(smallCreate.total === 5 && smallCreate.idLookups === 1 && smallCreate.memberActivityInserts === 1 && smallCreate.memberInserts === 1, "31 cars are five database calls");
+ok(largeCreate.total === 11 && largeCreate.idLookups === 3 && largeCreate.memberActivityInserts === 3 && largeCreate.total < 20, "500 cars stay under a handful of writes");
+ok(viewCreateRoundTrips(200).idLookups === 1 && viewCreateRoundTrips(201).idLookups === 2, "id lookups are one query per 200 cars");
 ok(smallCreate.total !== 31 && largeCreate.memberActivityInserts !== 500, "creates are not one write per car");
+
+const probeA = filterSuppliedRailcars({
+  requestedIds: [1, 37123],
+  cars: [{ id: 37123, active: true, reporting_marks: "TFOX", car_number: "000401" }],
+  pasteText: "",
+});
+ok(probeA.ids.join(",") === "37123" && probeA.unmatched.join(",") === "1" && probeA.inactiveIds.length === 0, "probe A drops an unknown id into unmatched and keeps the car that exists");
+
+const probeB = filterSuppliedRailcars({
+  requestedIds: [29315, 29345],
+  cars: [
+    { id: 29315, active: true, reporting_marks: "TFOX", car_number: "000401" },
+    { id: 29345, active: false, reporting_marks: "TFOX", car_number: "000412" },
+  ],
+  pasteText: "TFOX 401",
+});
+ok(probeB.ids.join(",") === "29315" && probeB.inactiveIds.length === 0 && probeB.unmatched.length === 0, "probe B keeps pasted TFOX 401 and drops inactive TFOX 412");
+
+const probeCCars = Array.from({ length: 50 }, (_, index) => ({
+  id: 8000 + index,
+  active: index % 50 !== 0,
+  reporting_marks: "TEST",
+  car_number: String(index + 1).padStart(6, "0"),
+}));
+const probeC = filterSuppliedRailcars({
+  requestedIds: probeCCars.map((car) => car.id),
+  cars: probeCCars,
+  pasteText: "TFOX 401",
+});
+ok(probeC.ids.length === 49 && !probeC.ids.includes(8000) && probeC.inactiveIds.length === 0, "probe C drops an inactive car the paste does not name and keeps the active cars");
+ok(probeC.unmatched.length === 0, "probe C does not report a real car as unknown");
+
+const graymontPaste = `${GRAYMONT_MARKS} ${GRAYMONT_NUMBERS.join(", ")}`;
+const graymontSupplied = GRAYMONT_NUMBERS.map((number, index) => ({
+  id: 29000 + index,
+  active: !(GRAYMONT_INACTIVE_NUMBERS as readonly string[]).includes(number),
+  reporting_marks: GRAYMONT_MARKS,
+  car_number: number.padStart(6, "0"),
+}));
+const graymontKept = filterSuppliedRailcars({
+  requestedIds: graymontSupplied.map((car) => car.id),
+  cars: graymontSupplied,
+  pasteText: graymontPaste,
+});
+const graymont406 = graymontSupplied.find((car) => car.car_number === "000406");
+const graymont416 = graymontSupplied.find((car) => car.car_number === "000416");
+if (!graymont406 || !graymont416) throw new Error("Graymont 406 and 416 are missing from the supplied list");
+ok(
+  graymontKept.ids.length === 31 && graymontKept.inactiveIds.includes(graymont406.id) && graymontKept.inactiveIds.includes(graymont416.id),
+  "Graymont's inactive 406 and 416 are kept when they were pasted",
+);
+const paddedPaste = filterSuppliedRailcars({
+  requestedIds: [graymont406.id],
+  cars: [{ ...graymont406, car_number: "406" }],
+  pasteText: "TFOX 000406",
+});
+const storedPad = filterSuppliedRailcars({
+  requestedIds: [graymont416.id],
+  cars: [graymont416],
+  pasteText: "TFOX 416",
+});
+ok(paddedPaste.inactiveIds.join(",") === String(graymont406.id) && storedPad.inactiveIds.join(",") === String(graymont416.id), "leading zeros still match a pasted inactive car");
+const rangeKept = filterSuppliedRailcars({
+  requestedIds: [graymont406.id, graymont416.id],
+  cars: [graymont406, graymont416],
+  pasteText: "TFOX 401-449",
+});
+ok(rangeKept.inactiveIds.includes(graymont406.id) && rangeKept.inactiveIds.includes(graymont416.id), "a pasted range keeps inactive 406 and 416");
+const noPaste = filterSuppliedRailcars({
+  requestedIds: [graymont406.id, 29315],
+  cars: [graymont406, { id: 29315, active: true, reporting_marks: "TFOX", car_number: "000401" }],
+  pasteText: "",
+});
+ok(noPaste.ids.join(",") === "29315" && noPaste.inactiveIds.length === 0, "with no paste, only active cars are kept");
 
 const pinnedShared = { id: 2, name: "Graymont PD", pinned: true, shared: true, owner: "bruce" };
 const privateMine = { id: 3, name: "Mine", pinned: false, shared: false, owner: "bruce" };

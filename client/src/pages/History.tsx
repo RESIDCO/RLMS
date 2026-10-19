@@ -13,6 +13,7 @@ import { FleetMembershipBadge, FleetAwareStatusBadge } from "@/components/Inacti
 import { displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 import { cn } from "@/lib/utils";
+import { BackToSearch } from "@/components/BackToSearch";
 
 type ResolvedCar = {
   id: number;
@@ -101,6 +102,7 @@ export default function HistoryPage() {
       />
 
       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4 overflow-auto">
+        <BackToSearch />
         <ClearableSearchInput
           className="flex-none w-full max-w-md"
           placeholder="Search car number, mark+number, or OL / rider…"

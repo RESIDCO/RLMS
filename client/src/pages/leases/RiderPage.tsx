@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
 import { todayIsoDateOnly } from "@shared/lease-authority";
 import { ArrowLeft } from "lucide-react";
+import { BackToSearch } from "@/components/BackToSearch";
 import { useCanEdit } from "@/lib/AuthContext";
 
 export default function RiderPage() {
@@ -112,7 +113,10 @@ export default function RiderPage() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-8">
+      <div className="px-4 pt-4 sm:px-8">
+        <BackToSearch />
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 sm:px-8">
         <Breadcrumb data-testid="ol-breadcrumb">
           <BreadcrumbList>
             <BreadcrumbItem>

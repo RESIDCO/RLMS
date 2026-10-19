@@ -11,6 +11,8 @@ import {
   parseSearchScope,
   railcarIdsForSearchMatches,
   railcarSearchTokens,
+  resolveFleetMatch,
+  type FleetMatchReport,
   type SearchScope,
 } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
@@ -21,7 +23,7 @@ const CAR_LIMIT = 500;
 const SIDE_LIMIT = 100;
 
 const SEARCH_CAR_SELECT = `
-id, car_number, reporting_marks, car_type, equipment_type_code, status, fleet_status, entity, active, mechanical_designation,
+id, car_number, reporting_marks, car_type, equipment_type_code, aar_designation, status, fleet_status, entity, active, mechanical_designation,
 general_description, lessee_name, rider_external_id, assignment_label, managed_category, lease_type, comment_event_note,
 assignment:railcar_assignments(
   id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at,
@@ -32,6 +34,18 @@ assignment:railcar_assignments(
 )
 `.replace(/\s+/g, " ").trim();
 
+export type InactiveMatch = {
+  id: number;
+  reporting_marks: string | null;
+  car_number: string | null;
+  status: string | null;
+};
+
+export type AmbiguousMatch = {
+  token: string;
+  matches: { id: number; label: string }[];
+};
+
 export type GlobalSearchResult = {
   query: string;
   terms: string[];
@@ -39,8 +53,34 @@ export type GlobalSearchResult = {
   riders: any[];
   leases: any[];
   not_found: string[];
-  counts: { railcars: number; riders: number; leases: number; total: number };
+  inactive_matches: InactiveMatch[];
+  ambiguous: AmbiguousMatch[];
+  truncated: boolean;
+  match: FleetMatchReport | null;
+  counts: {
+    railcars: number;
+    riders: number;
+    leases: number;
+    total: number;
+    pasted: number;
+    inactive: number;
+    ambiguous: number;
+    not_found: number;
+  };
 };
+
+function emptyCounts(railcars = 0, riders = 0, leases = 0) {
+  return {
+    railcars,
+    riders,
+    leases,
+    total: railcars + riders + leases,
+    pasted: 0,
+    inactive: 0,
+    ambiguous: 0,
+    not_found: 0,
+  };
+}
 
 function mapCar(r: any) {
   const assignment = asOne(r.assignment);
@@ -208,6 +248,7 @@ async function fetchCarsByIds(ids: number[], active?: string): Promise<any[]> {
 }
 
 async function runCarListSearch(raw: string, tokens: string[], active?: string): Promise<GlobalSearchResult> {
+  const truncated = tokens.length > CAR_LIMIT;
   const capped = tokens.slice(0, CAR_LIMIT);
   const resolved = await timed("railcars-paste-resolve", () =>
     resolveProgramCars({ text: capped.join("\n") }),
@@ -220,19 +261,34 @@ async function runCarListSearch(raw: string, tokens: string[], active?: string):
     orderedIds.push(id);
   };
   for (const m of resolved.matched) pushId(m.railcar_id);
-  // Bare numbers may match several marks — keep them all. Mark-scoped tokens must not fan out.
+  // Bare numbers may match several marks — keep them all. Mark-scoped tokens are ambiguous, not missing.
   for (const a of resolved.ambiguous) {
     if (splitCarNumber(a.token).reporting_marks) continue;
     for (const m of a.matches) pushId(m.railcar_id);
   }
-  const railcars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds, active));
+  const ambiguous: AmbiguousMatch[] = resolved.ambiguous
+    .filter((a) => Boolean(splitCarNumber(a.token).reporting_marks))
+    .map((a) => ({
+      token: a.token,
+      matches: a.matches.map((m) => ({ id: m.railcar_id, label: m.label })),
+    }));
+  const not_found = resolved.not_found.map((n) => n.token);
+  const allCars = await timed("railcars-paste-hydrate", () => fetchCarsByIds(orderedIds, "all"));
+  const want = !active || active === "active" ? "active" : active;
+  const railcars = allCars.filter((c) => {
+    if (want === "all") return true;
+    if (want === "inactive") return c.active === false;
+    return c.active !== false;
+  });
+  const inactive_matches: InactiveMatch[] = allCars
+    .filter((c) => c.active === false)
+    .map((c) => ({
+      id: Number(c.id),
+      reporting_marks: c.reporting_marks ?? null,
+      car_number: c.car_number ?? null,
+      status: c.fleet_status ?? c.status ?? null,
+    }));
   const railcarsWithNotes = await attachLatestAmNotes(railcars);
-  const not_found = [
-    ...resolved.not_found.map((n) => n.token),
-    ...resolved.ambiguous
-      .filter((a) => Boolean(splitCarNumber(a.token).reporting_marks))
-      .map((a) => a.token),
-  ];
   return {
     query: raw,
     terms: capped,
@@ -240,11 +296,19 @@ async function runCarListSearch(raw: string, tokens: string[], active?: string):
     riders: [],
     leases: [],
     not_found,
+    inactive_matches,
+    ambiguous,
+    truncated,
+    match: null,
     counts: {
-      railcars: railcars.length,
+      railcars: railcarsWithNotes.length,
       riders: 0,
       leases: 0,
-      total: railcars.length,
+      total: railcarsWithNotes.length,
+      pasted: tokens.length,
+      inactive: inactive_matches.length,
+      ambiguous: ambiguous.length,
+      not_found: not_found.length,
     },
   };
 }
@@ -267,6 +331,34 @@ export async function runGlobalSearch(
 
   const groups = raw.split(/[\n\r,;]+/).map((g) => g.trim()).filter(Boolean);
   const terms = groups.flatMap((g) => g.split(/\s+/).filter(Boolean));
+  const fleet = groups.length === 1 ? await resolveFleetMatch(groups[0]) : { orClause: null, match: null };
+
+  if (fleet.orClause) {
+    const cars = await timed("railcars-fleet-code", async () => {
+      let q = supabaseAdmin.from("railcars").select(SEARCH_CAR_SELECT).or(fleet.orClause!);
+      q = applyActiveFilter(q, active);
+      const { data, error } = await q.order("car_number", { ascending: true }).limit(CAR_LIMIT);
+      if (error) throw error;
+      return (data ?? []).map(mapCar);
+    });
+    const carsOut = await attachLatestAmNotes(cars);
+    console.log(
+      `[search] total ${Date.now() - tAll}ms q=${JSON.stringify(raw)} fleet=${fleet.match?.kind ?? ""} cars=${carsOut.length}`,
+    );
+    return {
+      query: raw,
+      terms,
+      railcars: carsOut,
+      riders: [],
+      leases: [],
+      not_found: [],
+      inactive_matches: [],
+      ambiguous: [],
+      truncated: false,
+      match: fleet.match,
+      counts: emptyCounts(carsOut.length),
+    };
+  }
 
   const [textCars, priorIds, matchedRiders, matchedLeases] = await Promise.all([
     timed("railcars-text-query", () => fetchCarsByText(groups, scope, active)),
@@ -323,11 +415,10 @@ export async function runGlobalSearch(
     riders: ridersOut,
     leases: matchedLeases,
     not_found: [],
-    counts: {
-      railcars: carsOut.length,
-      riders: ridersOut.length,
-      leases: matchedLeases.length,
-      total: carsOut.length + ridersOut.length + matchedLeases.length,
-    },
+    inactive_matches: [],
+    ambiguous: [],
+    truncated: false,
+    match: null,
+    counts: emptyCounts(carsOut.length, ridersOut.length, matchedLeases.length),
   };
 }

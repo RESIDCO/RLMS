@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, KeyboardEvent, ClipboardEvent } from "react";
 import { Search, X } from "lucide-react";
 import { carListSearchTokens } from "@shared/programs";
-import { openAppTab } from "@/lib/browse-nav";
+import { navigateHash } from "@/lib/hash-location";
 import { searchPagePath } from "@/lib/search-query";
 
 export default function GlobalSearch() {
@@ -11,7 +11,7 @@ export default function GlobalSearch() {
   function submit() {
     const trimmed = query.trim();
     if (!trimmed) return;
-    openAppTab(searchPagePath(trimmed));
+    navigateHash(searchPagePath(trimmed));
     setQuery("");
     inputRef.current?.blur();
   }
@@ -21,7 +21,7 @@ export default function GlobalSearch() {
     const cars = carListSearchTokens(text);
     if (!cars || cars.length < 2) return;
     e.preventDefault();
-    openAppTab(searchPagePath(text.trim()));
+    navigateHash(searchPagePath(text.trim()));
     setQuery("");
     inputRef.current?.blur();
   }

@@ -1905,11 +1905,14 @@ export function RailcarDetailSheet({
   carId,
   onClose,
   readOnly = false,
+  carPageHref,
 }: {
   carId: number | null;
   onClose: () => void;
   /** Context-gated: hide Edit / Change Number / Delete and the edit form. Not a role check. */
   readOnly?: boolean;
+  /** Same-tab car page link. Falls back to opening a new tab. */
+  carPageHref?: string;
 }) {
   const canEdit = useCanEdit() && !readOnly;
   const { toast } = useToast();
@@ -1941,7 +1944,8 @@ export function RailcarDetailSheet({
               onEdit={readOnly ? () => {} : (car) => setEditCar(car)}
               onDelete={readOnly ? () => {} : () => deleteMutation.mutate(viewId)}
               canEdit={canEdit}
-              showCarPageLink={!readOnly}
+              showCarPageLink={!readOnly || Boolean(carPageHref)}
+              carPageHref={carPageHref}
               readOnly={readOnly}
               onRemarked={(newId) => setViewId(newId)}
             />
@@ -1965,6 +1969,7 @@ export function CarDetail({
   onDelete,
   canEdit,
   showCarPageLink = true,
+  carPageHref,
   readOnly = false,
   onRemarked,
 }: {
@@ -1974,6 +1979,8 @@ export function CarDetail({
   canEdit: boolean;
   /** Hide when already on `#/cars/:id`. */
   showCarPageLink?: boolean;
+  /** Same-tab destination. When omitted, the car page opens in a new tab. */
+  carPageHref?: string;
   /** Context-gated read-only (e.g. Account Management). Overrides canEdit. */
   readOnly?: boolean;
   onRemarked?: (newId: number) => void;
@@ -2111,7 +2118,15 @@ export function CarDetail({
       )}
 
       <div className="flex gap-2 mt-4 flex-wrap">
-        {showCarPageLink && (
+        {showCarPageLink && carPageHref && (
+          <Button size="sm" variant="outline" asChild>
+            <Link href={carPageHref} data-testid="button-open-car-page">
+              <ExternalLink className="h-3.5 w-3.5" />
+              Car page
+            </Link>
+          </Button>
+        )}
+        {showCarPageLink && !carPageHref && (
           <Button size="sm" variant="outline" onClick={() => openAppTab(carPath(r.id))} data-testid="button-open-car-page">
             <ExternalLink className="h-3.5 w-3.5" />
             Car page

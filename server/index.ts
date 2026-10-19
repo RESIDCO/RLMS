@@ -58,6 +58,18 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+/** Keep /api log lines small enough that Render does not drop them. */
+export function loggedJson(body: unknown): string {
+  let json: string;
+  try {
+    json = JSON.stringify(body);
+  } catch {
+    return "[unserializable]";
+  }
+  if (json.length <= 1000) return json;
+  return `${json.slice(0, 1000)}…(+${json.length - 1000} bytes)`;
+}
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -88,7 +100,7 @@ app.use((req, res, next) => {
       }
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        logLine += ` :: ${loggedJson(capturedJsonResponse)}`;
       }
 
       log(logLine);

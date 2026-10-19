@@ -9,6 +9,7 @@ import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
 import LeaseCrmLinks from "@/components/crm/LeaseCrmLinks";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
 import { ArrowLeft, FileText } from "lucide-react";
+import { BackToSearch } from "@/components/BackToSearch";
 import { useCanEdit } from "@/lib/AuthContext";
 
 function usd(n: number) {
@@ -65,6 +66,7 @@ export default function LesseePage() {
         }
       />
       <div className="px-4 sm:px-8 py-4 flex-1 min-h-0 overflow-auto space-y-6">
+        <BackToSearch />
         <LeaseCrmLinks mode="lessee" id={id} />
         <div className="flex flex-wrap gap-4 text-sm">
           {(data.contacts ?? []).slice(0, 8).map((c: any) => (

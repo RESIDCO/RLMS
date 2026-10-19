@@ -3,6 +3,12 @@ import { parseFleetStatus } from "@shared/fleet-status";
 import { carNumberSearchPattern, isOlNumberToken, splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import { hydrateOpsFlag, OPS_FLAG_FALLBACK_PREFIX } from "@shared/ops-flag";
+import {
+  classifyFleetQuery,
+  fleetMatchLabel,
+  fleetOrClause,
+  fleetPatternToLike,
+} from "@shared/carTypeAliases";
 import { fetchAllRows } from "./fetch-all";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachLatestAmNotes } from "./rider-account-comments";
@@ -64,6 +70,25 @@ export type RailcarListParams = {
   flag?: string;
   /** Filter/store flags in comment_event_note because ops_flag is not on the table yet. */
   opsFlagFallback?: boolean;
+  /** Car type / equipment type code. `J31*` is a prefix. */
+  carType?: string;
+  /** Mechanical designation, exact or `GB*` prefix. */
+  mech?: string;
+  /** AAR designation, exact or prefix. */
+  aar?: string;
+  /** Set by attachFleetMatch. Not a query-string param. */
+  fleetOr?: string | null;
+  fleetMatch?: FleetMatchReport | null;
+  fleetReady?: boolean;
+};
+
+export type FleetMatchReport = {
+  kind: "car_type" | "mechanical" | "alias";
+  label: string;
+  code?: string;
+  ruleId?: string;
+  ruleLabel?: string;
+  activeCount: number | null;
 };
 
 export function parseRailcarListParams(query: Record<string, unknown>): RailcarListParams {
@@ -110,7 +135,10 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
     sort: str(query.sort) ?? "car_number",
     dir: query.dir === "desc" ? "desc" : "asc",
     page: Math.max(1, num(query.page) ?? 1),
-    pageSize: Math.min(200, Math.max(1, num(query.pageSize) ?? 75)),
+    pageSize: Math.min(500, Math.max(1, num(query.pageSize) ?? 75)),
+    carType: str(query.type) ?? str(query.car_type),
+    mech: str(query.mech),
+    aar: str(query.aar),
     all: truthy(query.all) || truthy(query.export),
     acquisition_batch_id: num(query.acquisition_batch_id) ?? num(query.batch),
     needs_completion:
@@ -196,12 +224,16 @@ export function leaseSearchTokenValues(tokens: SearchToken[]): string[] {
 
 const CAR_NUMBER_FIELDS = ["reporting_marks", "car_initial", "car_number"] as const;
 const LEASE_OL_FIELDS = ["lessee_name", "rider_external_id", "assignment_label"] as const;
-const CAR_DATA_FIELDS = [
+/** Always searched. No Car data checkbox. Both type columns, case-insensitive. */
+const FLEET_FIELDS = [
   "car_type",
   "equipment_type_code",
-  "general_description",
+  "aar_designation",
   "mechanical_designation",
+  "general_description",
 ] as const;
+/** Slower free text. Still behind the Car data checkbox. */
+const CAR_DATA_FIELDS = ["description", "notes"] as const;
 
 export function parseSearchScope(query: Record<string, unknown> | undefined): SearchScope {
   const flag = (key: string, fallback: boolean) => {
@@ -360,7 +392,10 @@ export function applySearchFilter(
     if (sc.leases) {
       for (const col of LEASE_OL_FIELDS) ors.push(`${col}.ilike.%${t}%`);
     }
-    if (sc.carData) {
+    if (hasLetter) {
+      for (const col of FLEET_FIELDS) ors.push(`${col}.ilike.%${t}%`);
+    }
+    if (sc.carData && hasLetter) {
       for (const col of CAR_DATA_FIELDS) ors.push(`${col}.ilike.%${t}%`);
     }
     ors.push(...railcarIns);
@@ -370,9 +405,83 @@ export function applySearchFilter(
   return query;
 }
 
+function quoteLike(value: string) {
+  return `"${value.replace(/"/g, "")}"`;
+}
+
+function applyColumnPattern(query: any, columns: string[], raw: string | undefined) {
+  const like = fleetPatternToLike(raw ?? "");
+  if (!like) return query;
+  if (columns.length === 1) return query.ilike(columns[0], like);
+  return query.or(columns.map((c) => `${c}.ilike.${quoteLike(like)}`).join(","));
+}
+
+async function countActiveFleetOr(orClause: string): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from("railcars")
+    .select("id", { count: "exact", head: true })
+    .or(orClause)
+    .neq("active", false);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
+ * Car-type codes and mechanical designations match exactly (case-insensitive),
+ * not as substrings. A mechanical-shaped token with zero cars falls back to
+ * text search so "BNSF" still finds the lessee. Alias phrases always use the rule.
+ */
+export async function resolveFleetMatch(search: string | undefined): Promise<{
+  orClause: string | null;
+  match: FleetMatchReport | null;
+}> {
+  const cls = classifyFleetQuery(search ?? "");
+  switch (cls.kind) {
+    case "text":
+      return { orClause: null, match: null };
+    case "alias":
+    case "car_type":
+    case "mechanical": {
+      const orClause = fleetOrClause(cls);
+      if (!orClause) return { orClause: null, match: null };
+      const activeCount = await countActiveFleetOr(orClause);
+      if (cls.kind !== "alias" && activeCount <= 0) return { orClause: null, match: null };
+      return {
+        orClause,
+        match: {
+          kind: cls.kind,
+          label: fleetMatchLabel(cls, cls.kind === "alias" ? undefined : activeCount),
+          code: cls.kind === "alias" ? undefined : cls.code,
+          ruleId: cls.kind === "alias" ? cls.rule.id : undefined,
+          ruleLabel: cls.kind === "alias" ? cls.rule.label : undefined,
+          activeCount,
+        },
+      };
+    }
+    default: {
+      const _never: never = cls;
+      return _never;
+    }
+  }
+}
+
+async function attachFleetMatch(p: RailcarListParams) {
+  if (p.fleetReady) return;
+  p.fleetReady = true;
+  if (!p.search || p.ids?.length) {
+    p.fleetOr = null;
+    p.fleetMatch = null;
+    return;
+  }
+  const resolved = await resolveFleetMatch(p.search);
+  p.fleetOr = resolved.orClause;
+  p.fleetMatch = resolved.match;
+}
+
 async function applyRailcarFilters(query: any, p: RailcarListParams) {
+  await attachFleetMatch(p);
   const scope = scopeOrDefault(p.searchScope);
-  if (p.search && !p.ids?.length && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
+  if (p.search && !p.fleetOr && !p.ids?.length && scope.leases && p.searchRiderIds == null && p.searchLeaseIds == null) {
     const matched = await matchingLeaseAndRiderIds(leaseSearchTokenValues(railcarSearchTokens(p.search)));
     p.searchRiderIds = matched.riderIds;
     p.searchLeaseIds = matched.leaseIds;
@@ -442,7 +551,12 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
     );
   }
 
-  query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, extra);
+  if (p.carType) query = applyColumnPattern(query, ["car_type", "equipment_type_code"], p.carType);
+  if (p.mech) query = applyColumnPattern(query, ["mechanical_designation"], p.mech);
+  if (p.aar) query = applyColumnPattern(query, ["aar_designation"], p.aar);
+
+  if (p.fleetOr) query = query.or(p.fleetOr);
+  else query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, extra);
   query = applyOpsFlagFilter(query, p.flag, p.opsFlagFallback);
   return query;
 }
@@ -627,8 +741,8 @@ async function queryRailcarIdsWithParams(p: RailcarListParams): Promise<number[]
 
 async function queryRailcarsByAssignedIds(p: RailcarListParams, select: string) {
   const ids = await railcarIdsForAssignmentFilter(p);
-  if (!ids?.length) {
-    return { rows: [] as any[], total_count: 0, page: 1, pageSize: p.pageSize ?? 0 };
+    if (!ids?.length) {
+    return { rows: [] as any[], total_count: 0, page: 1, pageSize: p.pageSize ?? 0, match: p.fleetMatch ?? null };
   }
   const orderCol = p.sort === "car_number" || p.sort === "id" ? p.sort : "car_number";
   const rows: any[] = [];
@@ -644,22 +758,29 @@ async function queryRailcarsByAssignedIds(p: RailcarListParams, select: string) 
     rows.push(...(data ?? []).map(mapRow));
   }
   const merged = await attachAccountJoins(rows);
-  if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
+  if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
   const start = ((p.page ?? 1) - 1) * (p.pageSize ?? merged.length);
   return {
     rows: merged.slice(start, start + (p.pageSize ?? merged.length)),
     total_count: merged.length,
     page: p.page ?? 1,
     pageSize: p.pageSize ?? merged.length,
+    match: p.fleetMatch ?? null,
   };
 }
 
 async function extraCarsByPriorIdentity(p: RailcarListParams, select: string, haveIds: Set<number>) {
-  if (!p.search) return [];
+  if (!p.search || p.fleetOr) return [];
   const ids = (await resolveRailcarsByAnyIdentity(p.search)).filter((id) => !haveIds.has(id));
   if (!ids.length) return [];
   let q = supabaseAdmin.from("railcars").select(select).in("id", ids.slice(0, 80));
-  q = await applyRailcarFilters(q, { ...p, search: undefined });
+  q = await applyRailcarFilters(q, {
+    ...p,
+    search: undefined,
+    fleetOr: null,
+    fleetMatch: null,
+    fleetReady: true,
+  });
   const { data, error } = await q;
   if (error) {
     console.log(`[railcars] prior-identity hydrate skipped: ${error.message}`);
@@ -686,13 +807,14 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     const rows = all.map(mapRow).filter((r: any) => !assignedSet.has(r.id) && !r.assignment);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
     const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
-    if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
+    if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
     const start = (p.page! - 1) * p.pageSize!;
     return {
       rows: merged.slice(start, start + p.pageSize!),
       total_count: merged.length,
       page: p.page,
       pageSize: p.pageSize,
+      match: p.fleetMatch ?? null,
     };
   }
 
@@ -705,7 +827,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     const rows = data.map(mapRow);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
     const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
-    return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length };
+    return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
   }
 
   const from = (p.page! - 1) * p.pageSize!;
@@ -726,6 +848,57 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     total_count: (count ?? 0) + extra.length,
     page: p.page,
     pageSize: p.pageSize,
+    match: p.fleetMatch ?? null,
+  };
+}
+
+export type RailcarSummary = {
+  total: number;
+  by_type: { key: string; count: number }[];
+  by_entity: { key: string; count: number }[];
+  by_status: { key: string; count: number }[];
+  match: FleetMatchReport | null;
+};
+
+function bumpCount(map: Map<string, number>, key: string) {
+  const k = key.trim() || "—";
+  map.set(k, (map.get(k) ?? 0) + 1);
+}
+
+function rankedCounts(map: Map<string, number>) {
+  return Array.from(map.entries())
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
+
+/** Same filters as the list. Grouped counts for the summary above the grid. */
+export async function queryRailcarSummary(p: RailcarListParams): Promise<RailcarSummary> {
+  await attachFleetMatch(p);
+  const select = "id, car_type, entity, fleet_status";
+  const data = await fetchAllRows<{
+    id: number;
+    car_type: string | null;
+    entity: string | null;
+    fleet_status: string | null;
+  }>(async (from, to) => {
+    let q = supabaseAdmin.from("railcars").select(select).order("id", { ascending: true }).range(from, to);
+    q = await applyRailcarFilters(q, p);
+    return q;
+  });
+  const byType = new Map<string, number>();
+  const byEntity = new Map<string, number>();
+  const byStatus = new Map<string, number>();
+  for (const row of data) {
+    bumpCount(byType, String(row.car_type ?? ""));
+    bumpCount(byEntity, String(row.entity ?? ""));
+    bumpCount(byStatus, String(row.fleet_status ?? ""));
+  }
+  return {
+    total: data.length,
+    by_type: rankedCounts(byType),
+    by_entity: rankedCounts(byEntity),
+    by_status: rankedCounts(byStatus),
+    match: p.fleetMatch ?? null,
   };
 }
 

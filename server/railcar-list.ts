@@ -13,6 +13,7 @@ import {
 import { fetchAllRows } from "./fetch-all";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachLatestAmNotes } from "./rider-account-comments";
+import { attachFocusColumns } from "./focus-columns";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
 export const RAILCAR_LIST_SELECT = `
@@ -86,6 +87,16 @@ export type RailcarListParams = {
   fleetOr?: string | null;
   fleetMatch?: FleetMatchReport | null;
   fleetReady?: boolean;
+  /** Open rent stop: any, Abatement, Off rent, or none. */
+  openStop?: string;
+  /** Program name contains. */
+  program?: string;
+  /** Exact car tag. */
+  tag?: string;
+  /** Attach rent-stop, program, note, and tag columns for the returned rows. */
+  focus?: boolean;
+  /** Fixed or query view whose members and notes apply to this request. */
+  viewId?: number;
 };
 
 export type FleetMatchReport = {
@@ -148,6 +159,11 @@ export function parseRailcarListParams(query: Record<string, unknown>): RailcarL
     mech: str(query.mech),
     aar: str(query.aar),
     fleetCodes: truthy(query.fleet),
+    openStop: str(query.open_stop),
+    program: str(query.program),
+    tag: str(query.tag),
+    focus: truthy(query.focus),
+    viewId: num(query.view_id),
     all: truthy(query.all) || truthy(query.export),
     acquisition_batch_id: num(query.acquisition_batch_id) ?? num(query.batch),
     needs_completion:
@@ -587,8 +603,18 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
   }
 
   const restrictIds = await railcarIdsForAssignmentFilter(p);
-  if (restrictIds) {
-    query = query.in("id", restrictIds.length ? restrictIds : [-1]);
+  const focusIds = await railcarIdsForFocusFilters(p);
+  let limitIds = restrictIds;
+  if (focusIds) {
+    const allow = new Set(focusIds);
+    limitIds = limitIds ? limitIds.filter((id) => allow.has(id)) : focusIds;
+  }
+  if (limitIds) {
+    query = query.in("id", limitIds.length ? limitIds : [-1]);
+  }
+  if (p.openStop === "none") {
+    const openIds = await openStopRailcarIds();
+    if (openIds.length) query = query.not("id", "in", `(${openIds.join(",")})`);
   }
   if (p.rider) {
     const ol = sanitizeOrValue(p.rider).toUpperCase();
@@ -605,6 +631,51 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
   else query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, { ...extra, fleetCodes: p.fleetCodes });
   query = applyOpsFlagFilter(query, p.flag, p.opsFlagFallback);
   return query;
+}
+
+async function openStopRailcarIds(type?: string): Promise<number[]> {
+  let q = supabaseAdmin.from("car_rent_stops").select("railcar_id").is("actual_resume_date", null);
+  if (type && type !== "any") q = q.eq("type", type);
+  const { data, error } = await q;
+  if (error) throw error;
+  return [...new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0))];
+}
+
+async function programRailcarIds(text: string): Promise<number[]> {
+  const safe = text.replace(/[%_,()]/g, "").trim();
+  if (!safe) return [];
+  const { data: programs, error } = await supabaseAdmin.from("programs").select("id").ilike("name", `%${safe}%`).limit(100);
+  if (error) throw error;
+  const programIds = (programs ?? []).map((row) => Number(row.id)).filter((id) => id > 0);
+  if (!programIds.length) return [];
+  const { data, error: carError } = await supabaseAdmin
+    .from("program_cars")
+    .select("railcar_id")
+    .in("program_id", programIds)
+    .is("exited_date", null);
+  if (carError) throw carError;
+  return [...new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0))];
+}
+
+async function tagRailcarIds(tag: string): Promise<number[]> {
+  const { data, error } = await supabaseAdmin.from("car_tags").select("railcar_id").eq("tag", tag);
+  if (error) throw error;
+  return [...new Set((data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0))];
+}
+
+/** Include-list for open stop / program / tag. `none` is applied separately so it can exclude a short id list. */
+async function railcarIdsForFocusFilters(p: RailcarListParams): Promise<number[] | undefined> {
+  const sets: number[][] = [];
+  if (p.openStop && p.openStop !== "none") sets.push(await openStopRailcarIds(p.openStop));
+  if (p.program) sets.push(await programRailcarIds(p.program));
+  if (p.tag) sets.push(await tagRailcarIds(p.tag));
+  if (!sets.length) return undefined;
+  let ids = new Set(sets[0]);
+  for (const next of sets.slice(1)) {
+    const allow = new Set(next);
+    ids = new Set([...ids].filter((id) => allow.has(id)));
+  }
+  return [...ids];
 }
 
 function applyOpsFlagFilter(query: any, flag: string | undefined, fallback?: boolean) {
@@ -708,6 +779,46 @@ async function attachAccountJoins<T extends { rider_external_id?: string | null;
   return withAm.map((r, i) => ({ ...r, am_note: withNotes[i]?.am_note ?? null }));
 }
 
+const FOCUS_FIELD_KEYS = [
+  "open_stop_type",
+  "open_stop_since",
+  "open_stop_days",
+  "open_stop_expected",
+  "open_stop_reason",
+  "open_stop_note",
+  "program_name",
+  "program_extra",
+  "program_status",
+  "program_milestone",
+  "program_milestone_at",
+  "program_note",
+  "latest_note",
+  "latest_note_at",
+  "latest_note_actor",
+  "tags",
+  "view_note",
+] as const;
+
+/** Account joins and, when requested, focus columns run together for the page being returned. */
+async function finishRows<T extends { id: number; notes?: string | null; rider_external_id?: string | null; assignment?: unknown }>(
+  rows: T[],
+  p: RailcarListParams,
+) {
+  const [joined, focused] = await Promise.all([
+    attachAccountJoins(rows),
+    p.focus ? attachFocusColumns(rows, { viewId: p.viewId }) : Promise.resolve(null),
+  ]);
+  if (!focused) return joined;
+  const byId = new Map(focused.map((row) => [row.id, row]));
+  return joined.map((row) => {
+    const extra = byId.get((row as { id: number }).id);
+    if (!extra) return row;
+    const focus: Record<string, unknown> = {};
+    for (const key of FOCUS_FIELD_KEYS) focus[key] = extra[key];
+    return { ...row, ...focus };
+  });
+}
+
 function mapRow(r: any) {
   const assignmentRaw = asOne(r.assignment);
   const rider = asOne(assignmentRaw?.rider);
@@ -809,7 +920,7 @@ async function queryRailcarsByAssignedIds(p: RailcarListParams, select: string) 
     if (error) throw error;
     rows.push(...(data ?? []).map(mapRow));
   }
-  const merged = await attachAccountJoins(rows);
+  const merged = await finishRows(rows, p);
   if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
   const start = ((p.page ?? 1) - 1) * (p.pageSize ?? merged.length);
   return {
@@ -857,7 +968,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     });
     const rows = all.map(mapRow).filter((r: any) => !assignedSet.has(r.id) && !r.assignment);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-    const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
+    const merged = await finishRows(extra.length ? [...extra, ...rows] : rows, p);
     if (p.all) return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
     const start = (p.page! - 1) * p.pageSize!;
     return {
@@ -877,7 +988,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
     });
     const rows = data.map(mapRow);
     const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-    const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
+    const merged = await finishRows(extra.length ? [...extra, ...rows] : rows, p);
     return { rows: merged, total_count: merged.length, page: 1, pageSize: merged.length, match: p.fleetMatch ?? null };
   }
 
@@ -892,7 +1003,7 @@ async function queryRailcarsWithSelect(p: RailcarListParams, select: string) {
   if (error) throw error;
   const rows = (data ?? []).map(mapRow);
   const extra = await extraCarsByPriorIdentity(p, select, new Set(rows.map((r: any) => r.id)));
-  const merged = await attachAccountJoins(extra.length ? [...extra, ...rows] : rows);
+  const merged = await finishRows(extra.length ? [...extra, ...rows] : rows, p);
   return {
     rows: merged,
     total_count: (count ?? 0) + extra.length,
@@ -919,6 +1030,15 @@ function rankedCounts(map: Map<string, number>) {
   return Array.from(map.entries())
     .map(([key, count]) => ({ key, count }))
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
+
+/** Same filters as the list. Head count, used by saved-view buttons. */
+export async function countRailcars(p: RailcarListParams): Promise<number> {
+  let q = supabaseAdmin.from("railcars").select("id", { count: "exact", head: true });
+  q = await applyRailcarFilters(q, p);
+  const { count, error } = await q;
+  if (error) throw error;
+  return count ?? 0;
 }
 
 /** Same filters as the list. Grouped counts for the summary above the grid. */

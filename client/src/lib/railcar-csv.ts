@@ -51,6 +51,20 @@ export const RAILCAR_CSV_COLS: CsvCol[] = [
   { key: "lessor", header: "Lessor", get: (r) => str(r.assignment?.rider?.master_lease?.lessor) },
   { key: "expires", header: "Expiration Date", get: (r) => str(r.assignment?.rider?.expiration_date) },
   { key: "oac", header: "OAC", get: (r) => r.oac != null ? String(r.oac) : "" },
+  { key: "open_stop_type", header: "Rent stop", get: (r) => str(r.open_stop_type) },
+  { key: "open_stop_since", header: "Stop since", get: (r) => str(r.open_stop_since) },
+  { key: "open_stop_days", header: "Days stopped", get: (r) => r.open_stop_days != null ? String(r.open_stop_days) : "" },
+  { key: "open_stop_expected", header: "Expected resume", get: (r) => str(r.open_stop_expected) },
+  { key: "open_stop_reason", header: "Stop reason", get: (r) => str(r.open_stop_reason) },
+  { key: "program_name", header: "Program", get: (r) => str(r.program_name) },
+  { key: "program_status", header: "Program status", get: (r) => str(r.program_status) },
+  { key: "program_milestone", header: "Milestone", get: (r) => [r.program_milestone, r.program_milestone_at].filter(Boolean).join(" ") },
+  { key: "program_note", header: "Program note", get: (r) => str(r.program_note) },
+  { key: "scrapped_at", header: "Scrapped", get: (r) => str(r.scrapped_at) },
+  { key: "umler_status", header: "UMLER status", get: (r) => str(r.umler_status) },
+  { key: "latest_note", header: "Latest note", get: (r) => str(r.latest_note) },
+  { key: "tags", header: "Tags", get: (r) => Array.isArray(r.tags) ? r.tags.join(", ") : str(r.tags) },
+  { key: "view_note", header: "View note", get: (r) => str(r.view_note) },
 ];
 
 /** Master Car List–compatible CSV used by Railcars and Search exports. */

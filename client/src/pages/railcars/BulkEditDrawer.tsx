@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { offerUndoToast } from "@/lib/undo";
+import { markSearchRefresh } from "@/lib/searchState";
 import { useToast } from "@/hooks/use-toast";
 
 type PreviewRow = {
@@ -70,6 +71,7 @@ export function BulkEditDrawer({
         preview_hash: preview.preview_hash,
       }).then((r) => r.json());
       offerUndoToast(body);
+      markSearchRefresh();
       await queryClient.invalidateQueries();
       onClose();
     } catch (e: any) {

@@ -1,4 +1,4 @@
-import { Search as SearchIcon, Loader2, X, Pencil, History, ChevronLeft, ChevronRight, Download, ChevronDown, Copy } from "lucide-react";
+import { Search as SearchIcon, Loader2, X, Pencil, History, ChevronLeft, ChevronRight, Download, ChevronDown, Copy, Info, MoreHorizontal, PanelLeft } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
@@ -33,6 +33,7 @@ import {
   resolveStoredSearch,
   saveSearchState,
   shouldRebootSearch,
+  takeSearchRefresh,
   type SearchActive,
   type SearchHashState,
   type StoredSearchResults,
@@ -52,6 +53,34 @@ import { GridColumnTh } from "@/components/GridColumnTh";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { carBuildYear } from "@shared/build-year";
+import {
+  FOCUS_COLUMN_LABELS,
+  SAVED_VIEWS_SCHEMA_MESSAGE,
+  emptyViewFilters,
+  focusPresetLayout,
+  isFocusColumn,
+  layoutNeedsFocus,
+  type ViewFilters,
+  type ViewKind,
+  type ViewLayout,
+  type ViewQuery,
+} from "@shared/saved-views";
+import { useCanEdit, useIsAdmin, useAuth } from "@/lib/AuthContext";
+import { RAILCARS_HANDOFF_KEY } from "@/lib/searchState";
+import {
+  FilterPopover,
+  PinnedViewStrip,
+  SaveViewDialog,
+  SelectionBar,
+  ViewMeta,
+  ViewsMenu,
+  readViewsSidebarOpen,
+  writeViewsSidebarOpen,
+  type ViewSummary,
+} from "@/components/search/SearchViewBar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
+import { queryClient } from "@/lib/queryClient";
 
 type SearchScope = { leases: boolean; cars: boolean; carData: boolean };
 
@@ -78,7 +107,10 @@ type OptCol =
   | "monthly_rent_per_car" | "monthly_depr_per_car"
   | "commodity" | "commodity_family"
   | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
-  | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials" | "am_note";
+  | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials" | "am_note"
+  | "open_stop_type" | "open_stop_since" | "open_stop_days" | "open_stop_expected" | "open_stop_reason"
+  | "program_name" | "program_status" | "program_milestone" | "program_note"
+  | "scrapped_at" | "umler_status" | "latest_note" | "tags" | "view_note";
 
 const OPT_COLS: { key: OptCol; label: string }[] = [
   { key: "nbv", label: "NBV" },
@@ -104,6 +136,20 @@ const OPT_COLS: { key: OptCol; label: string }[] = [
   { key: "account_manager_initials", label: "Acct Mgr" },
   { key: "am_note", label: "Latest AM Note" },
   { key: "comment_event_note", label: "Comment / Event Note" },
+  { key: "open_stop_type", label: FOCUS_COLUMN_LABELS.open_stop_type },
+  { key: "open_stop_since", label: FOCUS_COLUMN_LABELS.open_stop_since },
+  { key: "open_stop_days", label: FOCUS_COLUMN_LABELS.open_stop_days },
+  { key: "open_stop_expected", label: FOCUS_COLUMN_LABELS.open_stop_expected },
+  { key: "open_stop_reason", label: FOCUS_COLUMN_LABELS.open_stop_reason },
+  { key: "program_name", label: FOCUS_COLUMN_LABELS.program_name },
+  { key: "program_status", label: FOCUS_COLUMN_LABELS.program_status },
+  { key: "program_milestone", label: FOCUS_COLUMN_LABELS.program_milestone },
+  { key: "program_note", label: FOCUS_COLUMN_LABELS.program_note },
+  { key: "scrapped_at", label: FOCUS_COLUMN_LABELS.scrapped_at },
+  { key: "umler_status", label: FOCUS_COLUMN_LABELS.umler_status },
+  { key: "latest_note", label: FOCUS_COLUMN_LABELS.latest_note },
+  { key: "tags", label: FOCUS_COLUMN_LABELS.tags },
+  { key: "view_note", label: FOCUS_COLUMN_LABELS.view_note },
 ];
 
 const SEARCH_DEFAULT_COLS = new Set<string>(["description", "mech_designation", "equipment_type_code"]);
@@ -134,6 +180,21 @@ const WIDTHS: Record<string, number> = {
   lease: 110,
   expires: 110,
   _actions: 72,
+  open_stop_type: 110,
+  open_stop_since: 110,
+  open_stop_days: 90,
+  open_stop_expected: 120,
+  open_stop_reason: 160,
+  program_name: 180,
+  program_status: 180,
+  program_milestone: 140,
+  program_note: 180,
+  scrapped_at: 110,
+  umler_status: 120,
+  latest_note: 200,
+  tags: 140,
+  view_note: 140,
+  rider_external_id: 90,
 };
 
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
@@ -160,10 +221,12 @@ function fmtUsd(v: unknown, digits = 0) {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
-function renderOptTd(key: string, r: any) {
-  const money = "px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap";
-  const num = "px-4 py-3 font-mono-num text-muted-foreground";
-  const text = "px-4 py-3 text-muted-foreground";
+function renderOptTd(key: string, r: any, compact = false) {
+  const money = compact
+    ? "px-3 py-1 font-mono-num text-muted-foreground whitespace-nowrap"
+    : "px-4 py-3 font-mono-num text-muted-foreground whitespace-nowrap";
+  const num = compact ? "px-3 py-1 font-mono-num text-muted-foreground" : "px-4 py-3 font-mono-num text-muted-foreground";
+  const text = compact ? "px-3 py-1 text-muted-foreground" : "px-4 py-3 text-muted-foreground";
   switch (key) {
     case "nbv": return <td key={key} className={money}>{fmtUsd(r.nbv, 0)}</td>;
     case "oac": return <td key={key} className={money}>{fmtUsd(r.oac, 0)}</td>;
@@ -185,7 +248,7 @@ function renderOptTd(key: string, r: any) {
     case "data_source": return <td key={key} className={text}>{r.data_source ?? "—"}</td>;
     case "active":
       return (
-        <td key={key} className="px-4 py-3">
+        <td key={key} className={compact ? "px-3 py-1" : "px-4 py-3"}>
           {r.active === false ? <InactiveFleetBadge active={false} /> : <span className="text-muted-foreground text-xs">Active</span>}
         </td>
       );
@@ -197,6 +260,41 @@ function renderOptTd(key: string, r: any) {
     }
     case "comment_event_note":
       return <td key={key} className={`${text} max-w-[220px] truncate`} title={r.comment_event_note ?? ""}>{r.comment_event_note ?? "—"}</td>;
+    case "open_stop_reason":
+      return <td key={key} className={`${text} max-w-[180px] truncate`} title={r.open_stop_note || ""}>{r.open_stop_reason || "—"}</td>;
+    case "open_stop_days":
+      return <td key={key} className={num}>{r.open_stop_days ?? "—"}</td>;
+    case "program_name":
+      return (
+        <td key={key} className={text}>
+          <span className="truncate">{r.program_name || "—"}</span>
+          {r.program_extra > 0 ? <span className="ml-1 rounded bg-muted px-1 text-[10px]">+{r.program_extra}</span> : null}
+        </td>
+      );
+    case "program_milestone":
+      return <td key={key} className={`${text} max-w-[160px] truncate`}>{[r.program_milestone, r.program_milestone_at].filter(Boolean).join(" · ") || "—"}</td>;
+    case "latest_note":
+      return <td key={key} className={`${text} max-w-[220px] truncate`} title={[r.latest_note_at, r.latest_note_actor].filter(Boolean).join(" · ")}>{r.latest_note || "—"}</td>;
+    case "tags":
+      return (
+        <td key={key} className={text}>
+          <span className="flex flex-wrap gap-1">
+            {(Array.isArray(r.tags) ? r.tags : []).map((tag: string) => (
+              <span key={tag} className="rounded-full border border-border px-1.5 py-0.5 text-[10px]">{tag}</span>
+            ))}
+          </span>
+        </td>
+      );
+    case "view_note":
+      return <td key={key} className={`${text} max-w-[160px] truncate`} title={r.active === false ? "Inactive" : ""}>{r.view_note || ""}</td>;
+    case "open_stop_type":
+    case "open_stop_since":
+    case "open_stop_expected":
+    case "program_status":
+    case "program_note":
+    case "scrapped_at":
+    case "umler_status":
+      return <td key={key} className={`${text} max-w-[180px] truncate`}>{r[key] || "—"}</td>;
     default:
       return <td key={key} className={text}>—</td>;
   }
@@ -253,6 +351,10 @@ type Boot = {
   sort: string;
   dir: "asc" | "desc";
   exactFleet: boolean;
+  viewId: number | null;
+  openStop: string;
+  program: string;
+  tag: string;
   sid: string;
   fromCache: boolean;
   /** Put the page back at scrollY once the grid has rows. */
@@ -265,6 +367,15 @@ type Boot = {
   match: FleetMatch;
   selection: number[];
   scrollY: number;
+  draft: {
+    viewId: number | null;
+    dirty: boolean;
+    density: "comfortable" | "compact";
+    panelCollapsed: boolean;
+    cols: string[];
+    order: string[];
+    widths: Record<string, number>;
+  } | null;
 };
 
 type RailcarPage = { rows: any[]; total_count: number; page: number; pageSize: number; match?: FleetMatch };
@@ -287,6 +398,10 @@ function blankBoot(): Boot {
     sort: "car_number",
     dir: "asc",
     exactFleet: true,
+    viewId: null,
+    openStop: "",
+    program: "",
+    tag: "",
     sid: "",
     fromCache: false,
     restoreScroll: false,
@@ -298,6 +413,7 @@ function blankBoot(): Boot {
     match: null,
     selection: [],
     scrollY: 0,
+    draft: null,
   };
 }
 
@@ -333,21 +449,118 @@ function summarize(rows: any[]): Summary {
 }
 
 function scrollParent(): HTMLElement | null {
+  const grid = document.querySelector("[data-search-grid]");
+  if (grid instanceof HTMLElement) return grid;
   const el = document.querySelector("[data-app-scroll]");
   return el instanceof HTMLElement ? el : null;
+}
+
+type ViewDetail = ViewSummary & {
+  query: ViewQuery;
+  layout: ViewLayout;
+  members?: { railcar_id: number; note: string | null; active: boolean | null }[];
+};
+
+function matchesSearchFilters(
+  r: any,
+  f: {
+    type: string;
+    mech: string;
+    aar: string;
+    entity: string;
+    status: string;
+    active: SearchActive;
+    openStop: string;
+    program: string;
+    tag: string;
+  },
+): boolean {
+  if (f.type && !codeHit(r.car_type, f.type) && !codeHit(r.equipment_type_code, f.type)) return false;
+  if (f.mech && !codeHit(r.mechanical_designation, f.mech)) return false;
+  if (f.aar && !codeHit(r.aar_designation, f.aar)) return false;
+  if (f.entity && String(r.entity ?? "") !== f.entity) return false;
+  if (f.status && String(r.fleet_status ?? "") !== f.status) return false;
+  if (f.active === "active" && r.active === false) return false;
+  if (f.active === "inactive" && r.active !== false) return false;
+  const stop = String(r.open_stop_type ?? "");
+  if (f.openStop === "none" && stop) return false;
+  if (f.openStop === "any" && !stop) return false;
+  if ((f.openStop === "Abatement" || f.openStop === "Off rent") && stop !== f.openStop) return false;
+  if (f.program) {
+    const hay = `${r.program_name ?? ""} ${r.program_status ?? ""}`.toLowerCase();
+    if (!hay.includes(f.program.toLowerCase())) return false;
+  }
+  if (f.tag) {
+    const tags = Array.isArray(r.tags) ? r.tags.map((tag: string) => String(tag).toLowerCase()) : [];
+    if (!tags.includes(f.tag.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function sortValue(row: any, key: string): string {
+  if (key === "car_number") return String(row.car_number ?? "");
+  if (key === "marks") return String(row.reporting_marks ?? "");
+  if (key === "lessee") return String(row.assignment?.fleet_name ?? row.lessee_name ?? "");
+  if (key === "rider") return String(row.assignment?.rider?.rider_name ?? row.rider_external_id ?? "");
+  if (key === "lease") return String(row.assignment?.rider?.master_lease?.lease_number ?? "");
+  if (key === "status") return String(row.fleet_status ?? "");
+  if (key === "type") return String(row.car_type ?? "");
+  if (key === "entity") return String(row.entity ?? "");
+  if (key === "tags") return Array.isArray(row.tags) ? row.tags.join(", ") : "";
+  if (key === "program_milestone") return [row.program_milestone, row.program_milestone_at].filter(Boolean).join(" ");
+  const value = row[key];
+  return value == null ? "" : String(value);
+}
+
+function sortRows(rows: any[], key: string, dir: "asc" | "desc"): any[] {
+  const sign = dir === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => sortValue(a, key).localeCompare(sortValue(b, key), undefined, { numeric: true }) * sign);
+}
+
+function ViewNoteCell({
+  value,
+  readOnly,
+  compact,
+  onSave,
+}: {
+  value: string;
+  readOnly: boolean;
+  compact: boolean;
+  onSave: (note: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const pad = compact ? "px-3 py-1" : "px-4 py-3";
+  if (readOnly) {
+    return <td className={`${pad} max-w-[160px] truncate text-muted-foreground`} title={value ? "Inactive" : "Inactive"}>{value}</td>;
+  }
+  return (
+    <td className={pad} onClick={(event) => event.stopPropagation()}>
+      <input
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={() => {
+          if (text !== value) onSave(text);
+        }}
+        className="h-7 w-full rounded border border-transparent bg-transparent px-1 text-xs hover:border-border focus:border-primary focus:outline-none"
+        aria-label="View note"
+      />
+    </td>
+  );
 }
 
 function readBoot(): Boot {
   const base = blankBoot();
   if (typeof window === "undefined") return base;
   const hash = decodeHash(window.location.hash);
+  const refresh = takeSearchRefresh();
   const cached = hash.sid ? loadSearchState(hash.sid) : null;
   const resolved = resolveStoredSearch(cached);
   if (cached && resolved) {
     const h = resolved.hash;
     const results = cached.results!;
     const counts = results.counts ?? {};
-    const useCache = resolved.useCache;
+    const useCache = resolved.useCache && !refresh;
     return {
       query: resolved.query,
       committed: resolved.query,
@@ -363,6 +576,10 @@ function readBoot(): Boot {
       sort: h.sort,
       dir: h.dir,
       exactFleet: h.fleet !== false,
+      viewId: Number(h.view) > 0 ? Number(h.view) : null,
+      openStop: h.openStop,
+      program: h.program,
+      tag: h.tag,
       sid: cached.sid,
       fromCache: useCache,
       restoreScroll: true,
@@ -386,6 +603,7 @@ function readBoot(): Boot {
       match: useCache ? ((results.match as FleetMatch) ?? null) : null,
       selection: resolved.selection,
       scrollY: resolved.scrollY,
+      draft: cached.draft ?? null,
     };
   }
   const legacy = readSearchSession();
@@ -429,7 +647,29 @@ function readBoot(): Boot {
     base.sort = hash.sort;
     base.dir = hash.dir;
     base.exactFleet = hash.fleet;
+    base.viewId = Number(hash.view) > 0 ? Number(hash.view) : null;
+    base.openStop = hash.openStop;
+    base.program = hash.program;
+    base.tag = hash.tag;
     base.sid = hash.sid;
+  } else if (hash.view || hash.openStop || hash.program || hash.tag) {
+    base.viewId = Number(hash.view) > 0 ? Number(hash.view) : null;
+    base.openStop = hash.openStop;
+    base.program = hash.program;
+    base.tag = hash.tag;
+    base.sid = hash.sid;
+    base.scope = { leases: hash.leases, cars: hash.cars, carData: hash.carData };
+    base.activeMode = hash.active;
+    base.page = hash.page;
+    base.ps = hash.ps;
+    base.type = hash.type;
+    base.mech = hash.mech;
+    base.aar = hash.aar;
+    base.entity = hash.entity;
+    base.status = hash.status;
+    base.sort = hash.sort;
+    base.dir = hash.dir;
+    base.exactFleet = hash.fleet;
   }
   return base;
 }
@@ -543,12 +783,38 @@ export default function SearchPage() {
   const [leaseGlance, setLeaseGlance] = useState<LeaseGlanceRider | null>(null);
   const [exporting, setExporting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(() => new Set(boot.selection));
+  const [viewId, setViewId] = useState<number | null>(boot.viewId);
+  const [openStop, setOpenStop] = useState(boot.openStop);
+  const [programFilter, setProgramFilter] = useState(boot.program);
+  const [tagFilter, setTagFilter] = useState(boot.tag);
+  const [density, setDensity] = useState<"comfortable" | "compact">(
+    boot.draft && boot.draft.viewId === boot.viewId ? boot.draft.density : "comfortable",
+  );
+  const [panelOpen, setPanelOpen] = useState(
+    Boolean(boot.draft && boot.draft.viewId === boot.viewId && !boot.draft.panelCollapsed),
+  );
+  const [schemaMessage, setSchemaMessage] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ViewSummary | null>(null);
+  const [viewLayout, setViewLayout] = useState<ViewLayout | null>(null);
+  const [viewDirty, setViewDirty] = useState(Boolean(boot.draft?.dirty && boot.draft.viewId === boot.viewId));
+  const [sessionLayout, setSessionLayout] = useState<ViewLayout | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(readViewsSidebarOpen);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [savingView, setSavingView] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
+  const canEdit = useCanEdit();
+  const isAdmin = useIsAdmin();
+  const { user } = useAuth();
   const sidRef = useRef(boot.sid);
   const scrollRef = useRef(boot.scrollY);
   const pendingScroll = useRef<number | null>(boot.restoreScroll ? boot.scrollY : null);
   const committedRef = useRef(boot.committed);
   const lastSeenHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
   const hashBooted = useRef(false);
+  const replaceFromView = useRef<number | null>(null);
+  const suppressDirty = useRef(false);
   committedRef.current = committed;
   const { toast } = useToast();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -557,7 +823,8 @@ export default function SearchPage() {
   const { visibleCols: visibleColsRaw, colOrder, setColOrder, colWidths, setColWidth } = colPrefs;
   const visibleCols = visibleColsRaw as Set<OptCol>;
 
-  const isPaste = Boolean(committed && carListSearchTokens(committed));
+  const fixedMode = activeView?.kind === "fixed" && Boolean(viewId);
+  const isPaste = Boolean(!fixedMode && committed && carListSearchTokens(committed));
   const pageSize = pageSizeNumber(ps);
   const listParams = {
     page,
@@ -567,7 +834,7 @@ export default function SearchPage() {
     search_cars: scope.cars ? 1 : 0,
     search_leases: scope.leases ? 1 : 0,
     search_car_data: scope.carData ? 1 : 0,
-    sort: sort !== "car_number" ? sort : undefined,
+    sort: sort !== "car_number" && !isFocusColumn(sort) ? sort : undefined,
     dir: dir === "desc" ? "desc" : undefined,
     type: typeFilter || undefined,
     mech: mechFilter || undefined,
@@ -575,52 +842,114 @@ export default function SearchPage() {
     entity: entityFilter || undefined,
     status: statusFilter || undefined,
     fleet: exactFleet ? 1 : undefined,
+    open_stop: openStop || undefined,
+    program: programFilter || undefined,
+    tag: tagFilter || undefined,
+    view_id: viewId || undefined,
+    focus: layoutNeedsFocus(viewLayout?.order?.length ? viewLayout.order : [...visibleCols]) ? 1 : undefined,
   };
 
   const textQuery = useQuery<RailcarPage>({
     queryKey: ["/api/railcars", "search-page", listParams],
     queryFn: ({ signal }) => apiGet<RailcarPage>(railcarsQs(listParams), { timeoutMs: 20_000, signal }),
-    enabled: Boolean(committed) && !isPaste && live,
+    enabled: Boolean(committed) && !isPaste && !fixedMode && live,
     staleTime: 30_000,
   });
   const summaryParams = { ...listParams, page: undefined, pageSize: undefined };
   const summaryQuery = useQuery<Summary & { match?: FleetMatch }>({
     queryKey: ["/api/railcars/summary", "search-page", summaryParams],
     queryFn: ({ signal }) => apiGet(railcarsQs(summaryParams).replace("/api/railcars", "/api/railcars/summary"), { timeoutMs: 20_000, signal }),
-    enabled: Boolean(committed) && !isPaste && live,
+    enabled: Boolean(committed) && !isPaste && !fixedMode && live,
     staleTime: 30_000,
   });
   const peopleQuery = useQuery<DirectoryPage>({
     queryKey: ["/api/directory-search", "from-search", committed],
     queryFn: ({ signal }) =>
       apiGet<DirectoryPage>(`/api/directory-search?q=${encodeURIComponent(committed.trim())}&page=1&pageSize=8`, { timeoutMs: 20_000, signal }),
-    enabled: Boolean(committed) && !isPaste && live && committed.trim().length >= 2,
+    enabled: Boolean(committed) && !isPaste && !fixedMode && live && committed.trim().length >= 2,
     staleTime: 30_000,
   });
 
-  const filteredPaste = useMemo(() => {
-    const rows = pasteRows ?? [];
-    return rows.filter((r) => {
-      if (typeFilter && !codeHit(r.car_type, typeFilter) && !codeHit(r.equipment_type_code, typeFilter)) return false;
-      if (mechFilter && !codeHit(r.mechanical_designation, mechFilter)) return false;
-      if (aarFilter && !codeHit(r.aar_designation, aarFilter)) return false;
-      if (entityFilter && String(r.entity ?? "") !== entityFilter) return false;
-      if (statusFilter && String(r.fleet_status ?? "") !== statusFilter) return false;
-      return true;
-    });
-  }, [pasteRows, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter]);
+  const viewsQuery = useQuery<{ schema_ready: boolean; message?: string; views: ViewSummary[] }>({
+    queryKey: ["/api/views"],
+    queryFn: ({ signal }) => apiGet("/api/views", { timeoutMs: 20_000, signal }),
+    staleTime: 15_000,
+  });
+  const views = viewsQuery.data?.schema_ready ? viewsQuery.data.views : [];
+  const pinIds = views.filter((view) => view.pinned).map((view) => view.id).slice(0, 12);
+  const countsQuery = useQuery<{ counts: Record<string, { count: number; active: number; inactive: number; ms: number } | null> }>({
+    queryKey: ["/api/views/counts", pinIds.join(",")],
+    queryFn: ({ signal }) => apiGet(`/api/views/counts?ids=${pinIds.join(",")}`, { timeoutMs: 20_000, signal }),
+    enabled: pinIds.length > 0 && viewsQuery.data?.schema_ready === true,
+    staleTime: 30_000,
+  });
+  const detailQuery = useQuery<ViewDetail>({
+    queryKey: ["/api/views", viewId],
+    queryFn: ({ signal }) => apiGet(`/api/views/${viewId}`, { timeoutMs: 20_000, signal }),
+    enabled: Boolean(viewId) && viewsQuery.data?.schema_ready === true,
+  });
+  const fixedQuery = useQuery<any[] | { rows?: any[] }>({
+    queryKey: ["/api/railcars", "view-fixed", viewId, listParams.focus],
+    queryFn: ({ signal }) => apiGet(railcarsQs({ view_id: viewId, all: 1, active: "all", focus: listParams.focus }), { timeoutMs: 20_000, signal }),
+    enabled: fixedMode && viewsQuery.data?.schema_ready === true,
+  });
 
-  const rows = isPaste ? filteredPaste : live ? (textQuery.data?.rows ?? []) : cachedTextRows;
-  const summary = isPaste ? summarize(filteredPaste) : live ? (summaryQuery.data ?? null) : cachedSummary;
-  const match: FleetMatch = isPaste ? null : live ? (textQuery.data?.match ?? summaryQuery.data?.match ?? null) : cachedMatch;
+  const filterBag = {
+    type: typeFilter,
+    mech: mechFilter,
+    aar: aarFilter,
+    entity: entityFilter,
+    status: statusFilter,
+    active: activeMode,
+    openStop,
+    program: programFilter,
+    tag: tagFilter,
+  };
+  const filteredPaste = useMemo(() => {
+    return (pasteRows ?? []).filter((r) => matchesSearchFilters(r, { ...filterBag, active: "all", openStop: "", program: "", tag: "" }));
+  }, [pasteRows, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter]);
+  const filteredFixed = useMemo(() => {
+    return asRailcarList(fixedQuery.data).filter((r) => matchesSearchFilters(r, filterBag));
+  }, [fixedQuery.data, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter, activeMode, openStop, programFilter, tagFilter]);
+
+  const unsortedRows = fixedMode
+    ? filteredFixed
+    : isPaste
+      ? filteredPaste
+      : live
+        ? (textQuery.data?.rows ?? [])
+        : cachedTextRows;
+  const knownTotal = fixedMode
+    ? filteredFixed.length
+    : isPaste
+      ? filteredPaste.length
+      : (summaryQuery.data?.total ?? (live ? textQuery.data?.total_count : cachedTextTotal) ?? 0);
+  const fullSetLoaded = fixedMode || isPaste || (knownTotal > 0 && knownTotal <= 2000 && unsortedRows.length >= knownTotal);
+  const rows = (fixedMode || isPaste || (isFocusColumn(sort) && fullSetLoaded))
+    ? sortRows(unsortedRows, sort, dir)
+    : unsortedRows;
+  const summary = fixedMode
+    ? summarize(filteredFixed)
+    : isPaste
+      ? summarize(filteredPaste)
+      : live
+        ? (summaryQuery.data ?? null)
+        : cachedSummary;
+  const match: FleetMatch = fixedMode || isPaste ? null : live ? (textQuery.data?.match ?? summaryQuery.data?.match ?? null) : cachedMatch;
   // Summary counts every matching row. The list endpoint's total is an estimate, so the
   // breadcrumb, pager, and summary chips share the summary total once it has loaded.
-  const totalCount = isPaste
-    ? filteredPaste.length
-    : (summary?.total ?? (live ? (textQuery.data?.total_count ?? 0) : cachedTextTotal));
+  const totalCount = fixedMode
+    ? filteredFixed.length
+    : isPaste
+      ? filteredPaste.length
+      : (summary?.total ?? (live ? (textQuery.data?.total_count ?? 0) : cachedTextTotal));
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const loading = isPaste ? pasteLoading : live && textQuery.isFetching && !textQuery.data;
-  const pageRows = isPaste ? filteredPaste.slice((page - 1) * pageSize, page * pageSize) : rows;
+  const loading = fixedMode
+    ? fixedQuery.isFetching && !fixedQuery.data
+    : isPaste
+      ? pasteLoading
+      : live && textQuery.isFetching && !textQuery.data;
+  const pageRows = fixedMode || isPaste ? rows.slice((page - 1) * pageSize, page * pageSize) : rows;
   const peopleRows = peopleQuery.data?.rows ?? [];
   const peopleTotal = peopleQuery.data?.total_count ?? 0;
   const alias = classifyFleetQuery(committed);
@@ -644,8 +973,12 @@ export default function SearchPage() {
       entity: entityFilter,
       status: statusFilter,
       active: activeMode,
-      fleet: exactFleet,
-      sort,
+    fleet: exactFleet,
+    view: viewId ? String(viewId) : "",
+    openStop,
+    program: programFilter,
+    tag: tagFilter,
+    sort,
       dir,
       page,
       ps,
@@ -710,16 +1043,16 @@ export default function SearchPage() {
   const draftCount = draft.tokens.filter(looksLikeCarToken).length;
 
   useEffect(() => {
-    if (!committed) return;
+    if (!committed && !viewId) return;
     const external = decodeHash(window.location.hash);
-    if (window.location.hash !== lastSeenHash.current && shouldRebootSearch({ q: committed, sid: sidRef.current }, external)) {
+    if (window.location.hash !== lastSeenHash.current && shouldRebootSearch({ q: committed, sid: sidRef.current, view: viewId ? String(viewId) : "" }, { ...external, view: external.view })) {
       return;
     }
     const hash = hashState();
     const path = encodeHash(hash);
     lastSeenHash.current = `#${path}`;
     if (window.location.hash !== `#${path}`) navigateHash(path, { replace: true });
-    const ready = !live || (isPaste ? !pasteLoading : textQuery.isFetched || textQuery.isError);
+    const ready = !live || (fixedMode ? Boolean(fixedQuery.data) || fixedQuery.isError : isPaste ? !pasteLoading : textQuery.isFetched || textQuery.isError);
     const results: StoredSearchResults = isPaste
       ? {
           mode: "paste",
@@ -752,11 +1085,22 @@ export default function SearchPage() {
     saveSearchState(hash.sid, {
       hash,
       pastedText: committed,
-      ids: (isPaste ? pasteRows ?? [] : rows).map((r) => Number(r.id)).filter((n) => n > 0),
+      ids: (fixedMode ? filteredFixed : isPaste ? pasteRows ?? [] : rows).map((r) => Number(r.id)).filter((n) => n > 0),
       selection: Array.from(selected),
       scrollY: scrollRef.current,
       results,
       ready,
+      draft: viewId
+        ? {
+            viewId,
+            dirty: viewDirty,
+            density,
+            panelCollapsed: !panelOpen,
+            cols: viewLayout?.cols ?? [],
+            order: viewLayout?.order ?? [],
+            widths: viewLayout?.widths ?? {},
+          }
+        : null,
     });
     saveSearchSession({
       query: committed,
@@ -780,7 +1124,7 @@ export default function SearchPage() {
     });
     // hashState closes over the latest filters; listing them keeps the hash in step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [committed, page, ps, activeMode, exactFleet, scope, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter, sort, dir, pasteRows, pasteMeta, selected, live, pasteLoading, textQuery.data, textQuery.isFetched, summaryQuery.data, totalCount]);
+  }, [committed, viewId, openStop, programFilter, tagFilter, page, ps, activeMode, exactFleet, scope, typeFilter, mechFilter, aarFilter, entityFilter, statusFilter, sort, dir, pasteRows, pasteMeta, selected, live, pasteLoading, textQuery.data, textQuery.isFetched, summaryQuery.data, totalCount, viewDirty, density, panelOpen, viewLayout, fixedMode, filteredFixed]);
 
   function applyBoot(next: Boot) {
     sidRef.current = next.sid;
@@ -801,6 +1145,17 @@ export default function SearchPage() {
     setSort(next.sort);
     setDir(next.dir);
     setExactFleet(next.exactFleet);
+    setViewId(next.viewId);
+    setOpenStop(next.openStop);
+    setProgramFilter(next.program);
+    setTagFilter(next.tag);
+    if (next.draft && next.draft.viewId === next.viewId) {
+      setDensity(next.draft.density);
+      setPanelOpen(!next.draft.panelCollapsed);
+      setViewDirty(next.draft.dirty);
+    } else {
+      setViewDirty(false);
+    }
     setPasteRows(next.pasteRows);
     setPasteMeta(next.pasteMeta);
     setCachedTextRows(next.textRows);
@@ -826,11 +1181,174 @@ export default function SearchPage() {
     if (window.location.hash === lastSeenHash.current) return;
     const hash = decodeHash(window.location.hash);
     lastSeenHash.current = window.location.hash;
-    if (!shouldRebootSearch({ q: committedRef.current, sid: sidRef.current }, { q: hash.q, sid: hash.sid })) return;
+    if (!shouldRebootSearch({ q: committedRef.current, sid: sidRef.current, view: viewId ? String(viewId) : "" }, { q: hash.q, sid: hash.sid, view: hash.view })) return;
     applyBoot(readBoot());
     // Re-read when the top bar or Back/Forward changes q or sid. Filter edits stay on this page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hashQs]);
+
+  useEffect(() => {
+    if (viewsQuery.data?.schema_ready === false) setSchemaMessage(viewsQuery.data.message || SAVED_VIEWS_SCHEMA_MESSAGE);
+    else if (viewsQuery.data?.schema_ready) setSchemaMessage(null);
+  }, [viewsQuery.data]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      event.preventDefault();
+      setPanelOpen(true);
+      inputRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    const detail = detailQuery.data;
+    if (!detail || !viewId || detail.id !== viewId) return;
+    setActiveView({
+      id: detail.id,
+      name: detail.name,
+      kind: detail.kind,
+      description: detail.description,
+      shared: detail.shared,
+      pinned: detail.pinned,
+      pin_order: detail.pin_order,
+      owner: detail.owner,
+      owner_name: detail.owner_name,
+      updated_by_name: detail.updated_by_name,
+      updated_at: detail.updated_at,
+      updated_at_et: detail.updated_at_et,
+      member_count: detail.member_count,
+    });
+    const opening = replaceFromView.current === detail.id;
+    const stored = loadSearchState(sidRef.current)?.draft;
+    const keepDraft = !opening && stored?.dirty && stored.viewId === detail.id;
+    if (opening) {
+      suppressDirty.current = true;
+      applyLayout(detail.layout, detail.kind === "query" ? detail.query : null);
+      if (detail.kind === "fixed") {
+        setCommitted("");
+        setQuery(detail.query?.q ?? "");
+        setPasteRows(null);
+        setPasteMeta(null);
+      } else if (!committedRef.current && detail.query?.q) {
+        setQuery(detail.query.q);
+        setCommitted(detail.query.q);
+        setExactFleet(detail.query.fleet !== false);
+        if (detail.query.scope) setScope(detail.query.scope);
+        setLive(true);
+      }
+      setViewDirty(false);
+      replaceFromView.current = null;
+      suppressDirty.current = false;
+      return;
+    }
+    if (keepDraft && stored) {
+      setViewLayout({
+        ...detail.layout,
+        cols: stored.cols.length ? stored.cols : detail.layout.cols,
+        order: stored.order.length ? stored.order : detail.layout.order,
+        widths: stored.widths,
+        density: stored.density,
+        panelCollapsed: stored.panelCollapsed,
+      });
+      setDensity(stored.density);
+      setPanelOpen(!stored.panelCollapsed);
+      setViewDirty(true);
+    } else {
+      setViewLayout(detail.layout);
+      setDensity(detail.layout.density ?? "comfortable");
+    }
+    if (detail.kind === "query" && !committedRef.current && detail.query?.q) {
+      setQuery(detail.query.q);
+      setCommitted(detail.query.q);
+      setExactFleet(detail.query.fleet !== false);
+      if (detail.query.scope) setScope(detail.query.scope);
+      setLive(true);
+    }
+  }, [detailQuery.data, viewId]);
+
+  function markDirty() {
+    if (suppressDirty.current || !viewId) return;
+    setViewDirty(true);
+  }
+
+  function currentFilters(): ViewFilters {
+    return {
+      ...emptyViewFilters(activeMode),
+      type: typeFilter,
+      mech: mechFilter,
+      aar: aarFilter,
+      entity: entityFilter,
+      status: statusFilter,
+      active: activeMode,
+      open_stop: (openStop || "") as ViewFilters["open_stop"],
+      program: programFilter,
+      tag: tagFilter,
+    };
+  }
+
+  function layoutSnapshot(preset?: ViewLayout): ViewLayout {
+    if (preset) return preset;
+    const order = (viewId && viewLayout?.order.length ? viewLayout.order : displayKeys).filter((key) => key !== "_actions");
+    const pageSizeValue = ps === "all" || ps === 500 ? 500 : ps === 200 ? 200 : 75;
+    return {
+      v: 1,
+      cols: order,
+      order,
+      widths: { ...(viewLayout?.widths ?? {}), ...colWidths },
+      sort: sort ? { key: sort, dir } : null,
+      filters: currentFilters(),
+      pageSize: pageSizeValue,
+      showInactive: activeMode !== "active",
+      panelCollapsed: !panelOpen,
+      density,
+    };
+  }
+
+  function applyLayout(layout: ViewLayout, query: ViewQuery | null) {
+    suppressDirty.current = true;
+    setViewLayout(layout);
+    setDensity(layout.density ?? "comfortable");
+    setPanelOpen(layout.panelCollapsed === false);
+    const filters = layout.filters ?? emptyViewFilters();
+    setTypeFilter(filters.type || "");
+    setMechFilter(filters.mech || "");
+    setAarFilter(filters.aar || "");
+    setEntityFilter(filters.entity || "");
+    setStatusFilter(filters.status || "");
+    setActiveMode(filters.active || "active");
+    setOpenStop(filters.open_stop || "");
+    setProgramFilter(filters.program || "");
+    setTagFilter(filters.tag || "");
+    if (layout.sort?.key) {
+      setSort(layout.sort.key);
+      setDir(layout.sort.dir === "desc" ? "desc" : "asc");
+    }
+    setPs(layout.pageSize === 500 ? 500 : layout.pageSize === 200 ? 200 : 75);
+    setPage(1);
+    if (query) {
+      setExactFleet(query.fleet !== false);
+      setScope(query.scope ?? { ...DEFAULT_SCOPE });
+    }
+    setLive(true);
+    suppressDirty.current = false;
+  }
+
+  function openView(id: number) {
+    if (id === viewId) return;
+    replaceFromView.current = id;
+    setViewId(id);
+    setPage(1);
+    setSelected(new Set());
+    setLive(true);
+    setError(null);
+    ensureSid();
+  }
 
   async function runPaste(q: string, nextScope: SearchScope, nextActive: SearchActive) {
     setPasteLoading(true);
@@ -873,6 +1391,14 @@ export default function SearchPage() {
   function submit() {
     const trimmed = query.trim();
     if (!trimmed) return;
+    if (activeView?.kind === "fixed") {
+      setViewId(null);
+      setActiveView(null);
+      setViewLayout(null);
+      setViewDirty(false);
+    } else if (viewId) {
+      markDirty();
+    }
     setPage(1);
     setSelected(new Set());
     setError(null);
@@ -897,6 +1423,14 @@ export default function SearchPage() {
     setPage(1);
     setSelected(new Set());
     setLive(true);
+    setViewId(null);
+    setActiveView(null);
+    setViewLayout(null);
+    setViewDirty(false);
+    setOpenStop("");
+    setProgramFilter("");
+    setTagFilter("");
+    setSessionLayout(null);
     clearSearchSession();
     navigateHash("/search", { replace: true });
     inputRef.current?.focus();
@@ -905,6 +1439,7 @@ export default function SearchPage() {
   function touchFilters() {
     setPage(1);
     setLive(true);
+    markDirty();
   }
 
   function setScopeFlag(key: keyof SearchScope, next: boolean) {
@@ -980,18 +1515,27 @@ export default function SearchPage() {
   }
 
   const displayKeys = useMemo(() => {
+    const layoutOrder = (viewId ? viewLayout?.order : sessionLayout?.order) ?? [];
+    if (layoutOrder.length) {
+      const order = layoutOrder.filter((key) => key !== "_actions" && key !== "_select");
+      return [...order, ...PINNED_END];
+    }
     const movable = [...CORE_MOVABLE, ...OPT_COLS.filter((c) => visibleCols.has(c.key)).map((c) => c.key)];
     return [...PINNED_START, ...mergeColOrder(movable, colOrder), ...PINNED_END];
-  }, [visibleCols, colOrder]);
-  const movableKeys = displayKeys.filter((k) => !(PINNED_START as readonly string[]).includes(k) && !(PINNED_END as readonly string[]).includes(k));
+  }, [viewId, viewLayout, sessionLayout, visibleCols, colOrder]);
+  const movableKeys = displayKeys.filter((k) => k !== "_actions" && (!(viewId || sessionLayout) ? !(PINNED_START as readonly string[]).includes(k) && !(PINNED_END as readonly string[]).includes(k) : true));
   const pasteCount = pasteMeta?.counts.pasted ?? (committed ? carListSearchTokens(committed)?.length ?? 0 : 0);
   const committedLabel = pasteCount > 1 ? `${pasteCount} cars` : `"${committed}"`;
   const crumbQuery = pasteCount > 1 ? `${pasteCount} cars` : committed.length > 48 ? `${committed.slice(0, 48)}…` : committed;
   const missing = pasteMeta?.notFound ?? [];
   const ambiguous = pasteMeta?.ambiguous ?? [];
-  const hasResults = Boolean(committed) && (totalCount > 0 || missing.length > 0 || ambiguous.length > 0 || peopleRows.length > 0);
-  const noResults = Boolean(committed) && !loading && !peopleQuery.isFetching && !peopleQuery.isError && totalCount === 0 && missing.length === 0 && ambiguous.length === 0 && peopleRows.length === 0;
-  const loadError = !isPaste && textQuery.isError ? ((textQuery.error as Error)?.message || "Search failed") : error;
+  const hasResults = (Boolean(committed) || Boolean(viewId)) && (totalCount > 0 || missing.length > 0 || ambiguous.length > 0 || peopleRows.length > 0);
+  const noResults = (Boolean(committed) || Boolean(viewId)) && !loading && !peopleQuery.isFetching && !peopleQuery.isError && totalCount === 0 && missing.length === 0 && ambiguous.length === 0 && peopleRows.length === 0;
+  const loadError = fixedQuery.isError
+    ? ((fixedQuery.error as Error)?.message || "Could not load this view")
+    : !isPaste && textQuery.isError
+      ? ((textQuery.error as Error)?.message || "Search failed")
+      : error;
   const editRow = editCarId == null ? null : (rows.find((r) => r.id === editCarId) ?? (pasteRows ?? []).find((r) => r.id === editCarId) ?? null);
 
   function toggleSelected(id: number) {
@@ -1004,15 +1548,29 @@ export default function SearchPage() {
   }
 
   function cell(key: string, r: any) {
-    if (OPT_COLS.some((c) => c.key === key) && visibleCols.has(key as OptCol)) return renderOptTd(key, r);
+    const compact = density === "compact";
+    const pad = compact ? "px-3 py-1" : "px-4 py-3";
+    const shownByLayout = Boolean((viewId ? viewLayout : sessionLayout)?.order.includes(key));
+    if (key === "view_note" && (shownByLayout || visibleCols.has("view_note"))) {
+      return (
+        <ViewNoteCell
+          key={key}
+          value={String(r.view_note ?? "")}
+          compact={compact}
+          readOnly={!canEdit || !fixedMode || r.active === false}
+          onSave={(note) => { void saveMemberNote(Number(r.id), note); }}
+        />
+      );
+    }
+    if (OPT_COLS.some((c) => c.key === key) && (shownByLayout || visibleCols.has(key as OptCol))) return renderOptTd(key, r, compact);
     switch (key) {
       case "entity":
-        return <td key={key} className="px-4 py-3"><EntityBadge entity={r.entity} /></td>;
+        return <td key={key} className={`${pad} font-mono-num text-muted-foreground`}><EntityBadge entity={r.entity} /></td>;
       case "marks":
-        return <td key={key} className="px-4 py-3 font-mono-num text-muted-foreground hidden sm:table-cell">{r.reporting_marks ?? "—"}</td>;
+        return <td key={key} className={cn(`${pad} font-mono-num text-muted-foreground sticky left-9 z-10 bg-card hidden sm:table-cell`)}>{r.reporting_marks ?? "—"}</td>;
       case "car_number":
         return (
-          <td key={key} className="px-4 py-3 font-mono-num font-medium">
+          <td key={key} className={cn(`${pad} font-mono-num font-medium sticky left-[7.75rem] z-10 bg-card`)}>
             <div className="flex items-center gap-2 flex-wrap">
               <Link
                 href={withFrom(`/cars/${r.id}`)}
@@ -1027,15 +1585,15 @@ export default function SearchPage() {
         );
       case "lease_type":
         return (
-          <td key={key} className="px-4 py-3">
+          <td key={key} className={pad}>
             <LeaseTypeBadge carType={r.lease_type} mlaType={r.assignment?.rider?.master_lease?.lease_type} />
           </td>
         );
       case "type":
-        return <td key={key} className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{r.car_type ?? "—"}</td>;
+        return <td key={key} className={`${pad} text-muted-foreground hidden sm:table-cell`}>{r.car_type ?? "—"}</td>;
       case "status":
         return (
-          <td key={key} className="px-4 py-3">
+          <td key={key} className={pad}>
             <div className="flex items-center gap-1.5 flex-wrap">
               <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
               {r.ops_flag ? <OpsFlagBadge flag={r.ops_flag} /> : null}
@@ -1108,23 +1666,481 @@ export default function SearchPage() {
     }
   }
 
+  const viewCounts: Record<string, { count: number; active: number; inactive: number; ms: number } | null> = {
+    ...(countsQuery.data?.counts ?? {}),
+  };
+  const crumbCount = viewId ? (viewCounts[String(viewId)]?.count ?? totalCount) : totalCount;
+  const collapsed = (Boolean(committed) || Boolean(viewId)) && !panelOpen;
+  const filterCount = [typeFilter, mechFilter, aarFilter, entityFilter, statusFilter, openStop, programFilter, tagFilter].filter(Boolean).length
+    + (activeMode !== "active" ? 1 : 0);
+
+  function refreshViews() {
+    void queryClient.invalidateQueries({ queryKey: ["/api/views"] });
+    void queryClient.invalidateQueries({ queryKey: ["/api/views/counts"] });
+    if (viewId) void queryClient.invalidateQueries({ queryKey: ["/api/views", viewId] });
+  }
+
+  async function saveMemberNote(railcarId: number, note: string) {
+    if (!viewId) return;
+    try {
+      await apiRequest("PATCH", `/api/views/${viewId}/members/${railcarId}`, { note });
+      void queryClient.invalidateQueries({ queryKey: ["/api/railcars", "view-fixed", viewId] });
+    } catch (e: any) {
+      toast({ title: "Note not saved", description: e.message ?? "inactive – left alone", variant: "destructive" });
+    }
+  }
+
+  function writableIds(ids: number[]): number[] {
+    const inactive = new Set(rows.filter((row) => row.active === false).map((row) => Number(row.id)));
+    return ids.filter((id) => !inactive.has(id));
+  }
+
+  async function patchView(id: number, body: Record<string, unknown>) {
+    const res = await apiRequest("PATCH", `/api/views/${id}`, body);
+    refreshViews();
+    return res.json();
+  }
+
+  async function saveCurrentView() {
+    if (!viewId || !activeView) {
+      setSaveOpen(true);
+      return;
+    }
+    setSavingView(true);
+    try {
+      const layout = layoutSnapshot();
+      const body: Record<string, unknown> = { layout, expected_updated_at: activeView.updated_at };
+      if (activeView.kind === "query") {
+        body.query = { v: 1, q: committed, scope, fleet: exactFleet, filters: layout.filters };
+      }
+      const saved = await patchView(viewId, body);
+      setViewDirty(false);
+      setViewLayout(layout);
+      if (saved?.updated_at) setActiveView((prev) => prev ? { ...prev, updated_at: saved.updated_at, updated_at_et: saved.updated_at_et } : prev);
+      toast({ title: "View saved" });
+    } catch (e: any) {
+      toast({ title: "Could not save view", description: e.message, variant: "destructive" });
+    } finally {
+      setSavingView(false);
+    }
+  }
+
+  async function saveNewView(body: { name: string; kind: ViewKind; shared: boolean; pinned: boolean; description: string; preset: "current" | "focus" }) {
+    setSavingView(true);
+    try {
+      const layout = body.preset === "focus" ? focusPresetLayout(currentFilters()) : layoutSnapshot();
+      const payload: Record<string, unknown> = {
+        name: body.name,
+        kind: body.kind,
+        shared: body.shared,
+        pinned: body.pinned,
+        description: body.description,
+        layout,
+      };
+      if (body.kind === "query") {
+        payload.query = { v: 1, q: committed || query, scope, fleet: exactFleet, filters: layout.filters };
+      } else if (committed && carListSearchTokens(committed)) {
+        payload.text = committed;
+      } else if (fixedMode && viewId) {
+        payload.railcar_ids = filteredFixed.map((row) => Number(row.id)).filter((id) => id > 0);
+      } else {
+        const data = await apiGet<{ ids: number[] }>(railcarsQs({ ...listParams, page: undefined, pageSize: undefined }).replace("/api/railcars?", "/api/railcars/ids?"), { timeoutMs: 20_000 });
+        payload.railcar_ids = (data.ids ?? []).slice(0, 2000);
+      }
+      const res = await apiRequest("POST", "/api/views", payload);
+      const created = await res.json();
+      const id = Number(created?.view?.id ?? created?.id);
+      setSaveOpen(false);
+      refreshViews();
+      if (id > 0) openView(id);
+      if (body.preset === "focus") setViewLayout(layout);
+    } catch (e: any) {
+      toast({ title: "Could not save view", description: e.message, variant: "destructive" });
+    } finally {
+      setSavingView(false);
+    }
+  }
+
+  async function reorderPins(ids: number[]) {
+    try {
+      await apiRequest("PUT", "/api/views/pins", { order: ids });
+      refreshViews();
+    } catch (e: any) {
+      toast({ title: "Could not reorder pins", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function togglePin(view: ViewSummary) {
+    try {
+      await patchView(view.id, { pinned: !view.pinned, expected_updated_at: view.updated_at });
+    } catch (e: any) {
+      toast({ title: "Could not pin view", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function renameView(view: ViewSummary) {
+    const name = window.prompt("Rename view", view.name);
+    if (!name || !name.trim() || name.trim() === view.name) return;
+    try {
+      await patchView(view.id, { name: name.trim(), expected_updated_at: view.updated_at });
+    } catch (e: any) {
+      toast({ title: "Could not rename", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function duplicateView(view: ViewSummary) {
+    try {
+      const res = await apiRequest("POST", `/api/views/${view.id}/duplicate`, { name: `${view.name} copy`, shared: canEdit ? view.shared : false });
+      const created = await res.json();
+      refreshViews();
+      const id = Number(created?.view?.id ?? created?.id);
+      if (id > 0) openView(id);
+    } catch (e: any) {
+      toast({ title: "Could not duplicate", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function deleteView(view: ViewSummary) {
+    try {
+      await apiRequest("DELETE", `/api/views/${view.id}`);
+      refreshViews();
+      if (view.id === viewId) {
+        setViewId(null);
+        setActiveView(null);
+        setViewLayout(null);
+        setViewDirty(false);
+      }
+      toast({ title: "View deleted" });
+    } catch (e: any) {
+      toast({ title: "Could not delete", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function copyViewLink(view: ViewSummary) {
+    const hash = encodeHash({ ...hashState(), view: String(view.id), q: view.kind === "fixed" ? "" : committed });
+    const url = `${window.location.origin}${window.location.pathname}#${hash}`;
+    await copyList(url, "Copied view link");
+  }
+
+  function resetView() {
+    const detail = detailQuery.data;
+    if (!detail) return;
+    applyLayout(detail.layout, detail.kind === "query" ? detail.query : null);
+    setViewDirty(false);
+  }
+
+  function toggleViewCol(key: string) {
+    const base = (viewId ? viewLayout : sessionLayout) ?? layoutSnapshot();
+    const order = base.order.includes(key) ? base.order.filter((item) => item !== key) : [...base.order, key];
+    const next = { ...base, order, cols: order };
+    if (viewId) {
+      setViewLayout(next);
+      markDirty();
+    } else setSessionLayout(next);
+  }
+
+  function applyFocusPreset() {
+    const layout = focusPresetLayout(currentFilters());
+    if (viewId) {
+      setViewLayout(layout);
+      setSort(layout.sort?.key ?? "program_status");
+      setDir(layout.sort?.dir ?? "asc");
+      markDirty();
+    } else setSessionLayout(layout);
+  }
+
+  function resizeColumn(key: string, width: number) {
+    if (viewId) {
+      setViewLayout((prev) => prev ? { ...prev, widths: { ...prev.widths, [key]: width } } : prev);
+      markDirty();
+      return;
+    }
+    if (sessionLayout) {
+      setSessionLayout({ ...sessionLayout, widths: { ...sessionLayout.widths, [key]: width } });
+      return;
+    }
+    setColWidth(key, width);
+  }
+
+  function moveColumn(from: string, to: string) {
+    if (viewId && viewLayout) {
+      const order = moveCol(viewLayout.order.length ? viewLayout.order : displayKeys.filter((key) => key !== "_actions"), from, to);
+      setViewLayout({ ...viewLayout, order, cols: order });
+      markDirty();
+      return;
+    }
+    if (sessionLayout) {
+      const order = moveCol(sessionLayout.order, from, to);
+      setSessionLayout({ ...sessionLayout, order, cols: order });
+      return;
+    }
+    setColOrder(moveCol(movableKeys, from, to));
+  }
+
+  function columnWidth(key: string) {
+    const custom = (viewId ? viewLayout?.widths : sessionLayout?.widths)?.[key];
+    if (custom) return custom;
+    return colWidth(colWidths, key, WIDTHS[key] ?? 110);
+  }
+
+  function selectPage() {
+    setSelected(new Set(pageRows.map((row) => Number(row.id)).filter((id) => id > 0)));
+  }
+
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    try {
+      if (fixedMode || isPaste) {
+        setSelected(new Set(rows.map((row) => Number(row.id)).filter((id) => id > 0)));
+        return;
+      }
+      const data = await apiGet<{ ids: number[] }>(railcarsQs({ ...listParams, page: undefined, pageSize: undefined }).replace("/api/railcars?", "/api/railcars/ids?"), { timeoutMs: 20_000 });
+      setSelected(new Set(data.ids ?? []));
+    } catch (e: any) {
+      toast({ title: "Could not select cars", description: e.message, variant: "destructive" });
+    } finally {
+      setSelectingAll(false);
+    }
+  }
+
+  function openInRailcars() {
+    const ids = Array.from(selected);
+    const payload = {
+      ids,
+      label: activeView?.name || crumbQuery || "Search",
+      from: "search",
+      sid: ensureSid(),
+      view_id: viewId,
+      returnHash: encodeHash(hashState()),
+    };
+    sessionStorage.setItem(RAILCARS_HANDOFF_KEY, JSON.stringify(payload));
+    navigateHash("/railcars?handoff=1");
+  }
+
+  async function exportSelected(kind: "xlsx" | "csv") {
+    const picked = rows.filter((row) => selected.has(Number(row.id)));
+    if (!picked.length) return;
+    if (kind === "csv") {
+      downloadRailcarsCsv(picked, "search_selected.csv", { keys: exportKeys });
+      return;
+    }
+    await downloadSearchXlsx(picked, exportKeys, {
+      query: activeView?.name || committed,
+      filters: filterLabel(),
+      notFound: [],
+      inactive: [],
+      ambiguous: [],
+      summary: summarize(picked),
+    }, "search_selected.xlsx");
+  }
+
+  async function addSelectionTo(view: ViewSummary) {
+    const ids = writableIds(Array.from(selected));
+    if (!ids.length) {
+      toast({ title: "Inactive cars were left alone" });
+      return;
+    }
+    try {
+      await apiRequest("POST", `/api/views/${view.id}/members`, { ids });
+      toast({ title: `Added to ${view.name}` });
+      setAddOpen(false);
+      refreshViews();
+    } catch (e: any) {
+      toast({ title: "Could not add cars", description: e.message, variant: "destructive" });
+    }
+  }
+
+  async function removeSelection() {
+    if (!viewId) return;
+    const ids = writableIds(Array.from(selected));
+    if (!ids.length) {
+      toast({ title: "Inactive cars were left alone" });
+      return;
+    }
+    try {
+      await apiRequest("POST", `/api/views/${viewId}/members/remove`, { ids });
+      setSelected(new Set());
+      refreshViews();
+      void queryClient.invalidateQueries({ queryKey: ["/api/railcars", "view-fixed", viewId] });
+    } catch (e: any) {
+      toast({ title: "Could not remove cars", description: e.message, variant: "destructive" });
+    }
+  }
+
   const selectCls = "h-7 rounded border border-border bg-card px-2 text-xs text-foreground";
 
+  const filterControls = (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <ScopeBox id="search-scope-leases" label="Lease/OL info" checked={scope.leases} onChange={(v) => setScopeFlag("leases", v)} />
+        <ScopeBox id="search-scope-cars" label="Car numbers" checked={scope.cars} onChange={(v) => setScopeFlag("cars", v)} />
+        <ScopeBox id="search-scope-data" label="Car data" checked={scope.carData} onChange={(v) => setScopeFlag("carData", v)} />
+        <ScopeBox id="search-show-inactive" label="Show inactive / historical" checked={activeMode !== "active"} onChange={(v) => changeActive(v ? "all" : "active")} />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="search-filters">
+        <FilterText label="Car type" value={typeFilter} onCommit={(v) => { setTypeFilter(v); touchFilters(); }} testId="filter-car-type" />
+        <FilterText label="Mechanical" value={mechFilter} onCommit={(v) => { setMechFilter(v); touchFilters(); }} testId="filter-mech" />
+        <FilterText label="AAR" value={aarFilter} onCommit={(v) => { setAarFilter(v); touchFilters(); }} testId="filter-aar" />
+        <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          Owner
+          <select className={selectCls} value={entityFilter} onChange={(e) => { setEntityFilter(e.target.value); touchFilters(); }} data-testid="filter-entity">
+            <option value="">All</option>
+            <option value="Main">Main</option>
+            <option value="Rail Partners Select">RPS</option>
+            <option value="Coal">Coal</option>
+          </select>
+        </label>
+        <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          Fleet status
+          <select className={selectCls} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); touchFilters(); }} data-testid="filter-status">
+            <option value="">All</option>
+            {FLEET_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          Active
+          <select className={selectCls} value={activeMode} onChange={(e) => changeActive(e.target.value as SearchActive)} data-testid="filter-active">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          Rent stop
+          <select className={selectCls} value={openStop} onChange={(e) => { setOpenStop(e.target.value); touchFilters(); }} data-testid="filter-open-stop">
+            <option value="">Any stop</option>
+            <option value="any">Open stop</option>
+            <option value="Abatement">Abatement</option>
+            <option value="Off rent">Off rent</option>
+            <option value="none">No open stop</option>
+          </select>
+        </label>
+        <FilterText label="Program" value={programFilter} onCommit={(v) => { setProgramFilter(v); touchFilters(); }} testId="filter-program" />
+        <FilterText label="Tag" value={tagFilter} onCommit={(v) => { setTagFilter(v); touchFilters(); }} testId="filter-tag" />
+      </div>
+    </div>
+  );
+
+  const viewMenuProps = {
+    views,
+    counts: Object.fromEntries(Object.entries(viewCounts).map(([key, value]) => [key, value ?? undefined])),
+    activeId: viewId,
+    canEdit,
+    isAdmin,
+    userId: user?.id ?? "",
+    schemaMessage,
+    onOpen: openView,
+    onPin: (view: ViewSummary) => { void togglePin(view); },
+    onRename: (view: ViewSummary) => { void renameView(view); },
+    onDuplicate: (view: ViewSummary) => { void duplicateView(view); },
+    onDelete: (view: ViewSummary) => { void deleteView(view); },
+    onCopy: (view: ViewSummary) => { void copyViewLink(view); },
+  };
+
+  const selectedInactive = rows.filter((row) => selected.has(Number(row.id)) && row.active === false).length;
+
   return (
-    <div className="w-full min-w-0 overflow-x-hidden">
-      <div className="px-4 sm:px-8 pt-6 pb-4 max-w-[1400px] w-full mx-auto">
-        <div className="font-eyebrow mb-1.5">RLMS</div>
-        <nav aria-label="Breadcrumb" className="text-sm mb-1 flex flex-wrap items-center gap-1.5" data-testid="search-breadcrumb">
-          <span className="font-medium text-foreground">Search</span>
-          {committed && (
-            <>
-              <span className="text-muted-foreground">›</span>
-              <span className="text-foreground">"{crumbQuery}" ({totalCount.toLocaleString()} cars)</span>
-            </>
-          )}
-        </nav>
-        <h1 className="font-serif text-2xl font-semibold tracking-tight">Search</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+    <div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden">
+      {sidebarOpen ? (
+        <aside className="hidden xl:flex w-56 shrink-0 flex-col gap-2 overflow-auto border-r border-border px-2 py-3" data-testid="search-views-sidebar">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-medium">Views</span>
+            <button type="button" className="text-muted-foreground" aria-label="Hide views" onClick={() => { setSidebarOpen(false); writeViewsSidebarOpen(false); }}>
+              <PanelLeft className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <ViewsMenu {...viewMenuProps} />
+        </aside>
+      ) : null}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="shrink-0 space-y-2 px-4 pt-3 pb-2 sm:px-6">
+        <PinnedViewStrip
+          views={views}
+          counts={Object.fromEntries(Object.entries(viewCounts).map(([key, value]) => [key, value ?? undefined]))}
+          activeId={viewId}
+          canPin={canEdit}
+          onOpen={openView}
+          onReorder={(ids) => { void reorderPins(ids); }}
+          onCreate={() => setSaveOpen(true)}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          {!sidebarOpen ? (
+            <button type="button" className="hidden xl:inline-flex text-muted-foreground" aria-label="Show views" onClick={() => { setSidebarOpen(true); writeViewsSidebarOpen(true); }}>
+              <PanelLeft className="h-4 w-4" />
+            </button>
+          ) : null}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="outline" size="sm" className="h-7 text-xs xl:hidden">Views</Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72">
+              <ViewsMenu {...viewMenuProps} />
+            </PopoverContent>
+          </Popover>
+          <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm" data-testid="search-breadcrumb">
+            <button type="button" className="font-medium text-foreground" onClick={() => { if (committed || viewId) clear(); }}>Search</button>
+            {(viewId || committed) && (
+              <>
+                <span className="text-muted-foreground">›</span>
+                <span className="truncate text-foreground">
+                  {activeView?.name || crumbQuery} ({crumbCount.toLocaleString()}{activeView ? "" : " cars"})
+                  {viewDirty ? <span className="ml-1 text-amber-400" title="Unsaved changes">●</span> : null}
+                </span>
+              </>
+            )}
+          </nav>
+          <ViewMeta view={activeView} />
+          <div className="ml-auto flex flex-wrap items-center gap-1">
+            <Button type="button" size="sm" className="h-7 text-xs" disabled={Boolean(schemaMessage) || (!canEdit && Boolean(viewId)) || savingView} title={!canEdit ? "Viewers can save a private copy" : undefined} onClick={() => { if (!canEdit || !viewId) setSaveOpen(true); else void saveCurrentView(); }}>
+              {viewId && canEdit ? "Save" : "Save as…"}
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={Boolean(schemaMessage)} onClick={() => setSaveOpen(true)}>Save as…</Button>
+            {viewId ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" size="sm" variant="outline" className="h-7 px-2" aria-label="View actions"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void renameView(activeView)}>Rename</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => activeView && void duplicateView(activeView)}>Duplicate</DropdownMenuItem>
+                  <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void togglePin(activeView)}>{activeView?.pinned ? "Unpin" : "Pin"}</DropdownMenuItem>
+                  <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void patchView(activeView.id, { shared: !activeView.shared, expected_updated_at: activeView.updated_at }).catch((e) => toast({ title: "Could not update sharing", description: e.message, variant: "destructive" }))}>{activeView?.shared ? "Make private" : "Share"}</DropdownMenuItem>
+                  <DropdownMenuItem disabled={!viewDirty} onClick={resetView}>Reset to saved</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => activeView && void copyViewLink(activeView)}>Copy link</DropdownMenuItem>
+                  <DropdownMenuItem disabled={!(isAdmin || activeView?.owner === user?.id)} onClick={() => activeView && void deleteView(activeView)}>Delete</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
+        </div>
+        {schemaMessage ? <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200" data-testid="saved-views-schema-message">{schemaMessage}</div> : null}
+        {collapsed ? (
+          <div className="space-y-1.5">
+            <button type="button" className="flex h-8 w-full items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-sm" onClick={() => { setPanelOpen(true); markDirty(); }} data-testid="search-collapsed-query">
+              <SearchIcon className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="truncate">{fixedMode ? `${activeView?.member_count ?? filteredFixed.length} cars pasted` : (committed || query || "Edit search")}</span>
+            </button>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              {isPaste && pasteMeta ? (
+                <span>
+                  {pasteMeta.counts.pasted.toLocaleString()} pasted · {pasteFoundLabel(pasteMeta.counts.found, pasteMeta.counts.inactive, activeMode)}
+                  {pasteShowsInactiveSeparately(activeMode) ? ` · ${pasteMeta.counts.inactive.toLocaleString()} inactive` : ""} · {pasteMeta.counts.not_found.toLocaleString()} not in RLMS
+                </span>
+              ) : null}
+              {typeFilter ? <button type="button" className="rounded-full border px-2 py-0.5" onClick={() => { setTypeFilter(""); touchFilters(); }}>Type: {typeFilter} ✕</button> : null}
+              {openStop ? <button type="button" className="rounded-full border px-2 py-0.5" onClick={() => { setOpenStop(""); touchFilters(); }}>Rent stop: {openStop} ✕</button> : null}
+              {programFilter ? <button type="button" className="rounded-full border px-2 py-0.5" onClick={() => { setProgramFilter(""); touchFilters(); }}>Program: {programFilter} ✕</button> : null}
+              {tagFilter ? <button type="button" className="rounded-full border px-2 py-0.5" onClick={() => { setTagFilter(""); touchFilters(); }}>Tag: {tagFilter} ✕</button> : null}
+              <FilterPopover count={filterCount}>{filterControls}</FilterPopover>
+              <span title="Defaults to active cars. Car type, mechanical designation, and description are searched automatically. Paste a column or a range such as TFOX 401-449. Press / to edit the search."><Info className="h-3.5 w-3.5" /></span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      {!collapsed && (
+      <div className="shrink-0 px-4 sm:px-6 pb-2 w-full">
+        {!committed && !viewId ? <h1 className="font-serif text-2xl font-semibold tracking-tight">Search</h1> : null}
+        <p className="text-sm text-muted-foreground">
           Defaults to active cars. Car type, mechanical designation, and description are searched automatically. Car data adds notes. Paste a column of cars, or a range such as TFOX 401-449.
         </p>
 
@@ -1216,9 +2232,13 @@ export default function SearchPage() {
         {draft.rejectedRanges.map((r) => (
           <div key={r.raw} className="mt-1 text-xs text-amber-500">{r.message}</div>
         ))}
+        {(committed || viewId) ? (
+          <button type="button" className="mt-2 text-xs text-primary hover:underline" onClick={() => setPanelOpen(false)}>Collapse search</button>
+        ) : null}
       </div>
+      )}
 
-      {!committed && !loading && (
+      {!committed && !viewId && !loading && (
         <div className="px-4 sm:px-8 pb-8 max-w-[1400px] w-full mx-auto grid grid-cols-2 gap-4 sm:grid-cols-4">
           {[
             { label: "Paste a car list", example: "HWCX10823\nHWCX10841", sub: "Excel column, commas, or MARK + number" },
@@ -1246,10 +2266,23 @@ export default function SearchPage() {
         </div>
       )}
 
-      {committed && (
-        <div className="px-4 sm:px-8 pb-8 max-w-[1400px] w-full mx-auto flex flex-col gap-3 min-w-0">
+      {(committed || viewId) && (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 px-4 pb-3 sm:px-6">
           <div className="flex flex-wrap items-center gap-2">
-            <ColumnPicker columns={OPT_COLS} prefs={colPrefs} />
+            <ColumnPicker
+              columns={OPT_COLS}
+              prefs={colPrefs}
+              visible={(viewId || sessionLayout) ? new Set(displayKeys) : undefined}
+              onToggle={(viewId || sessionLayout) ? toggleViewCol : undefined}
+              onReorder={(viewId || sessionLayout) ? (order) => {
+                if (viewId && viewLayout) {
+                  setViewLayout({ ...viewLayout, order, cols: order });
+                  markDirty();
+                } else if (sessionLayout) setSessionLayout({ ...sessionLayout, order, cols: order });
+              } : undefined}
+              onApplyPreset={applyFocusPreset}
+              onSaveToView={viewId ? () => { void saveCurrentView(); } : undefined}
+            />
             <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               Sort
               <select
@@ -1269,6 +2302,13 @@ export default function SearchPage() {
               </select>
             </label>
             <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              Density
+              <select className={selectCls} value={density} onChange={(e) => { setDensity(e.target.value === "compact" ? "compact" : "comfortable"); markDirty(); }} data-testid="search-density">
+                <option value="comfortable">Comfortable</option>
+                <option value="compact">Compact</option>
+              </select>
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               Page size
               <select
                 className={selectCls}
@@ -1282,6 +2322,7 @@ export default function SearchPage() {
               >
                 <option value="75">75</option>
                 <option value="200">200</option>
+                <option value="500">500</option>
                 <option value="all">All (≤500)</option>
               </select>
             </label>
@@ -1475,36 +2516,67 @@ export default function SearchPage() {
             </div>
           )}
 
+          <SelectionBar
+            selected={selected.size}
+            inactive={selectedInactive}
+            canEdit={canEdit && !schemaMessage}
+            fixedView={Boolean(fixedMode)}
+            onRailcars={openInRailcars}
+            onAdd={() => setAddOpen(true)}
+            onRemove={() => { void removeSelection(); }}
+            onPhotos={() => setPhotoOpen(true)}
+            onExport={(kind) => { void exportSelected(kind); }}
+          />
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <button type="button" className="text-primary hover:underline" onClick={selectPage}>Select page</button>
+            <button type="button" className="text-primary hover:underline" disabled={selectingAll} onClick={() => { void selectAllMatching(); }}>
+              {selectingAll ? "Selecting…" : `Select all ${totalCount.toLocaleString()} matching`}
+            </button>
+          </div>
+
           {hasResults && !loading && pageRows.length > 0 && (
-            <div className="rounded-lg border border-card-border bg-card min-w-0">
+            <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-card-border bg-card">
+              <div className="min-h-0 flex-1 overflow-auto" data-search-grid="">
               <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
                 <colgroup>
                   <col style={{ width: 36 }} />
                   {displayKeys.map((k) => (
-                    <col key={k} style={{ width: colWidth(colWidths, k, WIDTHS[k] ?? 110) }} />
+                    <col key={k} style={{ width: columnWidth(k) }} />
                   ))}
                 </colgroup>
-                <thead className="sticky top-0 z-10 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
+                <thead className="sticky top-0 z-30 bg-card text-muted-foreground shadow-[inset_0_-1px_0_0_hsl(var(--border))]">
                   <tr className="text-left">
-                    <th className="px-2 py-3 bg-muted/40" />
+                    <th className="sticky left-0 z-40 bg-muted/40 px-2 py-2" />
                     {displayKeys.map((key) => {
-                      const pinned = (PINNED_START as readonly string[]).includes(key) || (PINNED_END as readonly string[]).includes(key);
+                      const layoutPinned = key === "_actions";
+                      const pinned = viewId || sessionLayout ? layoutPinned : (PINNED_START as readonly string[]).includes(key) || (PINNED_END as readonly string[]).includes(key);
+                      const focusLocked = isFocusColumn(key) && !fullSetLoaded;
+                      const stickyLeft = key === "marks" ? "sticky left-9 z-30 bg-muted/40" : key === "car_number" ? "sticky left-[7.75rem] z-30 bg-muted/40" : "";
                       return (
                         <GridColumnTh
                           key={key}
                           listKey="search_results"
                           colKey={key}
-                          width={colWidth(colWidths, key, WIDTHS[key] ?? 110)}
+                          width={columnWidth(key)}
                           pinned={pinned}
                           className={cn(
-                            "px-4 py-3 font-medium text-[11px] uppercase tracking-wider bg-muted/40",
+                            "px-3 py-2 font-medium text-[11px] uppercase tracking-wider bg-muted/40",
+                            stickyLeft,
                             key === "marks" && "hidden sm:table-cell",
                             key === "type" && "hidden sm:table-cell",
                           )}
-                          onResize={setColWidth}
-                          onMove={(from, to) => setColOrder(moveCol(movableKeys, from, to))}
+                          onResize={resizeColumn}
+                          onMove={moveColumn}
+                          onSort={(fullSetLoaded || key === "car_number" || key === "id") && !focusLocked ? (col) => {
+                            setDir(sort === col && dir === "asc" ? "desc" : "asc");
+                            setSort(col);
+                            markDirty();
+                          } : undefined}
+                          sortDir={sort === key ? dir : null}
                         >
-                          {key === "_actions" ? null : columnLabel("search_results", key, LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key)}
+                          <span title={focusLocked ? "Narrow the search to sort by this" : undefined}>
+                            {key === "_actions" ? null : columnLabel("search_results", key, LABELS[key] ?? OPT_COLS.find((c) => c.key === key)?.label ?? key)}
+                          </span>
                         </GridColumnTh>
                       );
                     })}
@@ -1514,11 +2586,15 @@ export default function SearchPage() {
                   {pageRows.map((r) => (
                     <tr
                       key={r.id}
-                      className={cn("border-t border-border hover-elevate cursor-pointer", selected.has(r.id) && "bg-primary/10")}
+                      className={cn(
+                        "border-t border-border hover-elevate",
+                        r.active === false ? "bg-muted/60 text-muted-foreground" : "cursor-pointer",
+                        selected.has(r.id) && "bg-primary/10",
+                      )}
                       onClick={() => setEditCarId(r.id)}
                       data-testid={`row-search-car-${r.id}`}
                     >
-                      <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className={cn("sticky left-0 z-10 bg-card px-2", density === "compact" ? "py-1" : "py-3")} onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={selected.has(r.id)}
                           onCheckedChange={() => toggleSelected(r.id)}
@@ -1531,7 +2607,8 @@ export default function SearchPage() {
                   ))}
                 </tbody>
               </table>
-              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-border text-xs text-muted-foreground">
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground">
                 <span>
                   {totalCount.toLocaleString()} cars
                   {totalCount > 0 ? ` · page ${page} of ${totalPages}` : ""}
@@ -1558,6 +2635,41 @@ export default function SearchPage() {
         carPageHref={editCarId ? withFrom(`/cars/${editCarId}`) : undefined}
       />
       <LeaseGlanceSheet rider={leaseGlance} onClose={() => setLeaseGlance(null)} searchQuery={committed ? searchQueryString() : null} />
+      <SaveViewDialog
+        open={saveOpen}
+        onOpenChange={setSaveOpen}
+        views={views}
+        defaultName={activeView ? `${activeView.name} copy` : (isPaste ? "Pasted cars" : committed.slice(0, 48))}
+        defaultKind={isPaste || fixedMode ? "fixed" : "query"}
+        carCount={fixedMode ? filteredFixed.length : isPaste ? (pasteRows?.length ?? 0) : totalCount}
+        canShare={canEdit}
+        busy={savingView}
+        onSave={(body) => { void saveNewView(body); }}
+      />
+      {addOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setAddOpen(false)}>
+          <div className="w-80 rounded-lg border border-border bg-card p-3" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-2 text-sm font-medium">Add to a fixed view</div>
+            <div className="max-h-64 space-y-1 overflow-auto">
+              {views.filter((view) => view.kind === "fixed").map((view) => (
+                <button key={view.id} type="button" className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => { void addSelectionTo(view); }}>
+                  {view.name}
+                </button>
+              ))}
+              {views.every((view) => view.kind !== "fixed") ? <div className="text-xs text-muted-foreground">No fixed views yet.</div> : null}
+            </div>
+            <Button type="button" size="sm" variant="outline" className="mt-2 h-7 text-xs" onClick={() => { setAddOpen(false); setSaveOpen(true); }}>New fixed view</Button>
+          </div>
+        </div>
+      ) : null}
+      {photoOpen ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/40 p-6" onClick={() => setPhotoOpen(false)}>
+          <div className="w-full max-w-3xl" onClick={(event) => event.stopPropagation()}>
+            <PhotoFinderPanel initialText={carsToPasteText(rows.filter((row) => selected.has(Number(row.id))))} onClose={() => setPhotoOpen(false)} />
+          </div>
+        </div>
+      ) : null}
+      </div>
     </div>
   );
 }

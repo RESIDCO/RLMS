@@ -1,0 +1,1039 @@
+import type { Express, Request, Response } from "express";
+import { parseCarPasteListDetailed } from "@shared/programs";
+import { splitCarNumber } from "@shared/residco-import";
+import {
+  INACTIVE_NOTE_MESSAGE,
+  SAVED_VIEWS_SCHEMA_MESSAGE,
+  VIEW_MEMBER_CAP,
+  VIEW_PIN_CAP,
+  canonicalViewName,
+  countCacheKey,
+  formatEtTime,
+  isMissingViewSchema,
+  memberNoteAllowed,
+  memberReaddSnapshots,
+  memberRemoveSnapshots,
+  parseViewLayout,
+  parseViewQuery,
+  viewCreateSnapshots,
+  viewDeleteSnapshots,
+  viewNameKey,
+  viewNamesCollide,
+  viewUpdatedAtConflicts,
+  viewWriteStatus,
+  type ViewKind,
+  type ViewLayout,
+  type ViewQuery,
+} from "@shared/saved-views";
+import { recordChange, withChangeGroupResult } from "./change-log";
+import { countRailcars, parseRailcarListParams, type RailcarListParams } from "./railcar-list";
+import { resolveProgramCars } from "./programs";
+import { supabaseAdmin } from "./supabase";
+
+type ViewRow = {
+  id: number;
+  name: string;
+  kind: ViewKind;
+  description: string | null;
+  shared: boolean;
+  pinned: boolean;
+  pin_order: number | null;
+  owner: string | null;
+  updated_by: string | null;
+  updated_at: string;
+  created_at: string | null;
+  query: ViewQuery;
+  layout: ViewLayout;
+  deleted_at: string | null;
+};
+
+type Actor = { id: string; role: string };
+
+const SCHEMA_TTL_MS = 15_000;
+let schemaCache: { at: number; ready: boolean } | null = null;
+const countCache = new Map<string, { at: number; value: ViewCount }>();
+const COUNT_TTL_MS = 60_000;
+const nameCache = new Map<string, string>();
+
+export type ViewCount = { count: number; active: number; inactive: number; ms: number };
+
+export function clearViewCountCache() {
+  countCache.clear();
+}
+
+export function resetSavedViewSchemaCache() {
+  schemaCache = null;
+}
+
+function httpError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { status });
+}
+
+export async function savedViewsSchemaReady(): Promise<boolean> {
+  if (schemaCache && Date.now() - schemaCache.at < SCHEMA_TTL_MS) return schemaCache.ready;
+  const { error } = await supabaseAdmin.from("car_lists").select("id, kind, deleted_at").limit(1);
+  const ready = !error || !isMissingViewSchema(error);
+  if (error && !isMissingViewSchema(error)) throw error;
+  schemaCache = { at: Date.now(), ready };
+  return ready;
+}
+
+async function displayName(userId: string | null | undefined): Promise<string> {
+  const id = String(userId ?? "").trim();
+  if (!id) return "";
+  const cached = nameCache.get(id);
+  if (cached) return cached;
+  let name = "";
+  try {
+    const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+    const meta = (data.user?.user_metadata ?? {}) as Record<string, unknown>;
+    name = String(meta.full_name || meta.name || meta.display_name || data.user?.email || "");
+  } catch {
+    name = "";
+  }
+  if (!name) {
+    const { data } = await supabaseAdmin.from("user_roles").select("email").eq("user_id", id).maybeSingle();
+    name = String(data?.email ?? "");
+  }
+  const label = name || id;
+  nameCache.set(id, label);
+  return label;
+}
+
+async function nameMap(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  await Promise.all(unique.map((id) => displayName(id)));
+  const out = new Map<string, string>();
+  for (const id of unique) out.set(id, nameCache.get(id) ?? id);
+  return out;
+}
+
+function layoutOf(raw: unknown): ViewLayout {
+  const parsed = parseViewLayout(raw && Object.keys(raw as object).length ? raw : {});
+  if (!parsed.ok) throw httpError(400, parsed.message);
+  return parsed.layout;
+}
+
+function queryOf(raw: unknown, kind: ViewKind): ViewQuery {
+  const parsed = parseViewQuery(raw, kind);
+  if (!parsed.ok) throw httpError(400, parsed.message);
+  return parsed.query;
+}
+
+function asView(row: Record<string, unknown>): ViewRow {
+  const kind: ViewKind = row.kind === "query" ? "query" : "fixed";
+  return {
+    id: Number(row.id),
+    name: String(row.name ?? ""),
+    kind,
+    description: row.description == null ? null : String(row.description),
+    shared: row.shared !== false,
+    pinned: row.pinned === true,
+    pin_order: row.pin_order == null ? null : Number(row.pin_order),
+    owner: row.owner == null ? null : String(row.owner),
+    updated_by: row.updated_by == null ? null : String(row.updated_by),
+    updated_at: String(row.updated_at ?? row.created_at ?? new Date().toISOString()),
+    created_at: row.created_at == null ? null : String(row.created_at),
+    query: queryOf(row.query ?? {}, kind),
+    layout: layoutOf(row.layout ?? {}),
+    deleted_at: row.deleted_at == null ? null : String(row.deleted_at),
+  };
+}
+
+async function assertSchema() {
+  if (!(await savedViewsSchemaReady())) throw httpError(503, SAVED_VIEWS_SCHEMA_MESSAGE);
+}
+
+async function loadRow(id: number): Promise<ViewRow | null> {
+  await assertSchema();
+  const { data, error } = await supabaseAdmin.from("car_lists").select("*").eq("id", id).maybeSingle();
+  if (error) {
+    if (isMissingViewSchema(error)) throw httpError(503, SAVED_VIEWS_SCHEMA_MESSAGE);
+    throw error;
+  }
+  if (!data || data.deleted_at) return null;
+  return asView(data as Record<string, unknown>);
+}
+
+function canRead(view: ViewRow, actor: Actor): boolean {
+  return view.shared || view.owner === actor.id;
+}
+
+async function liveNames(exceptId?: number): Promise<{ id: number; name: string }[]> {
+  const { data, error } = await supabaseAdmin.from("car_lists").select("id, name").is("deleted_at", null);
+  if (error) throw error;
+  return (data ?? [])
+    .map((row) => ({ id: Number(row.id), name: String(row.name ?? "") }))
+    .filter((row) => row.id !== exceptId);
+}
+
+async function assertUniqueName(name: string, exceptId?: number) {
+  const names = await liveNames(exceptId);
+  if (names.some((row) => viewNamesCollide(row.name, name))) {
+    throw httpError(409, "A view with that name already exists");
+  }
+}
+
+async function liveMemberIds(listId: number): Promise<number[]> {
+  const { data, error } = await supabaseAdmin
+    .from("car_list_members")
+    .select("railcar_id")
+    .eq("list_id", listId)
+    .is("removed_at", null);
+  if (error) throw error;
+  return (data ?? []).map((row) => Number(row.railcar_id)).filter((id) => id > 0);
+}
+
+async function recordListChange(opts: {
+  id: number;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  action: string;
+  actor: string;
+}) {
+  await recordChange({
+    table: "car_lists",
+    pk: opts.id,
+    before: opts.before,
+    after: opts.after,
+    action: opts.action,
+    entity_type: "railcar",
+    entity_id: opts.id,
+    actor: opts.actor,
+    detail: { view_id: opts.id },
+  });
+}
+
+async function recordMemberChange(opts: {
+  id: number;
+  listId: number;
+  railcarId: number;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  action: string;
+  actor: string;
+}) {
+  await recordChange({
+    table: "car_list_members",
+    pk: opts.id,
+    before: opts.before,
+    after: opts.after,
+    action: opts.action,
+    entity_type: "railcar",
+    entity_id: opts.railcarId,
+    railcar_id: opts.railcarId,
+    actor: opts.actor,
+    detail: { view_id: opts.listId },
+  });
+}
+
+function summary(view: ViewRow, names: Map<string, string>, memberCount: number | null) {
+  return {
+    id: view.id,
+    name: view.name,
+    kind: view.kind,
+    description: view.description,
+    shared: view.shared,
+    pinned: view.pinned,
+    pin_order: view.pin_order,
+    owner: view.owner,
+    owner_name: names.get(view.owner ?? "") ?? "",
+    updated_by: view.updated_by,
+    updated_by_name: names.get(view.updated_by ?? "") ?? "",
+    updated_at: view.updated_at,
+    updated_at_et: formatEtTime(view.updated_at),
+    created_at: view.created_at,
+    member_count: memberCount,
+  };
+}
+
+export async function listSavedViews(actor: Actor) {
+  if (!(await savedViewsSchemaReady())) {
+    return { schema_ready: false as const, message: SAVED_VIEWS_SCHEMA_MESSAGE, views: [] as ReturnType<typeof summary>[] };
+  }
+  const { data, error } = await supabaseAdmin
+    .from("car_lists")
+    .select("*")
+    .is("deleted_at", null)
+    .or(`shared.eq.true,owner.eq.${actor.id}`)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (isMissingViewSchema(error)) {
+      schemaCache = { at: Date.now(), ready: false };
+      return { schema_ready: false as const, message: SAVED_VIEWS_SCHEMA_MESSAGE, views: [] };
+    }
+    throw error;
+  }
+  const views = (data ?? []).map((row) => asView(row as Record<string, unknown>)).filter((view) => canRead(view, actor));
+  const fixedIds = views.filter((view) => view.kind === "fixed").map((view) => view.id);
+  const counts = new Map<number, number>();
+  if (fixedIds.length) {
+    const { data: members, error: memberError } = await supabaseAdmin
+      .from("car_list_members")
+      .select("list_id")
+      .in("list_id", fixedIds)
+      .is("removed_at", null);
+    if (memberError) throw memberError;
+    for (const row of members ?? []) counts.set(Number(row.list_id), (counts.get(Number(row.list_id)) ?? 0) + 1);
+  }
+  const names = await nameMap(views.flatMap((view) => [view.owner, view.updated_by]));
+  return {
+    schema_ready: true as const,
+    views: views.map((view) => summary(view, names, view.kind === "fixed" ? counts.get(view.id) ?? 0 : null)),
+  };
+}
+
+export async function getSavedView(id: number, actor: Actor) {
+  const view = await loadRow(id);
+  if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
+  const names = await nameMap([view.owner, view.updated_by]);
+  let members: { railcar_id: number; note: string | null; sort_order: number | null; active: boolean | null }[] = [];
+  if (view.kind === "fixed") {
+    const { data, error } = await supabaseAdmin
+      .from("car_list_members")
+      .select("railcar_id, note, sort_order")
+      .eq("list_id", id)
+      .is("removed_at", null);
+    if (error) throw error;
+    const ids = (data ?? []).map((row) => Number(row.railcar_id));
+    const active = new Map<number, boolean | null>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const slice = ids.slice(i, i + 200);
+      const { data: cars, error: carError } = await supabaseAdmin.from("railcars").select("id, active").in("id", slice);
+      if (carError) throw carError;
+      for (const car of cars ?? []) active.set(Number(car.id), car.active == null ? null : car.active !== false);
+    }
+    members = (data ?? []).map((row) => ({
+      railcar_id: Number(row.railcar_id),
+      note: row.note == null ? null : String(row.note),
+      sort_order: row.sort_order == null ? null : Number(row.sort_order),
+      active: active.get(Number(row.railcar_id)) ?? null,
+    }));
+  }
+  return { ...summary(view, names, view.kind === "fixed" ? members.length : null), query: view.query, layout: view.layout, members };
+}
+
+async function matchPaste(text: string) {
+  const detailed = parseCarPasteListDetailed(text);
+  const tokens = detailed.tokens;
+  if (tokens.length > VIEW_MEMBER_CAP) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
+  const resolved = await resolveProgramCars({ text: tokens.join("\n") });
+  const ordered: number[] = [];
+  const seen = new Set<number>();
+  const push = (id: number) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ordered.push(id);
+  };
+  for (const match of resolved.matched) push(match.railcar_id);
+  for (const row of resolved.ambiguous) {
+    if (splitCarNumber(row.token).reporting_marks) continue;
+    for (const match of row.matches) push(match.railcar_id);
+  }
+  const ambiguous = resolved.ambiguous
+    .filter((row) => Boolean(splitCarNumber(row.token).reporting_marks))
+    .map((row) => ({
+      token: row.token,
+      matches: row.matches.map((match) => ({ id: match.railcar_id, label: match.label })),
+    }));
+  const cars: { id: number; active: boolean }[] = [];
+  for (let i = 0; i < ordered.length; i += 200) {
+    const slice = ordered.slice(i, i + 200);
+    const { data, error } = await supabaseAdmin.from("railcars").select("id, active").in("id", slice);
+    if (error) throw error;
+    for (const car of data ?? []) cars.push({ id: Number(car.id), active: car.active !== false });
+  }
+  return {
+    ids: cars.map((car) => car.id),
+    inactiveIds: cars.filter((car) => !car.active).map((car) => car.id),
+    notFound: resolved.not_found.map((row) => row.token),
+    ambiguous,
+    pasted: tokens.length,
+  };
+}
+
+function stamp(actor: string) {
+  return { updated_at: new Date().toISOString(), updated_by: actor };
+}
+
+export async function createSavedView(actor: Actor, body: Record<string, unknown>) {
+  await assertSchema();
+  const kind: ViewKind = body.kind === "query" ? "query" : "fixed";
+  const shared = body.shared === false ? false : true;
+  const action = shared ? "create_shared" : "create_private";
+  if (viewWriteStatus({ role: actor.role, action })) throw httpError(403, "Forbidden");
+  const name = canonicalViewName(String(body.name ?? ""));
+  if (!name) throw httpError(400, "Name is required");
+  if (name.length > 80) throw httpError(400, "Name is too long");
+  await assertUniqueName(name);
+  const layout = layoutOf(body.layout ?? {});
+  let query = queryOf(body.query ?? {}, kind);
+  let railcarIds: number[] = Array.isArray(body.railcar_ids) ? body.railcar_ids.map(Number).filter((id) => id > 0) : [];
+  let paste: Awaited<ReturnType<typeof matchPaste>> | null = null;
+  if (kind === "fixed" && typeof body.text === "string" && body.text.trim()) {
+    paste = await matchPaste(body.text);
+    railcarIds = paste.ids;
+    query = {
+      ...query,
+      source: "paste",
+      q: body.text.trim(),
+      unmatched: paste.notFound,
+      ambiguous: paste.ambiguous,
+    };
+  }
+  railcarIds = [...new Set(railcarIds)].slice(0, VIEW_MEMBER_CAP);
+  if (railcarIds.length > VIEW_MEMBER_CAP) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
+  const pinned = body.pinned !== false;
+  const hiddenAt = new Date().toISOString();
+  const result = await withChangeGroupResult(actor.id, async () => {
+    const { data, error } = await supabaseAdmin
+      .from("car_lists")
+      .insert({
+        name,
+        kind,
+        description: body.description == null ? null : String(body.description).slice(0, 500),
+        owner: actor.id,
+        shared,
+        query,
+        layout,
+        pinned,
+        pin_order: pinned ? Date.now() % 1_000_000 : null,
+        ...stamp(actor.id),
+        deleted_at: null,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      if (String(error.code) === "23505") throw httpError(409, "A view with that name already exists");
+      throw error;
+    }
+    const row = data as Record<string, unknown>;
+    const snaps = viewCreateSnapshots(row, hiddenAt);
+    await recordListChange({
+      id: Number(row.id),
+      before: snaps.before,
+      after: snaps.after,
+      action: "view_create",
+      actor: actor.id,
+    });
+    const members = [];
+    for (let i = 0; i < railcarIds.length; i += 200) {
+      const slice = railcarIds.slice(i, i + 200).map((railcar_id, index) => ({
+        list_id: row.id,
+        railcar_id,
+        added_by: actor.id,
+        sort_order: i + index,
+        note: null,
+        removed_at: null,
+      }));
+      const { data: inserted, error: memberError } = await supabaseAdmin.from("car_list_members").insert(slice).select("*");
+      if (memberError) throw memberError;
+      for (const member of inserted ?? []) {
+        await recordMemberChange({
+          id: Number(member.id),
+          listId: Number(row.id),
+          railcarId: Number(member.railcar_id),
+          before: {},
+          after: member as Record<string, unknown>,
+          action: "view_member_add",
+          actor: actor.id,
+        });
+        members.push(member);
+      }
+    }
+    clearViewCountCache();
+    return { view: asView(row), members, paste };
+  });
+  return result;
+}
+
+export async function patchSavedView(id: number, actor: Actor, body: Record<string, unknown>) {
+  const view = await loadRow(id);
+  if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
+  if (viewWriteStatus({ role: actor.role, action: "update" })) throw httpError(403, "Forbidden");
+  if (viewUpdatedAtConflicts(view.updated_at, body.expected_updated_at == null ? "" : String(body.expected_updated_at))) {
+    const who = await displayName(view.updated_by);
+    throw httpError(409, `Changed by ${who || "someone else"} at ${formatEtTime(view.updated_at)}. Reload, or Save as a copy.`);
+  }
+  const patch: Record<string, unknown> = { ...stamp(actor.id) };
+  if (body.name != null) {
+    const name = canonicalViewName(String(body.name));
+    if (!name) throw httpError(400, "Name is required");
+    await assertUniqueName(name, id);
+    patch.name = name;
+  }
+  if (body.description !== undefined) patch.description = body.description == null ? null : String(body.description).slice(0, 500);
+  if (body.query != null) patch.query = queryOf(body.query, view.kind);
+  if (body.layout != null) patch.layout = layoutOf(body.layout);
+  if (body.shared != null) patch.shared = body.shared !== false;
+  if (body.pinned != null) patch.pinned = body.pinned === true;
+  if (body.pin_order != null) patch.pin_order = Number(body.pin_order);
+  const before: Record<string, unknown> = {};
+  for (const key of Object.keys(patch)) {
+    if (key === "updated_at" || key === "updated_by") continue;
+    before[key] = (view as unknown as Record<string, unknown>)[key] ?? null;
+  }
+  const result = await withChangeGroupResult(actor.id, async () => {
+    const { data, error } = await supabaseAdmin.from("car_lists").update(patch).eq("id", id).select("*").single();
+    if (error) {
+      if (String(error.code) === "23505") throw httpError(409, "A view with that name already exists");
+      throw error;
+    }
+    await recordListChange({
+      id,
+      before,
+      after: patch,
+      action: "view_update",
+      actor: actor.id,
+    });
+    clearViewCountCache();
+    return asView(data as Record<string, unknown>);
+  });
+  return result;
+}
+
+export async function duplicateSavedView(id: number, actor: Actor, body: Record<string, unknown>) {
+  const view = await loadRow(id);
+  if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
+  const shared = body.shared === true ? true : body.shared === false ? false : false;
+  if (viewWriteStatus({ role: actor.role, action: shared ? "create_shared" : "create_private" })) {
+    throw httpError(403, "Forbidden");
+  }
+  const ids = view.kind === "fixed" ? await liveMemberIds(id) : [];
+  const name = canonicalViewName(String(body.name ?? `${view.name} copy`));
+  return createSavedView(actor, {
+    name,
+    kind: view.kind,
+    description: body.description ?? view.description,
+    query: view.query,
+    layout: body.layout ?? view.layout,
+    shared,
+    pinned: body.pinned === true,
+    railcar_ids: ids,
+  });
+}
+
+export async function deleteSavedView(id: number, actor: Actor) {
+  const view = await loadRow(id);
+  if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
+  if (viewWriteStatus({ role: actor.role, action: "delete", actorId: actor.id, ownerId: view.owner })) {
+    throw httpError(403, "Forbidden");
+  }
+  const hiddenAt = new Date().toISOString();
+  const snaps = viewDeleteSnapshots(hiddenAt);
+  return withChangeGroupResult(actor.id, async () => {
+    const { error } = await supabaseAdmin.from("car_lists").update({ deleted_at: hiddenAt, ...stamp(actor.id) }).eq("id", id);
+    if (error) throw error;
+    await recordListChange({ id, before: snaps.before, after: snaps.after, action: "view_delete", actor: actor.id });
+    clearViewCountCache();
+    return { id, deleted_at: hiddenAt };
+  });
+}
+
+async function addMemberIds(listId: number, actor: Actor, ids: number[]) {
+  const existing = await supabaseAdmin
+    .from("car_list_members")
+    .select("id, railcar_id, removed_at")
+    .eq("list_id", listId)
+    .in("railcar_id", ids.length ? ids : [-1]);
+  const { data: prior, error } = await existing;
+  if (error) throw error;
+  const byCar = new Map((prior ?? []).map((row) => [Number(row.railcar_id), row]));
+  const live = new Set(await liveMemberIds(listId));
+  const room = VIEW_MEMBER_CAP - live.size;
+  let added = 0;
+  for (const railcarId of ids) {
+    if (live.has(railcarId)) continue;
+    if (added >= room) throw httpError(400, `A view can hold at most ${VIEW_MEMBER_CAP.toLocaleString()} cars`);
+    const previous = byCar.get(railcarId);
+    if (previous?.removed_at) {
+      const snaps = memberReaddSnapshots(String(previous.removed_at));
+      const { error: updateError } = await supabaseAdmin
+        .from("car_list_members")
+        .update({ removed_at: null, added_by: actor.id, added_at: new Date().toISOString() })
+        .eq("id", previous.id);
+      if (updateError) throw updateError;
+      await recordMemberChange({
+        id: Number(previous.id),
+        listId,
+        railcarId,
+        before: snaps.before,
+        after: snaps.after,
+        action: "view_member_add",
+        actor: actor.id,
+      });
+    } else if (!previous) {
+      const { data, error: insertError } = await supabaseAdmin
+        .from("car_list_members")
+        .insert({ list_id: listId, railcar_id: railcarId, added_by: actor.id, removed_at: null })
+        .select("*")
+        .single();
+      if (insertError) throw insertError;
+      await recordMemberChange({
+        id: Number(data.id),
+        listId,
+        railcarId,
+        before: {},
+        after: data as Record<string, unknown>,
+        action: "view_member_add",
+        actor: actor.id,
+      });
+    }
+    live.add(railcarId);
+    added += 1;
+  }
+  return added;
+}
+
+export async function addViewMembers(id: number, actor: Actor, body: Record<string, unknown>) {
+  const view = await loadRow(id);
+  if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
+  if (view.kind !== "fixed") throw httpError(400, "Only a fixed list can take cars");
+  if (viewWriteStatus({ role: actor.role, action: "members" })) throw httpError(403, "Forbidden");
+  let ids = Array.isArray(body.ids) ? body.ids.map(Number).filter((n) => n > 0) : [];
+  let paste: Awaited<ReturnType<typeof matchPaste>> | null = null;
+  if (typeof body.text === "string" && body.text.trim()) {
+    paste = await matchPaste(body.text);
+    ids = [...ids, ...paste.ids];
+  }
+  ids = [...new Set(ids)];
+  const result = await withChangeGroupResult(actor.id, async () => {
+    const added = await addMemberIds(id, actor, ids);
+    await supabaseAdmin.from("car_lists").update(stamp(actor.id)).eq("id", id);
+    clearViewCountCache();
+    return { added, paste };
+  });
+  return result;
+}
+
+export async function removeViewMembers(id: number, actor: Actor, ids: number[]) {
+  const view = await loadRow(id);
+  if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
+  if (view.kind !== "fixed") throw httpError(400, "Only a fixed list has cars to remove");
+  if (viewWriteStatus({ role: actor.role, action: "members" })) throw httpError(403, "Forbidden");
+  const unique = [...new Set(ids.filter((n) => n > 0))];
+  const hiddenAt = new Date().toISOString();
+  return withChangeGroupResult(actor.id, async () => {
+    const { data, error } = await supabaseAdmin
+      .from("car_list_members")
+      .select("id, railcar_id, removed_at")
+      .eq("list_id", id)
+      .in("railcar_id", unique.length ? unique : [-1])
+      .is("removed_at", null);
+    if (error) throw error;
+    const snaps = memberRemoveSnapshots(hiddenAt);
+    for (const row of data ?? []) {
+      const { error: updateError } = await supabaseAdmin.from("car_list_members").update({ removed_at: hiddenAt }).eq("id", row.id);
+      if (updateError) throw updateError;
+      await recordMemberChange({
+        id: Number(row.id),
+        listId: id,
+        railcarId: Number(row.railcar_id),
+        before: snaps.before,
+        after: snaps.after,
+        action: "view_member_remove",
+        actor: actor.id,
+      });
+    }
+    await supabaseAdmin.from("car_lists").update(stamp(actor.id)).eq("id", id);
+    clearViewCountCache();
+    return { removed: (data ?? []).length };
+  });
+}
+
+export async function patchMemberNote(id: number, railcarId: number, actor: Actor, note: string) {
+  const view = await loadRow(id);
+  if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
+  if (viewWriteStatus({ role: actor.role, action: "note" })) throw httpError(403, "Forbidden");
+  const { data: car, error: carError } = await supabaseAdmin.from("railcars").select("id, active").eq("id", railcarId).maybeSingle();
+  if (carError) throw carError;
+  if (!car) throw httpError(404, "Car not found");
+  const allowed = memberNoteAllowed(car.active !== false);
+  if (!allowed.ok) throw httpError(allowed.status, allowed.message || INACTIVE_NOTE_MESSAGE);
+  const { data: member, error } = await supabaseAdmin
+    .from("car_list_members")
+    .select("id, note, removed_at")
+    .eq("list_id", id)
+    .eq("railcar_id", railcarId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!member || member.removed_at) throw httpError(404, "Car is not in this view");
+  const next = note.trim().slice(0, 240) || null;
+  return withChangeGroupResult(actor.id, async () => {
+    const { error: updateError } = await supabaseAdmin.from("car_list_members").update({ note: next }).eq("id", member.id);
+    if (updateError) throw updateError;
+    await recordMemberChange({
+      id: Number(member.id),
+      listId: id,
+      railcarId,
+      before: { note: member.note ?? null },
+      after: { note: next },
+      action: "view_member_note",
+      actor: actor.id,
+    });
+    clearViewCountCache();
+    return { railcar_id: railcarId, note: next };
+  });
+}
+
+export async function orderPins(actor: Actor, order: number[]) {
+  if (viewWriteStatus({ role: actor.role, action: "pin" })) throw httpError(403, "Forbidden");
+  const ids = [...new Set(order.map(Number).filter((id) => id > 0))].slice(0, VIEW_PIN_CAP);
+  if (order.length > VIEW_PIN_CAP) throw httpError(400, `Pin at most ${VIEW_PIN_CAP} views`);
+  await assertSchema();
+  const { data, error } = await supabaseAdmin.from("car_lists").select("id, pinned, pin_order").is("deleted_at", null).eq("pinned", true);
+  if (error) throw error;
+  return withChangeGroupResult(actor.id, async () => {
+    const pinnedNow = new Set((data ?? []).map((row) => Number(row.id)));
+    for (const row of data ?? []) {
+      if (ids.includes(Number(row.id))) continue;
+      await supabaseAdmin.from("car_lists").update({ pinned: false, pin_order: null, ...stamp(actor.id) }).eq("id", row.id);
+      await recordListChange({
+        id: Number(row.id),
+        before: { pinned: true, pin_order: row.pin_order },
+        after: { pinned: false, pin_order: null },
+        action: "view_update",
+        actor: actor.id,
+      });
+    }
+    for (let index = 0; index < ids.length; index += 1) {
+      const id = ids[index];
+      const prior = (data ?? []).find((row) => Number(row.id) === id);
+      await supabaseAdmin.from("car_lists").update({ pinned: true, pin_order: index, ...stamp(actor.id) }).eq("id", id).is("deleted_at", null);
+      await recordListChange({
+        id,
+        before: { pinned: prior ? true : false, pin_order: prior?.pin_order ?? null },
+        after: { pinned: true, pin_order: index },
+        action: "view_update",
+        actor: actor.id,
+      });
+      pinnedNow.add(id);
+    }
+    clearViewCountCache();
+    return { order: ids };
+  });
+}
+
+function paramsFromView(view: ViewRow): RailcarListParams {
+  const filters = view.layout.filters;
+  const queryFilters = view.query.filters;
+  const active = view.layout.showInactive ? "all" : filters.active || queryFilters.active || "active";
+  return parseRailcarListParams({
+    search: view.kind === "query" ? view.query.q : undefined,
+    fleet: view.query.fleet ? "1" : "0",
+    search_cars: view.query.scope.cars ? "1" : "0",
+    search_leases: view.query.scope.leases ? "1" : "0",
+    search_car_data: view.query.scope.carData ? "1" : "0",
+    type: filters.type || queryFilters.type,
+    mech: filters.mech || queryFilters.mech,
+    aar: filters.aar || queryFilters.aar,
+    entity: filters.entity || queryFilters.entity,
+    status: filters.status || queryFilters.status,
+    active,
+    open_stop: filters.open_stop || queryFilters.open_stop,
+    program: filters.program || queryFilters.program,
+    tag: filters.tag || queryFilters.tag,
+    pageSize: view.layout.pageSize,
+  });
+}
+
+async function activeSplit(ids: number[]): Promise<{ active: number; inactive: number }> {
+  let active = 0;
+  let inactive = 0;
+  for (let i = 0; i < ids.length; i += 200) {
+    const slice = ids.slice(i, i + 200);
+    const { data, error } = await supabaseAdmin.from("railcars").select("id, active").in("id", slice);
+    if (error) throw error;
+    for (const car of data ?? []) {
+      if (car.active === false) inactive += 1;
+      else active += 1;
+    }
+  }
+  return { active, inactive };
+}
+
+async function countOne(view: ViewRow): Promise<ViewCount> {
+  const started = Date.now();
+  if (view.kind === "fixed") {
+    const ids = await liveMemberIds(view.id);
+    const split = await activeSplit(ids);
+    const mode = view.layout.showInactive ? "all" : view.layout.filters.active;
+    const count = mode === "all" ? split.active + split.inactive : mode === "inactive" ? split.inactive : split.active;
+    return { count, active: split.active, inactive: split.inactive, ms: Date.now() - started };
+  }
+  const base = paramsFromView(view);
+  const [active, inactive] = await Promise.all([
+    countRailcars({ ...base, active: "active" }),
+    countRailcars({ ...base, active: "inactive" }),
+  ]);
+  const mode = view.layout.showInactive ? "all" : view.layout.filters.active;
+  const count = mode === "all" ? active + inactive : mode === "inactive" ? inactive : active;
+  return { count, active, inactive, ms: Date.now() - started };
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
+export async function countSavedViews(ids: number[], actor: Actor) {
+  if (!(await savedViewsSchemaReady())) {
+    return { schema_ready: false as const, counts: {} as Record<string, ViewCount | null> };
+  }
+  const unique = [...new Set(ids.map(Number).filter((id) => id > 0))].slice(0, 12);
+  const started = Date.now();
+  let cold = 0;
+  let cached = 0;
+  const counts: Record<string, ViewCount | null> = {};
+  await Promise.all(unique.map(async (id) => {
+    const view = await loadRow(id).catch(() => null);
+    if (!view || !canRead(view, actor)) {
+      counts[String(id)] = null;
+      return;
+    }
+    const key = countCacheKey(view.id, view.updated_at, view.layout.showInactive, view.layout.filters.active);
+    const hit = countCache.get(key);
+    if (hit && Date.now() - hit.at < COUNT_TTL_MS) {
+      cached += 1;
+      counts[String(id)] = hit.value;
+      return;
+    }
+    cold += 1;
+    const value = await withTimeout(countOne(view), 5000);
+    if (value) countCache.set(key, { at: Date.now(), value });
+    counts[String(id)] = value;
+  }));
+  console.log(`[search] views/counts n=${unique.length} cold=${cold} cached=${cached} ms=${Date.now() - started}`);
+  return { schema_ready: true as const, counts };
+}
+
+export async function nameAvailable(name: string, exceptId?: number) {
+  if (!(await savedViewsSchemaReady())) return { schema_ready: false, available: false, message: SAVED_VIEWS_SCHEMA_MESSAGE };
+  const canonical = canonicalViewName(name);
+  if (!canonical) return { schema_ready: true, available: false };
+  const names = await liveNames(exceptId);
+  return { schema_ready: true, available: !names.some((row) => viewNameKey(row.name) === viewNameKey(canonical)), name: canonical };
+}
+
+function has(raw: Record<string, unknown>, key: string) {
+  return raw[key] != null && String(raw[key]).trim() !== "";
+}
+
+/** `view_id` on the railcars list, ids, summary, and export. */
+export async function applyViewToParams(params: RailcarListParams, raw: Record<string, unknown>): Promise<RailcarListParams> {
+  const viewId = Number(raw.view_id);
+  if (!Number.isFinite(viewId) || viewId <= 0) return params;
+  if (!(await savedViewsSchemaReady())) throw httpError(503, SAVED_VIEWS_SCHEMA_MESSAGE);
+  const { data, error } = await supabaseAdmin.from("car_lists").select("*").eq("id", viewId).maybeSingle();
+  if (error) {
+    if (isMissingViewSchema(error)) throw httpError(503, SAVED_VIEWS_SCHEMA_MESSAGE);
+    throw error;
+  }
+  if (!data || data.deleted_at) throw httpError(404, "View not found");
+  const view = asView(data as Record<string, unknown>);
+  const next: RailcarListParams = { ...params, viewId: view.id };
+  if (raw.focus === "1" || raw.focus === "true" || raw.focus === "yes") next.focus = true;
+  if (view.kind === "fixed") {
+    const ids = await liveMemberIds(view.id);
+    const limited = ids.length ? ids : [-1];
+    next.ids = params.ids?.length ? limited.filter((id) => params.ids!.includes(id)) : limited;
+    if (!has(raw, "active")) next.active = view.layout.showInactive ? "all" : view.layout.filters.active || "all";
+    return next;
+  }
+  const stored = paramsFromView(view);
+  if (!has(raw, "search") && stored.search) next.search = stored.search;
+  if (!has(raw, "type") && !has(raw, "car_type") && stored.carType) next.carType = stored.carType;
+  if (!has(raw, "mech") && stored.mech) next.mech = stored.mech;
+  if (!has(raw, "aar") && stored.aar) next.aar = stored.aar;
+  if (!has(raw, "entity") && stored.entity) next.entity = stored.entity;
+  if (!has(raw, "status") && stored.status) next.status = stored.status;
+  if (!has(raw, "open_stop") && stored.openStop) next.openStop = stored.openStop;
+  if (!has(raw, "program") && stored.program) next.program = stored.program;
+  if (!has(raw, "tag") && stored.tag) next.tag = stored.tag;
+  if (!has(raw, "active")) next.active = stored.active;
+  if (!has(raw, "fleet")) next.fleetCodes = stored.fleetCodes;
+  if (!has(raw, "search_cars") && stored.searchScope) next.searchScope = stored.searchScope;
+  return next;
+}
+
+function actorFrom(req: Request): Actor | null {
+  const id = req.authUser?.id;
+  if (!id) return null;
+  return { id, role: req.authRole || "viewer" };
+}
+
+function sendError(res: Response, error: unknown) {
+  const status = Number((error as { status?: number })?.status) || 500;
+  const message = error instanceof Error ? error.message : SAVED_VIEWS_SCHEMA_MESSAGE;
+  if (isMissingViewSchema(error)) {
+    schemaCache = { at: Date.now(), ready: false };
+    res.status(503).json({ schema_ready: false, message: SAVED_VIEWS_SCHEMA_MESSAGE });
+    return;
+  }
+  res.status(status).json({ message });
+}
+
+export function registerSavedViewRoutes(
+  app: Express,
+  requireUser: (req: Request, res: Response) => Promise<string | null>,
+) {
+  app.get("/api/views", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await listSavedViews(actor));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.get("/api/views/counts", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      const ids = String(req.query.ids ?? "").split(/[,\s]+/).map(Number);
+      res.json(await countSavedViews(ids, actor));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.get("/api/views/available", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const except = Number(req.query.except);
+      res.json(await nameAvailable(String(req.query.name ?? ""), Number.isFinite(except) ? except : undefined));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.put("/api/views/pins", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      const order = Array.isArray(req.body?.order) ? req.body.order.map(Number) : [];
+      res.json(await orderPins(actor, order));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.get("/api/views/:id", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await getSavedView(Number(req.params.id), actor));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.post("/api/views", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await createSavedView(actor, req.body ?? {}));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.patch("/api/views/:id", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await patchSavedView(Number(req.params.id), actor, req.body ?? {}));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.post("/api/views/:id/duplicate", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await duplicateSavedView(Number(req.params.id), actor, req.body ?? {}));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.delete("/api/views/:id", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await deleteSavedView(Number(req.params.id), actor));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.post("/api/views/:id/members", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await addViewMembers(Number(req.params.id), actor, req.body ?? {}));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.post("/api/views/:id/members/remove", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];
+      res.json(await removeViewMembers(Number(req.params.id), actor, ids));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.patch("/api/views/:id/members/:railcarId", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const actor = actorFrom(req);
+      if (!actor) return res.status(401).json({ error: "Unauthorized" });
+      res.json(await patchMemberNote(Number(req.params.id), Number(req.params.railcarId), actor, String(req.body?.note ?? "")));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+}
+
+/** Old list routes keep working and share this code. */
+export async function legacyListCarLists(actorId: string) {
+  const listed = await listSavedViews({ id: actorId, role: "viewer" });
+  if (!listed.schema_ready) {
+    const { data, error } = await supabaseAdmin
+      .from("car_lists")
+      .select("*")
+      .or(`owner.eq.${actorId},shared.eq.true`)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  }
+  return listed.views;
+}

@@ -23,6 +23,11 @@ export type SearchHashState = {
   active: SearchActive;
   /** False when the user asked to search the code as ordinary text. */
   fleet: boolean;
+  /** Saved view id. Empty when the search is not a view. */
+  view: string;
+  openStop: string;
+  program: string;
+  tag: string;
   sort: string;
   dir: "asc" | "desc";
   page: number;
@@ -58,8 +63,42 @@ export type StoredSearch = {
   results: StoredSearchResults | null;
   /** False while a refetch is in flight so a remount does not paint an empty cache. */
   ready?: boolean;
+  /** Unsaved view edits. Restored with the sid so Back keeps the dirty marker. */
+  draft?: {
+    viewId: number | null;
+    dirty: boolean;
+    density: "comfortable" | "compact";
+    panelCollapsed: boolean;
+    cols: string[];
+    order: string[];
+    widths: Record<string, number>;
+  } | null;
   timestamp: number;
 };
+
+export const RAILCARS_HANDOFF_KEY = "rlms-railcars-handoff";
+export const SEARCH_REFRESH_KEY = "rlms-search-refresh";
+
+/** After a Railcars bulk apply, the next Search boot refetches instead of painting the cache. */
+export function markSearchRefresh(): void {
+  try {
+    storage()?.setItem(SEARCH_REFRESH_KEY, "1");
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Returns true once, then clears the flag. */
+export function takeSearchRefresh(): boolean {
+  try {
+    const store = storage();
+    if (!store || store.getItem(SEARCH_REFRESH_KEY) !== "1") return false;
+    store.removeItem(SEARCH_REFRESH_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const PREFIX = "rlms-search:";
 const INDEX_KEY = "rlms-search-index";
@@ -69,8 +108,13 @@ const FULL_ROW_SIDS = 5;
 const HASH_Q_MAX = 1600;
 
 /** True when a top-bar search or Back/Forward moved to a different search. */
-export function shouldRebootSearch(current: { q: string; sid: string }, next: { q: string; sid: string }): boolean {
-  return current.q !== next.q || (current.sid || "") !== (next.sid || "");
+export function shouldRebootSearch(
+  current: { q: string; sid: string; view?: string },
+  next: { q: string; sid: string; view?: string },
+): boolean {
+  return current.q !== next.q
+    || (current.sid || "") !== (next.sid || "")
+    || String(current.view || "") !== String(next.view || "");
 }
 
 /** "found" stays the cars in the grid. When inactive cars are in that grid, say so instead of adding them again. */
@@ -104,6 +148,10 @@ export function emptySearchHash(sid = ""): SearchHashState {
     status: "",
     active: "active",
     fleet: true,
+    view: "",
+    openStop: "",
+    program: "",
+    tag: "",
     sort: "car_number",
     dir: "asc",
     page: 1,
@@ -151,6 +199,10 @@ export function decodeHash(hash: string): SearchHashState {
   state.status = params.get("status") ?? "";
   state.active = active;
   state.fleet = params.get("fleet") !== "0";
+  state.view = params.get("view") ?? "";
+  state.openStop = params.get("open_stop") ?? "";
+  state.program = params.get("program") ?? "";
+  state.tag = params.get("tag") ?? "";
   state.sort = params.get("sort") || "car_number";
   state.dir = params.get("dir") === "desc" ? "desc" : "asc";
   const page = Number(params.get("page"));
@@ -190,6 +242,10 @@ export function encodeHash(state: SearchHashState): string {
   if (state.status) params.set("status", state.status);
   if (state.active !== "active") params.set("active", state.active);
   if (!state.fleet) params.set("fleet", "0");
+  if (state.view) params.set("view", state.view);
+  if (state.openStop) params.set("open_stop", state.openStop);
+  if (state.program) params.set("program", state.program);
+  if (state.tag) params.set("tag", state.tag);
   if (state.sort && state.sort !== "car_number") params.set("sort", state.sort);
   if (state.dir === "desc") params.set("dir", "desc");
   if (state.page > 1) params.set("page", String(state.page));
@@ -274,6 +330,7 @@ export function saveSearchState(sid: string, state: Omit<StoredSearch, "sid" | "
     scrollY: state.scrollY ?? 0,
     results: state.results ?? null,
     ready: state.ready !== false,
+    draft: state.draft ?? null,
     timestamp: state.timestamp ?? Date.now(),
   };
   const prior = readIndex(store);

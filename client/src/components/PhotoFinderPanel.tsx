@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiRequest } from "@/lib/queryClient";
 import { Image, Loader2, ExternalLink, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { useIsAdmin } from "@/lib/AuthContext";
+import { apiGet, apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import PhotoIndexResults from "@/components/PhotoIndexResults";
 import {
   PHOTO_MAX_CARS,
   PHOTO_DISCLAIMER,
@@ -22,8 +26,43 @@ import {
   hasRunningPhotoJob,
   abortPhotoJob,
 } from "@/lib/photoJobStore";
+import {
+  PHOTO_INDEX_CHUNK,
+  PHOTO_SEARCH_MODE_KEY,
+  effectivePhotoSearchMode,
+  isLegacyPhotoSearchBuild,
+  planWarmRequests,
+  resolveIndexSearch,
+  type IndexCar,
+  type IndexLookupSuccess,
+} from "@shared/photo-index";
 
 type PhotoCar = { mark: string; number: string };
+
+const TOOLBAR = "flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 [&_button]:h-auto [&_button]:max-w-full [&_button]:whitespace-normal";
+
+function photoSearchEnv(): string {
+  const env = import.meta.env as Record<string, string | boolean | undefined>;
+  const value = env.VITE_PHOTO_SEARCH;
+  return typeof value === "string" ? value : "";
+}
+
+function readStoredPhotoMode(): string | null {
+  try {
+    return localStorage.getItem(PHOTO_SEARCH_MODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPhotoMode(classic: boolean): void {
+  try {
+    if (classic) localStorage.setItem(PHOTO_SEARCH_MODE_KEY, "legacy");
+    else localStorage.removeItem(PHOTO_SEARCH_MODE_KEY);
+  } catch {
+    /* private mode */
+  }
+}
 
 export function carsToPasteText(rows: unknown[]): string {
   const cars = extractCarsFromRows(rows, { max: PHOTO_MAX_CARS }) as PhotoCar[];
@@ -49,16 +88,27 @@ export default function PhotoFinderPanel({
   initialText?: string;
   onClose?: () => void;
 }) {
+  const { toast } = useToast();
+  const isAdmin = useIsAdmin();
+  const legacyBuild = isLegacyPhotoSearchBuild(photoSearchEnv());
+  const [classicOn, setClassicOn] = useState(() => effectivePhotoSearchMode(photoSearchEnv(), readStoredPhotoMode()) === "legacy" && !isLegacyPhotoSearchBuild(photoSearchEnv()));
+  const legacyMode = legacyBuild || classicOn;
+  const legacyModeRef = useRef(legacyMode);
+  legacyModeRef.current = legacyMode;
   const [text, setText] = useState(initialText);
   const [aliasNote, setAliasNote] = useState("");
   const [isSearching, setIsSearching] = useState(() => hasRunningPhotoJob());
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
+  const [indexView, setIndexView] = useState<IndexLookupSuccess | null>(null);
+  const [warmBusy, setWarmBusy] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const [dlBusy, setDlBusy] = useState(false);
   const [dlNote, setDlNote] = useState("");
   const searchingRef = useRef(hasRunningPhotoJob());
   const seenRunningRef = useRef(hasRunningPhotoJob());
   const trackedJobIdRef = useRef<string | null>(null);
+  const indexReq = useRef(0);
+  const indexInFlightRef = useRef(false);
 
   useEffect(() => {
     if (initialText) setText(initialText);
@@ -72,6 +122,7 @@ export default function PhotoFinderPanel({
     return subscribePhotoJobs((snap: any) => {
       const list = snap.jobs || [];
       const running = list.filter((j: any) => j.status === "running");
+      if (indexInFlightRef.current && !running.length) return;
       if (running.length) {
         seenRunningRef.current = true;
         searchingRef.current = true;
@@ -132,6 +183,55 @@ export default function PhotoFinderPanel({
     });
   }, []);
 
+  function startLegacy(cars: PhotoCar[], title?: string) {
+    if (!cars.length) return;
+    if (trackedJobIdRef.current) abortPhotoJob(trackedJobIdRef.current);
+    searchingRef.current = true;
+    seenRunningRef.current = true;
+    setIsSearching(true);
+    setRunStatus({
+      kind: "running",
+      carsDone: 0,
+      carTotal: cars.length,
+      message: `Searching ${cars.length} car${cars.length === 1 ? "" : "s"} for photos…`,
+    });
+    const job = startPhotoJob({
+      cars,
+      title: title || `Photo Search · ${cars.length} car${cars.length === 1 ? "" : "s"}`,
+    });
+    trackedJobIdRef.current = job.id;
+  }
+
+  async function runIndex(cars: PhotoCar[]) {
+    const requestId = ++indexReq.current;
+    indexInFlightRef.current = true;
+    searchingRef.current = true;
+    setIsSearching(true);
+    setIndexView(null);
+    setRunStatus({
+      kind: "running",
+      carsDone: 0,
+      carTotal: cars.length,
+      message: `Checking the photo index for ${cars.length} car${cars.length === 1 ? "" : "s"}…`,
+    });
+    const plan = await resolveIndexSearch(cars, async (list) => {
+      const timeoutMs = Math.max(1, Math.ceil(list.length / PHOTO_INDEX_CHUNK)) * 12_000;
+      const res = await apiRequest("POST", "/api/photos/index-lookup", { cars: list }, undefined, { timeoutMs });
+      return res.json();
+    });
+    if (indexReq.current !== requestId) return;
+    if (plan.kind === "legacy" || legacyModeRef.current) {
+      indexInFlightRef.current = false;
+      startLegacy(cars);
+      return;
+    }
+    indexInFlightRef.current = false;
+    searchingRef.current = false;
+    setIsSearching(false);
+    setIndexView(plan.view);
+    setRunStatus(null);
+  }
+
   async function handleSearch() {
     if (searchingRef.current || isSearching) return;
     if (!rows.length) return;
@@ -154,19 +254,22 @@ export default function PhotoFinderPanel({
     } catch {
       cars = rows;
     }
-    setRunStatus({
-      kind: "running",
-      carsDone: 0,
-      carTotal: cars.length,
-      message: `Searching ${cars.length} car${cars.length === 1 ? "" : "s"} for photos…`,
-    });
-    startPhotoJob({
-      cars,
-      title: `Photo Search · ${cars.length} car${cars.length === 1 ? "" : "s"}`,
-    });
+    if (!cars.length) {
+      searchingRef.current = false;
+      seenRunningRef.current = false;
+      setIsSearching(false);
+      return;
+    }
+    if (legacyModeRef.current) {
+      startLegacy(cars);
+      return;
+    }
+    void runIndex(cars);
   }
 
   function handleClear() {
+    indexReq.current += 1;
+    indexInFlightRef.current = false;
     if (isSearching && trackedJobIdRef.current) {
       abortPhotoJob(trackedJobIdRef.current);
     }
@@ -175,10 +278,43 @@ export default function PhotoFinderPanel({
     trackedJobIdRef.current = null;
     setIsSearching(false);
     setText("");
+    setAliasNote("");
     setRunStatus(null);
+    setIndexView(null);
     setActiveIdx(0);
     setDlBusy(false);
     setDlNote("");
+  }
+
+  function setClassic(on: boolean) {
+    setClassicOn(on);
+    writeStoredPhotoMode(on);
+  }
+
+  async function warmActiveFleet() {
+    if (warmBusy) return;
+    setWarmBusy(true);
+    try {
+      const data = await apiGet<unknown>("/api/railcars?active=active&all=1", { timeoutMs: 60_000 });
+      const rowsForWarm = Array.isArray(data) ? data : [];
+      const plan = planWarmRequests(rowsForWarm);
+      if (!plan.send.length) {
+        toast({ title: "No active cars to warm" });
+        return;
+      }
+      let sent = 0;
+      for (const chunk of plan.chunks) {
+        const res = await apiRequest("POST", "/api/photos/index-warm", { cars: chunk }, undefined, { timeoutMs: 12_000 });
+        const body = await res.json() as { fallback?: boolean; sent?: number };
+        if (body?.fallback) throw new Error("warm failed");
+        sent += typeof body?.sent === "number" ? body.sent : chunk.length;
+      }
+      toast({ title: `Queued ${sent.toLocaleString("en-US")} active cars` });
+    } catch {
+      toast({ title: "Could not warm the photo index", variant: "destructive" });
+    } finally {
+      setWarmBusy(false);
+    }
   }
 
   const hitCars = useMemo(() => {
@@ -215,8 +351,10 @@ export default function PhotoFinderPanel({
       ? Math.min(100, Math.round((100 * (runStatus.carsDone || 0)) / (runStatus.carTotal || 1)))
       : null;
 
+  const showIndex = !legacyMode && indexView != null;
+
   return (
-    <div className="flex flex-col gap-4 min-h-0">
+    <div className="flex min-h-0 min-w-0 max-w-full flex-col gap-4">
       <div>
         <label htmlFor="rlms-photo-car-list" className="font-eyebrow block mb-1.5">
           Cars (one per line or comma-separated)
@@ -240,7 +378,7 @@ export default function PhotoFinderPanel({
         </p>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className={TOOLBAR}>
         <Button
           type="button"
           disabled={!rows.length || isSearching}
@@ -254,24 +392,54 @@ export default function PhotoFinderPanel({
         <Button
           type="button"
           variant="outline"
-          disabled={!isSearching && !text && !runStatus}
+          disabled={!isSearching && !text && !runStatus && !indexView}
           onClick={handleClear}
           data-testid="button-photo-search-clear"
         >
           <X className="h-4 w-4" />
           New search
         </Button>
-        {isSearching && trackedJobIdRef.current && (
+        {isSearching && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={() => {
+              indexReq.current += 1;
+              indexInFlightRef.current = false;
               const id = trackedJobIdRef.current;
               if (id) abortPhotoJob(id);
+              searchingRef.current = false;
+              seenRunningRef.current = false;
+              setIsSearching(false);
+              setRunStatus((prev) => (prev?.kind === "running" ? null : prev));
             }}
           >
             Cancel
+          </Button>
+        )}
+        {!legacyBuild && (
+          <label className="inline-flex max-w-full items-center gap-2 text-sm">
+            <Switch
+              checked={classicOn}
+              onCheckedChange={setClassic}
+              aria-label="Classic photo search"
+              data-testid="switch-classic-photo-search"
+            />
+            Classic photo search
+          </label>
+        )}
+        {!legacyBuild && isAdmin && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={warmBusy}
+            onClick={() => { void warmActiveFleet(); }}
+            data-testid="button-warm-photo-index"
+          >
+            {warmBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {warmBusy ? "Warming…" : "Warm photo index (active fleet)"}
           </Button>
         )}
         {onClose && (
@@ -307,7 +475,8 @@ export default function PhotoFinderPanel({
         )}
         {runStatus?.kind === "done" && (
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-3">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
+            {showIndex && <div className="text-xs font-medium text-muted-foreground mb-1">Deep search</div>}
+            <div className="flex w-full min-w-0 flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="text-sm font-medium">{runStatus.message}</div>
                 {(runStatus.notFoundCount || 0) > 0 && (
@@ -345,16 +514,28 @@ export default function PhotoFinderPanel({
         )}
       </div>
 
+      {showIndex && indexView && (
+        <PhotoIndexResults
+          cars={indexView.cars as IndexCar[]}
+          onDeepSearch={(cars) => {
+            const title = cars.length === 1
+              ? `Deep search · ${cars[0]?.mark ?? ""} ${cars[0]?.number ?? ""}`.trim()
+              : `Deep search · ${cars.length} cars`;
+            startLegacy(cars, title);
+          }}
+        />
+      )}
+
       {runStatus?.kind === "done" && hitCars.length > 0 && (
-        <div className="grid gap-3 min-h-0">
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
+        <div className="grid min-h-0 min-w-0 gap-3">
+          <div className="flex flex-wrap gap-1.5">
             {hitCars.map((c: any, i: number) => (
               <button
                 key={`${c.mark}_${c.number}`}
                 type="button"
                 onClick={() => setActiveIdx(i)}
                 className={cn(
-                  "shrink-0 rounded-md border px-2.5 py-1 text-xs font-mono",
+                  "rounded-md border px-2.5 py-1 text-xs font-mono",
                   i === activeIdx
                     ? "border-primary bg-primary/10 text-foreground"
                     : "border-border text-muted-foreground hover:text-foreground",

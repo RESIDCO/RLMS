@@ -140,6 +140,7 @@ import { registerCrmRoutes } from "./crm";
 import { registerColumnPrefRoutes } from "./column-prefs";
 import { createShopRecord, registerProgramTrackerRoutes } from "./program-tracker-sync";
 import { registerProgramColumnRoutes } from "./program-columns";
+import { registerPhotoIndexRoutes } from "./photo-index";
 import { statusFromAssignmentLink } from "@shared/commitment";
 import { masterReportFilename } from "@shared/programs";
 import { asOne } from "@shared/lease-type";
@@ -4565,6 +4566,7 @@ export async function registerRoutes(
   });
 
   registerColumnPrefRoutes(app);
+  registerPhotoIndexRoutes(app);
   registerProgramTrackerRoutes(app, upload);
 
   // GET /api/admin/users — list all users with roles (admin only)

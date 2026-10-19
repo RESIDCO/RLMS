@@ -33,6 +33,10 @@ import {
 
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 
+function escapeIlike(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 function cellValue(value: unknown): unknown {
   if (value == null) return null;
   if (value instanceof Date) return value;
@@ -325,7 +329,7 @@ export async function createShopRecord(
     err.status = 400;
     throw err;
   }
-  const { data: existing, error: findErr } = await supabaseAdmin.from("shops").select("*").ilike("name", trimmed).limit(1);
+  const { data: existing, error: findErr } = await supabaseAdmin.from("shops").select("*").ilike("name", escapeIlike(trimmed)).limit(1);
   if (findErr) throw findErr;
   if (existing && existing.length) return { ...existing[0], change_group: null, created: false };
   return withChangeGroupResult(actor, async () => {

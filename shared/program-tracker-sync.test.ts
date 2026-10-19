@@ -355,6 +355,8 @@ ok(!/insert\s+into\s+(public\.)?rent_events/i.test(migration), "migration does n
 ok(!/update\s+(public\.)?rent_events/i.test(migration), "migration does not update rent_events");
 ok(migration.includes("r.active IS NOT TRUE"), "apply fails closed when a car is inactive");
 ok(migration.includes("rent_events are out of scope"), "snapshot cannot carry rent_events");
+ok(migration.includes("v_list_key text") && migration.includes("v_view_name text"), "layout plpgsql variables are prefixed");
+ok(!/(^|\n)\s*list_key text;/.test(migration) && !/(^|\n)\s*view_name text;/.test(migration), "layout variables do not clash with user_column_prefs columns");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

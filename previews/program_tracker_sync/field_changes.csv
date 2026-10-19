@@ -1,7 +1,7 @@
 program,program_car_id,car,field,current,proposed,action,note
 CP ACQUISITION - 60 4750's,42,KCS 310671,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,42,KCS 310671,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,42,KCS 310671,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,42,KCS 310671,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,42,KCS 310671,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,42,KCS 310671,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,42,KCS 310671,dispo_provided,,2026-10-08,fill blank,
@@ -11,7 +11,7 @@ CP ACQUISITION - 60 4750's,42,KCS 310671,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,42,KCS 310671,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,30,KCS 310813,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,30,KCS 310813,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,30,KCS 310813,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,30,KCS 310813,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,30,KCS 310813,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,30,KCS 310813,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,30,KCS 310813,dispo_provided,,2026-10-08,fill blank,
@@ -21,7 +21,7 @@ CP ACQUISITION - 60 4750's,30,KCS 310813,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,30,KCS 310813,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,21,KCS 310865,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,21,KCS 310865,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,21,KCS 310865,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,21,KCS 310865,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,21,KCS 310865,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,21,KCS 310865,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,21,KCS 310865,dispo_provided,,2026-10-08,fill blank,
@@ -31,7 +31,7 @@ CP ACQUISITION - 60 4750's,21,KCS 310865,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,21,KCS 310865,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,18,KCS 310899,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,18,KCS 310899,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,18,KCS 310899,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,18,KCS 310899,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,18,KCS 310899,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,18,KCS 310899,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,18,KCS 310899,dispo_provided,,2026-10-08,fill blank,
@@ -41,7 +41,7 @@ CP ACQUISITION - 60 4750's,18,KCS 310899,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,18,KCS 310899,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,58,KCS 310528,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,58,KCS 310528,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,58,KCS 310528,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,58,KCS 310528,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,58,KCS 310528,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,58,KCS 310528,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,58,KCS 310528,dispo_provided,,2026-10-08,fill blank,
@@ -51,7 +51,7 @@ CP ACQUISITION - 60 4750's,58,KCS 310528,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,58,KCS 310528,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,60,KCS 310517,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,60,KCS 310517,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,60,KCS 310517,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,60,KCS 310517,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,60,KCS 310517,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,60,KCS 310517,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,60,KCS 310517,dispo_provided,,2026-10-08,fill blank,
@@ -61,7 +61,7 @@ CP ACQUISITION - 60 4750's,60,KCS 310517,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,60,KCS 310517,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,57,KCS 310532,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,57,KCS 310532,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,57,KCS 310532,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,57,KCS 310532,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,57,KCS 310532,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,57,KCS 310532,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,57,KCS 310532,dispo_provided,,2026-10-08,fill blank,
@@ -71,7 +71,7 @@ CP ACQUISITION - 60 4750's,57,KCS 310532,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,57,KCS 310532,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,26,KCS 310834,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,26,KCS 310834,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,26,KCS 310834,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,26,KCS 310834,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,26,KCS 310834,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,26,KCS 310834,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,26,KCS 310834,dispo_provided,,2026-10-08,fill blank,
@@ -81,7 +81,7 @@ CP ACQUISITION - 60 4750's,26,KCS 310834,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,26,KCS 310834,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,6,KCS 310162,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,6,KCS 310162,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,6,KCS 310162,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,6,KCS 310162,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,6,KCS 310162,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,6,KCS 310162,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,6,KCS 310162,dispo_provided,,2026-10-08,fill blank,
@@ -91,7 +91,7 @@ CP ACQUISITION - 60 4750's,6,KCS 310162,arrived_lessee_destination,,2026-10-15,f
 CP ACQUISITION - 60 4750's,6,KCS 310162,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,44,KCS 310661,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,44,KCS 310661,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,44,KCS 310661,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,44,KCS 310661,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,44,KCS 310661,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,44,KCS 310661,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,44,KCS 310661,dispo_provided,,2026-10-08,fill blank,
@@ -101,7 +101,7 @@ CP ACQUISITION - 60 4750's,44,KCS 310661,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,44,KCS 310661,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,35,KCS 310777,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,35,KCS 310777,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,35,KCS 310777,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,35,KCS 310777,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,35,KCS 310777,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,35,KCS 310777,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,35,KCS 310777,dispo_provided,,2026-10-08,fill blank,
@@ -111,7 +111,7 @@ CP ACQUISITION - 60 4750's,35,KCS 310777,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,35,KCS 310777,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,31,KCS 310811,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,31,KCS 310811,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,31,KCS 310811,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,31,KCS 310811,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,31,KCS 310811,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,31,KCS 310811,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,31,KCS 310811,dispo_provided,,2026-10-08,fill blank,
@@ -121,7 +121,7 @@ CP ACQUISITION - 60 4750's,31,KCS 310811,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,31,KCS 310811,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,10,KCS 310444,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,10,KCS 310444,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,10,KCS 310444,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,10,KCS 310444,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,10,KCS 310444,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,10,KCS 310444,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,10,KCS 310444,dispo_provided,,2026-10-08,fill blank,
@@ -131,7 +131,7 @@ CP ACQUISITION - 60 4750's,10,KCS 310444,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,10,KCS 310444,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,13,KCS 310483,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,13,KCS 310483,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,13,KCS 310483,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,13,KCS 310483,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,13,KCS 310483,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,13,KCS 310483,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,13,KCS 310483,dispo_provided,,2026-10-08,fill blank,
@@ -141,7 +141,7 @@ CP ACQUISITION - 60 4750's,13,KCS 310483,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,13,KCS 310483,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,14,KCS 310487,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,14,KCS 310487,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,14,KCS 310487,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,14,KCS 310487,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,14,KCS 310487,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,14,KCS 310487,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,14,KCS 310487,dispo_provided,,2026-10-08,fill blank,
@@ -151,7 +151,7 @@ CP ACQUISITION - 60 4750's,14,KCS 310487,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,14,KCS 310487,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,55,KCS 310539,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,55,KCS 310539,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,55,KCS 310539,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,55,KCS 310539,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,55,KCS 310539,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,55,KCS 310539,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,55,KCS 310539,dispo_provided,,2026-10-08,fill blank,
@@ -161,7 +161,7 @@ CP ACQUISITION - 60 4750's,55,KCS 310539,arrived_lessee_destination,,2026-10-15,
 CP ACQUISITION - 60 4750's,55,KCS 310539,trace_date,,2026-10-15,fill blank,
 CP ACQUISITION - 60 4750's,8,KCS 310413,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,8,KCS 310413,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,8,KCS 310413,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,8,KCS 310413,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,8,KCS 310413,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,8,KCS 310413,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,8,KCS 310413,dispo_provided,,2026-10-08,fill blank,
@@ -169,7 +169,7 @@ CP ACQUISITION - 60 4750's,8,KCS 310413,dispo_instructions,,"Sullivan, IN",fill 
 CP ACQUISITION - 60 4750's,8,KCS 310413,trace_date,,2026-10-16,fill blank,
 CP ACQUISITION - 60 4750's,2,KCS 310110,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,2,KCS 310110,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,2,KCS 310110,shop_id,Prairie Line Shop,,change,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,2,KCS 310110,shop_id,Prairie Line Shop,PFL-St Louis TRRA,change,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,2,KCS 310110,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,2,KCS 310110,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,2,KCS 310110,dispo_provided,,2026-10-16,fill blank,
@@ -177,7 +177,7 @@ CP ACQUISITION - 60 4750's,2,KCS 310110,dispo_instructions,,"Sullivan, IN",fill 
 CP ACQUISITION - 60 4750's,2,KCS 310110,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,5,KCS 310155,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,5,KCS 310155,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,5,KCS 310155,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,5,KCS 310155,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,5,KCS 310155,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,5,KCS 310155,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,5,KCS 310155,dispo_provided,,2026-10-16,fill blank,
@@ -185,7 +185,7 @@ CP ACQUISITION - 60 4750's,5,KCS 310155,dispo_instructions,,"Sullivan, IN",fill 
 CP ACQUISITION - 60 4750's,5,KCS 310155,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,9,KCS 310437,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,9,KCS 310437,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,9,KCS 310437,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,9,KCS 310437,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,9,KCS 310437,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,9,KCS 310437,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,9,KCS 310437,dispo_provided,,2026-10-16,fill blank,
@@ -193,7 +193,7 @@ CP ACQUISITION - 60 4750's,9,KCS 310437,dispo_instructions,,"Sullivan, IN",fill 
 CP ACQUISITION - 60 4750's,9,KCS 310437,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,11,KCS 310449,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,11,KCS 310449,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,11,KCS 310449,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,11,KCS 310449,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,11,KCS 310449,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,11,KCS 310449,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,11,KCS 310449,dispo_provided,,2026-10-16,fill blank,
@@ -201,7 +201,7 @@ CP ACQUISITION - 60 4750's,11,KCS 310449,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,11,KCS 310449,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,12,KCS 310454,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,12,KCS 310454,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,12,KCS 310454,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,12,KCS 310454,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,12,KCS 310454,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,12,KCS 310454,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,12,KCS 310454,dispo_provided,,2026-10-16,fill blank,
@@ -209,7 +209,7 @@ CP ACQUISITION - 60 4750's,12,KCS 310454,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,12,KCS 310454,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,56,KCS 310536,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,56,KCS 310536,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,56,KCS 310536,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,56,KCS 310536,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,56,KCS 310536,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,56,KCS 310536,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,56,KCS 310536,dispo_provided,,2026-10-16,fill blank,
@@ -217,7 +217,7 @@ CP ACQUISITION - 60 4750's,56,KCS 310536,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,56,KCS 310536,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,53,KCS 310588,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,53,KCS 310588,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,53,KCS 310588,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,53,KCS 310588,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,53,KCS 310588,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,53,KCS 310588,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,53,KCS 310588,dispo_provided,,2026-10-16,fill blank,
@@ -225,7 +225,7 @@ CP ACQUISITION - 60 4750's,53,KCS 310588,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,53,KCS 310588,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,52,KCS 310589,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,52,KCS 310589,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,52,KCS 310589,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,52,KCS 310589,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,52,KCS 310589,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,52,KCS 310589,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,52,KCS 310589,dispo_provided,,2026-10-16,fill blank,
@@ -233,7 +233,7 @@ CP ACQUISITION - 60 4750's,52,KCS 310589,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,52,KCS 310589,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,51,KCS 310590,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,51,KCS 310590,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,51,KCS 310590,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,51,KCS 310590,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,51,KCS 310590,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,51,KCS 310590,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,51,KCS 310590,dispo_provided,,2026-10-16,fill blank,
@@ -241,7 +241,7 @@ CP ACQUISITION - 60 4750's,51,KCS 310590,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,51,KCS 310590,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,50,KCS 310605,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,50,KCS 310605,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,50,KCS 310605,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,50,KCS 310605,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,50,KCS 310605,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,50,KCS 310605,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,50,KCS 310605,dispo_provided,,2026-10-16,fill blank,
@@ -249,7 +249,7 @@ CP ACQUISITION - 60 4750's,50,KCS 310605,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,50,KCS 310605,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,48,KCS 310632,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,48,KCS 310632,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,48,KCS 310632,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,48,KCS 310632,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,48,KCS 310632,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,48,KCS 310632,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,48,KCS 310632,dispo_provided,,2026-10-16,fill blank,
@@ -257,7 +257,7 @@ CP ACQUISITION - 60 4750's,48,KCS 310632,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,48,KCS 310632,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,39,KCS 310685,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,39,KCS 310685,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,39,KCS 310685,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,39,KCS 310685,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,39,KCS 310685,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,39,KCS 310685,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,39,KCS 310685,dispo_provided,,2026-10-16,fill blank,
@@ -265,7 +265,7 @@ CP ACQUISITION - 60 4750's,39,KCS 310685,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,39,KCS 310685,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,38,KCS 310720,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,38,KCS 310720,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,38,KCS 310720,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,38,KCS 310720,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,38,KCS 310720,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,38,KCS 310720,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,38,KCS 310720,dispo_provided,,2026-10-16,fill blank,
@@ -273,7 +273,7 @@ CP ACQUISITION - 60 4750's,38,KCS 310720,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,38,KCS 310720,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,33,KCS 310804,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,33,KCS 310804,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,33,KCS 310804,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,33,KCS 310804,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,33,KCS 310804,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,33,KCS 310804,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,33,KCS 310804,dispo_provided,,2026-10-16,fill blank,
@@ -281,7 +281,7 @@ CP ACQUISITION - 60 4750's,33,KCS 310804,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,33,KCS 310804,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,32,KCS 310809,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,32,KCS 310809,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,32,KCS 310809,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,32,KCS 310809,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,32,KCS 310809,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,32,KCS 310809,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,32,KCS 310809,dispo_provided,,2026-10-16,fill blank,
@@ -289,7 +289,7 @@ CP ACQUISITION - 60 4750's,32,KCS 310809,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,32,KCS 310809,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,29,KCS 310815,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,29,KCS 310815,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,29,KCS 310815,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,29,KCS 310815,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,29,KCS 310815,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,29,KCS 310815,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,29,KCS 310815,dispo_provided,,2026-10-16,fill blank,
@@ -297,7 +297,7 @@ CP ACQUISITION - 60 4750's,29,KCS 310815,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,29,KCS 310815,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,27,KCS 310823,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,27,KCS 310823,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,27,KCS 310823,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,27,KCS 310823,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,27,KCS 310823,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,27,KCS 310823,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,27,KCS 310823,dispo_provided,,2026-10-16,fill blank,
@@ -305,7 +305,7 @@ CP ACQUISITION - 60 4750's,27,KCS 310823,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,27,KCS 310823,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,24,KCS 310839,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,24,KCS 310839,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,24,KCS 310839,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,24,KCS 310839,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,24,KCS 310839,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,24,KCS 310839,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,24,KCS 310839,dispo_provided,,2026-10-16,fill blank,
@@ -313,7 +313,7 @@ CP ACQUISITION - 60 4750's,24,KCS 310839,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,24,KCS 310839,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,23,KCS 310844,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,23,KCS 310844,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,23,KCS 310844,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,23,KCS 310844,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,23,KCS 310844,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,23,KCS 310844,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,23,KCS 310844,dispo_provided,,2026-10-16,fill blank,
@@ -321,7 +321,7 @@ CP ACQUISITION - 60 4750's,23,KCS 310844,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,23,KCS 310844,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,19,KCS 310897,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,19,KCS 310897,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,19,KCS 310897,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,19,KCS 310897,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,19,KCS 310897,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,19,KCS 310897,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,19,KCS 310897,dispo_provided,,2026-10-16,fill blank,
@@ -329,120 +329,120 @@ CP ACQUISITION - 60 4750's,19,KCS 310897,dispo_instructions,,"Sullivan, IN",fill
 CP ACQUISITION - 60 4750's,19,KCS 310897,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,37,KCS 310723,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,37,KCS 310723,nld_to,,TBD,fill blank,
-CP ACQUISITION - 60 4750's,37,KCS 310723,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,37,KCS 310723,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,37,KCS 310723,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,37,KCS 310723,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,37,KCS 310723,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,25,KCS 310836,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,25,KCS 310836,nld_to,,TBD,fill blank,
-CP ACQUISITION - 60 4750's,25,KCS 310836,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,25,KCS 310836,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,25,KCS 310836,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,25,KCS 310836,dispo_requested,,2026-10-05,fill blank,
 CP ACQUISITION - 60 4750's,25,KCS 310836,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,43,KCS 310664,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,43,KCS 310664,nld_to,,TBD,fill blank,
-CP ACQUISITION - 60 4750's,43,KCS 310664,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,43,KCS 310664,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,43,KCS 310664,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,43,KCS 310664,dispo_requested,,2026-10-14,fill blank,
 CP ACQUISITION - 60 4750's,43,KCS 310664,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,49,KCS 310626,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,49,KCS 310626,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,49,KCS 310626,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,49,KCS 310626,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,49,KCS 310626,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,49,KCS 310626,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,15,KCS 310489,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,15,KCS 310489,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,15,KCS 310489,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,15,KCS 310489,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,15,KCS 310489,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,15,KCS 310489,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,1,KCS 310100,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,1,KCS 310100,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,1,KCS 310100,shop_id,Prairie Line Shop,,change,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,1,KCS 310100,shop_id,Prairie Line Shop,PFL-St Louis TRRA,change,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,1,KCS 310100,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,1,KCS 310100,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,3,KCS 310122,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,3,KCS 310122,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,3,KCS 310122,shop_id,Prairie Line Shop,,change,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,3,KCS 310122,shop_id,Prairie Line Shop,PFL-St Louis TRRA,change,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,3,KCS 310122,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,3,KCS 310122,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,7,KCS 310404,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,7,KCS 310404,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,7,KCS 310404,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,7,KCS 310404,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,7,KCS 310404,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,7,KCS 310404,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,17,KCS 310504,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,17,KCS 310504,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,17,KCS 310504,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,17,KCS 310504,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,17,KCS 310504,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,17,KCS 310504,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,54,KCS 310568,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,54,KCS 310568,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,54,KCS 310568,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,54,KCS 310568,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,54,KCS 310568,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,54,KCS 310568,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,45,KCS 310650,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,45,KCS 310650,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,45,KCS 310650,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,45,KCS 310650,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,45,KCS 310650,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,45,KCS 310650,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,40,KCS 310683,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,40,KCS 310683,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,40,KCS 310683,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,40,KCS 310683,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,40,KCS 310683,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,40,KCS 310683,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,28,KCS 310818,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,28,KCS 310818,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,28,KCS 310818,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,28,KCS 310818,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,28,KCS 310818,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,28,KCS 310818,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,41,KCS 310676,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,41,KCS 310676,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,41,KCS 310676,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,41,KCS 310676,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,41,KCS 310676,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,41,KCS 310676,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,4,KCS 310151,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,4,KCS 310151,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,4,KCS 310151,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,4,KCS 310151,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,4,KCS 310151,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,4,KCS 310151,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,59,KCS 310522,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,59,KCS 310522,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,59,KCS 310522,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,59,KCS 310522,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,59,KCS 310522,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,59,KCS 310522,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,46,KCS 310646,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,46,KCS 310646,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,46,KCS 310646,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,46,KCS 310646,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,46,KCS 310646,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,46,KCS 310646,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,22,KCS 310848,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,22,KCS 310848,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,22,KCS 310848,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,22,KCS 310848,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,22,KCS 310848,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,22,KCS 310848,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,20,KCS 310887,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,20,KCS 310887,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,20,KCS 310887,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,20,KCS 310887,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,20,KCS 310887,arrived_shop_date,,2026-08-02,fill blank,
 CP ACQUISITION - 60 4750's,20,KCS 310887,trace_date,,2026-08-17,fill blank,
 CP ACQUISITION - 60 4750's,16,KCS 310499,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,16,KCS 310499,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,16,KCS 310499,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,16,KCS 310499,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,16,KCS 310499,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,16,KCS 310499,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,47,KCS 310644,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,47,KCS 310644,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,47,KCS 310644,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,47,KCS 310644,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,47,KCS 310644,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,47,KCS 310644,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,36,KCS 310755,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,36,KCS 310755,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,36,KCS 310755,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,36,KCS 310755,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,36,KCS 310755,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,36,KCS 310755,trace_date,,2026-09-21,fill blank,
 CP ACQUISITION - 60 4750's,34,KCS 310801,pre_registered,,Y,fill blank,
 CP ACQUISITION - 60 4750's,34,KCS 310801,nld_to,,Lansing,fill blank,
-CP ACQUISITION - 60 4750's,34,KCS 310801,shop_id,,,fill blank,new shop: PFL-St Louis TRRA
+CP ACQUISITION - 60 4750's,34,KCS 310801,shop_id,,PFL-St Louis TRRA,fill blank,new shop: PFL-St Louis TRRA
 CP ACQUISITION - 60 4750's,34,KCS 310801,arrived_shop_date,,2026-09-19,fill blank,
 CP ACQUISITION - 60 4750's,34,KCS 310801,trace_date,,2026-09-21,fill blank,
 xOL2526 - Solvay Return,181,TFOX 780,operating_lease,,xOL2526,fill blank,new optional field def
@@ -1496,40 +1496,40 @@ OL1739&OL1816 - KBX GON Return,141,TFOX 2304,operating_lease,,OL1739,fill blank,
 OL1739&OL1816 - KBX GON Return,141,TFOX 2304,nld_to,,Consolidated,fill blank,
 OL1739&OL1816 - KBX GON Return,148,TFOX 2347,operating_lease,,OL1739,fill blank,new optional field def
 OL1739&OL1816 - KBX GON Return,148,TFOX 2347,nld_to,,Consolidated,fill blank,
-xOL2312 - xScoular,1184,OFOX 40037,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1184,OFOX 40037,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1184,OFOX 40037,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1185,OFOX 40077,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1185,OFOX 40077,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1185,OFOX 40077,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1186,OFOX 40070,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1186,OFOX 40070,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1186,OFOX 40070,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1187,OFOX 40086,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1187,OFOX 40086,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1187,OFOX 40086,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1188,OFOX 40108,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1188,OFOX 40108,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1188,OFOX 40108,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1189,OFOX 40004,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1189,OFOX 40004,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1189,OFOX 40004,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1190,OFOX 40006,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1190,OFOX 40006,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1190,OFOX 40006,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1191,OFOX 40042,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1191,OFOX 40042,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1191,OFOX 40042,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1192,OFOX 40057,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1192,OFOX 40057,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1192,OFOX 40057,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1193,OFOX 40063,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1193,OFOX 40063,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1193,OFOX 40063,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1194,OFOX 40003,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1194,OFOX 40003,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1194,OFOX 40003,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1195,OFOX 40007,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1195,OFOX 40007,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1195,OFOX 40007,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1196,OFOX 40047,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1196,OFOX 40047,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1196,OFOX 40047,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1197,OFOX 40055,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1197,OFOX 40055,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1197,OFOX 40055,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1198,OFOX 40109,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1198,OFOX 40109,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1198,OFOX 40109,trace_date,,2026-07-13,fill blank,
-xOL2312 - xScoular,1199,OFOX 40054,shop_id,,,fill blank,"new shop: Port Harbor RR-Granite City, IL"
+xOL2312 - xScoular,1199,OFOX 40054,shop_id,,"Port Harbor RR-Granite City, IL",fill blank,"new shop: Port Harbor RR-Granite City, IL"
 xOL2312 - xScoular,1199,OFOX 40054,trace_date,,2026-07-13,fill blank,
 OL1826 - Ingevity,1133,TFOX 9174,cleaning_certificate_received,,N,fill blank,new optional field def
-OL1826 - Ingevity,1133,TFOX 9174,shop_id,,14,fill blank,"shop Gerdau - Midlothian, TX"
+OL1826 - Ingevity,1133,TFOX 9174,shop_id,,"Gerdau - Midlothian, TX",fill blank,"shop Gerdau - Midlothian, TX"
 OL1826 - Ingevity,1133,TFOX 9174,arrived_shop_date,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1133,TFOX 9174,original_code6,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1133,TFOX 9174,original_code7,N/A,,clear,N/A blanks the field
@@ -1545,7 +1545,7 @@ OL1826 - Ingevity,1133,TFOX 9174,dispo_provided,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1133,TFOX 9174,released_from_shop,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1133,TFOX 9174,trace_date,2026-08-10,2026-10-12,change,
 OL1826 - Ingevity,1136,TFOX 9162,cleaning_certificate_received,,N,fill blank,new optional field def
-OL1826 - Ingevity,1136,TFOX 9162,shop_id,,14,fill blank,"shop Gerdau - Midlothian, TX"
+OL1826 - Ingevity,1136,TFOX 9162,shop_id,,"Gerdau - Midlothian, TX",fill blank,"shop Gerdau - Midlothian, TX"
 OL1826 - Ingevity,1136,TFOX 9162,arrived_shop_date,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1136,TFOX 9162,original_code6,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1136,TFOX 9162,original_code7,N/A,,clear,N/A blanks the field
@@ -1561,7 +1561,7 @@ OL1826 - Ingevity,1136,TFOX 9162,dispo_provided,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1136,TFOX 9162,released_from_shop,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1136,TFOX 9162,trace_date,2026-08-10,2026-10-12,change,
 OL1826 - Ingevity,1144,TFOX 9490,cleaning_certificate_received,,N,fill blank,new optional field def
-OL1826 - Ingevity,1144,TFOX 9490,shop_id,,14,fill blank,"shop Gerdau - Midlothian, TX"
+OL1826 - Ingevity,1144,TFOX 9490,shop_id,,"Gerdau - Midlothian, TX",fill blank,"shop Gerdau - Midlothian, TX"
 OL1826 - Ingevity,1144,TFOX 9490,arrived_shop_date,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1144,TFOX 9490,original_code6,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1144,TFOX 9490,original_code7,N/A,,clear,N/A blanks the field
@@ -1577,7 +1577,7 @@ OL1826 - Ingevity,1144,TFOX 9490,dispo_provided,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1144,TFOX 9490,released_from_shop,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1144,TFOX 9490,trace_date,2026-08-10,2026-10-12,change,
 OL1826 - Ingevity,1154,TFOX 960016,cleaning_certificate_received,,N,fill blank,new optional field def
-OL1826 - Ingevity,1154,TFOX 960016,shop_id,,14,fill blank,"shop Gerdau - Midlothian, TX"
+OL1826 - Ingevity,1154,TFOX 960016,shop_id,,"Gerdau - Midlothian, TX",fill blank,"shop Gerdau - Midlothian, TX"
 OL1826 - Ingevity,1154,TFOX 960016,arrived_shop_date,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1154,TFOX 960016,original_code6,N/A,,clear,N/A blanks the field
 OL1826 - Ingevity,1154,TFOX 960016,original_code7,N/A,,clear,N/A blanks the field

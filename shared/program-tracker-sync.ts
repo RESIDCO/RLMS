@@ -711,7 +711,7 @@ export function parseSheetCars(sheet: string, rows: unknown[][]): { headers: Par
     if (!number && !newNumber) continue;
     cars.push({ sheet, mark, number, newMark, newNumber, cells });
   }
-  return { headers, cars, unmapped: [...new Set(unmapped)] };
+  return { headers, cars, unmapped: Array.from(new Set(unmapped)) };
 }
 
 export function findRlmsCars(sheetCar: SheetCar, candidates: RlmsCar[]): RlmsCar[] {
@@ -723,7 +723,7 @@ export function findRlmsCars(sheetCar: SheetCar, candidates: RlmsCar[]): RlmsCar
   if (!want.size) return [];
   return candidates.filter((c) => {
     const keys = carMatchKeys(c);
-    for (const k of want) if (keys.has(k)) return true;
+    for (const k of Array.from(want)) if (keys.has(k)) return true;
     return false;
   });
 }

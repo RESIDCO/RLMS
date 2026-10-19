@@ -204,13 +204,21 @@ const summary = [...new Set([...Object.keys(groups), ...inactiveByProgram.keys()
 }));
 
 mkdirSync(outDir, { recursive: true });
+function previewValue(row: PlannedChange): string {
+  if (row.column === "shop_id") {
+    if (row.note.startsWith("new shop:")) return row.note.slice("new shop:".length).trim();
+    if (row.note.startsWith("shop ")) return row.note.slice("shop ".length).trim();
+  }
+  return row.proposed == null ? "" : String(row.proposed);
+}
+
 writeFileSync(resolve(outDir, "field_changes.csv"), csv(writes.map((row) => ({
   program: row.program,
   program_car_id: row.program_car_id,
   car: row.car,
   field: row.field,
   current: row.current ?? "",
-  proposed: row.proposed ?? "",
+  proposed: previewValue(row),
   action: row.action,
   note: row.note,
 }))));

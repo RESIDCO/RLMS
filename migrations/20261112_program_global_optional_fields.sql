@@ -81,8 +81,8 @@ DECLARE
   updated int := 0;
   pref_id bigint;
   pref_before jsonb;
-  list_key text;
-  view_name text;
+  v_list_key text;
+  v_view_name text;
   new_name text;
   new_program_id bigint;
   actor_uuid uuid;
@@ -256,19 +256,19 @@ BEGIN
     IF actor_uuid IS NULL THEN
       RAISE EXCEPTION 'column layouts need an actor uuid';
     END IF;
-    list_key := btrim(layout->>'list_key');
-    view_name := coalesce(nullif(btrim(layout->>'view_name'), ''), 'Tracker order');
+    v_list_key := btrim(layout->>'list_key');
+    v_view_name := coalesce(nullif(btrim(layout->>'view_name'), ''), 'Tracker order');
     SELECT p.id, to_jsonb(p) INTO pref_id, pref_before
     FROM public.user_column_prefs p
-    WHERE p.list_key = list_key AND p.view_name = view_name AND p.is_shared IS TRUE
+    WHERE p.list_key = v_list_key AND p.view_name = v_view_name AND p.is_shared IS TRUE
     ORDER BY p.id
     LIMIT 1;
     UPDATE public.user_column_prefs
     SET is_default = false
-    WHERE list_key = list_key AND is_shared IS TRUE AND is_default IS TRUE AND id IS DISTINCT FROM pref_id;
+    WHERE list_key = v_list_key AND is_shared IS TRUE AND is_default IS TRUE AND id IS DISTINCT FROM pref_id;
     IF pref_id IS NULL THEN
       INSERT INTO public.user_column_prefs (user_id, page, list_key, view_name, is_default, is_shared, visible_cols, updated_at)
-      VALUES (actor_uuid, 'program_cars', list_key, view_name, true, true, COALESCE(layout->'visible_cols', '{}'::jsonb), now())
+      VALUES (actor_uuid, 'program_cars', v_list_key, v_view_name, true, true, COALESCE(layout->'visible_cols', '{}'::jsonb), now())
       RETURNING id INTO pref_id;
       INSERT INTO public.activity_log (
         entity_type, entity_id, action, actor, detail, source, occurred_at,
@@ -278,7 +278,7 @@ BEGIN
         jsonb_build_object('op', 'insert', 'source', 'program_tracker_sync'),
         'program_tracker_sync', now(), grp, 'user_column_prefs', pref_id,
         '{}'::jsonb,
-        jsonb_build_object('id', pref_id, 'list_key', list_key, 'view_name', view_name, 'is_shared', true, 'is_default', true, 'page', 'program_cars', 'visible_cols', COALESCE(layout->'visible_cols', '{}'::jsonb)),
+        jsonb_build_object('id', pref_id, 'list_key', v_list_key, 'view_name', v_view_name, 'is_shared', true, 'is_default', true, 'page', 'program_cars', 'visible_cols', COALESCE(layout->'visible_cols', '{}'::jsonb)),
         true
       );
     ELSE
@@ -296,8 +296,8 @@ BEGIN
         'program', coalesce((layout->>'program_id')::bigint, 0), 'program_column_layout', p_actor,
         jsonb_build_object('op', 'update', 'source', 'program_tracker_sync'),
         'program_tracker_sync', now(), grp, 'user_column_prefs', pref_id,
-        jsonb_build_object('visible_cols', pref_before->'visible_cols', 'is_default', pref_before->'is_default', 'is_shared', true, 'view_name', view_name, 'list_key', list_key),
-        jsonb_build_object('visible_cols', COALESCE(layout->'visible_cols', '{}'::jsonb), 'is_default', true, 'is_shared', true, 'view_name', view_name, 'list_key', list_key),
+        jsonb_build_object('visible_cols', pref_before->'visible_cols', 'is_default', pref_before->'is_default', 'is_shared', true, 'view_name', v_view_name, 'list_key', v_list_key),
+        jsonb_build_object('visible_cols', COALESCE(layout->'visible_cols', '{}'::jsonb), 'is_default', true, 'is_shared', true, 'view_name', v_view_name, 'list_key', v_list_key),
         true
       );
     END IF;

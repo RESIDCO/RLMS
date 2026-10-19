@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "@/lib/queryClient";
+import { ApiError, apiGet } from "@/lib/queryClient";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -461,10 +461,17 @@ function UtilRing({ pct }: { pct: number }) {
 export default function Dashboard() {
   const { data, isLoading, isError, error, refetch } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
-    queryFn: ({ signal }) => apiGet<DashboardData>("/api/dashboard", { timeoutMs: 15_000, signal }),
+    queryFn: ({ signal }) => apiGet<DashboardData>("/api/dashboard", { timeoutMs: 30_000, signal }),
     staleTime: 45_000,
     refetchOnMount: true,
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
+      return failureCount < 2;
+    },
+    retryDelay: (failureCount) => (failureCount === 0 ? 1_000 : 3_000),
   });
+  const panelFailed = isError && !data;
+  const showPanelPlaceholders = !data && !panelFailed;
 
   const [drillKey, setDrillKey] = useState<DrillKey>(null);
 
@@ -843,10 +850,12 @@ export default function Dashboard() {
               </span>
             </header>
             <div className="p-5 space-y-2.5 max-h-[480px] overflow-auto">
-              {isLoading ? (
+              {showPanelPlaceholders ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <Skeleton key={i} className="h-7 rounded" />
                 ))
+              ) : panelFailed ? (
+                <div className="text-sm text-muted-foreground py-10 text-center">Couldn't load</div>
               ) : data && data.cars_by_fleet.length > 0 ? (
                 data.cars_by_fleet.map((f) => (
                   <button
@@ -885,10 +894,12 @@ export default function Dashboard() {
               </div>
             </header>
             <div className="divide-y divide-border max-h-[480px] overflow-auto">
-              {isLoading ? (
+              {showPanelPlaceholders ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="px-5 py-4"><Skeleton className="h-10 rounded" /></div>
                 ))
+              ) : panelFailed ? (
+                <div className="px-5 py-8 text-sm text-muted-foreground">Couldn't load</div>
               ) : (() => {
                 type TimelineItem = NonNullable<DashboardData["expiration_timeline"]>[number];
                 const withEnd = data?.expiration_timeline ?? [];

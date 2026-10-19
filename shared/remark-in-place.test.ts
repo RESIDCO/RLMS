@@ -174,6 +174,10 @@ const sql = readFileSync(new URL("../migrations/20261112_remark_in_place.sql", i
 ok(sql.includes("remark_railcars_in_place"), "migration defines the in-place function");
 ok(!sql.includes("CREATE OR REPLACE FUNCTION public.remark_railcars("), "migration does not replace retire-and-create");
 ok(sql.includes("DELETE FROM public.car_number_history"), "undo removes history rows");
+ok(sql.includes("h.railcar_id IN"), "history delete is limited to the group's railcars");
+ok(sql.includes("AS it(value)") && sql.includes("it.value->>'id'"), "postcheck aliases the jsonb set");
+ok(!/jsonb_array_elements\(p_items\)\s+item\b/.test(sql), "postcheck does not reuse the item variable");
+ok(sql.includes("idx_car_number_history_old_mark_number"), "old mark and number are indexed");
 ok(sql.includes("change_group "), "history delete matches the reason marker");
 ok(!/rent_events/i.test(sql.replace(/never touch rent_events/i, "")), "migration does not reference rent_events except the comment");
 ok(sql.includes("'mark_change'") && sql.includes("'op', 'update'"), "activity rows match the undo format");

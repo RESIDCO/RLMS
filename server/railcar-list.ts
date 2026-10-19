@@ -561,7 +561,7 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
   if (p.search && !p.fleetOr && !p.ids?.length && !p.priorIdentityChecked) {
     p.priorIdentityChecked = true;
     const prior = (await resolveRailcarsByAnyIdentity(p.search)).slice(0, 80);
-    if (prior.length) searchRailcarIds = [...new Set([...(searchRailcarIds ?? []), ...prior])];
+    if (prior.length) searchRailcarIds = Array.from(new Set([...(searchRailcarIds ?? []), ...prior]));
   }
   const extra = { railcarIds: searchRailcarIds };
 

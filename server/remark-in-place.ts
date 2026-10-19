@@ -36,7 +36,7 @@ function numbersOf(rows: RemarkInputRow[]): string[] {
     if (row.old_number) set.add(row.old_number);
     if (row.new_number) set.add(row.new_number);
   }
-  return [...set];
+  return Array.from(set);
 }
 
 async function carsByNumbers(numbers: string[]): Promise<RemarkCarRecord[]> {
@@ -52,7 +52,7 @@ async function carsByNumbers(numbers: string[]): Promise<RemarkCarRecord[]> {
       byId.set(Number(row.id), row as RemarkCarRecord);
     }
   }
-  return [...byId.values()];
+  return Array.from(byId.values());
 }
 
 async function historyForNumbers(numbers: string[]): Promise<RemarkHistoryRef[]> {
@@ -93,7 +93,7 @@ async function attachPrograms(cars: RemarkCarRecord[]): Promise<RemarkCarRecord[
 
 async function hydrateMissing(cars: RemarkCarRecord[], history: RemarkHistoryRef[]): Promise<RemarkCarRecord[]> {
   const have = new Set(cars.map((car) => car.id));
-  const missing = [...new Set(history.map((row) => Number(row.railcar_id)).filter((id) => id && !have.has(id)))];
+  const missing = Array.from(new Set(history.map((row) => Number(row.railcar_id)).filter((id) => id && !have.has(id))));
   if (!missing.length) return cars;
   const extra: RemarkCarRecord[] = [];
   for (const slice of chunk(missing, 80)) {

@@ -188,11 +188,13 @@ BEGIN
     ));
   END LOOP;
 
+  -- `item` is the loop variable above. Alias the set or Postgres raises
+  -- "column reference item is ambiguous" and the whole apply rolls back.
   SELECT count(*) INTO n
     FROM public.railcars r
-    JOIN jsonb_array_elements(p_items) item ON r.id = (item->>'id')::bigint
-   WHERE r.reporting_marks = upper(btrim(item->>'reporting_marks'))
-     AND r.car_number = lpad(btrim(item->>'car_number'), 6, '0')
+    JOIN jsonb_array_elements(p_items) AS it(value) ON r.id = (it.value->>'id')::bigint
+   WHERE r.reporting_marks = upper(btrim(it.value->>'reporting_marks'))
+     AND r.car_number = lpad(btrim(it.value->>'car_number'), 6, '0')
      AND r.active IS TRUE;
   IF n <> jsonb_array_length(p_items) THEN
     RAISE EXCEPTION 'remark in place postcheck failed: % of %', n, jsonb_array_length(p_items);
@@ -208,6 +210,10 @@ GRANT EXECUTE ON FUNCTION public.remark_railcars_in_place(jsonb, text, text, tex
 
 COMMENT ON FUNCTION public.remark_railcars_in_place(jsonb, text, text, text) IS
   'Rename a railcar in place (same id). Active cars only. Writes car_number_history and one undoable mark_change activity row per car under a single change_group. Does not call remark_railcars.';
+
+-- VCF alias matching and prior-mark resolve look up history by the old mark and number.
+CREATE INDEX IF NOT EXISTS idx_car_number_history_old_mark_number
+  ON public.car_number_history (old_car_initial, old_car_number);
 
 -- Undo still restores railcars from activity_log.before. Also delete the
 -- car_number_history rows whose reason names this change_group (the marker
@@ -315,8 +321,14 @@ BEGIN
     VALUES (rec.entity_type, rec.entity_id, 'undo', p_actor, rec.railcar_id, rec.rider_id, jsonb_build_object('op', 'update', 'undid', rec.action, 'original_group', p_group::text), 'undo', now(), undo_group, rec.table_name, rec.row_pk, rec.after, rec.before, false, rec.id);
   END LOOP;
 
-  DELETE FROM public.car_number_history
-   WHERE reason LIKE '%change_group ' || p_group::text;
+  DELETE FROM public.car_number_history AS h
+   WHERE h.reason LIKE '%change_group ' || p_group::text
+     AND h.railcar_id IN (
+       SELECT a.railcar_id
+         FROM public.activity_log AS a
+        WHERE a.change_group = p_group
+          AND a.railcar_id IS NOT NULL
+     );
   GET DIAGNOSTICS hist_removed = ROW_COUNT;
 
   UPDATE public.activity_log SET undone_at = now(), undone_by = p_actor WHERE change_group = p_group;

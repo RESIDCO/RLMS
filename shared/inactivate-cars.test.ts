@@ -90,7 +90,7 @@ ok(inactivateEndDateError(true, "2026-10-19") == null, "ISO date is accepted");
 ok(inactivateEndDateError(false, "") == null, "date is optional when not closing");
 ok(INACTIVATE_CONFIRM === "INACTIVATE" && INACTIVATE_BATCH_MAX === 500, "confirm word and cap");
 
-const sql = readFileSync(join(import.meta.dirname, "../migrations/20261113_inactivate_railcars.sql"), "utf8");
+const sql = readFileSync(join(import.meta.dirname, "../migrations/20261114_inactivate_railcars.sql"), "utf8");
 ok(!/\brent_events\b/i.test(sql), "migration never mentions rent_events");
 ok(!/^UPDATE\s+public\.railcars/im.test(sql), "migration has no top-level railcar update");
 ok(/CREATE OR REPLACE FUNCTION public\.inactivate_railcars/i.test(sql), "function is in the migration");

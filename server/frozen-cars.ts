@@ -7,7 +7,7 @@ export const FROZEN_CAR_MESSAGE =
 const CHUNK = 200;
 
 export async function findFrozenRailcarIds(ids: number[]): Promise<number[]> {
-  const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
   const frozen: number[] = [];
   for (let i = 0; i < unique.length; i += CHUNK) {
     const slice = unique.slice(i, i + CHUNK);

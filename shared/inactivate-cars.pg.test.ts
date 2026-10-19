@@ -34,7 +34,7 @@ const root = mkdtempSync(join(tmpdir(), "inactivate-pg-"));
 const data = join(root, "data");
 const sock = root;
 const port = "55441";
-const migration = join(import.meta.dirname, "../migrations/20261113_inactivate_railcars.sql");
+const migration = join(import.meta.dirname, "../migrations/20261114_inactivate_railcars.sql");
 
 function bin(name: string): string {
   return join(PG_BIN!, name);

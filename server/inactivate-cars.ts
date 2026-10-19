@@ -42,7 +42,7 @@ export async function previewInactivate(
   ids: number[],
   opts: { closeAssignment: boolean },
 ): Promise<InactivatePreview> {
-  const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
   if (!unique.length) throw httpError(400, "ids required");
   if (unique.length > INACTIVATE_BATCH_MAX) {
     throw httpError(400, `At most ${INACTIVATE_BATCH_MAX} cars per batch`);
@@ -117,7 +117,7 @@ export async function previewInactivate(
     if (ol) ols.add(ol);
   }
   const activeOnOl = new Map<string, Set<number>>();
-  const olList = [...ols];
+  const olList = Array.from(ols);
   for (let i = 0; i < olList.length; i += CHUNK) {
     const slice = olList.slice(i, i + CHUNK);
     const { data, error } = await supabaseAdmin
@@ -199,7 +199,7 @@ export async function applyInactivate(opts: {
   if (error) {
     const message = String(error.message ?? error);
     if (/inactivate_railcars/i.test(message) && /schema cache|does not exist|could not find|function/i.test(message)) {
-      throw httpError(503, "Inactivate is not available until migrations/20261113_inactivate_railcars.sql is applied.");
+      throw httpError(503, "Inactivate is not available until migrations/20261114_inactivate_railcars.sql is applied.");
     }
     throw error;
   }

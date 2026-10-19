@@ -30,6 +30,51 @@ export function assertReportSqlIsReadOnly(sql: string): void {
   }
 }
 
+const PAGE = 1000;
+const MAX_PAGES = 200;
+
+type ReportRow = {
+  id: number;
+  reporting_marks: string | null;
+  car_number: string | null;
+  status: string | null;
+  active_status: string | null;
+  active_source: string | null;
+};
+
+type ReportQuery = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: boolean) => {
+        order: (column: string, options: { ascending: boolean }) => {
+          range: (from: number, to: number) => PromiseLike<{ data: ReportRow[] | null; error: { message: string } | null }>;
+        };
+      };
+    };
+  };
+};
+
+/** PostgREST stops at 1000 rows unless the query is ranged. Order by id so pages do not skip. */
+export async function loadActiveFalseNotInactive(sb: ReportQuery): Promise<ReportRow[]> {
+  const out: ReportRow[] = [];
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const from = page * PAGE;
+    const { data, error } = await sb
+      .from("railcars")
+      .select("id, reporting_marks, car_number, status, active_status, active_source")
+      .eq("active", false)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const batch = data ?? [];
+    for (const row of batch) {
+      if (String(row.status ?? "").trim() !== "Inactive") out.push(row);
+    }
+    if (batch.length < PAGE) return out;
+  }
+  throw new Error(`Report stopped after ${MAX_PAGES * PAGE} active=false rows; the query is still full.`);
+}
+
 function isMain(): boolean {
   const entry = process.argv[1] ?? "";
   return entry.endsWith("report-active-false-not-inactive.ts");
@@ -49,18 +94,13 @@ async function main() {
     return;
   }
   const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data, error } = await sb
-    .from("railcars")
-    .select("id, reporting_marks, car_number, status, active_status, active_source, active")
-    .eq("active", false);
-  if (error) throw error;
-  const rows = (data ?? []).filter((row) => String(row.status ?? "").trim() !== "Inactive");
+  const rows = await loadActiveFalseNotInactive(sb);
   const byStatus = new Map<string, number>();
   for (const row of rows) {
     const status = String(row.status ?? "").trim() || "(blank)";
     byStatus.set(status, (byStatus.get(status) ?? 0) + 1);
   }
-  const counts = [...byStatus.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const counts = Array.from(byStatus.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   console.log(`active=false and status is not Inactive: ${rows.length}`);
   for (const [status, n] of counts) console.log(`${n}\t${status}`);
   console.log("id\tmarks\tnumber\tstatus\tactive_status\tactive_source");

@@ -43,7 +43,11 @@ ok(parseCarPasteList("TFOX 2248\nTFOX 000430, KBX 123").length === 3, "paste lis
 ok(parseCarPasteList("TFOX\t3297").join("|") === "TFOX 003297", "tab + zero-pad");
 ok(parseCarPasteList("TFOX  3297\nTFOX 003297").length === 1, "spaces and pad collapse to one car");
 
-ok(isCarDone({ active: false }), "inactive is program done");
+ok(!isCarDone({ active: false }), "fleet inactive alone is not program done");
+ok(isCarDone({ active: false, exited_date: "2026-10-01" }), "program exit is program done");
+ok(isCarDone({ active: false, outcome_reached_at: "2026-10-17" }), "outcome still counts on an inactive car");
+ok(deriveCompletionLevel({ active: false, status: "Enroute" }) === "in_progress", "inactive fleet car with a status stays in progress");
+ok(deriveCompletionLevel({ active: false }) === "not_started", "inactive fleet car with no program outcome is not started");
 ok(isCarDone({ active: true, milestone: "On rent" }), "on rent is program done");
 ok(isCarDone({ active: true, milestones: [{ milestone: "Scrapped" }] }), "scrapped trail is program done");
 ok(!isCarDone({ active: true, milestone: "Work complete" }), "work complete is not program done");

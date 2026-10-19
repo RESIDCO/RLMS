@@ -96,16 +96,18 @@ export function isTerminalMilestone(raw: string | null | undefined): boolean {
 }
 
 export function deriveCompletionLevel(row: {
+  /** Fleet flag. Inactive cars stay listed; this does not mark the program row done. */
   active?: boolean | null;
   status?: string | null;
   milestone?: string | null;
   milestones?: { milestone?: string | null }[] | null;
   outcome_reached_at?: string | null;
   completed?: boolean | null;
+  exited_date?: string | null;
 }): CompletionLevel {
-  if (row.active === false) return "program_done";
   if (row.completed === true) return "program_done";
   if (String(row.outcome_reached_at ?? "").trim()) return "program_done";
+  if (String(row.exited_date ?? "").trim()) return "program_done";
   const names = [
     ...(row.milestones ?? []).map((m) => m.milestone),
     row.milestone,
@@ -200,6 +202,7 @@ export function isCarDone(row: {
   milestones?: { milestone?: string | null }[] | null;
   outcome_reached_at?: string | null;
   completed?: boolean | null;
+  exited_date?: string | null;
 }): boolean {
   return deriveCompletionLevel(row) === "program_done";
 }

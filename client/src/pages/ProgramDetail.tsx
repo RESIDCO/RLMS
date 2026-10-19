@@ -263,6 +263,7 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
     milestones: car.trail,
     outcome_reached_at: next.outcome_reached_at,
     completed: next.completed,
+    exited_date: next.exited_date,
   });
   return next;
 }
@@ -793,7 +794,7 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1">
             <CellInput
-              readOnly={!canEdit || exited || c.railcar?.active !== true}
+              readOnly={!canEdit || exited}
               value={c.milestone ?? ""}
               onSave={(v) => queueCarPatch(c.id, { milestone: v })}
             />
@@ -803,7 +804,7 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1">
             <DateCell
-              readOnly={!canEdit || exited || c.railcar?.active !== true}
+              readOnly={!canEdit || exited}
               value={c.milestone_at}
               allowMonthOnly={false}
               onSave={(v) => queueCarPatch(c.id, { milestone_at: v ?? "" })}
@@ -815,7 +816,7 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">
             <CellInput
-              readOnly={!canEdit || exited || c.railcar?.active !== true}
+              readOnly={!canEdit || exited}
               value={c.notes ?? ""}
               onSave={(v) => queueCarPatch(c.id, { notes: v })}
             />
@@ -990,6 +991,7 @@ export default function ProgramDetailPage() {
         milestones: c.trail,
         outcome_reached_at: c.outcome_reached_at,
         completed: c.completed,
+        exited_date: c.exited_date,
       });
       if (!levelFilter.has(level)) return false;
       return true;

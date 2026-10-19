@@ -576,9 +576,8 @@ async function applyOneCarUpdates(
   const commitment = commitmentPatch(updates ?? {});
   const { data: car } = await supabaseAdmin.from("railcars").select("id, active, status").eq("id", row.railcar_id).maybeSingle();
   if (!car) return { wrote: false, commitment: false };
-  // programCarFleetFrozen stands in for isFrozenRailcar (PR #40). Swap the
-  // helper body when that lands. Do not turn this into an early return:
-  // the program_cars update below is how a frozen car leaves Complete.
+  // Frozen cars still take program_cars status and complete-flag writes.
+  // programCarFleetFrozen only blocks the commitment write below.
   const fleetFrozen = programCarFleetFrozen(car);
   const { data: prior, error: priorErr } = await supabaseAdmin
     .from("program_cars")

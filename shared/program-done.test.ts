@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-/** OL1503 completion must not regress: checkbox/outcome/trail still count. scrapped_at is also done. */
+/** OL1503 completion must not regress: checkbox/outcome/trail still count. Fleet inactive does not. */
 
 function isProgramDone(row: {
   active?: boolean;
@@ -7,11 +7,12 @@ function isProgramDone(row: {
   outcome_reached_at?: string | null;
   complete?: boolean;
   milestone?: string | null;
+  exited_date?: string | null;
 }) {
-  if (row.active === false) return true;
   if (row.scrapped_at) return true;
   if (row.outcome_reached_at) return true;
   if (row.complete) return true;
+  if (String(row.exited_date ?? "").trim()) return true;
   const m = String(row.milestone ?? "").trim().toLowerCase();
   return ["on rent", "scrapped", "sold", "stored"].includes(m);
 }
@@ -31,6 +32,8 @@ ok(isProgramDone({ active: true, outcome_reached_at: "2026-01-01" }), "outcome_r
 ok(isProgramDone({ active: true, milestone: "On rent" }), "On rent milestone still Program done");
 ok(!isProgramDone({ active: true, milestone: "Work complete" }), "Work complete is not Program done");
 ok(isProgramDone({ active: true, scrapped_at: "2026-09-18" }), "scrapped_at is Program done");
+ok(!isProgramDone({ active: false }), "fleet inactive alone is not Program done");
+ok(isProgramDone({ active: false, exited_date: "2026-10-01" }), "program exit is Program done");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

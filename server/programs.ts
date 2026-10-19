@@ -515,6 +515,7 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
       milestones: trail,
       outcome_reached_at: r.outcome_reached_at,
       completed: r.completed,
+      exited_date: r.exited_date,
     });
     return {
       ...r,

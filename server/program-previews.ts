@@ -20,6 +20,7 @@ import {
   type ProgramLifecycle,
   type ProgramType,
 } from "@shared/programs";
+import { programCarFleetFrozen } from "@shared/program-car-fleet";
 import { parseProgramDateInput } from "@shared/program-dates";
 import { isCompleteProgramStatus, statusLeavesComplete } from "@shared/program-status";
 import {
@@ -573,9 +574,12 @@ async function applyOneCarUpdates(
   actor: string,
 ): Promise<{ wrote: boolean; commitment: boolean }> {
   const commitment = commitmentPatch(updates ?? {});
-  const { data: car } = await supabaseAdmin.from("railcars").select("id, active").eq("id", row.railcar_id).maybeSingle();
+  const { data: car } = await supabaseAdmin.from("railcars").select("id, active, status").eq("id", row.railcar_id).maybeSingle();
   if (!car) return { wrote: false, commitment: false };
-  const fleetInactive = car.active !== true;
+  // programCarFleetFrozen stands in for isFrozenRailcar (PR #40). Swap the
+  // helper body when that lands. Do not turn this into an early return:
+  // the program_cars update below is how a frozen car leaves Complete.
+  const fleetFrozen = programCarFleetFrozen(car);
   const { data: prior, error: priorErr } = await supabaseAdmin
     .from("program_cars")
     .select("*")
@@ -622,7 +626,7 @@ async function applyOneCarUpdates(
       if (trail && (trail as { inserted?: boolean }).inserted) wrote = true;
     }
   }
-  if (commitment && !fleetInactive) {
+  if (commitment && !fleetFrozen) {
     await upsertOpenCommitment(
       Number(row.railcar_id),
       { type: commitment.type, name: commitment.name, program_id: program.id },

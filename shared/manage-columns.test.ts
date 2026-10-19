@@ -81,6 +81,17 @@ ok(current.includes(insertBranch.trim()), "undo of add retires the definition in
 current = current.replace(insertBranch, "");
 current = current.replace(", 'program_field_defs'", "");
 ok(current === previous, "undo function is the live definition plus program_field_defs");
+
+function patchBody(sql: string): string {
+  const start = sql.indexOf("CREATE OR REPLACE FUNCTION public.rlms_apply_jsonb_patch");
+  const end = sql.indexOf("$function$;", start);
+  return sql.slice(start, end);
+}
+let patch = patchBody(next);
+const livePatch = patchBody(live);
+ok(patch.includes("'shops', 'user_column_prefs', 'program_field_defs'"), "patch allowlist includes column definitions");
+patch = patch.replace(", 'program_field_defs'", "");
+ok(patch === livePatch, "patch function is the live definition plus program_field_defs");
 ok(next.includes("DELETE FROM public.car_number_history"), "remark history removal stays");
 ok(next.includes("'shops', 'user_column_prefs', 'program_field_defs'"), "shops, prefs, and column defs are undoable");
 ok(next.includes("undo: program % still has cars"), "empty sync-created program undo stays");

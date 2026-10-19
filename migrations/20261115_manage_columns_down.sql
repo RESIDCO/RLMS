@@ -1,8 +1,54 @@
 -- Rolls back migrations/20261115_manage_columns.sql.
--- Restores rlms_undo_change_group to the 20261113 definition.
+-- Restores rlms_apply_jsonb_patch and rlms_undo_change_group to the 20261113 definitions.
 -- Does not touch rent_events or program_cars.custom_fields.
 -- Program-scoped definitions cannot keep a scope without program_id, so this
 -- rollback removes only those rows. Retire in the app never deletes.
+
+CREATE OR REPLACE FUNCTION public.rlms_apply_jsonb_patch(p_table text, p_id bigint, p_patch jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  stmt text;
+  col text;
+  typ text;
+  parts text[] := ARRAY[]::text[];
+BEGIN
+  IF p_patch IS NULL OR p_patch = '{}'::jsonb THEN
+    RETURN;
+  END IF;
+  IF p_table NOT IN (
+    'railcars', 'car_commitments', 'car_rent_stops', 'program_cars',
+    'program_car_milestones', 'programs', 'railcar_assignments',
+    'assignment_history', 'car_tags', 'car_lists', 'car_list_members',
+    'riders', 'master_leases', 'attachments', 'opportunities', 'crm_activities',
+    'accounts', 'companies', 'company_contacts', 'opportunity_contacts',
+    'shops', 'user_column_prefs'
+  ) THEN
+    RAISE EXCEPTION 'undo: table % is not patchable', p_table;
+  END IF;
+  FOR col, typ IN
+    SELECT a.attname, format_type(a.atttypid, a.atttypmod)
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = p_table AND a.attnum > 0 AND NOT a.attisdropped
+  LOOP
+    IF p_patch ? col THEN
+      IF p_patch -> col = 'null'::jsonb THEN
+        parts := array_append(parts, format('%I = NULL', col));
+      ELSE
+        parts := array_append(parts, format('%I = ($1->>%L)::%s', col, col, typ));
+      END IF;
+    END IF;
+  END LOOP;
+  IF coalesce(array_length(parts, 1), 0) = 0 THEN
+    RETURN;
+  END IF;
+  stmt := format('UPDATE public.%I SET %s WHERE id = $2', p_table, array_to_string(parts, ', '));
+  EXECUTE stmt USING p_patch, p_id;
+END;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.rlms_undo_change_group(p_group uuid, p_actor text)
  RETURNS jsonb
@@ -136,6 +182,7 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.rlms_undo_change_group(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.rlms_undo_change_group(uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.rlms_apply_jsonb_patch(text, bigint, jsonb) TO service_role;
 
 DELETE FROM public.program_field_defs
  WHERE field_key = 'trace_date_ran' AND category_id IS NULL AND program_id IS NULL;

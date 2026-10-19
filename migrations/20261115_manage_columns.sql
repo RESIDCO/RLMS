@@ -9,6 +9,10 @@
 -- remark-in-place function plus shops, shared column prefs, and empty
 -- sync-created programs). The only additions are the program_field_defs
 -- allowlist entry and insert-undo, which sets retired_at instead of DELETE.
+-- rlms_apply_jsonb_patch is that same migration's live definition, plus
+-- program_field_defs on its allowlist. Rename, retire, and restore undo
+-- through the patch function. Without that entry they raise
+-- 'undo: table program_field_defs is not patchable'.
 
 ALTER TABLE public.program_field_defs
   ADD COLUMN IF NOT EXISTS program_id bigint REFERENCES public.programs(id) ON DELETE CASCADE;
@@ -35,6 +39,52 @@ CREATE UNIQUE INDEX program_field_defs_global_field_uidx
 CREATE UNIQUE INDEX IF NOT EXISTS program_field_defs_program_field_uidx
   ON public.program_field_defs (program_id, field_key)
   WHERE program_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.rlms_apply_jsonb_patch(p_table text, p_id bigint, p_patch jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  stmt text;
+  col text;
+  typ text;
+  parts text[] := ARRAY[]::text[];
+BEGIN
+  IF p_patch IS NULL OR p_patch = '{}'::jsonb THEN
+    RETURN;
+  END IF;
+  IF p_table NOT IN (
+    'railcars', 'car_commitments', 'car_rent_stops', 'program_cars',
+    'program_car_milestones', 'programs', 'railcar_assignments',
+    'assignment_history', 'car_tags', 'car_lists', 'car_list_members',
+    'riders', 'master_leases', 'attachments', 'opportunities', 'crm_activities',
+    'accounts', 'companies', 'company_contacts', 'opportunity_contacts',
+    'shops', 'user_column_prefs', 'program_field_defs'
+  ) THEN
+    RAISE EXCEPTION 'undo: table % is not patchable', p_table;
+  END IF;
+  FOR col, typ IN
+    SELECT a.attname, format_type(a.atttypid, a.atttypmod)
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = p_table AND a.attnum > 0 AND NOT a.attisdropped
+  LOOP
+    IF p_patch ? col THEN
+      IF p_patch -> col = 'null'::jsonb THEN
+        parts := array_append(parts, format('%I = NULL', col));
+      ELSE
+        parts := array_append(parts, format('%I = ($1->>%L)::%s', col, col, typ));
+      END IF;
+    END IF;
+  END LOOP;
+  IF coalesce(array_length(parts, 1), 0) = 0 THEN
+    RETURN;
+  END IF;
+  stmt := format('UPDATE public.%I SET %s WHERE id = $2', p_table, array_to_string(parts, ', '));
+  EXECUTE stmt USING p_patch, p_id;
+END;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.rlms_undo_change_group(p_group uuid, p_actor text)
  RETURNS jsonb
@@ -173,6 +223,7 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.rlms_undo_change_group(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.rlms_undo_change_group(uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.rlms_apply_jsonb_patch(text, bigint, jsonb) TO service_role;
 
 -- Global optional date. Hidden until someone adds it from Columns.
 -- Not part of the default program column order.

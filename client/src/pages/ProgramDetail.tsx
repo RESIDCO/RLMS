@@ -1007,6 +1007,10 @@ export default function ProgramDetailPage() {
       return new Set(kept);
     });
   }, [visibleCars]);
+  const visibleSelectedIds = useMemo(
+    () => visibleCars.filter((c) => selected.has(c.id) && !c.exited_date).map((c) => c.id),
+    [visibleCars, selected],
+  );
   const detailCar = draftedCars.find((c) => c.id === detailId) ?? null;
   const splitListPct = Math.min(90, Math.max(30, Number(colWidths._split_list) || 68));
   const showPutOnRent = putOnRentProgramTypes().includes(header?.type as ProgramType);
@@ -1409,7 +1413,7 @@ export default function ProgramDetailPage() {
                   </Button>
                 </>
               ) : null}
-              {showPutOnRent && canEdit && selected.size > 0 && (
+              {showPutOnRent && canEdit && visibleSelectedIds.length > 0 && (
                 <Button size="sm" variant="outline" disabled={carSaving} onClick={() => setRentOpen(true)}>
                   Put on rent
                 </Button>
@@ -1454,17 +1458,17 @@ export default function ProgramDetailPage() {
                   : ""}
               </div>
             )}
-            {canEdit && selected.size > 0 && (
+            {canEdit && visibleSelectedIds.length > 0 && (
               <div className="shrink-0">
               <BulkEditBar
-                count={visibleCars.filter((c) => selected.has(c.id) && !c.exited_date).length}
+                count={visibleSelectedIds.length}
                 shops={shops}
                 statusOptions={statusChoices}
                 defs={defs}
                 programId={id}
                 saving={carSaving}
                 onApply={async (label, updates) => {
-                  const ids = visibleCars.filter((c) => selected.has(c.id) && !c.exited_date).map((c) => c.id);
+                  const ids = visibleSelectedIds;
                   if (!ids.length) return;
                   const ok = await confirmSave({
                     title: `Set ${label} for ${ids.length} selected car${ids.length === 1 ? "" : "s"}?`,
@@ -1613,7 +1617,7 @@ export default function ProgramDetailPage() {
       <PutOnRentDialog
         open={rentOpen}
         programId={id}
-        linkIds={Array.from(selected)}
+        linkIds={visibleSelectedIds}
         riders={riders}
         onClose={() => setRentOpen(false)}
         onApplied={() => {

@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/program-grid.test.ts */
 
+import { programCarFleetFrozen } from "./program-car-fleet";
 import { formatProgramDate, parseProgramDateInput } from "./program-dates";
 import { programCarMatchesQuery } from "./program-car-filter";
 import { isCompleteProgramStatus, mergeProgramStatusOptions, statusLeavesComplete } from "./program-status";
@@ -57,6 +58,10 @@ ok(programCarMatchesQuery(trinity, "TFOX003107"), "filter matches a glued mark a
 ok(programCarMatchesQuery(trinity, "curry"), "filter matches shop");
 ok(programCarMatchesQuery(trinity, "complete"), "filter matches status");
 ok(!programCarMatchesQuery(trinity, "TGCX"), "filter excludes other marks");
+ok(programCarFleetFrozen({ active: false, status: "Storage" }), "active false is frozen");
+ok(programCarFleetFrozen({ active: true, status: "Inactive" }), "Inactive status is frozen");
+ok(!programCarFleetFrozen({ active: true, status: "Off-Lease" }), "an active Off-Lease car is not frozen");
+ok(!programCarFleetFrozen({ active: null, status: "Storage" }), "a missing active flag is not frozen by itself");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

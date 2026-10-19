@@ -269,6 +269,29 @@ try {
   ok(columnUndo.ok === true && columnUndo.restored === 1, "undo of a new column retires it");
   ok(psql("SELECT count(*) FROM public.program_field_defs WHERE id = 33") === "1", "undo does not delete the column definition");
   ok(psql("SELECT retired_at IS NOT NULL FROM public.program_field_defs WHERE id = 33") === "t", "undo sets retired_at");
+
+  const renameGroup = psql("SELECT gen_random_uuid()::text");
+  psql(`
+    INSERT INTO public.program_field_defs (id, category_id, program_id, field_key, label, field_type, section, sort_order, is_optional)
+    VALUES (34, NULL, 71, 'rename_me', 'After name', 'text', 'Program', 2010, false);
+    INSERT INTO public.activity_log (entity_type, entity_id, action, actor, detail, source, change_group, table_name, row_pk, before, after)
+    VALUES ('program', 71, 'column_renamed', 'actor-1', '{"op":"update"}'::jsonb, 'app', '${renameGroup}', 'program_field_defs', 34, '{"label":"Before name"}'::jsonb, '{"label":"After name"}'::jsonb);
+  `);
+  const renameUndo = JSON.parse(psql(`SELECT public.rlms_undo_change_group('${renameGroup}'::uuid, 'actor-1')::text`)) as { ok: boolean; restored: number };
+  ok(renameUndo.ok === true && renameUndo.restored === 1, "undo of a rename restores the label");
+  ok(psql("SELECT label FROM public.program_field_defs WHERE id = 34") === "Before name", "rename undo writes the previous label");
+
+  const retireGroup = psql("SELECT gen_random_uuid()::text");
+  psql(`
+    INSERT INTO public.program_field_defs (id, category_id, program_id, field_key, label, field_type, section, sort_order, is_optional, retired_at)
+    VALUES (35, NULL, 71, 'retire_me', 'Keep me', 'text', 'Program', 2020, false, '2026-10-19 12:00:00+00');
+    INSERT INTO public.activity_log (entity_type, entity_id, action, actor, detail, source, change_group, table_name, row_pk, before, after)
+    VALUES ('program', 71, 'column_retired', 'actor-1', '{"op":"update"}'::jsonb, 'app', '${retireGroup}', 'program_field_defs', 35, '{"retired_at":null}'::jsonb, '{"retired_at":"2026-10-19T12:00:00+00"}'::jsonb);
+  `);
+  const retireUndo = JSON.parse(psql(`SELECT public.rlms_undo_change_group('${retireGroup}'::uuid, 'actor-1')::text`)) as { ok: boolean; restored: number };
+  ok(retireUndo.ok === true && retireUndo.restored === 1, "undo of a retire clears retired_at");
+  ok(psql("SELECT retired_at IS NULL FROM public.program_field_defs WHERE id = 35") === "t", "retire undo restores the column");
+  ok(psql("SELECT label FROM public.program_field_defs WHERE id = 35") === "Keep me", "retire undo leaves the label");
 } catch (err) {
   failed += 1;
   console.error("FAIL", err instanceof Error ? err.message : err);

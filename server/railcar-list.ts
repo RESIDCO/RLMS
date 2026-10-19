@@ -233,7 +233,17 @@ export function leaseSearchTokenValues(tokens: SearchToken[]): string[] {
 
 const CAR_NUMBER_FIELDS = ["reporting_marks", "car_initial", "car_number"] as const;
 const LEASE_OL_FIELDS = ["lessee_name", "rider_external_id", "assignment_label"] as const;
-/** Always searched. No Car data checkbox. Both type columns, case-insensitive. */
+/**
+ * Master's Car data checkbox. Used only when Search did not send `fleet=1`,
+ * so Railcars and select-all keep the filters they had before this PR.
+ */
+const MASTER_CAR_DATA_FIELDS = [
+  "car_type",
+  "equipment_type_code",
+  "general_description",
+  "mechanical_designation",
+] as const;
+/** Searched for letter tokens only when Search sends `fleet=1`. */
 const FLEET_FIELDS = [
   "car_type",
   "equipment_type_code",
@@ -241,8 +251,8 @@ const FLEET_FIELDS = [
   "mechanical_designation",
   "general_description",
 ] as const;
-/** Slower free text. Still behind the Car data checkbox. */
-const CAR_DATA_FIELDS = ["description", "notes"] as const;
+/** Extra free text. Still behind the Car data checkbox on a fleet search. */
+const NOTE_FIELDS = ["description", "notes"] as const;
 
 export function parseSearchScope(query: Record<string, unknown> | undefined): SearchScope {
   const flag = (key: string, fallback: boolean) => {
@@ -372,11 +382,12 @@ export function applySearchFilter(
   query: any,
   rawSearch: string | undefined,
   scope?: SearchScope,
-  extra?: { railcarIds?: number[] },
+  extra?: { railcarIds?: number[]; fleetCodes?: boolean },
 ) {
   if (!rawSearch) return query;
   const tokens = railcarSearchTokens(rawSearch);
   const sc = scopeOrDefault(scope);
+  const fleetCodes = Boolean(extra?.fleetCodes);
   const railcarIns = idInOrClauses(extra?.railcarIds ?? []);
   for (const tok of tokens) {
     const t = tok.value;
@@ -401,11 +412,14 @@ export function applySearchFilter(
     if (sc.leases) {
       for (const col of LEASE_OL_FIELDS) ors.push(`${col}.ilike.%${t}%`);
     }
-    if (hasLetter) {
+    if (fleetCodes && hasLetter) {
       for (const col of FLEET_FIELDS) ors.push(`${col}.ilike.%${t}%`);
     }
-    if (sc.carData && hasLetter) {
-      for (const col of CAR_DATA_FIELDS) ors.push(`${col}.ilike.%${t}%`);
+    if (sc.carData) {
+      const fields = fleetCodes ? NOTE_FIELDS : MASTER_CAR_DATA_FIELDS;
+      if (!fleetCodes || hasLetter) {
+        for (const col of fields) ors.push(`${col}.ilike.%${t}%`);
+      }
     }
     ors.push(...railcarIns);
     if (!ors.length) continue;
@@ -529,7 +543,7 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
 
   if (p.turning50) {
     query = query.eq("active", true).eq("build_year", p.turning50 - 50);
-    query = applySearchFilter(query, p.search, scope, extra);
+    query = applySearchFilter(query, p.search, scope, { ...extra, fleetCodes: p.fleetCodes });
     return query;
   }
 
@@ -588,7 +602,7 @@ async function applyRailcarFilters(query: any, p: RailcarListParams) {
   if (p.aar) query = applyColumnPattern(query, ["aar_designation"], p.aar);
 
   if (p.fleetOr) query = query.or(p.fleetOr);
-  else query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, extra);
+  else query = p.ids?.length ? query : applySearchFilter(query, p.search, scope, { ...extra, fleetCodes: p.fleetCodes });
   query = applyOpsFlagFilter(query, p.flag, p.opsFlagFallback);
   return query;
 }

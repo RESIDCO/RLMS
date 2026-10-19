@@ -311,6 +311,34 @@ export function saveSearchState(sid: string, state: Omit<StoredSearch, "sid" | "
   }
 }
 
+/** Rows were dropped to save space, but the count says the search had matches. */
+export function isStaleSearchResults(results: StoredSearchResults | null | undefined): boolean {
+  if (!results || !Array.isArray(results.rows)) return false;
+  const total = Number(results.total);
+  return results.rows.length === 0 && Number.isFinite(total) && total > 0;
+}
+
+export type ResolvedStoredSearch = {
+  /** Saved pasted text, or the query stored on the entry. Never the global paste key. */
+  query: string;
+  hash: SearchHashState;
+  /** False when the entry must be run again. A real zero-result search stays cached. */
+  useCache: boolean;
+  selection: SearchSelection;
+  scrollY: number;
+};
+
+export function resolveStoredSearch(stored: StoredSearch | null): ResolvedStoredSearch | null {
+  if (!stored || stored.ready === false || !stored.results || !stored.hash) return null;
+  return {
+    query: stored.pastedText || stored.hash.q || "",
+    hash: stored.hash,
+    useCache: !isStaleSearchResults(stored.results),
+    selection: stored.selection ?? [],
+    scrollY: stored.scrollY ?? 0,
+  };
+}
+
 export function searchResultsPathForSid(sid: string): string | null {
   const stored = loadSearchState(sid);
   if (!stored) return null;

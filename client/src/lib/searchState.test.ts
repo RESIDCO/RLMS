@@ -6,9 +6,11 @@ import {
   decodeHash,
   emptySearchHash,
   encodeHash,
+  isStaleSearchResults,
   loadSearchState,
   pasteFoundLabel,
   pasteShowsInactiveSeparately,
+  resolveStoredSearch,
   saveSearchState,
   shouldRebootSearch,
   type SearchHashState,
@@ -196,6 +198,106 @@ saveSearchState("new", { hash: emptySearchHash("new"), pastedText: "", ids: [7],
 sessionStorage.setItem = origSet;
 ok(loadSearchState("old") == null, "a quota error drops the oldest saved search and retries");
 ok(loadSearchState("new")?.ids.join(",") === "7" && loadSearchState("new")?.scrollY === 12, "the new search is saved after the retry");
+
+function results(mode: "text" | "paste", rows: unknown[], total: number): StoredSearchResults {
+  return {
+    mode,
+    rows,
+    total,
+    summary: { total },
+    notFound: [],
+    inactiveMatches: [],
+    ambiguous: [],
+    counts: { found: total },
+    match: null,
+    truncated: false,
+    rejectedRanges: [],
+    expandedFrom: [],
+  };
+}
+
+sessionStorage.clear();
+sessionStorage.setItem("rlms-search-paste", "WRONG PASTE");
+const staleHash = emptySearchHash("stale-paste");
+staleHash.paste = true;
+staleHash.q = "";
+saveSearchState("stale-paste", {
+  hash: staleHash,
+  pastedText: "TFOX 401-449",
+  ids: [1],
+  selection: [9, 10],
+  scrollY: 640,
+  results: results("paste", [], 38),
+});
+sessionStorage.setItem("rlms-search-paste", "WRONG PASTE");
+const stale = resolveStoredSearch(loadSearchState("stale-paste"));
+ok(isStaleSearchResults(loadSearchState("stale-paste")?.results), "no stored rows and a count above 0 is stale");
+ok(stale != null && stale.useCache === false, "a stale entry is not a cache hit");
+ok(stale?.query === "TFOX 401-449", "a stale entry re-runs its saved pasted text");
+ok(stale?.query !== "WRONG PASTE", "a stale entry ignores the global paste key");
+ok(stale?.selection.join(",") === "9,10" && stale?.scrollY === 640, "a stale entry keeps its selection and scroll");
+
+const emptyHash = emptySearchHash("empty-hit");
+emptyHash.q = "nomatch";
+saveSearchState("empty-hit", {
+  hash: emptyHash,
+  pastedText: "",
+  ids: [],
+  selection: [4],
+  scrollY: 12,
+  results: results("text", [], 0),
+});
+const emptyHit = resolveStoredSearch(loadSearchState("empty-hit"));
+ok(emptyHit?.useCache === true && emptyHit.query === "nomatch", "a real empty result stays cached and uses the saved query");
+ok(emptyHit?.selection.join(",") === "4" && emptyHit?.scrollY === 12, "a cached empty result keeps selection and scroll");
+
+const textHash = emptySearchHash("text-stale");
+textHash.q = "hopper";
+saveSearchState("text-stale", {
+  hash: textHash,
+  pastedText: "",
+  ids: [],
+  selection: [7],
+  scrollY: 80,
+  results: results("text", [], 12),
+});
+const textStale = resolveStoredSearch(loadSearchState("text-stale"));
+ok(textStale?.useCache === false && textStale.query === "hopper", "a stale text search re-runs the saved query");
+ok(textStale?.selection.join(",") === "7" && textStale.scrollY === 80, "a stale text search keeps selection and scroll");
+
+sessionStorage.clear();
+for (let i = 1; i <= 7; i += 1) {
+  const hash = emptySearchHash(`slim${i}`);
+  hash.q = `q${i}`;
+  saveSearchState(`slim${i}`, {
+    hash,
+    pastedText: `q${i}`,
+    ids: [i],
+    selection: [i],
+    scrollY: i * 10,
+    results: results("text", [{ id: i }, { id: i + 100 }], 2),
+  });
+}
+const oldest = resolveStoredSearch(loadSearchState("slim1"));
+const second = resolveStoredSearch(loadSearchState("slim2"));
+const newest = resolveStoredSearch(loadSearchState("slim7"));
+ok((loadSearchState("slim1")?.results?.rows.length ?? -1) === 0 && (loadSearchState("slim2")?.results?.rows.length ?? -1) === 0, "searches older than five drop their rows");
+ok(oldest?.useCache === false && oldest.query === "q1" && oldest.selection.join(",") === "1" && oldest.scrollY === 10, "the oldest trimmed search is re-run with its selection and scroll");
+ok(second?.useCache === false && second.query === "q2" && second.scrollY === 20, "the second trimmed search is re-run too");
+ok(newest?.useCache === true && (loadSearchState("slim7")?.results?.rows.length ?? 0) === 2, "a search that still has rows stays a cache hit");
+
+const pending = emptySearchHash("pending");
+pending.q = "FL";
+saveSearchState("pending", {
+  hash: pending,
+  pastedText: "FL",
+  ids: [],
+  selection: [],
+  scrollY: 0,
+  results: results("text", [], 3),
+  ready: false,
+});
+ok(resolveStoredSearch(loadSearchState("pending")) == null, "an in-flight save is not treated as a finished cache");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

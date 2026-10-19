@@ -30,6 +30,7 @@ import {
   pageSizeNumber,
   pasteFoundLabel,
   pasteShowsInactiveSeparately,
+  resolveStoredSearch,
   saveSearchState,
   shouldRebootSearch,
   type SearchActive,
@@ -254,6 +255,8 @@ type Boot = {
   exactFleet: boolean;
   sid: string;
   fromCache: boolean;
+  /** Put the page back at scrollY once the grid has rows. */
+  restoreScroll: boolean;
   pasteRows: any[] | null;
   pasteMeta: PasteMeta | null;
   textRows: any[];
@@ -286,6 +289,7 @@ function blankBoot(): Boot {
     exactFleet: true,
     sid: "",
     fromCache: false,
+    restoreScroll: false,
     pasteRows: null,
     pasteMeta: null,
     textRows: [],
@@ -338,13 +342,15 @@ function readBoot(): Boot {
   if (typeof window === "undefined") return base;
   const hash = decodeHash(window.location.hash);
   const cached = hash.sid ? loadSearchState(hash.sid) : null;
-  if (cached && cached.ready !== false && cached.results && cached.hash) {
-    const h = cached.hash;
-    const results = cached.results;
+  const resolved = resolveStoredSearch(cached);
+  if (cached && resolved) {
+    const h = resolved.hash;
+    const results = cached.results!;
     const counts = results.counts ?? {};
+    const useCache = resolved.useCache;
     return {
-      query: cached.pastedText || h.q,
-      committed: cached.pastedText || h.q,
+      query: resolved.query,
+      committed: resolved.query,
       scope: { leases: h.leases, cars: h.cars, carData: h.carData },
       activeMode: h.active,
       page: h.page,
@@ -358,9 +364,10 @@ function readBoot(): Boot {
       dir: h.dir,
       exactFleet: h.fleet !== false,
       sid: cached.sid,
-      fromCache: true,
-      pasteRows: results.mode === "paste" ? (results.rows as any[]) : null,
-      pasteMeta: results.mode === "paste" ? {
+      fromCache: useCache,
+      restoreScroll: true,
+      pasteRows: useCache && results.mode === "paste" ? (results.rows as any[]) : null,
+      pasteMeta: useCache && results.mode === "paste" ? {
         notFound: results.notFound ?? [],
         inactive: (results.inactiveMatches ?? []) as PasteMeta["inactive"],
         ambiguous: (results.ambiguous ?? []) as PasteMeta["ambiguous"],
@@ -373,12 +380,12 @@ function readBoot(): Boot {
           ambiguous: Number(counts.ambiguous ?? (results.ambiguous ?? []).length),
         },
       } : null,
-      textRows: results.mode === "text" ? (results.rows as any[]) : [],
-      textTotal: results.mode === "text" ? results.total : 0,
-      summary: (results.summary as Summary) ?? null,
-      match: (results.match as FleetMatch) ?? null,
-      selection: cached.selection ?? [],
-      scrollY: cached.scrollY ?? 0,
+      textRows: useCache && results.mode === "text" ? (results.rows as any[]) : [],
+      textTotal: useCache && results.mode === "text" ? results.total : 0,
+      summary: useCache ? ((results.summary as Summary) ?? null) : null,
+      match: useCache ? ((results.match as FleetMatch) ?? null) : null,
+      selection: resolved.selection,
+      scrollY: resolved.scrollY,
     };
   }
   const legacy = readSearchSession();
@@ -528,7 +535,9 @@ export default function SearchPage() {
   const [cachedMatch, setCachedMatch] = useState<FleetMatch>(boot.match);
   const [live, setLive] = useState(!boot.fromCache);
   const [scrollTick, setScrollTick] = useState(0);
-  const [pasteLoading, setPasteLoading] = useState(false);
+  const [pasteLoading, setPasteLoading] = useState(
+    () => !boot.fromCache && Boolean(boot.committed && carListSearchTokens(boot.committed)),
+  );
   const [error, setError] = useState<string | null>(null);
   const [editCarId, setEditCarId] = useState<number | null>(null);
   const [leaseGlance, setLeaseGlance] = useState<LeaseGlanceRider | null>(null);
@@ -536,7 +545,7 @@ export default function SearchPage() {
   const [selected, setSelected] = useState<Set<number>>(() => new Set(boot.selection));
   const sidRef = useRef(boot.sid);
   const scrollRef = useRef(boot.scrollY);
-  const pendingScroll = useRef<number | null>(boot.fromCache ? boot.scrollY : null);
+  const pendingScroll = useRef<number | null>(boot.restoreScroll ? boot.scrollY : null);
   const committedRef = useRef(boot.committed);
   const lastSeenHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
   const hashBooted = useRef(false);
@@ -673,7 +682,7 @@ export default function SearchPage() {
   useEffect(() => {
     const el = scrollParent();
     if (!el) return;
-    if (pendingScroll.current != null && !loading) {
+    if (pendingScroll.current != null && !loading && pageRows.length > 0) {
       const y = pendingScroll.current;
       pendingScroll.current = null;
       requestAnimationFrame(() => { el.scrollTop = y; });
@@ -776,7 +785,7 @@ export default function SearchPage() {
   function applyBoot(next: Boot) {
     sidRef.current = next.sid;
     scrollRef.current = next.scrollY;
-    pendingScroll.current = next.fromCache ? next.scrollY : null;
+    pendingScroll.current = next.restoreScroll ? next.scrollY : null;
     committedRef.current = next.committed;
     setQuery(next.query);
     setCommitted(next.committed);

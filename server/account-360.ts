@@ -60,8 +60,8 @@ export async function listCrmSummary(): Promise<CrmSummaryRow[]> {
         .range(from, to),
     ),
     loadOnRentCars(),
-    fetchAllRows<{ account_id: number; stage: string }>((from, to) =>
-      supabaseAdmin.from("opportunities").select("account_id, stage").order("id", { ascending: true }).range(from, to),
+    fetchAllRows<{ account_id: number; stage: string; flavor: string | null }>((from, to) =>
+      supabaseAdmin.from("opportunities").select("account_id, stage, flavor").order("id", { ascending: true }).range(from, to),
     ),
     fetchAllRows<{ account_id: number | null; occurred_at: string | null }>((from, to) =>
       supabaseAdmin.from("crm_activities").select("account_id, occurred_at").order("id", { ascending: true }).range(from, to),
@@ -82,7 +82,7 @@ export async function listCrmSummary(): Promise<CrmSummaryRow[]> {
   }
   const openOpps = new Map<number, number>();
   for (const opp of opps) {
-    if (!isOpenStage(opp.stage)) continue;
+    if (!isOpenStage(opp.stage) || opp.flavor === "portfolio_bid") continue;
     openOpps.set(Number(opp.account_id), (openOpps.get(Number(opp.account_id)) ?? 0) + 1);
   }
   const lastActivity = new Map<number, string>();
@@ -218,7 +218,7 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([role, group]) => ({ role, people: group }));
 
-  const openOpps = opportunities.filter((row) => isOpenStage(row.stage));
+  const openOpps = opportunities.filter((row) => isOpenStage(row.stage) && row.flavor !== "portfolio_bid");
   const estValue = openOpps.reduce((sum, row) => sum + (row.est_value ?? 0), 0);
   const lastActivity = activities.reduce<string | null>((latest, row) => {
     if (!latest || row.occurred_at > latest) return row.occurred_at;

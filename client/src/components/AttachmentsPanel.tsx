@@ -33,7 +33,7 @@ type Attachment = {
   source_module?: string | null;
 };
 
-type EntityType = "master_lease" | "rider" | "railcar" | "company" | "company_contact";
+type EntityType = "master_lease" | "rider" | "railcar" | "company" | "company_contact" | "opportunity";
 
 interface Props {
   entityType: EntityType;

@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
+import { parseHashSearch, useHashSearch } from "@/lib/hash-location";
 import CalculatorTab, { scenarioQueryKey } from "@/pages/opportunity/CalculatorTab";
 import { pinnedBidFigure } from "@shared/dealCalcApi";
 import { useToast } from "@/hooks/use-toast";
@@ -33,7 +34,8 @@ export default function BidOfferingPage() {
   const [editing, setEditing] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [filesLineId, setFilesLineId] = useState<number | null>(null);
-  const [tab, setTab] = useState("lines");
+  const hash = useHashSearch();
+  const [tab, setTab] = useState(parseHashSearch(hash).get("tab") === "calculator" ? "calculator" : "lines");
   const [priceLineId, setPriceLineId] = useState<number | null>(null);
   const scenarios = useQuery({
     queryKey: scenarioQueryKey(id),
@@ -102,7 +104,10 @@ export default function BidOfferingPage() {
         {offering.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
         {offering.isError ? <p className="text-sm text-destructive">Could not load this offering.</p> : null}
         {opp && opp.flavor !== "portfolio_bid" ? (
-          <p className="text-sm">This opportunity is not a portfolio bid. Open it from the pipeline to edit the usual fields.</p>
+          <div className="space-y-4">
+            <p className="text-sm">This opportunity is not a portfolio bid. Open it from the pipeline to edit the usual fields.</p>
+            <CalculatorTab opportunityId={opp.id} opportunity={opp} lines={lines} canWrite={canWrite} />
+          </div>
         ) : null}
         {opp && opp.flavor === "portfolio_bid" ? (
           <Tabs value={tab} onValueChange={setTab}>

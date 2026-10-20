@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { downloadDealCalcExcel } from "@/lib/dealCalcExcel";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { offerUndoToast } from "@/lib/undo";
 import { useToast } from "@/hooks/use-toast";
@@ -27,7 +31,8 @@ import {
   type PostLeasePlan,
   type Sourced,
 } from "@shared/dealCalc";
-import { pinnedBidFigure, usePriceDisabledReason } from "@shared/dealCalcApi";
+import { applyPriceWhichLabel, calcMethodLabel, LEGACY_BID_MODEL_LABEL, pinnedBidFigure, usePriceDisabledReason } from "@shared/dealCalcApi";
+import { applyWhatIf, saveScenarioPayload, scratchInputs } from "@shared/dealCalcScratch";
 import { DEAL_CALC_TOOLTIPS, type DealCalcTooltipKey } from "@shared/dealCalcTooltips";
 import type { OpportunityRow } from "@shared/crm";
 import type { BidLine } from "@/components/crm/BidLinesGrid";
@@ -52,12 +57,16 @@ type ScenarioRow = {
 
 type ScenarioList = { numbersHidden: boolean; scenarios: ScenarioRow[] };
 
+type PickerLine = { id?: number; seller_deal_ref?: string | null; lessee_desc?: string | null; car_count?: number | null };
+
 type Props = {
   opportunityId: number;
-  opportunity: OpportunityRow;
-  lines: BidLine[];
+  opportunity?: OpportunityRow;
+  lines?: BidLine[];
   canWrite: boolean;
   focusLineId?: number | null;
+  /** No opportunity. The run stays in the browser until Save to opportunity. */
+  scratch?: boolean;
   /** Offline render for the screenshot fixture. Skips the API. */
   preview?: { inputs: DealCalcInputs; viewer?: boolean; scenarios?: ScenarioRow[] };
 };
@@ -66,13 +75,13 @@ export function scenarioQueryKey(opportunityId: number) {
   return ["/api/opportunities", opportunityId, "scenarios"] as const;
 }
 
-export default function CalculatorTab({ opportunityId, opportunity, lines, canWrite, focusLineId, preview }: Props) {
+export default function CalculatorTab({ opportunityId, opportunity, lines = [], canWrite, focusLineId, scratch = false, preview }: Props) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const scenarios = useQuery({
     queryKey: scenarioQueryKey(opportunityId),
     queryFn: () => apiGet<ScenarioList>(`/api/opportunities/${opportunityId}/scenarios`),
-    enabled: !preview,
+    enabled: !preview && !scratch && opportunityId > 0,
   });
   const defaults = useQuery({
     queryKey: ["/api/calc/defaults"],
@@ -90,26 +99,34 @@ export default function CalculatorTab({ opportunityId, opportunity, lines, canWr
   const [dirty, setDirty] = useState(false);
   const [compare, setCompare] = useState<number[]>([]);
   const [seedLine, setSeedLine] = useState<number | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveOppId, setSaveOppId] = useState<number | null>(null);
+  const [saveLineId, setSaveLineId] = useState<number | null>(null);
+  const [savedHref, setSavedHref] = useState<string | null>(null);
 
   const selected = rows.find((row) => row.id === selectedId) ?? null;
   const line = lines.find((item) => item.id === (selected?.opportunity_line_id ?? seedLine ?? focusLineId)) ?? null;
-  const baseline = useMemo(() => buildInputsFromLine({
-    opportunity,
-    line: line ? {
-      car_count: line.car_count,
-      car_type: line.car_type,
-      aar_code: line.aar_code,
-      avg_build_year: line.avg_build_year,
-      lease_rate: line.lease_rate,
-      lease_expiry: line.lease_expiry,
-      lessee_rating: line.lessee_rating,
-      prelim_price_per_car: line.prelim_price_per_car,
-      final_price_per_car: line.final_price_per_car,
-    } : null,
-    company,
-  }), [opportunity, line, company]);
+  const baseline = useMemo(() => {
+    if (scratch || !opportunity) return scratchInputs(company);
+    return buildInputsFromLine({
+      opportunity,
+      line: line ? {
+        car_count: line.car_count,
+        car_type: line.car_type,
+        aar_code: line.aar_code,
+        avg_build_year: line.avg_build_year,
+        lease_rate: line.lease_rate,
+        lease_expiry: line.lease_expiry,
+        lessee_rating: line.lessee_rating,
+        prelim_price_per_car: line.prelim_price_per_car,
+        final_price_per_car: line.final_price_per_car,
+      } : null,
+      company,
+    });
+  }, [scratch, opportunity, line, company]);
 
   useEffect(() => {
+    if (scratch || !opportunity) return;
     if (!focusLineId || focusLineId === seedLine) return;
     setSeedLine(focusLineId);
     setSelectedId(null);
@@ -216,8 +233,35 @@ export default function CalculatorTab({ opportunityId, opportunity, lines, canWr
     onError: (err: Error) => toast({ title: "Could not use this price", description: err.message, variant: "destructive" }),
   });
 
-  if (!preview && scenarios.isLoading) return <p className="text-sm text-muted-foreground">Loading scenarios…</p>;
-  if (!preview && scenarios.isError) return <p className="text-sm text-destructive">Could not load scenarios.</p>;
+  const openOpps = useQuery({
+    queryKey: ["/api/opportunities", "scratch-open"],
+    queryFn: () => apiGet<OpportunityRow[]>("/api/opportunities?open=1"),
+    enabled: scratch && saveOpen && !preview,
+  });
+  const oppLines = useQuery({
+    queryKey: ["/api/opportunities", saveOppId, "lines"],
+    queryFn: () => apiGet<PickerLine[]>(`/api/opportunities/${saveOppId}/lines`),
+    enabled: scratch && saveOpen && !preview && saveOppId != null,
+  });
+  const attach = useMutation({
+    mutationFn: async () => {
+      if (!saveOppId) throw new Error("Pick an opportunity");
+      const payload = saveScenarioPayload({ name, notes, inputs, opportunityLineId: saveLineId });
+      const res = await apiRequest("POST", `/api/opportunities/${saveOppId}/scenarios`, payload);
+      return res.json() as Promise<{ scenario: ScenarioRow; change_group?: string }>;
+    },
+    onSuccess: (saved) => {
+      offerUndoToast(saved);
+      setDirty(false);
+      setSavedHref(saveOppId ? `/opportunities/${saveOppId}?tab=calculator` : null);
+      toast({ title: "Saved to the opportunity" });
+      if (saveOppId) void qc.invalidateQueries({ queryKey: scenarioQueryKey(saveOppId) });
+    },
+    onError: (err: Error) => toast({ title: "Could not save scenario", description: err.message, variant: "destructive" }),
+  });
+
+  if (!preview && !scratch && scenarios.isLoading) return <p className="text-sm text-muted-foreground">Loading scenarios…</p>;
+  if (!preview && !scratch && scenarios.isError) return <p className="text-sm text-destructive">Could not load scenarios.</p>;
   if (numbersHidden || !canWrite) {
     return (
       <div className="space-y-3" data-testid="calc-viewer">
@@ -232,38 +276,51 @@ export default function CalculatorTab({ opportunityId, opportunity, lines, canWr
     );
   }
 
-  const priceReason = usePriceDisabledReason({
+  const priceReason = !scratch && opportunity ? usePriceDisabledReason({
     lineId: line?.id ?? selected?.opportunity_line_id ?? null,
     linePresent: Boolean(line),
     lineOutcome: line?.outcome ?? null,
     opportunityStage: opportunity.stage,
     opportunityOutcome: opportunity.outcome,
-  });
+  }) : null;
 
   return (
     <div className="space-y-4" data-testid="calc-editor">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="text-xs space-y-1">
-          <span className="text-muted-foreground">Scenario</span>
-          <select
-            className="block h-9 rounded-md border bg-background px-2 text-sm"
-            value={selectedId ?? ""}
-            onChange={(event) => loadRow(rows.find((row) => row.id === Number(event.target.value)) ?? null)}
-          >
-            <option value="">Unsaved draft</option>
-            {rows.map((row) => (
-              <option key={row.id} value={row.id}>{row.is_pinned ? "★ " : ""}{row.name}</option>
-            ))}
-          </select>
-        </label>
+        {scratch ? null : (
+          <label className="text-xs space-y-1">
+            <span className="text-muted-foreground">Scenario</span>
+            <select
+              className="block h-9 rounded-md border bg-background px-2 text-sm"
+              value={selectedId ?? ""}
+              onChange={(event) => loadRow(rows.find((row) => row.id === Number(event.target.value)) ?? null)}
+            >
+              <option value="">Unsaved draft</option>
+              {rows.map((row) => (
+                <option key={row.id} value={row.id}>{row.is_pinned ? "★ " : ""}{row.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <Input className="h-9 w-48" value={name} onChange={(event) => { setName(event.target.value); setDirty(true); }} aria-label="Scenario name" />
         <Button type="button" size="sm" variant="outline" onClick={() => { setSelectedId(null); setDraft(structuredClone(baseline)); setName("Scenario"); setDirty(true); }}>New</Button>
         <Button type="button" size="sm" variant="outline" onClick={() => { setSelectedId(null); setDraft(structuredClone(inputs)); setName(`Copy of ${name}`); setDirty(true); }}>Duplicate</Button>
-        <Button type="button" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>
-        <Button type="button" size="sm" variant="outline" disabled={!selectedId || remove.isPending} onClick={() => remove.mutate()}>Delete</Button>
-        <Button type="button" size="sm" variant="outline" disabled={!selectedId || pin.isPending} onClick={() => pin.mutate()}>{selected?.is_pinned ? "Pinned" : "Pin"}</Button>
+        {scratch ? (
+          <Button type="button" size="sm" data-testid="save-to-opportunity" onClick={() => setSaveOpen(true)}>Save to opportunity</Button>
+        ) : (
+          <Button type="button" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>
+        )}
+        {scratch ? (
+          <Button type="button" size="sm" variant="outline" data-testid="download-excel" onClick={() => downloadDealCalcExcel(name, result)}>Download Excel</Button>
+        ) : (
+          <>
+            <Button type="button" size="sm" variant="outline" disabled={!selectedId || remove.isPending} onClick={() => remove.mutate()}>Delete</Button>
+            <Button type="button" size="sm" variant="outline" disabled={!selectedId || pin.isPending} onClick={() => pin.mutate()}>{selected?.is_pinned ? "Pinned" : "Pin"}</Button>
+          </>
+        )}
         <MethodSwitch value={inputs.method.value} onChange={(method) => edit({ ...inputs, method: { value: method, source: "user" } })} />
-        {dirty ? <span className="text-xs text-amber-600">Unsaved changes</span> : null}
+        {scratch ? <span className="text-xs text-muted-foreground" data-testid="scratch-note">Scratch. Nothing is stored until you save to an opportunity.</span> : null}
+        {!scratch && dirty ? <span className="text-xs text-amber-600">Unsaved changes</span> : null}
       </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
         <div className="space-y-4">
@@ -336,25 +393,27 @@ export default function CalculatorTab({ opportunityId, opportunity, lines, canWr
         </div>
         <Results result={result} showWayne={inputs.method.value !== "cash_flow"} showCash={inputs.method.value !== "wayne_leveraged"} />
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">Use this price</span>
-        {(["prelim", "final"] as const).map((field) => (
-          (["max", "stretch", "wayne"] as const).map((which) => (
-            <Button
-              key={`${field}-${which}`}
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={Boolean(priceReason) || !selectedId || applyPrice.isPending}
-              title={priceReason ?? `Write the ${which} price into ${field}`}
-              onClick={() => applyPrice.mutate({ field, which })}
-            >
-              {field} {which}
-            </Button>
-          ))
-        ))}
-        {priceReason ? <span className="text-xs text-muted-foreground">{priceReason}</span> : null}
-      </div>
+      {scratch ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Use this price</span>
+          {(["prelim", "final"] as const).map((field) => (
+            (["max", "stretch", "wayne"] as const).map((which) => (
+              <Button
+                key={`${field}-${which}`}
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={Boolean(priceReason) || !selectedId || applyPrice.isPending}
+                title={priceReason ?? `Write the ${applyPriceWhichLabel(which)} price into ${field}`}
+                onClick={() => applyPrice.mutate({ field, which })}
+              >
+                {field} {applyPriceWhichLabel(which)}
+              </Button>
+            ))
+          ))}
+          {priceReason ? <span className="text-xs text-muted-foreground">{priceReason}</span> : null}
+        </div>
+      )}
       <Tabs defaultValue="cashflow">
         <TabsList>
           <TabsTrigger value="cashflow">Cash flow</TabsTrigger>
@@ -364,7 +423,8 @@ export default function CalculatorTab({ opportunityId, opportunity, lines, canWr
         <TabsContent value="cashflow" className="mt-3">
           <CashFlowTable result={result} />
         </TabsContent>
-        <TabsContent value="sensitivity" className="mt-3">
+        <TabsContent value="sensitivity" className="mt-3 space-y-4">
+          <WhatIfSliders inputs={inputs} />
           <SensitivityTable result={result} />
         </TabsContent>
         <TabsContent value="compare" className="mt-3">
@@ -379,6 +439,56 @@ export default function CalculatorTab({ opportunityId, opportunity, lines, canWr
           />
         </TabsContent>
       </Tabs>
+      {scratch ? (
+        <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Save to opportunity</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <label className="block space-y-1">
+                <span className="text-muted-foreground">Opportunity</span>
+                <select
+                  className="block h-9 w-full rounded-md border bg-background px-2"
+                  aria-label="Opportunity"
+                  value={saveOppId ?? ""}
+                  onChange={(event) => {
+                    const next = event.target.value ? Number(event.target.value) : null;
+                    setSaveOppId(next);
+                    setSaveLineId(null);
+                    setSavedHref(null);
+                  }}
+                >
+                  <option value="">Select an opportunity</option>
+                  {(openOpps.data ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>{row.offering_name || row.account_name || `Opportunity ${row.id}`}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-muted-foreground">Bid line (optional)</span>
+                <select
+                  className="block h-9 w-full rounded-md border bg-background px-2"
+                  aria-label="Bid line"
+                  value={saveLineId ?? ""}
+                  onChange={(event) => setSaveLineId(event.target.value ? Number(event.target.value) : null)}
+                >
+                  <option value="">No line</option>
+                  {(oppLines.data ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {[row.seller_deal_ref, row.lessee_desc, row.car_count != null ? `${row.car_count} cars` : null].filter(Boolean).join(" · ") || `Line ${row.id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {savedHref ? <Link href={savedHref} className="text-primary hover:underline">Open the saved scenario</Link> : null}
+            </div>
+            <DialogFooter>
+              <Button type="button" disabled={!saveOppId || attach.isPending || Boolean(preview)} onClick={() => attach.mutate()}>Save scenario</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -389,7 +499,7 @@ function MethodSwitch({ value, onChange }: { value: CalcMethod; onChange: (metho
       {CALC_METHODS.map((method) => (
         <Label key={method} className="flex items-center gap-1 text-xs">
           <RadioGroupItem value={method} />
-          {method === "wayne_leveraged" ? "Wayne" : method === "cash_flow" ? "Cash flow" : "Both"}
+          {calcMethodLabel(method)}
         </Label>
       ))}
     </RadioGroup>
@@ -510,8 +620,8 @@ function Results({ result, showWayne, showCash }: { result: DealCalcResult; show
           ["Rent − maint", money(result.cash.margin), "margin"],
           ["Residual share", pct(result.cash.residualShare), "residualShare"],
         ]} /> : null}
-        {showWayne && result.wayne ? <MetricColumn title="Wayne" rows={[
-          ["Wayne bid", money(result.wayne.bidPerCar), "wayneBid"],
+        {showWayne && result.wayne ? <MetricColumn title={LEGACY_BID_MODEL_LABEL} rows={[
+          [`${LEGACY_BID_MODEL_LABEL} bid`, money(result.wayne.bidPerCar), "wayneBid"],
           ["Acquisition", money(result.wayne.acqPerCar), "wayneBid"],
           ["IRR", pct(result.wayne.irr), "irr"],
           ["Effective IRR", pct(result.wayne.effectiveAnnualIrr), "effectiveIrr"],
@@ -560,6 +670,33 @@ function CashFlowTable({ result }: { result: DealCalcResult }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function WhatIfSliders({ inputs }: { inputs: DealCalcInputs }) {
+  const [rentPct, setRentPct] = useState(0);
+  const [endPct, setEndPct] = useState(0);
+  const shocked = useMemo(
+    () => dealCalc(applyWhatIf(inputs, { rentPct: rentPct / 100, endValuePct: endPct / 100 })),
+    [inputs, rentPct, endPct],
+  );
+  return (
+    <div className="space-y-3 border rounded-md p-3" data-testid="calc-what-if">
+      <p className="text-xs text-muted-foreground">What-if. The sliders do not change the scenario.</p>
+      <label className="block text-xs space-y-1">
+        <span>Rent {rentPct > 0 ? "+" : ""}{rentPct}%</span>
+        <Slider aria-label="Rent what-if" value={[rentPct]} min={-20} max={20} step={1} onValueChange={(value) => setRentPct(value[0] ?? 0)} />
+      </label>
+      <label className="block text-xs space-y-1">
+        <span>End value {endPct > 0 ? "+" : ""}{endPct}%</span>
+        <Slider aria-label="End value what-if" value={[endPct]} min={-40} max={40} step={1} onValueChange={(value) => setEndPct(value[0] ?? 0)} />
+      </label>
+      <p className="text-sm" data-testid="what-if-verdict">
+        {shocked.verdict} · max {money(shocked.cash.maxBidPerCar)}
+        {shocked.wayne ? ` · ${LEGACY_BID_MODEL_LABEL} ${money(shocked.wayne.bidPerCar)}` : ""}
+        {" · "}IRR {pct(shocked.cash.irr)}
+      </p>
     </div>
   );
 }

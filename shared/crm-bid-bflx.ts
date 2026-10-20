@@ -55,7 +55,7 @@ export const BFLX_LINES: readonly BflxLine[] = [
     include_in_bid: true,
     exclude_reason: null,
     prelim_price_per_car: 64_000,
-    notes: "Wayne's exhibit includes this deal at $64,000/car. Greg had asked to leave Mexican boxcars out.",
+    notes: "The exhibit includes this deal at $64,000/car. Greg had asked to leave Mexican boxcars out.",
   },
   {
     seller_deal_ref: "C114",

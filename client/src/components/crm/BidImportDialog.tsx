@@ -122,6 +122,9 @@ export default function BidImportDialog({
     },
     onSuccess: (result) => {
       offerUndoToast(result);
+      if (remember && result && typeof result === "object" && (result as { mapping_saved?: boolean }).mapping_saved === false) {
+        toast({ title: "Lines imported", description: "The column mapping was not saved." });
+      }
       void qc.invalidateQueries({ queryKey: ["/api/opportunities", opportunityId, "bid"] });
       void qc.invalidateQueries({ queryKey: ["/api/opportunities/bids"] });
       setOpen(false);
@@ -269,6 +272,7 @@ export default function BidImportDialog({
                             className="px-2 py-2 text-left font-medium bg-background"
                             onResize={grid.onResize}
                             onMove={grid.onMove}
+                            isolateResizeDrag
                           >
                             <span title={column.label}>{column.label}</span>
                           </GridColumnTh>

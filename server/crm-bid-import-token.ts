@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { BidImportError } from "@shared/bid-import";
 
 export const BID_IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
 
@@ -15,6 +16,14 @@ export type BidImportTokenPayload = {
 
 export function bidImportMacKey(serviceRoleKey: string): Buffer {
   return createHmac("sha256", serviceRoleKey).update("rlms-bid-import-v1").digest();
+}
+
+/** Refuse to sign or verify when the service role key is missing. An empty key would be forgeable. */
+export function requireBidImportMacKey(serviceRoleKey: string | null | undefined): Buffer {
+  if (typeof serviceRoleKey !== "string" || serviceRoleKey.trim() === "") {
+    throw new BidImportError(500, "Bid import is not configured");
+  }
+  return bidImportMacKey(serviceRoleKey);
 }
 
 export function fileSha256(bytes: Uint8Array): string {

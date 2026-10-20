@@ -4,21 +4,28 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  BID_IMPORT_MAPPING_MAX_BYTES,
   BID_IMPORT_MAX_BYTES,
   BID_IMPORT_MAX_CELL,
+  BID_IMPORT_MAX_LINES,
   BidImportError,
   assertBidUpload,
   bidImportOpportunityError,
   bidImportRoleAllowed,
   inspectXlsxZip,
+  parseBidColumnMapping,
   parseBidWorkbook,
   sanitizeImportedLine,
+  takeAcknowledge,
+  takeCommitLines,
+  takeHeaderFields,
   type ImportGrid,
 } from "../shared/bid-import";
-import { commitBidImport, revertPlan, type ImportLogRow } from "./crm-bid-import-commit";
+import { commitBidImport, rememberBidMapping, revertPlan, type ImportLogRow } from "./crm-bid-import-commit";
+import { receiveAuthorizedBidFile } from "./crm-bid-import-gate";
 import { gridsFromXlsx } from "./crm-bid-import-read";
 import { buildBidImportTemplate } from "./crm-bid-import-template";
-import { BID_IMPORT_TOKEN_TTL_MS, bidImportMacKey, fileSha256, signBidImportToken, verifyBidImportToken } from "./crm-bid-import-token";
+import { BID_IMPORT_TOKEN_TTL_MS, bidImportMacKey, fileSha256, requireBidImportMacKey, signBidImportToken, verifyBidImportToken } from "./crm-bid-import-token";
 
 let passed = 0;
 let failed = 0;
@@ -313,6 +320,81 @@ async function main() {
   const appendUndo = revertPlan(memory.logs);
   const afterAppendUndo = memory.lines.filter((line) => !appendUndo.deletes.some((item) => item.id === line.id));
   ok(afterAppendUndo.length === 1 && afterAppendUndo[0]?.ref === "keep", "undo of append removes only the imported lines");
+
+  function statusOf(run: () => void): { status: number; message: string } {
+    try {
+      run();
+      return { status: 0, message: "" };
+    } catch (err) {
+      return { status: err instanceof BidImportError ? err.status : 0, message: err instanceof Error ? err.message : "" };
+    }
+  }
+  for (const missing of ["", "   ", undefined, null] as const) {
+    const refused = statusOf(() => requireBidImportMacKey(missing));
+    ok(refused.status === 500 && /not configured/.test(refused.message), `missing service role key fails closed (${JSON.stringify(missing)})`);
+  }
+  const configured = requireBidImportMacKey("real-service-role");
+  ok(!configured.equals(bidImportMacKey("")), "a configured key is not the empty-string key");
+
+  const tooManyLines = statusOf(() => takeCommitLines(JSON.stringify(Array.from({ length: BID_IMPORT_MAX_LINES + 1 }, () => ({ seller_deal_ref: "1" })))));
+  ok(tooManyLines.status === 400 && /2000 lines/.test(tooManyLines.message), "more than 2,000 edited lines is a 400");
+  ok(statusOf(() => takeCommitLines("{")).status === 400, "malformed lines JSON is a 400");
+  ok(statusOf(() => takeHeaderFields("[")).status === 400, "malformed header JSON is a 400");
+  ok(statusOf(() => takeAcknowledge("{")).status === 400, "malformed acknowledge JSON is a 400");
+  ok(statusOf(() => parseBidColumnMapping("{")).status === 400, "malformed mapping JSON is a 400");
+  const storedMap = parseBidColumnMapping(JSON.stringify({ seller_deal_ref: 0, lessee_desc: null, car_count: 3 }));
+  ok(storedMap?.seller_deal_ref === 0 && storedMap.car_count === 3 && storedMap.lessee_desc == null, "a mapping keeps integer indexes and drops nulls");
+  ok(statusOf(() => parseBidColumnMapping({ not_a_field: 1 })).status === 400, "an unknown mapping key is rejected");
+  ok(statusOf(() => parseBidColumnMapping({ seller_deal_ref: 1.5 })).status === 400, "a fractional column index is rejected");
+  ok(statusOf(() => parseBidColumnMapping(`{"seller_deal_ref":1,"pad":"${"x".repeat(BID_IMPORT_MAPPING_MAX_BYTES)}"}`)).status === 400, "an oversized mapping is rejected");
+
+  let mappingWrites = 0;
+  const skipped = await rememberBidMapping({ remember: true, companyId: null, mapping: storedMap, save: async () => { mappingWrites += 1; } });
+  ok(skipped === false && mappingWrites === 0, "no company skips the mapping save");
+  const failedSave = await rememberBidMapping({
+    remember: true,
+    companyId: 310,
+    mapping: storedMap,
+    save: async () => { throw new Error("mapping insert failed"); },
+  });
+  ok(failedSave === false, "a mapping failure does not throw after the lines are saved");
+
+  async function uploadAttempts(role: "anonymous" | "viewer" | "editor", id = "4"): Promise<{ uploaded: boolean; status: number }> {
+    let uploaded = false;
+    const state = { status: 0 };
+    const res = {
+      status(code: number) { state.status = code; return res; },
+      json() { return res; },
+    };
+    const req = { params: { id } } as { params: { id: string }; file?: { name: string } };
+    await receiveAuthorizedBidFile(req, res as never, {
+      requireWrite: async (_req, response) => {
+        if (role === "anonymous") {
+          response.status(401).json({ error: "Unauthorized" });
+          return null;
+        }
+        if (role === "viewer") {
+          response.status(403).json({ error: "Forbidden" });
+          return null;
+        }
+        return "editor-1";
+      },
+      upload: (request, _response, callback) => {
+        uploaded = true;
+        request.file = { name: "sheet.xlsx" };
+        callback(null);
+      },
+    }, async () => undefined);
+    return { uploaded, status: state.status };
+  }
+  const anonymous = await uploadAttempts("anonymous");
+  const viewer = await uploadAttempts("viewer");
+  const editor = await uploadAttempts("editor");
+  const badId = await uploadAttempts("editor", "nope");
+  ok(!anonymous.uploaded && anonymous.status === 401, "an anonymous caller does not buffer the upload");
+  ok(!viewer.uploaded && viewer.status === 403, "a viewer does not buffer the upload");
+  ok(editor.uploaded, "an editor reaches the upload only after the role check");
+  ok(!badId.uploaded && badId.status === 400, "a bad opportunity id does not buffer the upload");
 
   console.log(`${passed} passed, ${failed} failed`);
   if (failed) process.exit(1);

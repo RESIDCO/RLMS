@@ -1,4 +1,4 @@
-import { importActivityMessage } from "@shared/bid-import";
+import { importActivityMessage, type BidColumnMapping } from "@shared/bid-import";
 
 export type ImportLogRow = {
   table_name: string;
@@ -38,6 +38,27 @@ export type CommitDeps = {
   }): Promise<void>;
   rollback(group: string, actor: string): Promise<void>;
 };
+
+/**
+ * Runs only after the lines are committed. A missing company or a failed write
+ * leaves the import in place so a retry does not collide with the new lines.
+ */
+export async function rememberBidMapping(input: {
+  remember: boolean;
+  companyId: number | null;
+  mapping: BidColumnMapping | null;
+  save: () => Promise<void>;
+}): Promise<boolean> {
+  if (!input.remember || input.companyId == null || !Number.isInteger(input.companyId) || input.companyId <= 0) return false;
+  if (!input.mapping || Object.keys(input.mapping).length === 0) return false;
+  try {
+    await input.save();
+    return true;
+  } catch (err) {
+    console.error("[crm-bid-import] mapping was not saved", err);
+    return false;
+  }
+}
 
 function safeName(name: string): string {
   const cleaned = name.replace(/[^a-zA-Z0-9._-]/g, "_");

@@ -4,6 +4,8 @@
  */
 
 export const BID_IMPORT_MAX_BYTES = 20 * 1024 * 1024;
+/** Stored column maps are a handful of field indexes. */
+export const BID_IMPORT_MAPPING_MAX_BYTES = 4096;
 export const BID_IMPORT_MAX_SHEETS = 50;
 export const BID_IMPORT_MAX_COLUMNS = 200;
 export const BID_IMPORT_MAX_LINES = 2000;
@@ -1019,4 +1021,77 @@ export function sanitizeImportedLine(raw: unknown, sortOrder: number): ProposedL
 
 export function importActivityMessage(lines: number, cars: number, fileName: string): string {
   return `Imported ${lines} lines / ${cars} cars from ${fileName}`;
+}
+
+/** Multipart fields arrive as strings. A bad payload is a 400, not a parser 500. */
+export function readBidImportJson(value: unknown): unknown {
+  if (typeof value !== "string") return value === undefined ? undefined : value;
+  if (!value.trim()) return undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new BidImportError(400, "Import request JSON is not valid");
+  }
+}
+
+export function takeCommitLines(value: unknown): unknown[] {
+  const parsed = readBidImportJson(value);
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new BidImportError(400, "Nothing to import");
+  if (parsed.length > BID_IMPORT_MAX_LINES) {
+    throw new BidImportError(400, `Bid sheets are limited to ${BID_IMPORT_MAX_LINES} lines`);
+  }
+  return parsed;
+}
+
+export function takeAcknowledge(value: unknown): string[] {
+  const parsed = readBidImportJson(value);
+  if (parsed == null) return [];
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+    throw new BidImportError(400, "Import request JSON is not valid");
+  }
+  return parsed;
+}
+
+export function takeHeaderFields(value: unknown): Partial<BidHeaderFields> | null {
+  const parsed = readBidImportJson(value);
+  if (parsed == null) return null;
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new BidImportError(400, "Import request JSON is not valid");
+  }
+  return parsed as Partial<BidHeaderFields>;
+}
+
+/**
+ * Column maps saved for a seller. Only known fields, integer indexes, and a few KB.
+ * Null drops a field. Anything else is rejected before it can be stored.
+ */
+export function parseBidColumnMapping(value: unknown): BidColumnMapping | null {
+  if (typeof value === "string") {
+    if (!value.trim()) return null;
+    if (Buffer.byteLength(value) > BID_IMPORT_MAPPING_MAX_BYTES) {
+      throw new BidImportError(400, "Column mapping is too large");
+    }
+  }
+  const parsed = readBidImportJson(value);
+  if (parsed == null) return null;
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new BidImportError(400, "Column mapping is not valid");
+  }
+  if (JSON.stringify(parsed).length > BID_IMPORT_MAPPING_MAX_BYTES) {
+    throw new BidImportError(400, "Column mapping is too large");
+  }
+  const allowed = new Set<string>(BID_IMPORT_FIELDS);
+  const out: BidColumnMapping = {};
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  for (let i = 0; i < entries.length; i += 1) {
+    const key = entries[i][0];
+    const index = entries[i][1];
+    if (!allowed.has(key)) throw new BidImportError(400, "Column mapping is not valid");
+    if (index == null) continue;
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= BID_IMPORT_MAX_COLUMNS) {
+      throw new BidImportError(400, "Column mapping is not valid");
+    }
+    out[key as BidImportField] = index;
+  }
+  return out;
 }

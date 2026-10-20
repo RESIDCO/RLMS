@@ -6,9 +6,13 @@ import {
   bidImportOpportunityError,
   BidImportError,
   headerSignatureMaterial,
+  parseBidColumnMapping,
   parseBidWorkbook,
   replaceNeedsConfirm,
   sanitizeImportedLine,
+  takeAcknowledge,
+  takeCommitLines,
+  takeHeaderFields,
   unacknowledgedBlocks,
   type BidColumnMapping,
   type BidHeaderFields,
@@ -19,10 +23,11 @@ import { requireWrite } from "./auth";
 import { STORAGE_BUCKET, insertAttachmentRow } from "./attachments";
 import { recordChange, withChangeGroup } from "./change-log";
 import { opportunityFileInsertChange } from "./crm-bid-attachments";
-import { commitBidImport, revertPlan, type ImportLogRow } from "./crm-bid-import-commit";
+import { commitBidImport, rememberBidMapping, revertPlan, type ImportLogRow } from "./crm-bid-import-commit";
+import { receiveAuthorizedBidFile } from "./crm-bid-import-gate";
 import { gridsFromCsv, gridsFromXlsx } from "./crm-bid-import-read";
 import { buildBidImportTemplate } from "./crm-bid-import-template";
-import { bidImportMacKey, fileSha256, signBidImportToken, verifyBidImportToken } from "./crm-bid-import-token";
+import { fileSha256, requireBidImportMacKey, signBidImportToken, verifyBidImportToken } from "./crm-bid-import-token";
 import { CrmHttpError } from "./crm-error";
 import { saveOpportunityLines } from "./crm-bid-lines";
 import { supabaseAdmin } from "./supabase";
@@ -41,17 +46,6 @@ function sendError(res: Response, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   console.error("[crm-bid-import]", message, err);
   return res.status(500).json({ message: "Bid import failed" });
-}
-
-function positiveId(value: unknown): number | null {
-  const n = Number(value);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
-
-function readJson<T>(value: unknown, fallback: T): T {
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  return JSON.parse(value) as T;
 }
 
 async function loadOpportunity(id: number): Promise<Record<string, unknown> | null> {
@@ -150,19 +144,13 @@ async function rollbackGroup(group: string): Promise<void> {
   if (logErr) throw logErr;
 }
 
-function withFile(req: Request, res: Response, next: (file: Express.Multer.File) => Promise<void>) {
-  upload.single("file")(req, res, (err: unknown) => {
-    if (err) {
-      sendError(res, err);
-      return;
-    }
-    const file = req.file;
-    if (!file) {
-      res.status(400).json({ message: "Choose an .xlsx or .csv file" });
-      return;
-    }
-    void next(file).catch((failure) => sendError(res, failure));
-  });
+function withFile(req: Request, res: Response, next: (user: string, id: number, file: Express.Multer.File) => Promise<void>) {
+  void receiveAuthorizedBidFile(req, res, {
+    requireWrite,
+    upload: (request, response, callback) => {
+      upload.single("file")(request, response, callback);
+    },
+  }, next).catch((failure) => sendError(res, failure));
 }
 
 export function registerBidImportRoutes(app: Express) {
@@ -180,11 +168,7 @@ export function registerBidImportRoutes(app: Express) {
   });
 
   app.post("/api/crm/opportunities/:id/bid-import/parse", (req, res) => {
-    withFile(req, res, async (file) => {
-      const user = await requireWrite(req, res);
-      if (!user) return;
-      const id = positiveId(req.params.id);
-      if (!id) throw new BidImportError(400, "Invalid opportunity");
+    withFile(req, res, async (user, id, file) => {
       const opportunity = await loadOpportunity(id);
       gateOpportunity(opportunity);
       assertBidUpload({ filename: file.originalname, byteLength: file.size, bytes: file.buffer });
@@ -193,7 +177,7 @@ export function registerBidImportRoutes(app: Express) {
         : await gridsFromXlsx(file.buffer);
       const companyId = opportunity?.company_id == null ? null : Number(opportunity.company_id);
       const sheet = typeof req.body?.sheet === "string" ? req.body.sheet : null;
-      let mapping = readJson<BidColumnMapping | null>(req.body?.mapping, null);
+      let mapping = parseBidColumnMapping(req.body?.mapping);
       const probe = parseBidWorkbook(grids, { sheet, today: new Date().toISOString().slice(0, 10) });
       if (!mapping) mapping = await savedMapping(companyId, probe.header_signature_material);
       const live = await existingLines(id);
@@ -204,7 +188,7 @@ export function registerBidImportRoutes(app: Express) {
         mode: "append",
         today: new Date().toISOString().slice(0, 10),
       });
-      const key = bidImportMacKey(process.env.SUPABASE_SERVICE_ROLE_KEY ?? "");
+      const key = requireBidImportMacKey(process.env.SUPABASE_SERVICE_ROLE_KEY);
       const token = signBidImportToken({
         opportunity_id: id,
         file_sha256: fileSha256(file.buffer),
@@ -238,15 +222,11 @@ export function registerBidImportRoutes(app: Express) {
   });
 
   app.post("/api/crm/opportunities/:id/bid-import/commit", (req, res) => {
-    withFile(req, res, async (file) => {
-      const user = await requireWrite(req, res);
-      if (!user) return;
-      const id = positiveId(req.params.id);
-      if (!id) throw new BidImportError(400, "Invalid opportunity");
+    withFile(req, res, async (user, id, file) => {
       const opportunity = await loadOpportunity(id);
       gateOpportunity(opportunity);
       assertBidUpload({ filename: file.originalname, byteLength: file.size, bytes: file.buffer });
-      const key = bidImportMacKey(process.env.SUPABASE_SERVICE_ROLE_KEY ?? "");
+      const key = requireBidImportMacKey(process.env.SUPABASE_SERVICE_ROLE_KEY);
       const verified = verifyBidImportToken(String(req.body?.token ?? ""), key);
       if (!verified.ok) throw new BidImportError(400, verified.error);
       if (verified.payload.opportunity_id !== id) throw new BidImportError(400, "Import token is for a different opportunity");
@@ -255,9 +235,9 @@ export function registerBidImportRoutes(app: Express) {
         throw new BidImportError(400, "The file does not match the preview");
       }
       const mode = req.body?.mode === "replace" ? "replace" : "append";
-      const edited = readJson<unknown[]>(req.body?.lines, []);
-      if (!Array.isArray(edited) || !edited.length) throw new BidImportError(400, "Nothing to import");
+      const edited = takeCommitLines(req.body?.lines);
       const lines = edited.map((line, index) => sanitizeImportedLine(line, index + 1));
+      const mapping = parseBidColumnMapping(req.body?.mapping);
       const live = await existingLines(id);
       const cars = lines.reduce((sum, line) => sum + line.car_count, 0);
       const flags: ImportFlag[] = [];
@@ -268,7 +248,7 @@ export function registerBidImportRoutes(app: Express) {
           message: `Car total ${cars} does not match the stated total ${verified.payload.stated_car_total}`,
         });
       }
-      const acknowledged = readJson<string[]>(req.body?.acknowledge, []);
+      const acknowledged = takeAcknowledge(req.body?.acknowledge);
       const blocked = unacknowledgedBlocks(flags, acknowledged);
       if (blocked.length) throw new BidImportError(400, blocked[0].message);
       if (mode === "replace" && replaceNeedsConfirm(live) && req.body?.replace_confirm !== "true" && req.body?.replace_confirm !== true) {
@@ -280,7 +260,7 @@ export function registerBidImportRoutes(app: Express) {
         const clash = lines.find((line) => taken.has(line.seller_deal_ref.toLowerCase()));
         if (clash) throw new BidImportError(400, `Deal ${clash.seller_deal_ref} is already on this offering`);
       }
-      const header = headerPatch(readJson<Partial<BidHeaderFields> | null>(req.body?.header_fields, null));
+      const header = headerPatch(takeHeaderFields(req.body?.header_fields));
       const beforeHeader = opportunity ?? {};
       const result = await commitBidImport({
         opportunityId: id,
@@ -355,11 +335,14 @@ export function registerBidImportRoutes(app: Express) {
           await rollbackGroup(group);
         },
       });
-      if (req.body?.remember_mapping === "true" || req.body?.remember_mapping === true) {
-        const companyId = opportunity?.company_id == null ? null : Number(opportunity.company_id);
-        if (!companyId) throw new BidImportError(400, "This opportunity has no company to remember a mapping for");
-        const mapping = readJson<BidColumnMapping | null>(req.body?.mapping, null);
-        if (mapping) {
+      const companyRaw = opportunity?.company_id == null ? null : Number(opportunity.company_id);
+      const companyId = Number.isInteger(companyRaw) ? companyRaw : null;
+      const mappingSaved = await rememberBidMapping({
+        remember: req.body?.remember_mapping === "true" || req.body?.remember_mapping === true,
+        companyId,
+        mapping,
+        save: async () => {
+          if (companyId == null) return;
           const signature = verified.payload.header_signature;
           const { data: existing, error: findErr } = await supabaseAdmin
             .from("crm_bid_import_mappings")
@@ -372,18 +355,18 @@ export function registerBidImportRoutes(app: Express) {
           if (existing?.id) {
             const { error } = await supabaseAdmin.from("crm_bid_import_mappings").update({ mapping, created_by: user }).eq("id", existing.id);
             if (error) throw error;
-          } else {
-            const { error } = await supabaseAdmin.from("crm_bid_import_mappings").insert({
-              company_id: companyId,
-              header_signature: signature,
-              mapping,
-              created_by: user,
-            });
-            if (error) throw error;
+            return;
           }
-        }
-      }
-      res.status(201).json({ change_group: result.change_group, message: result.message });
+          const { error } = await supabaseAdmin.from("crm_bid_import_mappings").insert({
+            company_id: companyId,
+            header_signature: signature,
+            mapping,
+            created_by: user,
+          });
+          if (error) throw error;
+        },
+      });
+      res.status(201).json({ change_group: result.change_group, message: result.message, mapping_saved: mappingSaved });
     });
   });
 }

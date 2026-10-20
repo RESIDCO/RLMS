@@ -4,6 +4,7 @@
 import { BID_LINE_COLUMNS, BID_LINE_PRICE_KEYS } from "../components/crm/bid-grid-columns";
 import {
   WRAP_TEXT_KEYS,
+  blockColumnDragFromResizeHandle,
   cellTooltip,
   columnMinWidth,
   defaultLayout,
@@ -53,6 +54,8 @@ ok(resizeGrid(BID_LINE_COLUMNS, narrow.widths, "notes", 40).notes === columnMinW
 
 const reset = defaultLayout(BID_LINE_COLUMNS);
 ok(reset.order[0] === "seller_deal_ref" && reset.widths.notes >= columnMinWidth(notes!), "reset restores the default order and widths");
+ok(!blockColumnDragFromResizeHandle(false, true), "Railcars, Lease, Program Detail, and Search still drag from the resize handle");
+ok(blockColumnDragFromResizeHandle(true, true) && !blockColumnDragFromResizeHandle(true, false), "bid grids cancel a drag that starts on the resize handle");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

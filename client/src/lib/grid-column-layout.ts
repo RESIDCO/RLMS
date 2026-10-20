@@ -38,6 +38,14 @@ export function layoutStorageKey(gridId: string): string {
 }
 
 /** Wide enough for a text-xs header plus the resize handle. */
+/**
+ * Bid grids set this so a drag on the resize handle does not reorder the column.
+ * Other grids leave it off and keep the previous header drag.
+ */
+export function blockColumnDragFromResizeHandle(isolateResizeDrag: boolean, fromResizeHandle: boolean): boolean {
+  return isolateResizeDrag && fromResizeHandle;
+}
+
 export function headerMinWidth(label: string): number {
   const chars = Array.from(label).length;
   return Math.max(72, chars * 8 + 36);

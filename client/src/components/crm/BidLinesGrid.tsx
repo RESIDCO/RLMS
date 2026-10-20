@@ -226,6 +226,7 @@ export default function BidLinesGrid({
                   className="px-2 py-2 text-left font-medium bg-background"
                   onResize={grid.onResize}
                   onMove={column.pinned ? undefined : grid.onMove}
+                  isolateResizeDrag
                 >
                   <span title={column.label || undefined}>{column.label}</span>
                 </GridColumnTh>

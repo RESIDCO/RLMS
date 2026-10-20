@@ -6,8 +6,9 @@ import { supabase, supabaseAdmin } from "./supabase";
 import { fetchAllRows, fetchAllRowsOrThrow } from "./fetch-all";
 import { startVcfExportJob, getVcfExportJob, getVcfExportFile, recoverStaleExportJobs } from "./vcf-export-job";
 import { pointCurrentAssignmentAt } from "./current-assignment";
-import { loadOlIdentity, matchRiderByCompactLabel, railcarIdentityPatch } from "./ol-identity";
-import { AD_HOC_LEASE_NUMBER } from "@shared/ol-identity";
+import { loadOlIdentity } from "./ol-identity";
+import { resolveRiderLabel } from "./rider-resolve";
+import { applyMove, previewMove } from "./move-cars";
 import { queryRailcars, queryRailcarIds, queryRailcarSummary, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
 import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
 import { runGlobalSearch } from "./global-search";
@@ -109,7 +110,7 @@ import {
   listProgramCarMilestones,
   matchProgramCarsPaste,
 } from "./programs";
-import { assignmentRentStartOnMove } from "@shared/commitment";
+import { moveActor } from "@shared/move-plan";
 import { registerCommitmentRoutes, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
 import {
   applyActivateProgram,
@@ -208,7 +209,6 @@ import {
   carLesseeName,
   carOlCode,
   parseIsoDateOnly,
-  effectiveDateToTimestamp,
 } from "@shared/lease-authority";
 import {
   buildAssetReportExpirations,
@@ -2423,64 +2423,15 @@ export async function registerRoutes(
     }
   });
 
-  /** Resolve a free-text OL/rider label to an existing rider, or create one under an Ad Hoc MLA. */
+  /** Match an existing rider. create: true is the only path that inserts an Ad Hoc lease. */
   app.post("/api/riders/resolve", async (req, res) => {
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const raw = String(req.body?.label ?? req.body?.rider_name ?? "").trim();
-      if (!raw) return res.status(400).json({ message: "label is required" });
-
-      const riders = await fetchAllRows((from, to) =>
-        supabase
-          .from("riders")
-          .select("id, rider_name, schedule_number, master_lease_id")
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-      const asId = Number(raw);
-      const match =
-        (Number.isFinite(asId) && asId > 0
-          ? riders.find((r: any) => r.id === asId)
-          : undefined) ?? matchRiderByCompactLabel(riders as any[], raw);
-      if (match) {
-        return res.json({ id: match.id, rider_name: match.rider_name, created: false });
-      }
-
-      const AD_HOC_LEASE = AD_HOC_LEASE_NUMBER;
-      let { data: mla } = await supabase
-        .from("master_leases")
-        .select("id")
-        .eq("lease_number", AD_HOC_LEASE)
-        .maybeSingle();
-      if (!mla) {
-        const { data: created, error: mErr } = await supabase
-          .from("master_leases")
-          .insert({
-            lease_number: AD_HOC_LEASE,
-            lessor: "RESIDCO",
-            lessee: "Ad Hoc / Free-text OL",
-            account_id: await ensureAccountForLessee("Ad Hoc / Free-text OL"),
-            // lease_type left null — set in Lease Management
-          })
-          .select("id")
-          .single();
-        if (mErr) throw mErr;
-        mla = created;
-      }
-
-      const { data: inserted, error: rErr } = await supabase
-        .from("riders")
-        .insert({
-          master_lease_id: mla!.id,
-          rider_name: raw,
-          schedule_number: raw,
-          // riders.account_manager is deprecated / unused
-        })
-        .select("id, rider_name")
-        .single();
-      if (rErr) throw rErr;
-      res.json({ id: inserted.id, rider_name: inserted.rider_name, created: true });
+      const actor = moveActor({ email: req.authUser?.email, userId: writerId });
+      const resolved = await resolveRiderLabel(raw, req.body ?? {}, actor);
+      res.status(resolved.created ? 201 : 200).json(resolved);
     } catch (err) {
       errHandler(res, err);
     }
@@ -2571,189 +2522,25 @@ export async function registerRoutes(
   });
 
   // ---------- Move cars ----------
+  app.post("/api/move/preview", async (req, res) => {
+    try {
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      const input = moveCarsSchema.parse(req.body);
+      const actor = moveActor({ email: req.authUser?.email, userId: writerId, clientMovedBy: input.moved_by });
+      res.json(await previewMove(input, actor));
+    } catch (err) {
+      errHandler(res, err);
+    }
+  });
+
   app.post("/api/move", async (req, res) => {
     try {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const input = moveCarsSchema.parse(req.body);
-      const { car_ids, to_rider_id, new_fleet_name, reason, moved_by, effective_date, rent_start_date, lessee_override } = input;
-      await assertRailcarsWritable(car_ids);
-      const dateSupplied = typeof rent_start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rent_start_date);
-
-      const identity = await loadOlIdentity(to_rider_id);
-      if (!identity) return res.status(400).json({ message: "Destination rider not found" });
-
-      const typedLessee = String(new_fleet_name ?? "").trim() || null;
-      if (lessee_override) {
-        if (!String(reason ?? "").trim()) {
-          return res.status(400).json({ message: "Reason is required when overriding the OL lessee" });
-        }
-        if (!typedLessee) {
-          return res.status(400).json({ message: "Lessee is required when overriding the OL lessee" });
-        }
-      }
-
-      const deriveOlLessee = !identity.is_sold && !identity.is_adhoc && !lessee_override && Boolean(identity.canonical_lessee);
-      const olLessee = deriveOlLessee ? identity.canonical_lessee : null;
-
-      // fetch current assignments for each car
-      const { data: currentAssigns, error: caErr } = await supabase
-        .from("railcar_assignments")
-        .select("id, railcar_id, rider_id, fleet_name, rent_start_date, rent_start_set_by, rent_start_set_at")
-        .in("railcar_id", car_ids);
-      if (caErr) throw caErr;
-      const currentByCar = new Map<number, any>();
-      for (const a of currentAssigns ?? []) currentByCar.set(a.railcar_id, a);
-
-      const historyRows: any[] = [];
-      const movedAt = effectiveDateToTimestamp(effective_date);
-      const actor = moved_by ?? req.authUser?.email ?? "system";
-
-      const moveResult = await withChangeGroupResult(writerId, async () => {
-        for (const carId of car_ids) {
-          const prev = currentByCar.get(carId);
-          const fromRiderId = prev?.rider_id ?? null;
-          const fromFleet = prev?.fleet_name ?? null;
-          const targetFleet = olLessee ?? typedLessee ?? fromFleet;
-          const rent = assignmentRentStartOnMove({
-            fromRiderId,
-            toRiderId: to_rider_id,
-            prevDate: prev?.rent_start_date ?? null,
-            prevSetBy: prev?.rent_start_set_by ?? null,
-            prevSetAt: prev?.rent_start_set_at ?? null,
-            dateSupplied,
-            suppliedDate: rent_start_date ?? null,
-            actor: moved_by ?? "system",
-            movedAt,
-          });
-          const histReason = rent.priorDateNote
-            ? [reason, `prior rent_start_date ${rent.priorDateNote}`].filter(Boolean).join("; ")
-            : reason ?? null;
-
-          const assignAfter = {
-            rider_id: to_rider_id,
-            fleet_name: targetFleet,
-            assigned_at: movedAt,
-            rent_start_date: rent.rent_start_date,
-            rent_start_set_by: rent.rent_start_set_by,
-            rent_start_set_at: rent.rent_start_set_at,
-          };
-
-          if (prev) {
-            const { error: uErr } = await supabase
-              .from("railcar_assignments")
-              .update(assignAfter)
-              .eq("id", prev.id);
-            if (uErr) throw uErr;
-            await pointCurrentAssignmentAt(supabase, [{ id: prev.id, railcar_id: carId }]);
-            await recordChange({
-              table: "railcar_assignments",
-              pk: Number(prev.id),
-              before: pickRow(prev, [
-                "rider_id",
-                "fleet_name",
-                "rent_start_date",
-                "rent_start_set_by",
-                "rent_start_set_at",
-              ]),
-              after: assignAfter,
-              action: "reassignment",
-              entity_type: "railcar",
-              entity_id: carId,
-              railcar_id: carId,
-              rider_id: to_rider_id,
-              actor,
-            });
-          } else {
-            const { data: ins, error: iErr } = await supabase
-              .from("railcar_assignments")
-              .insert({
-                railcar_id: carId,
-                ...assignAfter,
-              })
-              .select("id, railcar_id")
-              .single();
-            if (iErr) throw iErr;
-            await pointCurrentAssignmentAt(supabase, ins ? [ins] : []);
-            await recordChange({
-              table: "railcar_assignments",
-              pk: ins?.id != null ? Number(ins.id) : null,
-              before: {},
-              after: { railcar_id: carId, ...assignAfter },
-              action: "reassignment",
-              entity_type: "railcar",
-              entity_id: carId,
-              railcar_id: carId,
-              rider_id: to_rider_id,
-              actor,
-            });
-          }
-
-          const carPatch = railcarIdentityPatch(identity, targetFleet);
-          const identKeys = Object.keys(carPatch);
-          const { data: carPrior, error: carPriorErr } = await supabase
-            .from("railcars")
-            .select("id, lessee_name, rider_external_id, assignment_label, lease_type")
-            .eq("id", carId)
-            .maybeSingle();
-          if (carPriorErr) throw carPriorErr;
-          const { error: carErr } = await supabase.from("railcars").update(carPatch).eq("id", carId);
-          if (carErr) throw carErr;
-          await recordChange({
-            table: "railcars",
-            pk: carId,
-            before: pickRow(carPrior, identKeys),
-            after: pickRow({ ...(carPrior ?? {}), ...carPatch }, identKeys),
-            action: "reassignment",
-            entity_type: "railcar",
-            entity_id: carId,
-            railcar_id: carId,
-            actor,
-          });
-
-          historyRows.push({
-            railcar_id: carId,
-            from_rider_id: fromRiderId,
-            to_rider_id: to_rider_id,
-            from_fleet_name: fromFleet,
-            to_fleet_name: targetFleet,
-            moved_at: movedAt,
-            moved_by: moved_by ?? "system",
-            reason: histReason,
-          });
-        }
-
-        if (historyRows.length) {
-          const { data: insertedHist, error: hErr } = await supabase
-            .from("assignment_history")
-            .insert(historyRows)
-            .select("id, railcar_id, from_rider_id, to_rider_id, from_fleet_name, to_fleet_name, moved_at, moved_by, reason");
-          if (hErr) throw hErr;
-          for (const h of insertedHist ?? []) {
-            await logActivity({
-              entity_type: "railcar",
-              entity_id: h.railcar_id,
-              railcar_id: h.railcar_id,
-              rider_id: h.to_rider_id ?? null,
-              action: "reassignment",
-              actor,
-              detail: {
-                from_rider_id: h.from_rider_id,
-                to_rider_id: h.to_rider_id,
-                from_fleet: h.from_fleet_name,
-                to_fleet: h.to_fleet_name,
-                reason: h.reason,
-              },
-              occurred_at: h.moved_at,
-              source_table: "assignment_history",
-              source_id: h.id,
-            });
-          }
-        }
-
-        return { ok: true as const, moved: car_ids.length };
-      });
-      res.json(moveResult);
+      const actor = moveActor({ email: req.authUser?.email, userId: writerId, clientMovedBy: input.moved_by });
+      res.json(await applyMove(input, actor));
     } catch (err) {
       errHandler(res, err);
     }

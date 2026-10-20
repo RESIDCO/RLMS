@@ -383,7 +383,7 @@ export default function MoveCars() {
                   </div>
                   <div className="font-medium truncate">{toRiderMatch?.rider_name ?? toRiderLabel}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {displayLeaseNumber(toRiderMatch?.master_lease?.lease_number) || (toRiderMatch ? "—" : "New OL (will create)")}
+                    {displayLeaseNumber(toRiderMatch?.master_lease?.lease_number) || (toRiderMatch ? "—" : "Existing rider required")}
                   </div>
                 </div>
               </div>

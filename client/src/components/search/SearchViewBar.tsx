@@ -437,6 +437,7 @@ export function SelectionBar({
   onRemove,
   onPhotos,
   onExport,
+  onMove,
 }: {
   selected: number;
   inactive: number;
@@ -447,6 +448,7 @@ export function SelectionBar({
   onRemove: () => void;
   onPhotos: () => void;
   onExport: (kind: "xlsx" | "csv") => void;
+  onMove: () => void;
 }) {
   if (selected <= 0) return null;
   return (
@@ -454,6 +456,7 @@ export function SelectionBar({
       <span className="font-medium">{selected.toLocaleString()} selected</span>
       {inactive > 0 ? <span className="text-muted-foreground">{inactive.toLocaleString()} inactive will be skipped</span> : null}
       <Button type="button" size="sm" className="h-7 text-xs" onClick={onRailcars}>Open in Railcars</Button>
+      <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={!canEdit} onClick={onMove} data-testid="search-move-cars">Move</Button>
       <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={!canEdit} onClick={onAdd}>Add to view…</Button>
       {fixedView ? <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={!canEdit} onClick={onRemove}>Remove from view</Button> : null}
       <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={onPhotos}>Find Photos</Button>

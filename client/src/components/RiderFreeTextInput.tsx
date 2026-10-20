@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { compactSearch, matchesSearchQuery } from "@/lib/search-match";
 
@@ -30,7 +31,8 @@ type Props = {
  * Free-text Rider/OL input with a visible filtered suggestion list.
  * Native <datalist> does not render reliably (especially in Chromium with
  * hundreds of options / a trailing chevron), so this is a custom combobox.
- * Any typed value is still accepted — new OL codes are created on resolve.
+ * A typed value is accepted in the field. Saving matches an existing rider.
+ * A new lease is created only by an explicit create action.
  */
 export function RiderFreeTextInput({
   value,
@@ -160,17 +162,24 @@ export function RiderFreeTextInput({
         )}
       </div>
       <p className="text-[10px] text-muted-foreground">
-        Type any OL/rider code. Suggestions are existing riders — new codes are accepted.
+        Suggestions are existing riders. A new lease is a separate create step.
       </p>
     </div>
   );
 }
 
-/** Resolve free-text label via API (match existing or create). */
+/** Match an existing rider. Does not create one. */
 export async function resolveRiderLabel(
   label: string
-): Promise<{ id: number; rider_name: string; created: boolean }> {
-  const { apiRequest } = await import("@/lib/queryClient");
+): Promise<{ id: number; rider_name: string; created: boolean; change_group?: string | null }> {
   const res = await apiRequest("POST", "/api/riders/resolve", { label: label.trim() });
+  return res.json();
+}
+
+/** Explicit lease create. This is the only resolve call that inserts an Ad Hoc rider. */
+export async function createRiderLease(
+  label: string
+): Promise<{ id: number; rider_name: string; created: boolean; change_group?: string | null }> {
+  const res = await apiRequest("POST", "/api/riders/resolve", { label: label.trim(), create: true });
   return res.json();
 }

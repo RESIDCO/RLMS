@@ -5,7 +5,10 @@ import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import FinanceLeaseTag from "@/components/crm/FinanceLeaseTag";
+import BidHistoryCard from "@/components/crm/BidHistoryCard";
+import BidStageBoard from "@/components/crm/BidStageBoard";
 import OpportunityDialog from "@/components/crm/OpportunityDialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
 import { parseHashSearch, useHashSearch } from "@/lib/hash-location";
@@ -43,6 +46,8 @@ export default function OpportunitiesPage() {
   const [openOnly, setOpenOnly] = useState(true);
   const [tag, setTag] = useState(hashParams.get("tag") ?? "");
   const [createOpen, setCreateOpen] = useState(false);
+  const [bidCreate, setBidCreate] = useState(false);
+  const [showBids, setShowBids] = useState(false);
   const [editing, setEditing] = useState<OpportunityRow | null>(null);
   const [preview, setPreview] = useState<RenewalRunResult | null>(null);
   const [relet, setRelet] = useState<WatchRow | null>(null);
@@ -57,6 +62,18 @@ export default function OpportunitiesPage() {
   if (companyId) params.set("company_id", companyId);
   if (tag.trim()) params.set("tag", tag.trim().toLowerCase());
   const qs = params.toString();
+
+  const bids = useQuery({
+    queryKey: ["/api/opportunities/bids"],
+    queryFn: () => apiGet<Array<OpportunityRow & {
+      cars_bid: number;
+      cars_total: number;
+      dollars: number | null;
+      won_lines: number;
+      line_count: number;
+      seller_name: string | null;
+    }>>("/api/opportunities/bids"),
+  });
 
   const opps = useQuery({
     queryKey: ["/api/opportunities", qs],
@@ -90,9 +107,9 @@ export default function OpportunitiesPage() {
   }, [opps.data]);
 
   const grouped = useMemo(() => {
-    const rows = opps.data ?? [];
+    const rows = (opps.data ?? []).filter((row) => showBids || row.flavor !== "portfolio_bid");
     return OPPORTUNITY_STAGES.map((stage) => ({ stage, rows: rows.filter((row) => row.stage === stage) })).filter((group) => group.rows.length);
-  }, [opps.data]);
+  }, [opps.data, showBids]);
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -111,6 +128,22 @@ export default function OpportunitiesPage() {
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-6">
+        <Tabs defaultValue="pipeline">
+        <TabsList>
+          <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
+          <TabsTrigger value="bids">Bids</TabsTrigger>
+        </TabsList>
+        <TabsContent value="bids" className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {canWrite ? (
+              <Button size="sm" onClick={() => { setEditing(null); setBidCreate(true); }}>+ New bid request</Button>
+            ) : null}
+          </div>
+          {canWrite ? <BidHistoryCard yearDefault={new Date().getFullYear()} /> : null}
+          {bids.isLoading ? <p className="text-sm text-muted-foreground">Loading bids…</p> : null}
+          <BidStageBoard cards={bids.data ?? []} canSeePrices={canWrite} today={new Date().toISOString().slice(0, 10)} />
+        </TabsContent>
+        <TabsContent value="pipeline" className="space-y-6">
         <div className="flex flex-wrap gap-2 items-center text-sm">
           <select className="h-8 rounded-md border border-input bg-background px-2" value={owner} onChange={(e) => setOwner(e.target.value)}>
             <option value="">All owners</option>
@@ -133,6 +166,10 @@ export default function OpportunitiesPage() {
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
             Open only
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={showBids} onChange={(e) => setShowBids(e.target.checked)} />
+            Show bids
           </label>
         </div>
 
@@ -215,6 +252,8 @@ export default function OpportunitiesPage() {
             ) : undefined}
           />
         </section>
+        </TabsContent>
+        </Tabs>
       </div>
 
       <Dialog open={preview != null} onOpenChange={(next) => { if (!next) setPreview(null); }}>
@@ -238,6 +277,12 @@ export default function OpportunitiesPage() {
         onOpenChange={setCreateOpen}
         canWrite={canWrite}
         editing={editing}
+      />
+      <OpportunityDialog
+        open={bidCreate}
+        onOpenChange={setBidCreate}
+        canWrite={canWrite}
+        preset={{ type: "purchase", portfolio_bid: true, bid_stage: "received", stage: "identified" }}
       />
       {relet ? (
         <OpportunityDialog

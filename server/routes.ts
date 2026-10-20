@@ -56,6 +56,7 @@ import {
   listAccountScopedAttachments,
   riderBelongsToAccount,
 } from "./attachments";
+import { assertAttachmentAccess } from "./attachment-access";
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import {
   MASTER_LEASE_DATE_KEYS,
@@ -4704,10 +4705,11 @@ export async function registerRoutes(
       const { id } = req.params;
       const { data: att, error: fetchErr } = await supabaseAdmin
         .from("attachments")
-        .select("storage_path, file_name")
+        .select("storage_path, file_name, entity_type")
         .eq("id", id)
         .single();
       if (fetchErr || !att) return res.status(404).json({ error: "Attachment not found" });
+      if (!(await assertAttachmentAccess(req, res, String(att.entity_type ?? "")))) return;
       const { data, error } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)
         .createSignedUrl(att.storage_path, 300);
@@ -4724,10 +4726,11 @@ export async function registerRoutes(
       const { id } = req.params;
       const { data: att, error: fetchErr } = await supabase
         .from("attachments")
-        .select("storage_path, file_name")
+        .select("storage_path, file_name, entity_type")
         .eq("id", id)
         .single();
       if (fetchErr || !att) return res.status(404).json({ error: "Attachment not found" });
+      if (!(await assertAttachmentAccess(req, res, String(att.entity_type ?? "")))) return;
       // Stream file directly through the backend
       const { data: fileBlob, error: dlErr } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)
@@ -4748,7 +4751,9 @@ export async function registerRoutes(
     try {
       const user = await getAuthUser(req, res);
       if (!user) return;
-      const { entityType, entityId } = req.params;
+      const { entityType: entityTypeParam, entityId } = req.params;
+      const entityType = Array.isArray(entityTypeParam) ? entityTypeParam[0] ?? "" : entityTypeParam;
+      if (!(await assertAttachmentAccess(req, res, entityType))) return;
       const { data, error } = await supabase
         .from("attachments")
         .select("*")
@@ -4765,7 +4770,10 @@ export async function registerRoutes(
     upload.single("file"),
     async (req: Request & { file?: Express.Multer.File }, res: Response) => {
       try {
-        const { entityType, entityId } = req.params;
+        const { entityType: entityTypeParam, entityId: entityIdParam } = req.params;
+        const entityType = Array.isArray(entityTypeParam) ? entityTypeParam[0] ?? "" : entityTypeParam;
+        const entityId = Array.isArray(entityIdParam) ? entityIdParam[0] ?? "" : entityIdParam;
+        if (!(await assertAttachmentAccess(req, res, entityType))) return;
         const writerId = (entityType === "company" || entityType === "company_contact")
           ? await requireContactsWrite(req, res)
           : await requireWrite(req, res);
@@ -4773,7 +4781,7 @@ export async function registerRoutes(
         const user = await getAuthUser(req);
         if (!user) return;
         if (!req.file) return res.status(400).json({ error: "No file provided" });
-        const validTypes = ["master_lease", "rider", "railcar", "company", "company_contact"];
+        const validTypes = ["master_lease", "rider", "railcar", "company", "company_contact", "opportunity"];
         if (!validTypes.includes(entityType) || !isAttachmentEntityType(entityType)) {
           return res.status(400).json({ error: "Invalid entity type" });
         }
@@ -4837,10 +4845,11 @@ export async function registerRoutes(
       const { id } = req.params;
       const { data: att, error: fetchErr } = await supabase
         .from("attachments")
-        .select("storage_path")
+        .select("storage_path, entity_type")
         .eq("id", id)
         .single();
       if (fetchErr || !att) return res.status(404).json({ error: "Attachment not found" });
+      if (!(await assertAttachmentAccess(req, res, String(att.entity_type ?? "")))) return;
       // Remove from storage first
       const { error: storageErr } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)

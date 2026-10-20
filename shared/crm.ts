@@ -25,6 +25,7 @@ export const OPPORTUNITY_STAGES = [
   "in_review",
   "proposal",
   "docs",
+  "negotiating",
   "won",
   "lost",
 ] as const;
@@ -131,6 +132,7 @@ export const OPPORTUNITY_STAGE_LABEL: Record<OpportunityStage, string> = {
   in_review: "In review",
   proposal: "Proposal",
   docs: "Docs",
+  negotiating: "Negotiating",
   won: "Won",
   lost: "Lost",
 };
@@ -170,6 +172,18 @@ export type OpportunityRow = {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+  flavor: "portfolio_bid" | null;
+  outcome: "won" | "lost" | "passed" | null;
+  bid_substage: "inspection" | "final" | null;
+  seller_company_id: number | null;
+  broker_company_id: number | null;
+  offering_name: string | null;
+  received_date: string | null;
+  bid_due_prelim: string | null;
+  bid_due_final: string | null;
+  award_date: string | null;
+  seller_name?: string | null;
+  broker_name?: string | null;
 };
 
 export type CrmActivityRow = {
@@ -656,3 +670,20 @@ export function nameSimilarity(left: string, right: string): number {
   if (aCount + bCount === 0) return 0;
   return (2 * shared) / (aCount + bCount);
 }
+
+export {
+  acquiredLeaseTable,
+  BID_STAGE_OPTIONS,
+  bidStageId,
+  bidStageLabel,
+  bidStageOption,
+  bidWinRate,
+  formatWinRate,
+  leaseWizardHref,
+  lineBidTotal,
+  nextBidDeadline,
+  portfolioBidRequiresPurchase,
+  PURCHASE_TYPE,
+  rollupBidLines,
+  type BidStageId,
+} from "./crm-bid";

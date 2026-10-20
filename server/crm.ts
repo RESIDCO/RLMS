@@ -14,6 +14,7 @@ import {
   listOpportunityWatch,
   patchOpportunity,
 } from "./crm-opportunities";
+import { registerCrmBidRoutes } from "./crm-bid-routes";
 
 function sendError(res: Response, err: unknown) {
   if (err instanceof CrmHttpError) {
@@ -42,6 +43,8 @@ async function actor(req: Request, res: Response, write: boolean): Promise<strin
 }
 
 export function registerCrmRoutes(app: Express) {
+  registerCrmBidRoutes(app);
+
   app.get("/api/accounts/crm-summary", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;

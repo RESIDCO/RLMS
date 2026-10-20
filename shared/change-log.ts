@@ -11,7 +11,8 @@ export type ActivityEntityType =
   | "crm_activity"
   | "company"
   | "company_contact"
-  | "opportunity_contact";
+  | "opportunity_contact"
+  | "opportunity_line";
 
 export function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;

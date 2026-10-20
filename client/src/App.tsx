@@ -27,6 +27,7 @@ import ContactsDedupReview from "@/pages/ContactsDedupReview";
 import Accounts from "@/pages/Accounts";
 import Account360 from "@/pages/Account360";
 import Opportunities from "@/pages/Opportunities";
+import BidOffering from "@/pages/BidOffering";
 import AccountTransitions from "@/pages/AccountTransitions";
 import TerritoryMap from "@/pages/TerritoryMap";
 import APTracker from "@/pages/APTracker";
@@ -103,6 +104,7 @@ function AppRouter() {
       <Route path="/railcars/umler-queue" component={UmlerQueue} />
       <Route path="/railcars/remark" component={RemarkCars} />
       <Route path="/railcars" component={FleetRegistry} />
+      <Route path="/opportunities/:id" component={BidOffering} />
       <Route path="/opportunities" component={Opportunities} />
       <Route path="/accounts/:id" component={Account360} />
       <Route path="/accounts" component={Accounts} />

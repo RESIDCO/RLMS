@@ -21,9 +21,13 @@ import {
   OPPORTUNITY_TYPES,
   OPPORTUNITY_TYPE_LABEL,
   OPPORTUNITY_STAGE_LABEL,
+  bidStageId,
+  bidStageOption,
   lostNeedsReason,
   remarketRiderUrl,
   wonReletNeedsRemarket,
+  BID_STAGE_OPTIONS,
+  type BidStageId,
   type LesseeRole,
   type OpportunityContactRole,
   type OpportunityContactRow,
@@ -58,6 +62,15 @@ type FormState = {
   tags: string[];
   referral_note: string;
   tagDraft: string;
+  portfolio_bid: boolean;
+  offering_name: string;
+  received_date: string;
+  bid_due_prelim: string;
+  bid_due_final: string;
+  award_date: string;
+  bid_stage: BidStageId;
+  seller_company_id: string;
+  broker_company_id: string;
 };
 
 type ExtraContact = {
@@ -94,6 +107,15 @@ function blankForm(seed?: Partial<FormState>): FormState {
     tags: [],
     referral_note: "",
     tagDraft: "",
+    portfolio_bid: false,
+    offering_name: "",
+    received_date: "",
+    bid_due_prelim: "",
+    bid_due_final: "",
+    award_date: "",
+    bid_stage: "received",
+    seller_company_id: "",
+    broker_company_id: "",
     ...seed,
   };
 }
@@ -123,6 +145,15 @@ function fromRow(row: OpportunityRow): FormState {
     lessee_role: row.lessee_role ?? "lessee",
     tags: row.tags ?? [],
     referral_note: row.referral_note ?? "",
+    portfolio_bid: row.flavor === "portfolio_bid",
+    offering_name: row.offering_name ?? "",
+    received_date: row.received_date ?? "",
+    bid_due_prelim: row.bid_due_prelim ?? "",
+    bid_due_final: row.bid_due_final ?? "",
+    award_date: row.award_date ?? "",
+    bid_stage: bidStageId(row.stage, row.outcome, row.bid_substage) ?? "received",
+    seller_company_id: row.seller_company_id ? String(row.seller_company_id) : "",
+    broker_company_id: row.broker_company_id ? String(row.broker_company_id) : "",
   });
 }
 
@@ -156,6 +187,7 @@ export default function OpportunityDialog({
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(() => blankForm(preset));
   const [party, setParty] = useState<PartySelection | null>(partyPreset ?? null);
+  const [broker, setBroker] = useState<PartySelection | null>(null);
   const [extraContacts, setExtraContacts] = useState<ExtraContact[]>([]);
   const [setup, setSetup] = useState<{ accountId: number; accountName: string } | null>(null);
   const lockedAccount = accountId ?? editing?.account_id ?? null;
@@ -165,6 +197,19 @@ export default function OpportunityDialog({
     setSetup(null);
     setExtraContacts([]);
     setParty(partyPreset ?? null);
+    if (editing?.broker_company_id) {
+      setBroker({
+        entity: "company",
+        entity_id: editing.broker_company_id,
+        account_id: null,
+        company_id: editing.broker_company_id,
+        contact_id: null,
+        label: editing.broker_name || `Company ${editing.broker_company_id}`,
+        kind: "company",
+      });
+    } else {
+      setBroker(null);
+    }
     if (editing) setForm(fromRow(editing));
     else {
       setForm(
@@ -217,6 +262,25 @@ export default function OpportunityDialog({
         tags: form.tags,
         referral_note: form.referral_note.trim() || null,
       };
+      if (form.type === "purchase" && form.portfolio_bid) {
+        const bid = bidStageOption(form.bid_stage);
+        payload.type = "purchase";
+        payload.flavor = "portfolio_bid";
+        payload.stage = bid.stage;
+        payload.outcome = bid.outcome;
+        payload.bid_substage = bid.bid_substage;
+        payload.offering_name = form.offering_name.trim() || null;
+        payload.received_date = form.received_date || null;
+        payload.bid_due_prelim = form.bid_due_prelim || null;
+        payload.bid_due_final = form.bid_due_final || null;
+        payload.award_date = form.award_date || null;
+        payload.seller_company_id = party?.company_id ?? (form.seller_company_id ? Number(form.seller_company_id) : null);
+        payload.broker_company_id = broker?.company_id ?? (form.broker_company_id ? Number(form.broker_company_id) : null);
+      } else if (editing?.flavor === "portfolio_bid") {
+        payload.flavor = null;
+        payload.outcome = null;
+        payload.bid_substage = null;
+      }
       const contactPayload = [
         ...(party?.contact_id ? [{ contact_id: party.contact_id, role: "primary" }] : []),
         ...(savedContacts.data ?? []).filter((row) => row.contact_id !== party?.contact_id).map((row) => ({ contact_id: row.contact_id, role: row.role })),
@@ -267,21 +331,93 @@ export default function OpportunityDialog({
         </DialogHeader>
         <div className="grid sm:grid-cols-2 gap-3 text-sm">
           <div className="sm:col-span-2">
-            <Label>Who is this deal with?</Label>
+            <Label>{form.portfolio_bid ? "Seller" : "Who is this deal with?"}</Label>
             {lockedAccount ? (
               <div className="mt-1">{accountLabel}</div>
             ) : (
               <div className="mt-1">
-                <PartyPicker selected={party} disabled={!canWrite} onSelect={setParty} />
+                <PartyPicker
+                  selected={party}
+                  disabled={!canWrite}
+                  onSelect={(next) => {
+                    setParty(next);
+                    if (next.company_id) set("seller_company_id", String(next.company_id));
+                  }}
+                />
               </div>
             )}
           </div>
           <Field label="Type">
-            <SelectValue value={form.type} disabled={!canWrite} onChange={(value) => set("type", value as OpportunityType)} options={OPPORTUNITY_TYPES.map((value) => ({ value, label: OPPORTUNITY_TYPE_LABEL[value] }))} />
+            <SelectValue
+              value={form.type}
+              disabled={!canWrite}
+              onChange={(value) => {
+                const next = value as OpportunityType;
+                set("type", next);
+                if (next !== "purchase") set("portfolio_bid", false);
+              }}
+              options={OPPORTUNITY_TYPES.map((value) => ({ value, label: OPPORTUNITY_TYPE_LABEL[value] }))}
+            />
           </Field>
+          {form.type === "purchase" ? (
+            <label className="flex items-end gap-2 pb-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.portfolio_bid}
+                disabled={!canWrite}
+                onChange={(e) => set("portfolio_bid", e.target.checked)}
+              />
+              Portfolio bid
+            </label>
+          ) : null}
           <Field label="Stage">
-            <SelectValue value={form.stage} disabled={!canWrite} onChange={(value) => set("stage", value as OpportunityStage)} options={OPPORTUNITY_STAGES.map((value) => ({ value, label: OPPORTUNITY_STAGE_LABEL[value] }))} />
+            {form.portfolio_bid ? (
+              <SelectValue
+                value={form.bid_stage}
+                disabled={!canWrite}
+                onChange={(value) => {
+                  const bid = bidStageOption(value as BidStageId);
+                  set("bid_stage", bid.id);
+                  set("stage", bid.stage);
+                }}
+                options={BID_STAGE_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+              />
+            ) : (
+              <SelectValue value={form.stage} disabled={!canWrite} onChange={(value) => set("stage", value as OpportunityStage)} options={OPPORTUNITY_STAGES.map((value) => ({ value, label: OPPORTUNITY_STAGE_LABEL[value] }))} />
+            )}
           </Field>
+          {form.portfolio_bid ? (
+            <>
+              <Field label="Offering name">
+                <Input value={form.offering_name} disabled={!canWrite} onChange={(e) => set("offering_name", e.target.value)} placeholder="BFLX Oct 2026" />
+              </Field>
+              <Field label="Received">
+                <Input type="date" value={form.received_date} disabled={!canWrite} onChange={(e) => set("received_date", e.target.value)} />
+              </Field>
+              <Field label="Preliminary due">
+                <Input type="date" value={form.bid_due_prelim} disabled={!canWrite} onChange={(e) => set("bid_due_prelim", e.target.value)} />
+              </Field>
+              <Field label="Final due">
+                <Input type="date" value={form.bid_due_final} disabled={!canWrite} onChange={(e) => set("bid_due_final", e.target.value)} />
+              </Field>
+              <Field label="Award date">
+                <Input type="date" value={form.award_date} disabled={!canWrite} onChange={(e) => set("award_date", e.target.value)} />
+              </Field>
+              <div className="sm:col-span-2">
+                <Label>Broker / manager (optional)</Label>
+                <div className="mt-1">
+                  <PartyPicker
+                    selected={broker}
+                    disabled={!canWrite}
+                    onSelect={(next) => {
+                      setBroker(next);
+                      if (next.company_id) set("broker_company_id", String(next.company_id));
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          ) : null}
           <Field label="Expected close">
             <Input type="date" value={form.expected_close} disabled={!canWrite} onChange={(e) => set("expected_close", e.target.value)} />
           </Field>

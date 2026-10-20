@@ -36,6 +36,7 @@ import {
   type WatchRow,
 } from "@shared/crm";
 import { createCrmProspect, ensureCompanyForAccount, resolveCrmParty } from "./crm-parties";
+import { applyBidRules, bidTouch, mapBidColumns, readBidWrite } from "./crm-bid";
 
 type RiderFact = {
   id: number;
@@ -134,7 +135,12 @@ function mapOpportunity(row: Record<string, unknown>): OpportunityRow {
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
     closed_at: row.closed_at == null ? null : String(row.closed_at),
+    ...mapBidColumns(row),
   };
+}
+
+export function mapOpportunityRow(row: Record<string, unknown>): OpportunityRow {
+  return mapOpportunity(row);
 }
 
 /**
@@ -742,6 +748,7 @@ function cleanWrite(body: Record<string, unknown>, partial: boolean): Record<str
   if (!partial || "won_rider_id" in body) take("won_rider_id", positiveInt(body.won_rider_id));
   if (!partial || "master_lease_id" in body) take("master_lease_id", positiveInt(body.master_lease_id));
   if (!partial || "rider_id" in body) take("rider_id", positiveInt(body.rider_id));
+  Object.assign(out, readBidWrite(body, true));
   return out;
 }
 
@@ -1029,6 +1036,7 @@ export async function createOpportunity(body: Record<string, unknown>, actor: st
     const stage = String(patch.stage);
     const loss = textOrNull(patch.loss_reason);
     if (lostNeedsReason(stage, loss)) throw httpError(400, "Lost opportunities require a loss_reason");
+    applyBidRules(patch, patch);
     if (String(patch.type) === "renewal" && stage === "won" && !dateOnly(patch.new_expiry_date)) {
       throw httpError(400, "Won renewal requires new_expiry_date");
     }
@@ -1098,6 +1106,7 @@ export async function patchOpportunity(
   const type = String(next.type) as OpportunityType;
   if (!isOpportunityType(type) || !isOpportunityStage(stage)) throw httpError(400, "Invalid opportunity");
   if (lostNeedsReason(stage, textOrNull(next.loss_reason))) throw httpError(400, "Lost opportunities require a loss_reason");
+  if (bidTouch(body)) applyBidRules(patch, next);
   if (type === "renewal" && stage === "won" && !dateOnly(next.new_expiry_date)) {
     throw httpError(400, "Won renewal requires new_expiry_date");
   }

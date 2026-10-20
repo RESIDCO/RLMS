@@ -27,9 +27,10 @@ export const UNDO_ALLOWED_TABLES = [
   "shops",
   "user_column_prefs",
   "program_field_defs",
+  "opportunity_lines",
 ] as const;
 
-export const REFERENCED_SINCE_TABLES = ["accounts", "companies", "company_contacts"] as const;
+export const REFERENCED_SINCE_TABLES = ["accounts", "companies", "company_contacts", "opportunities"] as const;
 export const REFERENCED_SINCE_MESSAGE = "referenced since";
 
 export type UndoAllowedTable = (typeof UNDO_ALLOWED_TABLES)[number];

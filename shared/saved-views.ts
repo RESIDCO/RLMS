@@ -92,7 +92,7 @@ export const FOCUS_COLUMN_LABELS: Record<FocusColumnKey, string> = {
   program_note: "Program note",
   scrapped_at: "Scrapped",
   umler_status: "UMLER status",
-  latest_note: "Latest note",
+  latest_note: "Last note",
   tags: "Tags",
   view_note: "View note",
 };

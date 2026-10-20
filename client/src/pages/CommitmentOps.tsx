@@ -18,6 +18,7 @@ import { apiGet, apiRequest } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { AddNoteField, appendNoteBody, noteSkipDescription } from "@/components/AddNoteField";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { Link } from "wouter";
 import { carPath, openAppTab } from "@/lib/browse-nav";
@@ -44,9 +45,10 @@ export function CommitmentPanel({ carId }: { carId: number }) {
   const open = data?.commitment;
   const implicit = data?.implicit;
   const [rentDate, setRentDate] = useState("");
+  const [rentNote, setRentNote] = useState("");
   const saveRent = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/rent-start/car/${carId}`, { date: rentDate || null });
+      const res = await apiRequest("POST", `/api/rent-start/car/${carId}`, { date: rentDate || null, ...appendNoteBody(rentNote) });
       return res.json();
     },
     onSuccess: () => {
@@ -92,12 +94,15 @@ export function CommitmentPanel({ carId }: { carId: number }) {
           {data?.on_ol ? "" : " (only editable on an OL)"}
         </div>
         {canEdit && data?.on_ol ? (
-          <div className="flex gap-2 items-end">
-            <div>
-              <Label>Set date</Label>
-              <Input type="date" value={rentDate} onChange={(e) => setRentDate(e.target.value)} />
+          <div className="space-y-2">
+            <div className="flex gap-2 items-end">
+              <div>
+                <Label>Set date</Label>
+                <Input type="date" value={rentDate} onChange={(e) => setRentDate(e.target.value)} />
+              </div>
+              <Button size="sm" disabled={saveRent.isPending} onClick={() => saveRent.mutate()}>Save date</Button>
             </div>
-            <Button size="sm" disabled={saveRent.isPending} onClick={() => saveRent.mutate()}>Save date</Button>
+            <AddNoteField id={`rent-start-note-${carId}`} value={rentNote} onChange={setRentNote} />
           </div>
         ) : null}
       </div>
@@ -570,6 +575,7 @@ export function BulkRentStartPage() {
   const [date, setDate] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [preview, setPreview] = useState<any>(null);
+  const [addNote, setAddNote] = useState("");
   const runPreview = useMutation({
     mutationFn: async () =>
       (await apiRequest("POST", "/api/rent-start/bulk/preview", { text, date: date || null, overwrite })).json(),
@@ -578,10 +584,10 @@ export function BulkRentStartPage() {
   });
   const apply = useMutation({
     mutationFn: async () =>
-      (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: preview?.preview_token })).json(),
+      (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: preview?.preview_token, ...appendNoteBody(addNote) })).json(),
     onSuccess: (d) => {
       void invalidateFleetQueries(qc);
-      toast({ title: "Applied", description: `${d.written} dates written` });
+      toast({ title: "Applied", description: [`${d.written} dates written`, noteSkipDescription(d)].filter(Boolean).join(" ") });
     },
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });
@@ -594,6 +600,9 @@ export function BulkRentStartPage() {
           <div>
             <Label>Date for all rows (or put dates in the CSV)</Label>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="min-w-[240px] flex-1">
+            <AddNoteField id="bulk-rent-start-note" value={addNote} onChange={setAddNote} />
           </div>
           <label className="text-sm flex items-center gap-2">
             <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />

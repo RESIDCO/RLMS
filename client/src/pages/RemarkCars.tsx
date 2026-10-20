@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { REMARK_CONFIRM, remarkPreviewToCsv, type RemarkPreviewRow, type RemarkStatus } from "@shared/remark-in-place";
 import { Download } from "lucide-react";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 
 type PreviewResponse = {
   ok: boolean;
@@ -60,6 +61,7 @@ export default function RemarkCars() {
   const [text, setText] = useState("KCS 310100 > OFOX 310100");
   const [file, setFile] = useState<File | null>(null);
   const [reason, setReason] = useState("");
+  const [addNote, setAddNote] = useState("");
   const [goodOnly, setGoodOnly] = useState(false);
   const [confirm, setConfirm] = useState("");
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
@@ -110,6 +112,7 @@ export default function RemarkCars() {
         mode: goodOnly ? "good" : "all",
         confirm,
         reason,
+        ...appendNoteBody(addNote),
       });
       const data = await res.json();
       void invalidateFleetQueries(queryClient);
@@ -193,6 +196,9 @@ export default function RemarkCars() {
               className="mt-1.5"
               data-testid="input-remark-reason"
             />
+            <div className="mt-3">
+              <AddNoteField id="remark-cars-note" value={addNote} onChange={setAddNote} />
+            </div>
           </div>
           <Button type="button" onClick={runPreview} disabled={!canEdit || busy != null} data-testid="button-remark-preview">
             {busy === "preview" ? "Checking…" : "Preview"}

@@ -81,6 +81,7 @@ import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates
 import { pickRow } from "@shared/change-log";
 import { diffProgramPatch } from "@shared/program-patch";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
+import { appendNotesInGroup, normalizeAppendNote, stripNotesField, withNoteReport } from "./append-note";
 import { listLineage } from "./lineage-read";
 import { applyUndo, eligibleUndo, previewUndo, resolveUndoGroup } from "./undo";
 import { recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
@@ -1548,6 +1549,7 @@ export async function registerRoutes(
           await applyMarkSold(String(req.body.preview_token), writerId, {
             sold_to: req.body?.sold_to ?? null,
             effective_date: req.body?.effective_date ?? null,
+            append_note: req.body?.append_note,
           }),
         );
       }
@@ -1592,15 +1594,22 @@ export async function registerRoutes(
           return res.status(400).json({ message: "A reason is required to reactivate an inactive car." });
         }
       }
-      const result = await withChangeGroupResult(writerId, async () =>
-        applyCarStatusChange({
+      const result = await withChangeGroupResult(writerId, async () => {
+        const applied = await applyCarStatusChange({
           ids: idsRaw,
           status,
           reason,
           userId: writerId,
-        }),
-      );
-      res.json({ ok: true, ...result, status });
+        });
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: idsRaw,
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport({ ok: true as const, ...applied, status }, req.body?.append_note, noteReport);
+      });
+      res.json(result);
     } catch (err: any) {
       if (err?.status === 400) return res.status(400).json({ message: err.message });
       errHandler(res, err);
@@ -1670,7 +1679,13 @@ export async function registerRoutes(
             });
           }
         }
-        return { ok: true as const, updated, needs_completion };
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: uniqueIds,
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport({ ok: true as const, updated, needs_completion }, req.body?.append_note, noteReport);
       });
       res.json(result);
     } catch (err) {
@@ -1734,7 +1749,13 @@ export async function registerRoutes(
             });
           }
         }
-        return { ok: true as const, updated, entity };
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: uniqueIds,
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport({ ok: true as const, updated, entity }, req.body?.append_note, noteReport);
       });
       res.json(result);
     } catch (err) {
@@ -1759,7 +1780,13 @@ export async function registerRoutes(
       await assertRailcarsWritable(uniqueIds);
       const result = await withChangeGroupResult(writerId, async () => {
         const updated = await persistOpsFlag(uniqueIds, ops_flag);
-        return { ok: true as const, updated, ops_flag };
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: uniqueIds,
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport({ ok: true as const, updated, ops_flag }, req.body?.append_note, noteReport);
       });
       res.json(result);
     } catch (err) {
@@ -1890,7 +1917,7 @@ export async function registerRoutes(
       });
       if (createConflict) return res.status(400).json(conflictResponse(createConflict));
       const flag = parsed.ops_flag;
-      const insertRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
+      const insertRow: Record<string, unknown> = stripNotesField(omitOpsFlagFields({ ...parsed }));
       delete insertRow.fleet_status;
       delete insertRow.fleet_status_source;
       const derived = statusFromAssignmentLink({
@@ -1922,7 +1949,22 @@ export async function registerRoutes(
       } catch (e: any) {
         console.warn("[railcars] recompute after insert:", e?.message ?? e);
       }
-      res.json(hydrateOpsFlag({ ...data, ops_flag: flag ?? null }));
+      const created = hydrateOpsFlag({ ...data, ops_flag: flag ?? null });
+      const createNote = req.body?.append_note;
+      if (!normalizeAppendNote(createNote)) {
+        res.json(created);
+        return;
+      }
+      const noted = await withChangeGroupResult(writerId, async () => {
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: [Number(data.id)],
+          note: createNote,
+          actor: writerId,
+        });
+        return withNoteReport(created, createNote, noteReport);
+      });
+      res.json(noted);
     } catch (err) {
       errHandler(res, err);
     }
@@ -1940,7 +1982,7 @@ export async function registerRoutes(
       const parsed = insertRailcarSchema.partial().parse(req.body);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RAILCAR_DATE_KEYS]);
       const flag = parsed.ops_flag;
-      const updateRow: Record<string, unknown> = omitOpsFlagFields({ ...parsed });
+      const updateRow: Record<string, unknown> = stripNotesField(omitOpsFlagFields({ ...parsed }));
       // Identity changes go through POST /change-number only. Echoing an unchanged
       // (or unpadded) car_number on Edit would fire the pad trigger and collide.
       delete updateRow.car_number;
@@ -2005,26 +2047,29 @@ export async function registerRoutes(
       }
 
       const patched = await withChangeGroupResult(writerId, async () => {
-        const { data, error } = await supabase
-          .from("railcars")
-          .update(updateRow)
-          .eq("id", id)
-          .select()
-          .single();
-        if (error) throw error;
-
+        let data = priorRow;
         const patchKeys = Object.keys(updateRow);
-        await recordChange({
-          table: "railcars",
-          pk: id,
-          before: pickRow(priorRow, patchKeys),
-          after: pickRow(data, patchKeys),
-          action: "railcar_patch",
-          entity_type: "railcar",
-          entity_id: id,
-          railcar_id: id,
-          actor: writerId,
-        });
+        if (patchKeys.length) {
+          const updated = await supabase
+            .from("railcars")
+            .update(updateRow)
+            .eq("id", id)
+            .select()
+            .single();
+          if (updated.error) throw updated.error;
+          data = updated.data;
+          await recordChange({
+            table: "railcars",
+            pk: id,
+            before: pickRow(priorRow, patchKeys),
+            after: pickRow(data, patchKeys),
+            action: "railcar_patch",
+            entity_type: "railcar",
+            entity_id: id,
+            railcar_id: id,
+            actor: writerId,
+          });
+        }
 
         if (parsed.status !== undefined && updateRow.active !== undefined && priorActive !== updateRow.active) {
           await syncCurrentAssignmentHistoryActive(id, updateRow.active === true);
@@ -2042,7 +2087,17 @@ export async function registerRoutes(
         }
 
         if (flag !== undefined) await persistOpsFlag([id], flag);
-        return hydrateOpsFlag({ ...data, ops_flag: flag !== undefined ? flag : (data as any).ops_flag });
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: [id],
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport(
+          hydrateOpsFlag({ ...data, ops_flag: flag !== undefined ? flag : (data as any).ops_flag }),
+          req.body?.append_note,
+          noteReport,
+        );
       });
       res.json(patched);
     } catch (err) {
@@ -2098,7 +2153,14 @@ export async function registerRoutes(
           reason: "remarks retire the old railcar row and create a new id via remark_railcars RPC; Phase 1 cannot restore identity in place",
           detail: { old_id: row.old_id, new_id: row.new_id },
         });
-        return {
+        const newId = Number(row.new_id);
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: Number.isFinite(newId) && newId > 0 ? [newId] : [],
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport({
           ok: true as const,
           undoable: false as const,
           old_id: row.old_id,
@@ -2107,7 +2169,7 @@ export async function registerRoutes(
           old_car_number: row.old_car_number,
           new_car_initial: row.new_car_initial,
           new_car_number: row.new_car_number,
-        };
+        }, req.body?.append_note, noteReport);
       });
       res.json(payload);
     } catch (err) { errHandler(res, err); }
@@ -2169,7 +2231,20 @@ export async function registerRoutes(
             detail: { old_id: row.old_id, new_id: row.new_id },
           });
         }
-        return { ok: true as const, undoable: false as const, results: out.results ?? [] };
+        const newIds = ((out.results ?? []) as Array<Record<string, unknown>>)
+          .map((row) => Number(row.new_id))
+          .filter((n) => Number.isFinite(n) && n > 0);
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: newIds,
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport(
+          { ok: true as const, undoable: false as const, results: out.results ?? [] },
+          req.body?.append_note,
+          noteReport,
+        );
       });
       res.json(payload);
     } catch (err) { errHandler(res, err); }
@@ -2455,16 +2530,31 @@ export async function registerRoutes(
       const parsed = insertRiderSchema.parse(req.body);
       assertNewRiderNumber(parsed.rider_name);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RIDER_DATE_KEYS]);
-      delete (parsed as { account_manager?: unknown }).account_manager;
-      delete (parsed as { status_tag?: unknown }).status_tag;
-      delete (parsed as { account_mgmt_comment?: unknown }).account_mgmt_comment;
+      const insertRow = stripNotesField({ ...parsed } as Record<string, unknown>);
+      delete insertRow.account_manager;
+      delete insertRow.status_tag;
+      delete insertRow.account_mgmt_comment;
       const { data, error } = await supabase
         .from("riders")
-        .insert(parsed)
+        .insert(insertRow)
         .select()
         .single();
       if (error) throw error;
-      res.json(data);
+      const createNote = req.body?.append_note;
+      if (!normalizeAppendNote(createNote)) {
+        res.json(data);
+        return;
+      }
+      const noted = await withChangeGroupResult(writerId, async () => {
+        const noteReport = await appendNotesInGroup({
+          entityType: "rider",
+          ids: [Number(data.id)],
+          note: createNote,
+          actor: writerId,
+        });
+        return withNoteReport(data, createNote, noteReport);
+      });
+      res.json(noted);
     } catch (err) {
       errHandler(res, err);
     }
@@ -2477,17 +2567,46 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const parsed = insertRiderSchema.partial().parse(req.body);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RIDER_DATE_KEYS]);
-      delete (parsed as { account_manager?: unknown }).account_manager;
-      delete (parsed as { status_tag?: unknown }).status_tag;
-      delete (parsed as { account_mgmt_comment?: unknown }).account_mgmt_comment;
-      const { data, error } = await supabase
-        .from("riders")
-        .update(parsed)
-        .eq("id", id)
-        .select()
-        .single();
-      if (error) throw error;
-      res.json(data);
+      const updateRow = stripNotesField({ ...parsed } as Record<string, unknown>);
+      delete updateRow.account_manager;
+      delete updateRow.status_tag;
+      delete updateRow.account_mgmt_comment;
+      const { data: prior, error: priorErr } = await supabase.from("riders").select("*").eq("id", id).maybeSingle();
+      if (priorErr) throw priorErr;
+      if (!prior) return res.status(404).json({ message: "Rider not found" });
+      const patched = await withChangeGroupResult(writerId, async () => {
+        let data = prior;
+        const keys = Object.keys(updateRow);
+        if (keys.length) {
+          const { data: updated, error } = await supabase
+            .from("riders")
+            .update(updateRow)
+            .eq("id", id)
+            .select()
+            .single();
+          if (error) throw error;
+          data = updated;
+          await recordChange({
+            table: "riders",
+            pk: id,
+            before: pickRow(prior, keys),
+            after: pickRow(updated, keys),
+            action: "update_rider",
+            entity_type: "rider",
+            entity_id: id,
+            rider_id: id,
+            actor: writerId,
+          });
+        }
+        const noteReport = await appendNotesInGroup({
+          entityType: "rider",
+          ids: [id],
+          note: req.body?.append_note,
+          actor: writerId,
+        });
+        return withNoteReport(data, req.body?.append_note, noteReport);
+      });
+      res.json(patched);
     } catch (err) {
       errHandler(res, err);
     }

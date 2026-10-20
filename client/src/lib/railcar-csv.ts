@@ -2,6 +2,7 @@ import { fleetActiveLabel } from "@/components/InactiveFleetBadge";
 import { formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { whitelistExportCols } from "@shared/column-views";
+import { formatLastNoteWhen, lastNoteForRow } from "@shared/lineage-notes";
 
 type CsvCol = { key: string; header: string; get: (r: any) => string };
 
@@ -62,7 +63,12 @@ export const RAILCAR_CSV_COLS: CsvCol[] = [
   { key: "program_note", header: "Program note", get: (r) => str(r.program_note) },
   { key: "scrapped_at", header: "Scrapped", get: (r) => str(r.scrapped_at) },
   { key: "umler_status", header: "UMLER status", get: (r) => str(r.umler_status) },
-  { key: "latest_note", header: "Latest note", get: (r) => str(r.latest_note) },
+  { key: "latest_note", header: "Last note", get: (r) => {
+    const note = lastNoteForRow(r);
+    if (!note) return "";
+    const when = formatLastNoteWhen(note.at);
+    return when ? `${when} ${note.text}` : note.text;
+  } },
   { key: "tags", header: "Tags", get: (r) => Array.isArray(r.tags) ? r.tags.join(", ") : str(r.tags) },
   { key: "view_note", header: "View note", get: (r) => str(r.view_note) },
 ];

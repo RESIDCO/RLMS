@@ -9,6 +9,7 @@ import {
   type MovePlanRow,
 } from "@shared/move-plan";
 import type { MoveCarsInput } from "@shared/schema";
+import { appendNotesInGroup, withNoteReport } from "./append-note";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { FROZEN_CAR_MESSAGE } from "./frozen-cars";
 import { pointCurrentAssignmentAt } from "./current-assignment";
@@ -318,13 +319,19 @@ export async function applyMove(input: MoveCarsInput, actor: string) {
     }
 
     const leftAlone = plans.filter((row) => row.disposition === "left_alone");
-    return {
+    const noteReport = await appendNotesInGroup({
+      entityType: "railcar",
+      ids: input.car_ids,
+      note: input.append_note,
+      actor,
+    });
+    return withNoteReport({
       ok: true as const,
       moved: historyRows.length,
       total: plans.length,
       left_alone: leftAlone,
       actor,
       cars: plans,
-    };
+    }, input.append_note, noteReport);
   });
 }

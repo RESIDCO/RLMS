@@ -16,6 +16,7 @@ import { apiGet, apiRequest } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { kpiBucketTitle } from "@shared/kpi-buckets";
 import { formatCarId } from "@shared/residco-import";
@@ -74,6 +75,7 @@ export function KpiCarSheet({
   const [buyer, setBuyer] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [kind, setKind] = useState<"commitment" | "clear" | "rent_start" | "sold" | "unsold" | null>(null);
+  const [addNote, setAddNote] = useState("");
 
   const row = data?.row;
   const ids = carId ? [carId] : [];
@@ -118,9 +120,10 @@ export function KpiCarSheet({
     mutationFn: async () => {
       const token = preview?.preview_token;
       if (!token) throw new Error("Preview first");
-      if (kind === "sold") return (await apiRequest("POST", "/api/railcars/sold/apply", { preview_token: token })).json();
-      if (kind === "unsold") return (await apiRequest("POST", "/api/railcars/unsold/apply", { preview_token: token })).json();
-      if (kind === "rent_start") return (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: token })).json();
+      const note = kind === "sold" || kind === "unsold" || kind === "rent_start" ? appendNoteBody(addNote) : {};
+      if (kind === "sold") return (await apiRequest("POST", "/api/railcars/sold/apply", { preview_token: token, ...note })).json();
+      if (kind === "unsold") return (await apiRequest("POST", "/api/railcars/unsold/apply", { preview_token: token, ...note })).json();
+      if (kind === "rent_start") return (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: token, ...note })).json();
       return (await apiRequest("POST", "/api/commitments/bulk/apply", { preview_token: token })).json();
     },
     onSuccess: () => {
@@ -238,9 +241,14 @@ export function KpiCarSheet({
                   <div className="text-destructive">Rejected inactive — nothing will be written.</div>
                 )}
                 {canEdit && (
-                  <Button disabled={!preview.preview_token || apply.isPending} onClick={() => apply.mutate()}>
-                    Apply preview
-                  </Button>
+                  <div className="space-y-2">
+                    {(kind === "sold" || kind === "unsold" || kind === "rent_start") && (
+                      <AddNoteField id="kpi-sheet-note" value={addNote} onChange={setAddNote} />
+                    )}
+                    <Button disabled={!preview.preview_token || apply.isPending} onClick={() => apply.mutate()}>
+                      Apply preview
+                    </Button>
+                  </div>
                 )}
               </div>
             )}

@@ -1,5 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { supabaseAdmin } from "./supabase";
+import { appendNotesInGroup, normalizeAppendNote, withNoteReport } from "./append-note";
+import { withChangeGroupResult } from "./change-log";
 import { getPreview, putPreview, recomputeStatus } from "./commitment";
 import { annotateKpiDelta } from "./kpi-delta";
 import {
@@ -51,7 +53,12 @@ async function logRentStartHistory(railcarId: number, assignment: any, actor: st
   if (error) throw error;
 }
 
-export async function setRentStartDate(railcarId: number, dateRaw: string | null, actor: string) {
+export async function setRentStartDate(
+  railcarId: number,
+  dateRaw: string | null,
+  actor: string,
+  appendNote?: unknown,
+) {
   const date = dateRaw == null || dateRaw === "" ? null : isoDateOnly(dateRaw);
   if (dateRaw && !date) throw Object.assign(new Error("date must be YYYY-MM-DD"), { status: 400 });
   const { data: car, error: cErr } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", railcarId).maybeSingle();
@@ -67,19 +74,17 @@ export async function setRentStartDate(railcarId: number, dateRaw: string | null
   if (!onOlOf(car, rider?.rider_name, assignment)) {
     throw Object.assign(new Error("not on OL"), { status: 400, code: "not_on_ol" });
   }
-  const { error } = await supabaseAdmin
-    .from("railcar_assignments")
-    .update({
-      rent_start_date: date,
-      rent_start_set_by: actor,
-      rent_start_set_at: new Date().toISOString(),
-    })
-    .eq("id", assignment.id);
+  const patch = {
+    rent_start_date: date,
+    rent_start_set_by: actor,
+    rent_start_set_at: new Date().toISOString(),
+  };
+  const { error } = await supabaseAdmin.from("railcar_assignments").update(patch).eq("id", assignment.id);
   if (error) throw error;
   await logRentStartHistory(railcarId, assignment, actor, date);
   await recomputeStatus(railcarId);
   const off = !(date && date <= new Date().toISOString().slice(0, 10));
-  return {
+  const result = {
     railcar_id: railcarId,
     rent_start_date: date,
     derived_status: derivedFleetStatus({
@@ -89,6 +94,17 @@ export async function setRentStartDate(railcarId: number, dateRaw: string | null
       hasOpenCommitment: false,
     }),
   };
+  // The date write is not undoable. Only an appended note joins a change group.
+  if (!normalizeAppendNote(appendNote)) return result;
+  return withChangeGroupResult(actor, async () => {
+    const noteReport = await appendNotesInGroup({
+      entityType: "railcar",
+      ids: [railcarId],
+      note: appendNote,
+      actor,
+    });
+    return withNoteReport(result, appendNote, noteReport);
+  });
 }
 
 export async function previewBulkRentStart(
@@ -233,14 +249,26 @@ export async function previewBulkRentStart(
   return { preview_token, ...snapshot };
 }
 
-export async function applyBulkRentStart(previewToken: string, actor: string) {
+export async function applyBulkRentStart(previewToken: string, actor: string, appendNote?: unknown) {
   const preview = await getPreview("rent_start", previewToken);
   const written = [];
+  const ids: number[] = [];
   for (const row of preview.write_ids ?? []) {
     const result = await setRentStartDate(row.id, row.new_date, actor);
     written.push(result);
+    ids.push(Number(row.id));
   }
-  return { written: written.length, rows: written };
+  const base = { written: written.length, rows: written };
+  if (!normalizeAppendNote(appendNote)) return base;
+  return withChangeGroupResult(actor, async () => {
+    const noteReport = await appendNotesInGroup({
+      entityType: "railcar",
+      ids,
+      note: appendNote,
+      actor,
+    });
+    return withNoteReport(base, appendNote, noteReport);
+  });
 }
 
 export async function listRentStartWatch(kind: string) {
@@ -325,7 +353,12 @@ export function registerRentStartRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await setRentStartDate(Number(req.params.id), req.body?.date ?? req.body?.rent_start_date ?? null, actor));
+      res.json(await setRentStartDate(
+        Number(req.params.id),
+        req.body?.date ?? req.body?.rent_start_date ?? null,
+        actor,
+        req.body?.append_note,
+      ));
     } catch (e) {
       errHandler(res, e);
     }
@@ -352,7 +385,7 @@ export function registerRentStartRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await applyBulkRentStart(String(req.body?.preview_token ?? ""), actor));
+      res.json(await applyBulkRentStart(String(req.body?.preview_token ?? ""), actor, req.body?.append_note));
     } catch (e) {
       errHandler(res, e);
     }

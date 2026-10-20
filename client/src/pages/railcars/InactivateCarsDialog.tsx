@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
+import { AddNoteField, appendNoteBody, noteSkipDescription } from "@/components/AddNoteField";
 import {
   INACTIVATE_CONFIRM,
   inactivatePreviewToCsv,
@@ -63,6 +64,7 @@ export function InactivateCarsDialog({
   const { toast } = useToast();
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [reason, setReason] = useState("");
+  const [addNote, setAddNote] = useState("");
   const [confirm, setConfirm] = useState("");
   const [goodOnly, setGoodOnly] = useState(false);
   const [closeAssignment, setCloseAssignment] = useState(false);
@@ -73,6 +75,7 @@ export function InactivateCarsDialog({
     if (!open) {
       setPreview(null);
       setReason("");
+      setAddNote("");
       setConfirm("");
       setGoodOnly(false);
       setCloseAssignment(false);
@@ -134,13 +137,14 @@ export function InactivateCarsDialog({
         mode: goodOnly ? "good" : "all",
         confirm,
         reason: reason.trim(),
+        ...appendNoteBody(addNote),
         close_assignment: closeAssignment,
         end_date: closeAssignment ? endDate : null,
       });
       const data = await res.json();
       toast({
         title: `Inactivated ${data.applied} car${data.applied === 1 ? "" : "s"}`,
-        description: "Undo reverses the whole batch.",
+        description: ["Undo reverses the status change. The note is a separate undo.", noteSkipDescription(data)].filter(Boolean).join(" "),
       });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
@@ -272,6 +276,7 @@ export function InactivateCarsDialog({
               data-testid="inactivate-reason"
             />
           </div>
+          <AddNoteField id="inactivate-add-note" value={addNote} onChange={setAddNote} />
           <div>
             <Label htmlFor="inactivate-confirm">Type {INACTIVATE_CONFIRM} to apply</Label>
             <Input

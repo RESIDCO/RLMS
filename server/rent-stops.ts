@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { supabaseAdmin } from "./supabase";
 import { getPreview, putPreview } from "./commitment";
+import { appendNotesInGroup, withNoteReport } from "./append-note";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { parseCarListText } from "@shared/commitment";
 import { formatCarId } from "@shared/residco-import";
@@ -291,7 +292,16 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await withChangeGroupResult(actor, () => setOffRent(Number(req.params.id), req.body ?? {}, actor)));
+      res.json(await withChangeGroupResult(actor, async () => {
+        const data = await setOffRent(Number(req.params.id), req.body ?? {}, actor);
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: [Number(req.params.id)],
+          note: req.body?.append_note,
+          actor,
+        });
+        return withNoteReport(data, req.body?.append_note, noteReport);
+      }));
     } catch (e) {
       errHandler(res, e);
     }
@@ -301,7 +311,16 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await withChangeGroupResult(actor, () => setAbatement(Number(req.params.id), req.body ?? {}, actor)));
+      res.json(await withChangeGroupResult(actor, async () => {
+        const data = await setAbatement(Number(req.params.id), req.body ?? {}, actor);
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: [Number(req.params.id)],
+          note: req.body?.append_note,
+          actor,
+        });
+        return withNoteReport(data, req.body?.append_note, noteReport);
+      }));
     } catch (e) {
       errHandler(res, e);
     }
@@ -311,7 +330,16 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await withChangeGroupResult(actor, () => resumeStop(Number(req.params.id), actor, req.body?.actual_resume_date)));
+      res.json(await withChangeGroupResult(actor, async () => {
+        const data = await resumeStop(Number(req.params.id), actor, req.body?.actual_resume_date);
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: [Number(req.params.id)],
+          note: req.body?.append_note,
+          actor,
+        });
+        return withNoteReport(data, req.body?.append_note, noteReport);
+      }));
     } catch (e) {
       errHandler(res, e);
     }
@@ -321,7 +349,16 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await withChangeGroupResult(actor, () => convertToOffRent(Number(req.params.id), actor, req.body ?? {})));
+      res.json(await withChangeGroupResult(actor, async () => {
+        const data = await convertToOffRent(Number(req.params.id), actor, req.body ?? {});
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: [Number(req.params.id)],
+          note: req.body?.append_note,
+          actor,
+        });
+        return withNoteReport(data, req.body?.append_note, noteReport);
+      }));
     } catch (e) {
       errHandler(res, e);
     }
@@ -437,7 +474,13 @@ export function registerRentStopRoutes(
           else if (snap.action === "Off rent" || snap.action === "off_rent") written.push(await setOffRent(row.id, body, actor));
           else written.push(await setAbatement(row.id, body, actor));
         }
-        return { written: written.length };
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: (snap.toWrite ?? []).map((row: { id?: number }) => Number(row.id)),
+          note: req.body?.append_note,
+          actor,
+        });
+        return withNoteReport({ written: written.length }, req.body?.append_note, noteReport);
       });
       res.json(result);
     } catch (e) {

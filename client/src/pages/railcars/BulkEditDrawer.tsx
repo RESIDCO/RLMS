@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { ADD_NOTE_PLACEHOLDER } from "@/components/AddNoteField";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { offerUndoToast } from "@/lib/undo";
 import { markSearchRefresh } from "@/lib/searchState";
@@ -93,7 +94,7 @@ export function BulkEditDrawer({
         <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
       </div>
       <label className="text-xs text-muted-foreground">Note</label>
-      <Textarea className="mb-2" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+      <Textarea className="mb-2" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={ADD_NOTE_PLACEHOLDER} />
       <label className="text-xs text-muted-foreground">Tag</label>
       <Input className="mb-2" value={tag} onChange={(e) => setTag(e.target.value)} />
       <div className="flex gap-2 mb-2">

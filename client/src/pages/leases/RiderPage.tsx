@@ -27,6 +27,7 @@ import { todayIsoDateOnly } from "@shared/lease-authority";
 import { ArrowLeft } from "lucide-react";
 import { BackToSearch } from "@/components/BackToSearch";
 import { useCanEdit } from "@/lib/AuthContext";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 
 export default function RiderPage() {
   const [, params] = useRoute("/leases/rider/:id");
@@ -46,6 +47,9 @@ export default function RiderPage() {
   const [newOl, setNewOl] = useState("");
   const [remarkDate, setRemarkDate] = useState(todayIsoDateOnly);
   const [carIdsText, setCarIdsText] = useState("");
+  const [termsNote, setTermsNote] = useState("");
+  const [offNote, setOffNote] = useState("");
+  const [remarkNote, setRemarkNote] = useState("");
   const [section, setSection] = useState<"cars" | "documents">("cars");
   const docsPath = leaseDocumentsPath("rider", id);
   const docs = useQuery<{ rows: LeaseDoc[] }>({
@@ -62,6 +66,7 @@ export default function RiderPage() {
       sublessee: form.sublessee ?? h.sublessee,
       contract_doc_url: form.contract_doc_url ?? h.contract_doc_url,
       owner_entity: form.owner_entity ?? h.owner_entity,
+      ...appendNoteBody(termsNote),
     }).then((r) => r.json()),
     onSuccess: () => {
       setEdit(false);
@@ -75,6 +80,7 @@ export default function RiderPage() {
       return apiRequest("POST", `/api/lease-mgmt/riders/${id}/off-lease`, {
         date: offDate,
         car_ids: ids.length ? ids : undefined,
+        ...appendNoteBody(offNote),
       }).then((r) => r.json());
     },
     onSuccess: () => {
@@ -91,6 +97,7 @@ export default function RiderPage() {
         new_ol_number: newOl,
         lessee_id: h.master_lease_id,
         car_ids: ids,
+        ...appendNoteBody(remarkNote),
       }).then((r) => r.json());
     },
     onSuccess: (body) => {
@@ -226,6 +233,7 @@ export default function RiderPage() {
             <div><Label>Rent / car</Label><Input type="number" defaultValue={h.monthly_rent_per_car ?? h.rider_rent_per_car ?? ""} onChange={(e) => setForm((f) => ({ ...f, monthly_rent_per_car: e.target.value }))} /></div>
             <div><Label>Sublessee / Operated by</Label><Input defaultValue={h.sublessee ?? ""} onChange={(e) => setForm((f) => ({ ...f, sublessee: e.target.value }))} /></div>
             <div><Label>Contract path</Label><Input defaultValue={h.contract_doc_url ?? ""} onChange={(e) => setForm((f) => ({ ...f, contract_doc_url: e.target.value }))} /></div>
+            <AddNoteField id="rider-terms-note" value={termsNote} onChange={setTermsNote} />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEdit(false)}>Cancel</Button>
@@ -242,6 +250,7 @@ export default function RiderPage() {
           <Input type="date" value={offDate} onChange={(e) => setOffDate(e.target.value)} />
           <Label>Car ids (optional, comma-separated)</Label>
           <Input value={carIdsText} onChange={(e) => setCarIdsText(e.target.value)} placeholder="Partial return: selected railcar ids" />
+          <AddNoteField id="off-lease-note" value={offNote} onChange={setOffNote} />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOffOpen(false)}>Cancel</Button>
             <Button onClick={() => offLease.mutate()} disabled={offLease.isPending}>Off lease</Button>
@@ -258,6 +267,7 @@ export default function RiderPage() {
           <Input type="date" value={remarkDate} onChange={(e) => setRemarkDate(e.target.value)} />
           <Label>Car ids to move</Label>
           <Input value={carIdsText} onChange={(e) => setCarIdsText(e.target.value)} placeholder="Required" />
+          <AddNoteField id="remarket-note" value={remarkNote} onChange={setRemarkNote} />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setRemarkOpen(false)}>Cancel</Button>
             <Button onClick={() => remarket.mutate()} disabled={remarket.isPending || !newOl}>Remarket</Button>

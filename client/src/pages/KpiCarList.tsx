@@ -28,6 +28,7 @@ import { columnLabel } from "@shared/column-dictionary";
 import { ColumnHelp, KpiReasonHelp } from "@/components/ColumnHelp";
 import { formatCarId } from "@shared/residco-import";
 import { FormerlyBadge } from "@/components/FormerlyBadge";
+import { LineageCarLink } from "@/components/LineageCarLink";
 import { overlayLifecycle } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { KpiCarSheet } from "@/pages/KpiCarSheet";
@@ -119,6 +120,7 @@ function KpiCell({
         >
           {formatCarId(r)}
         </button>
+        <LineageCarLink id={r.railcar_id} query={formatCarId(r)} />
         <FormerlyBadge formerly={r.formerly} />
       </td>
     );

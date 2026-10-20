@@ -20,6 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { Link } from "wouter";
 import { carPath, openAppTab } from "@/lib/browse-nav";
+import { LineageCarLink } from "@/components/LineageCarLink";
 
 function csvFromFile(file: File): Promise<string> {
   return file.text();
@@ -321,9 +322,16 @@ export function StaleCommitmentsPage() {
             {(data?.items ?? []).map((c: any) => (
               <tr key={c.id} className="border-t border-border/40">
                 <td className="py-1.5 font-mono">
-                  <button type="button" className="underline" onClick={() => openAppTab(carPath(c.railcar_id ?? c.railcar?.id))}>
-                    {c.railcar?.reporting_marks} {c.railcar?.car_number}
-                  </button>
+                  <span className="inline-flex items-center gap-2">
+                    <button type="button" className="underline" onClick={() => openAppTab(carPath(c.railcar_id ?? c.railcar?.id))}>
+                      {c.railcar?.reporting_marks} {c.railcar?.car_number}
+                    </button>
+                    <LineageCarLink
+                      id={c.railcar_id ?? c.railcar?.id}
+                      reportingMarks={c.railcar?.reporting_marks}
+                      carNumber={c.railcar?.car_number}
+                    />
+                  </span>
                 </td>
                 <td>{c.type} · {c.name}</td>
                 <td>{c.reason}</td>
@@ -582,9 +590,12 @@ export function RentStartWatchPage({ kind }: { kind: "awaiting" | "shop" | "futu
             {(data?.rows ?? []).map((r: any) => (
               <tr key={r.railcar_id} className="border-t border-border/40">
                 <td className="py-1.5 font-mono">
-                  <Link href={carPath(r.railcar_id)} className="underline">
-                    {r.reporting_marks} {r.car_number}
-                  </Link>
+                  <span className="inline-flex items-center gap-2">
+                    <Link href={carPath(r.railcar_id)} className="underline">
+                      {r.reporting_marks} {r.car_number}
+                    </Link>
+                    <LineageCarLink id={r.railcar_id} reportingMarks={r.reporting_marks} carNumber={r.car_number} />
+                  </span>
                 </td>
                 <td>{r.link_rider}</td>
                 <td>{r.lessee_name}</td>

@@ -1,10 +1,15 @@
+import { safeLineageBack } from "./lineage-link";
+
 /** Pause after typing before Lineage asks the server. One settled value, one request. */
 export const LINEAGE_SEARCH_DEBOUNCE_MS = 350;
 
-export function lineageSearchPath(q: string): string {
+export function lineageSearchPath(q: string, back?: string | null): string {
   const trimmed = String(q ?? "").trim();
-  if (!trimmed) return "/history";
-  return `/history?q=${encodeURIComponent(trimmed)}`;
+  const safe = safeLineageBack(back);
+  const parts: string[] = [];
+  if (trimmed) parts.push(`q=${encodeURIComponent(trimmed)}`);
+  if (safe) parts.push(`back=${encodeURIComponent(safe)}`);
+  return parts.length ? `/history?${parts.join("&")}` : "/history";
 }
 
 /**

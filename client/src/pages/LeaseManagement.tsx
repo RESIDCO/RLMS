@@ -55,6 +55,7 @@ import ActivityTimeline from "@/components/ActivityTimeline";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import { carPath } from "@/lib/browse-nav";
+import { LineageCarLink } from "@/components/LineageCarLink";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import type {
   MasterLeaseWithRiders,
@@ -870,7 +871,14 @@ function renderRcTd(key: string, c: any, leaseType: string | null | undefined) {
     case "marks":
       return <td key={key} className="px-3 py-1.5 font-mono-num text-muted-foreground">{c.reporting_marks ?? "—"}</td>;
     case "car_number":
-      return <td key={key} className="px-3 py-1.5 font-mono-num">{c.car_number}</td>;
+      return (
+        <td key={key} className="px-3 py-1.5 font-mono-num">
+          <span className="inline-flex items-center gap-2">
+            {c.car_number}
+            <LineageCarLink id={c.id} reportingMarks={c.reporting_marks} carNumber={c.car_number} />
+          </span>
+        </td>
+      );
     case "lessee":
       return <td key={key} className="px-3 py-1.5">{c.assignment?.fleet_name ?? "—"}</td>;
     case "rental_status":

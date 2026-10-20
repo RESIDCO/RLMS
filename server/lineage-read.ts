@@ -1,5 +1,6 @@
 import { mergeLineageFeed, type LineageSourceBundle } from "@shared/lineage-feed";
 import { listActivityLog, type ListActivityOpts } from "./activity-log";
+import { resolveLineageRailcars } from "./lineage-identity";
 import { supabaseAdmin } from "./supabase";
 
 const SLICE = 400;
@@ -255,8 +256,15 @@ export async function readLineageSources(opts: {
 /** Read-only Lineage. Activity log rows are the change-capture feed. */
 export async function listLineage(opts: ListActivityOpts) {
   const limit = Math.min(Math.max(opts.limit ?? 500, 1), 1000);
-  const activity = await listActivityLog({ ...opts, limit });
   const qText = opts.q != null ? String(opts.q).trim() : "";
+  // Tokenize before splitCarNumber. The shared resolver strips every space,
+  // so a list or a range never reaches the database as separate cars.
+  const lineageCars = qText ? await resolveLineageRailcars(qText) : null;
+  const activity = await listActivityLog({
+    ...opts,
+    limit,
+    resolvedRailcarIds: lineageCars ? lineageCars.ids : undefined,
+  });
   const scoped = Boolean(qText || opts.railcarId || opts.riderId);
   let railcarIds = opts.railcarId ? [opts.railcarId] : [];
   let riderIds = opts.riderId ? [opts.riderId] : [];
@@ -266,12 +274,14 @@ export async function listLineage(opts: ListActivityOpts) {
     if (opts.railcarId) railcarIds = [opts.railcarId];
     if (opts.riderId) riderIds = [opts.riderId];
   }
+  const message = lineageCars?.message ?? null;
   if (scoped && railcarIds.length === 0 && riderIds.length === 0) {
-    return { ...activity, events: [] };
+    return { ...activity, events: [], message };
   }
   const bundle = await readLineageSources({ railcarIds, riderIds, scoped });
   return {
     ...activity,
+    message,
     events: mergeLineageFeed(activity.events ?? [], bundle, {
       limit,
       includeVcfNoise: Boolean(opts.includeVcfNoise),

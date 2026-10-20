@@ -69,6 +69,11 @@ export async function logActivity(row: ActivityRow): Promise<void> {
   if (error) console.log(`[activity] log skipped: ${error.message}`);
 }
 
+/**
+ * Shared identity lookup for Search, programs, and bulk tools.
+ * A single "MARK 123" survives splitCarNumber stripping spaces. Lineage lists,
+ * ranges, and bare marks use resolveLineageRailcars instead.
+ */
 export async function resolveRailcarsByAnyIdentity(raw: string): Promise<number[]> {
   const groups = String(raw ?? "")
     .split(/[\n\r,;]+/)
@@ -246,6 +251,8 @@ export type ListActivityOpts = {
   q?: string;
   includeVcfNoise?: boolean;
   limit?: number;
+  /** When set, Lineage has already resolved cars and the shared parser is skipped. */
+  resolvedRailcarIds?: number[];
 };
 
 export async function listActivityLog(opts: ListActivityOpts) {
@@ -262,7 +269,7 @@ export async function listActivityLog(opts: ListActivityOpts) {
 
   if (qText) {
     const [cars, riders] = await Promise.all([
-      resolveRailcarsByAnyIdentity(qText),
+      opts.resolvedRailcarIds ?? resolveRailcarsByAnyIdentity(qText),
       resolveRidersByQuery(qText),
     ]);
     if (!opts.railcarId) railcarIds = cars;

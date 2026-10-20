@@ -44,6 +44,7 @@ type ResolvedRider = {
 
 type ActivityResponse = {
   events: any[];
+  message?: string | null;
   resolved?: {
     railcar_ids?: number[];
     rider_ids?: number[];
@@ -140,7 +141,7 @@ export default function HistoryPage() {
         <BackToSearch />
         <ClearableSearchInput
           className="flex-none w-full max-w-md"
-          placeholder="Search car number, mark+number, or OL / rider…"
+          placeholder="Search car, list, range, prior mark, or OL / rider…"
           value={search}
           onChange={setSearch}
           testId="input-search-history"
@@ -151,11 +152,16 @@ export default function HistoryPage() {
             {isLoading ? (
               <div className="px-4 py-3 text-sm text-muted-foreground">Resolving…</div>
             ) : cars.length === 0 && riders.length === 0 ? (
-              <div className="px-4 py-3 text-sm text-muted-foreground">
-                No matching car or rider. Try a current or prior mark+number, a bare car number, or an OL.
+              <div className="px-4 py-3 text-sm text-muted-foreground" data-testid="text-lineage-narrow">
+                {data?.message || "No matching car or rider. Try a current or prior mark+number, a bare car number, or an OL."}
               </div>
             ) : (
               <div>
+                {data?.message ? (
+                  <div className="px-4 py-3 text-sm text-muted-foreground" data-testid="text-lineage-narrow">
+                    {data.message}
+                  </div>
+                ) : null}
                 {cars.map((car) => {
                   const rider = asOne(car.assignment?.rider);
                   const lease = asOne(rider?.master_lease);

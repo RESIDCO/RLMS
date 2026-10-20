@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ActivityDialog from "@/components/crm/ActivityDialog";
+import BidImportDialog from "@/components/crm/BidImportDialog";
 import BidLinesGrid, { type BidLine } from "@/components/crm/BidLinesGrid";
 import OpportunityDialog from "@/components/crm/OpportunityDialog";
 import { opportunityFilesQueryKey, type OpportunityAttachment, type OpportunityFileLine } from "@/components/OpportunityFiles";
@@ -118,6 +119,11 @@ export default function BidOfferingPage() {
               <TabsTrigger value="timeline">Timeline</TabsTrigger>
             </TabsList>
             <TabsContent value="lines" className="mt-4 space-y-4">
+              {canWrite && opp.stage !== "won" && opp.stage !== "lost" ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <BidImportDialog opportunityId={opp.id} existingLines={lines} />
+                </div>
+              ) : null}
               <BidLinesGrid
                 opportunityId={opp.id}
                 lines={lines}

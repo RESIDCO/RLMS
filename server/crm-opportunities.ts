@@ -12,8 +12,9 @@ import {
   isLossReason,
   isOpenStage,
   isOpportunityContactRole,
-  isOpportunitySource,
   isOpportunityStage,
+  mergeSourceSuggestions,
+  resolveOpportunitySourceWrite,
   isOpportunityType,
   isRenewalCandidate,
   lostNeedsReason,
@@ -694,7 +695,11 @@ async function riderContext(riderId: number): Promise<{ master_lease_id: number;
   return { master_lease_id: Number(data.master_lease_id), account_id: positiveInt(lease?.account_id) };
 }
 
-function cleanWrite(body: Record<string, unknown>, partial: boolean): Record<string, unknown> {
+function cleanWrite(
+  body: Record<string, unknown>,
+  partial: boolean,
+  opts?: { previousSource?: string | null },
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const take = (key: string, value: unknown) => {
     if (partial && !(key in body)) return;
@@ -711,8 +716,9 @@ function cleanWrite(body: Record<string, unknown>, partial: boolean): Record<str
   }
   if (!partial || "source" in body) {
     const source = body.source == null || body.source === "" ? "manual" : body.source;
-    if (!isOpportunitySource(source)) throw httpError(400, "Invalid opportunity source");
-    take("source", source);
+    const resolved = resolveOpportunitySourceWrite(source, partial ? "patch" : "create", opts?.previousSource ?? null);
+    if (!resolved.ok) throw httpError(400, resolved.error);
+    take("source", resolved.value);
   }
   if (!partial || "owner" in body) take("owner", textOrNull(body.owner));
   if (!partial || "car_type" in body) take("car_type", textOrNull(body.car_type));
@@ -1088,7 +1094,7 @@ export async function patchOpportunity(
   if (beforeErr) throw beforeErr;
   if (!before) throw httpError(404, "Opportunity not found");
 
-  const patch = cleanWrite(body, true);
+  const patch = cleanWrite(body, true, { previousSource: before.source == null ? null : String(before.source) });
   let riderId = positiveInt("rider_id" in patch ? patch.rider_id : before.rider_id);
   if ("rider_id" in body) {
     if (riderId) {
@@ -1226,6 +1232,12 @@ export async function deleteOpportunityContact(
     return { ok: true as const };
   });
   return result;
+}
+
+export async function listOpportunitySourceSuggestions(): Promise<{ value: string; label: string }[]> {
+  const { data, error } = await supabaseAdmin.from("opportunities").select("source").limit(5000);
+  if (error) throw error;
+  return mergeSourceSuggestions((data ?? []).map((row) => (row.source == null ? "" : String(row.source))));
 }
 
 export type { OpportunitySource, OpportunityStage };

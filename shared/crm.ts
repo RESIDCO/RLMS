@@ -32,9 +32,11 @@ export const OPPORTUNITY_STAGES = [
 export type OpportunityStage = (typeof OPPORTUNITY_STAGES)[number];
 
 export const OPPORTUNITY_SOURCES = ["auto_expiry", "manual", "trinity", "handoff", "umler", "referral", "inbound"] as const;
-export type OpportunitySource = (typeof OPPORTUNITY_SOURCES)[number];
+export type OpportunitySourcePreset = (typeof OPPORTUNITY_SOURCES)[number];
+/** Preset key or free text. `auto_expiry` is written only by the renewal generator. */
+export type OpportunitySource = string;
 
-export const OPPORTUNITY_SOURCE_LABEL: Record<OpportunitySource, string> = {
+export const OPPORTUNITY_SOURCE_LABEL: Record<OpportunitySourcePreset, string> = {
   auto_expiry: "Auto expiry",
   manual: "Manual",
   trinity: "Trinity book",
@@ -44,8 +46,94 @@ export const OPPORTUNITY_SOURCE_LABEL: Record<OpportunitySource, string> = {
   inbound: "Inbound",
 };
 
+export const OPPORTUNITY_SOURCE_MAX = 60;
+export const AUTO_EXPIRY_SOURCE_ERROR = "auto_expiry is reserved for generated renewals";
+export const AUTO_EXPIRY_CHANGE_ERROR = "Source cannot change to or from auto_expiry";
+
+export function opportunitySourceLabel(source: string): string {
+  if ((OPPORTUNITY_SOURCES as readonly string[]).includes(source)) {
+    return OPPORTUNITY_SOURCE_LABEL[source as OpportunitySourcePreset];
+  }
+  return source;
+}
+
+export function collapseSourceWhitespace(input: string): string {
+  return input.trim().replace(/\s+/g, " ");
+}
+
+/** Case, space, and underscore insensitive match of the reserved key or its label. */
+export function isReservedAutoExpiryInput(input: string): boolean {
+  const folded = collapseSourceWhitespace(input).toLowerCase().replace(/[\s_]+/g, "");
+  return folded === "autoexpiry";
+}
+
+export function normalizeOpportunitySource(input: unknown): { ok: true; value: string } | { ok: false; error: string } {
+  if (typeof input !== "string") return { ok: false, error: "Source must be between 1 and 60 characters" };
+  const value = collapseSourceWhitespace(input);
+  if (!value || value.length > OPPORTUNITY_SOURCE_MAX) {
+    return { ok: false, error: "Source must be between 1 and 60 characters" };
+  }
+  if (isReservedAutoExpiryInput(value)) return { ok: false, error: AUTO_EXPIRY_SOURCE_ERROR };
+  const lower = value.toLowerCase();
+  for (const key of OPPORTUNITY_SOURCES) {
+    if (key === "auto_expiry") continue;
+    const label = OPPORTUNITY_SOURCE_LABEL[key];
+    if (lower === key || lower === label.toLowerCase()) return { ok: true, value: key };
+  }
+  return { ok: true, value };
+}
+
+/**
+ * Create never stores auto_expiry. A patch may resubmit the same auto_expiry
+ * value and may not move to or from it.
+ */
+export function resolveOpportunitySourceWrite(
+  input: unknown,
+  mode: "create" | "patch",
+  previous: string | null,
+): { ok: true; value: string } | { ok: false; error: string } {
+  const raw = input == null || input === "" ? "manual" : input;
+  if (mode === "patch" && previous === "auto_expiry" && typeof raw === "string" && isReservedAutoExpiryInput(raw)) {
+    return { ok: true, value: "auto_expiry" };
+  }
+  const norm = normalizeOpportunitySource(raw);
+  if (!norm.ok) return norm;
+  if (mode === "patch" && previous === "auto_expiry" && norm.value !== previous) {
+    return { ok: false, error: AUTO_EXPIRY_CHANGE_ERROR };
+  }
+  if (mode === "create") return norm;
+  if (mode === "patch") return norm;
+  const unreachable: never = mode;
+  return unreachable;
+}
+
 /** Sources offered when someone types a deal. Generated renewals keep auto_expiry. */
 export const MANUAL_OPPORTUNITY_SOURCES = ["manual", "trinity", "referral", "inbound", "umler", "handoff"] as const;
+
+export type SourceSuggestion = { value: string; label: string };
+
+/** Presets except auto_expiry, then distinct free-text sources, deduped case-insensitively. */
+export function mergeSourceSuggestions(stored: readonly string[]): SourceSuggestion[] {
+  const presets: SourceSuggestion[] = MANUAL_OPPORTUNITY_SOURCES.map((value) => ({
+    value,
+    label: OPPORTUNITY_SOURCE_LABEL[value],
+  }));
+  const seen = new Set(presets.map((row) => row.value.toLowerCase()));
+  const free = new Map<string, string>();
+  for (const raw of stored) {
+    if (typeof raw !== "string") continue;
+    const value = raw.trim();
+    if (!value || isReservedAutoExpiryInput(value)) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    const current = free.get(key);
+    if (current == null || value < current) free.set(key, value);
+  }
+  const extras = [...free.values()]
+    .sort((a, b) => a.localeCompare(b))
+    .map((value) => ({ value, label: opportunitySourceLabel(value) }));
+  return [...presets, ...extras];
+}
 
 export const LESSEE_ROLES = ["lessee", "sublessee"] as const;
 export type LesseeRole = (typeof LESSEE_ROLES)[number];
@@ -217,7 +305,7 @@ export function isOpportunityStage(value: unknown): value is OpportunityStage {
   return typeof value === "string" && STAGE_SET.has(value);
 }
 
-export function isOpportunitySource(value: unknown): value is OpportunitySource {
+export function isOpportunitySource(value: unknown): value is OpportunitySourcePreset {
   return typeof value === "string" && SOURCE_SET.has(value);
 }
 

@@ -62,6 +62,11 @@ export function GridColumnTh({
     <th
       draggable={!pinned && !!onMove}
       onDragStart={(e) => {
+        const target = e.target instanceof Element ? e.target : null;
+        if (target?.closest("[data-col-resize]")) {
+          e.preventDefault();
+          return;
+        }
         if (pinned || !onMove) {
           e.preventDefault();
           return;
@@ -114,9 +119,14 @@ export function GridColumnTh({
           role="separator"
           aria-orientation="vertical"
           aria-label={`Resize ${colKey}`}
+          data-col-resize=""
           className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize z-20 hover:bg-primary/50"
           onMouseDown={startResize}
           onClick={(e) => e.stopPropagation()}
+          onDragStart={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
         />
       )}
     </th>

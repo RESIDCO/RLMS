@@ -7,16 +7,15 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import PartyPicker, { type PartySelection } from "@/components/crm/PartyPicker";
+import SourceCombo from "@/components/crm/SourceCombo";
 import SetupLesseeNote from "@/components/crm/SetupLesseeNote";
 import { useToast } from "@/hooks/use-toast";
 import {
   CAR_TYPE_SUGGESTIONS,
   LESSEE_ROLES,
   LOSS_REASONS,
-  MANUAL_OPPORTUNITY_SOURCES,
   OPPORTUNITY_CONTACT_ROLE_LABEL,
   OPPORTUNITY_CONTACT_ROLES,
-  OPPORTUNITY_SOURCE_LABEL,
   OPPORTUNITY_STAGES,
   OPPORTUNITY_TYPES,
   OPPORTUNITY_TYPE_LABEL,
@@ -468,15 +467,11 @@ export default function OpportunityDialog({
             <summary className="cursor-pointer text-sm">More details</summary>
             <div className="grid sm:grid-cols-2 gap-3 mt-3">
               <Field label="Source">
-                <SelectValue
+                <SourceCombo
+                  open={open}
                   value={form.source}
                   disabled={!canWrite}
-                  onChange={(value) => set("source", value as OpportunitySource)}
-                  options={(
-                    (MANUAL_OPPORTUNITY_SOURCES as readonly string[]).includes(form.source)
-                      ? [...MANUAL_OPPORTUNITY_SOURCES]
-                      : [form.source, ...MANUAL_OPPORTUNITY_SOURCES]
-                  ).map((value) => ({ value, label: OPPORTUNITY_SOURCE_LABEL[value] }))}
+                  onChange={(value) => set("source", value)}
                 />
               </Field>
               <Field label="Lessee or sublessee">

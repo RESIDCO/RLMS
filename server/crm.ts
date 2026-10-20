@@ -11,6 +11,7 @@ import {
   generateRenewals,
   listOpportunities,
   listOpportunityContacts,
+  listOpportunitySourceSuggestions,
   listOpportunityWatch,
   patchOpportunity,
 } from "./crm-opportunities";
@@ -83,6 +84,15 @@ export function registerCrmRoutes(app: Express) {
       const months = queryInt(req.query.months) ?? 12;
       const dryRun = req.query.dry_run === "1" || req.query.dry_run === "true";
       res.json(await generateRenewals({ months, dryRun, actor: user }));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  app.get("/api/opportunities/source-suggestions", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      res.json({ sources: await listOpportunitySourceSuggestions() });
     } catch (err) {
       sendError(res, err);
     }

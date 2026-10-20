@@ -6,11 +6,11 @@ import { carListSearchTokens, looksLikeCarToken, parseCarPasteListDetailed } fro
 import { classifyFleetQuery, summaryCarTypeKey } from "@shared/carTypeAliases";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate, carLeaseEndDate } from "@shared/lease-authority";
-import { FleetMembershipBadge, FleetAwareStatusBadge, InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+import { FleetMembershipBadge, InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { FormerlyBadge } from "@/components/FormerlyBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
-import { OpsFlagBadge } from "@/components/OpsFlagBadge";
-import { displayStatusInputFromRailcar, FLEET_STATUSES } from "@shared/fleet-status";
+import { RentalStatusCell } from "@/components/StatusFlags";
+import { FLEET_STATUSES } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { LastNoteCell } from "@/components/LastNoteCell";
@@ -1684,10 +1684,7 @@ export default function SearchPage() {
       case "status":
         return (
           <td key={key} className={pad}>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
-              {r.ops_flag ? <OpsFlagBadge flag={r.ops_flag} /> : null}
-            </div>
+            <RentalStatusCell row={r} />
           </td>
         );
       case "lessee":

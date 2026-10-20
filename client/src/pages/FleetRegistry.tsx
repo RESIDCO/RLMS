@@ -5,7 +5,7 @@ import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
-import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
+import { InactiveFleetBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-status";
 import { CommitmentPanel } from "@/pages/CommitmentOps";
@@ -50,6 +50,7 @@ import { FormerlyBadge } from "@/components/FormerlyBadge";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { searchPagePath } from "@/lib/search-query";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
+import { NeedsCompletionBadge, RentalStatusCell, TRANSIT_STATUSES, TransitBadge } from "@/components/StatusFlags";
 import { AmCommentThread, formatAmNoteSnippet } from "@/components/AmCommentThread";
 import { downloadRailcarsCsv } from "@/lib/railcar-csv";
 import { OpsFlagPicker } from "@/components/OpsFlagPicker";
@@ -106,13 +107,6 @@ import { SavedFilters } from "@/pages/railcars/SavedFilters";
 
 type Row = RailcarWithAssignment;
 
-const TRANSIT_STATUSES = [
-  { value: "repair", label: "At Repair Shop", color: "bg-umler-signal/15 text-umler-signal border-umler-signal/25" },
-  { value: "transit", label: "In Transit", color: "bg-umler-steel/15 text-umler-steel border-umler-steel/25" },
-  { value: "cleaning", label: "Cleaning / Prep", color: "bg-umler-teal/15 text-umler-teal border-umler-teal/25" },
-  { value: "bad_order", label: "Bad Order", color: "bg-umler-signal/15 text-umler-signal border-umler-signal/25" },
-] as const;
-
 // Entity ownership badge
 const ENTITY_STYLES: Record<string, { label: string; cls: string }> = {
   "Rail Partners Select": { label: "RPS",  cls: "bg-umler-steel/15 text-umler-steel border-umler-steel/30 font-semibold" },
@@ -148,32 +142,6 @@ function EntityBadge({ entity, size = "sm" }: { entity: string | null | undefine
       style.cls
     )}>
       {style.label}
-    </span>
-  );
-}
-
-function NeedsCompletionBadge() {
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300"
-      title="New acquisition — still needs lessee, rider, and financials filled in"
-      data-testid="badge-needs-completion"
-    >
-      <ClipboardList className="h-2.5 w-2.5" />
-      Needs data
-    </span>
-  );
-}
-
-function TransitBadge({ status, label }: { status: string | null; label: string | null }) {
-  if (!status) return null;
-  const ts = TRANSIT_STATUSES.find((t) => t.value === status);
-  const color = ts?.color ?? "bg-muted text-muted-foreground border-border";
-  const text = ts?.label ?? status;
-  return (
-    <span className={cn("inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium", color)}>
-      <Wrench className="h-2.5 w-2.5" />
-      {text}{label ? ` · ${label}` : ""}
     </span>
   );
 }
@@ -1194,14 +1162,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       case "status":
         return (
           <td key={key} className="px-4 py-3">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <FleetAwareStatusBadge car={displayStatusInputFromRailcar(r)} />
-              {r.transit_status && (
-                <TransitBadge status={r.transit_status} label={r.transit_label} />
-              )}
-                  {r.needs_completion && <NeedsCompletionBadge />}
-              {r.ops_flag && <OpsFlagBadge flag={r.ops_flag} />}
-            </div>
+            <RentalStatusCell row={r} />
           </td>
         );
       case "flag":

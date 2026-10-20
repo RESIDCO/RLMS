@@ -313,3 +313,110 @@ export function portfolioBidRequiresPurchase(flavor: string | null | undefined, 
   if (flavor == null || flavor === "") return true;
   return flavor === BID_FLAVOR && type === PURCHASE_TYPE;
 }
+
+/**
+ * isPurchase is any purchase, including a portfolio bid.
+ * isPortfolioBid is the portfolio_bid flavor (or the dialog checkbox that stores it).
+ * Deal lines exist only for the portfolio bid.
+ */
+export function isBidOpportunity(
+  type: string | null | undefined,
+  flavor: string | null | undefined,
+): { isPurchase: boolean; isPortfolioBid: boolean } {
+  return {
+    isPurchase: type === PURCHASE_TYPE,
+    isPortfolioBid: flavor === BID_FLAVOR,
+  };
+}
+
+/** Form values the opportunity dialog turns into the base write. */
+export type OpportunityPayloadInput = {
+  type: string;
+  stage: string;
+  source: string;
+  owner: string;
+  rider_id: string;
+  car_type: string;
+  car_count: string;
+  current_rate: string;
+  target_rate: string;
+  term_months: string;
+  est_value: string;
+  expiry_date: string;
+  new_expiry_date: string;
+  expected_close: string;
+  won_rider_id: string;
+  sublessee_note: string;
+  competitor: string;
+  loss_reason: string;
+  notes: string;
+  lessee_role: string;
+  tags: string[];
+  referral_note: string;
+};
+
+const PURCHASE_HIDDEN_KEYS = [
+  "rider_id",
+  "current_rate",
+  "target_rate",
+  "term_months",
+  "expiry_date",
+  "lessee_role",
+  "sublessee_note",
+] as const;
+
+const PORTFOLIO_HIDDEN_KEYS = ["car_type", "car_count", "est_value"] as const;
+
+function textOrNull(value: string): string | null {
+  const text = value.trim();
+  return text ? text : null;
+}
+
+function formNumber(value: string): number | null {
+  const text = value.trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Base save body. Hidden fields are left out entirely: a purchase patch must
+ * not send lease columns, and a portfolio bid must not send car count or
+ * estimated value. Omitted keys take server defaults on create.
+ */
+export function buildOpportunityPayload(
+  form: OpportunityPayloadInput,
+  flags: { isPurchase: boolean; isPortfolioBid: boolean },
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    type: form.type,
+    stage: form.stage,
+    source: form.source,
+    owner: textOrNull(form.owner),
+    rider_id: formNumber(form.rider_id),
+    car_type: textOrNull(form.car_type),
+    car_count: formNumber(form.car_count),
+    current_rate: formNumber(form.current_rate),
+    target_rate: formNumber(form.target_rate),
+    term_months: formNumber(form.term_months),
+    est_value: formNumber(form.est_value),
+    expiry_date: form.expiry_date || null,
+    new_expiry_date: form.new_expiry_date || null,
+    expected_close: form.expected_close || null,
+    won_rider_id: formNumber(form.won_rider_id),
+    lessee_role: form.lessee_role,
+    sublessee_note: form.lessee_role === "sublessee" ? textOrNull(form.sublessee_note) : null,
+    competitor: textOrNull(form.competitor),
+    loss_reason: form.loss_reason || null,
+    notes: textOrNull(form.notes),
+    tags: [...form.tags],
+    referral_note: textOrNull(form.referral_note),
+  };
+  if (flags.isPurchase) {
+    for (const key of PURCHASE_HIDDEN_KEYS) delete payload[key];
+  }
+  if (flags.isPortfolioBid) {
+    for (const key of PORTFOLIO_HIDDEN_KEYS) delete payload[key];
+  }
+  return payload;
+}

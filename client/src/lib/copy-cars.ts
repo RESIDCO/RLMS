@@ -37,14 +37,21 @@ export function copyCarLine(car: CopyCarIdentity | string | null | undefined): s
   }).trim();
 }
 
-/** One car per line. Blank identities are omitted. */
-export function formatCarsClipboard(cars: readonly (CopyCarIdentity | string | null | undefined)[]): string {
-  const lines: string[] = [];
-  for (const car of cars) {
-    const line = copyCarLine(car);
-    if (line) lines.push(line);
+/** Drop blanks and later copies of the same line. First-seen order is kept. */
+function uniqueLines(lines: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const line of lines) {
+    if (!line || seen.has(line)) continue;
+    seen.add(line);
+    unique.push(line);
   }
-  return lines.join("\n");
+  return unique;
+}
+
+/** One car per line. Blank identities are omitted. Duplicate lines are dropped. */
+export function formatCarsClipboard(cars: readonly (CopyCarIdentity | string | null | undefined)[]): string {
+  return uniqueLines(cars.map((car) => copyCarLine(car))).join("\n");
 }
 
 export function formatCopyRows<T>(
@@ -52,21 +59,16 @@ export function formatCopyRows<T>(
   lineOf?: (row: T) => CopyCarIdentity | string | null | undefined,
 ): string {
   if (!lineOf) return formatCarsClipboard(rows as readonly CopyCarIdentity[]);
-  const lines: string[] = [];
-  for (const row of rows) {
-    const line = copyCarLine(lineOf(row));
-    if (line) lines.push(line);
-  }
-  return lines.join("\n");
+  return formatCarsClipboard(rows.map((row) => lineOf(row)));
 }
 
 export function copiedCarCount(text: string): number {
   return text ? text.split("\n").length : 0;
 }
 
-/** Toast title. Always "Copied N cars", including when N is 1 or 0. */
+/** Toast title. One car is singular; every other count, including zero, is plural. */
 export function copyCarsToastTitle(count: number): string {
-  return `Copied ${count} cars`;
+  return count === 1 ? "Copied 1 car" : `Copied ${count} cars`;
 }
 
 function defaultIdOf<T>(row: T): number | string | null | undefined {

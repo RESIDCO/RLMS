@@ -3,9 +3,11 @@
 
 import {
   collectPages,
+  copiedCarCount,
   copyCarLine,
   copyCarsToastTitle,
   formatCarsClipboard,
+  formatCopyRows,
   resolveCarsToCopy,
   writeClipboardText,
 } from "./copy-cars";
@@ -40,8 +42,46 @@ ok(
 );
 
 ok(copyCarsToastTitle(0) === "Copied 0 cars", "toast for zero");
-ok(copyCarsToastTitle(1) === "Copied 1 cars", "toast keeps the requested wording");
+ok(copyCarsToastTitle(1) === "Copied 1 car", "toast is singular for one car");
 ok(copyCarsToastTitle(12) === "Copied 12 cars", "toast for many");
+
+const repeated = [
+  { reporting_marks: "OFOX", car_number: "310100" },
+  { reporting_marks: "KCS", car_number: "100" },
+  { reporting_marks: "ofox", car_number: "310100" },
+  "OFOX310100",
+  { reporting_marks: "TFOX", car_number: "901745" },
+  { marks: "KCS", number: "100" },
+] as const;
+const deduped = formatCarsClipboard(repeated);
+ok(
+  deduped === "OFOX 310100\nKCS 000100\nTFOX 901745",
+  "formatCarsClipboard keeps the first copy of each line",
+);
+ok(copiedCarCount(deduped) === 3, "count uses the deduped clipboard text");
+ok(copyCarsToastTitle(copiedCarCount(deduped)) === "Copied 3 cars", "toast count follows the deduped list");
+
+const oneCarTwice = formatCopyRows([
+  { reporting_marks: "OFOX", car_number: "310100" },
+  { reporting_marks: "OFOX", car_number: "310100" },
+]);
+ok(oneCarTwice === "OFOX 310100", "formatCopyRows drops a repeated identity");
+ok(copiedCarCount(oneCarTwice) === 1, "a repeated car counts once");
+ok(copyCarsToastTitle(copiedCarCount(oneCarTwice)) === "Copied 1 car", "one unique car is singular");
+
+const viaLineOf = formatCopyRows(
+  [
+    { railcar: { reporting_marks: "TFOX", car_number: "901745" } },
+    { railcar: { reporting_marks: "OFOX", car_number: "310101" } },
+    { railcar: { reporting_marks: "tfox", car_number: "901745" } },
+  ],
+  (row) => ({
+    reporting_marks: row.railcar.reporting_marks,
+    car_number: row.railcar.car_number,
+  }),
+);
+ok(viaLineOf === "TFOX 901745\nOFOX 310101", "formatCopyRows dedupes mapped lines in first-seen order");
+ok(copiedCarCount(viaLineOf) === 2, "mapped duplicates do not increase the count");
 
 type Car = { id: number; reporting_marks: string; car_number: string };
 const page: Car[] = [

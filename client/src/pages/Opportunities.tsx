@@ -117,14 +117,17 @@ export default function OpportunitiesPage() {
         title="Opportunities"
         subtitle="Renewals, re-leases, and new business"
         actions={
-          canWrite ? (
-            <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/opportunities/calculator">Deal Calculator</Link>
+            </Button>
+            {canWrite ? (
               <Button size="sm" variant="outline" onClick={() => dryRun.mutate()} disabled={dryRun.isPending}>
                 Generate renewals (12 mo)
               </Button>
-              <Button size="sm" onClick={() => { setEditing(null); setCreateOpen(true); }}>+ Opportunity</Button>
-            </div>
-          ) : undefined
+            ) : null}
+            {canWrite ? <Button size="sm" onClick={() => { setEditing(null); setCreateOpen(true); }}>+ Opportunity</Button> : null}
+          </div>
         }
       />
       <div className="flex-1 min-h-0 overflow-auto px-4 sm:px-8 py-4 space-y-6">

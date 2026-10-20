@@ -79,7 +79,7 @@ export function headlineColumns(result: DealCalcResult): ScenarioColumns {
   };
 }
 
-/** Wayne headline NPV is the discount of the unlevered flows, which are monthlyCashFlows. */
+/** Legacy Bid Model headline NPV is the discount of the unlevered flows, which are monthlyCashFlows. */
 export function storedNpv(result: DealCalcResult): number | null {
   if (result.priceBasis === "wayne_bid") {
     if (!result.monthlyCashFlows.length) return null;
@@ -198,4 +198,25 @@ export function pinnedBidFigure(row: {
 }): number | null {
   if (row.method === "cash_flow") return row.max_bid_per_car;
   return row.wayne_bid_per_car ?? row.max_bid_per_car;
+}
+
+/** User-facing name for the leveraged method. The stored value stays wayne_leveraged. */
+export const LEGACY_BID_MODEL_LABEL = "Legacy Bid Model";
+
+export function calcMethodLabel(method: string): string {
+  switch (method) {
+    case "wayne_leveraged":
+      return LEGACY_BID_MODEL_LABEL;
+    case "cash_flow":
+      return "Cash flow";
+    case "both":
+      return "Both";
+    default:
+      return method;
+  }
+}
+
+export function applyPriceWhichLabel(which: string): string {
+  if (which === "wayne") return LEGACY_BID_MODEL_LABEL;
+  return which;
 }

@@ -30,15 +30,19 @@ const opportunity = {
 } as OpportunityRow;
 
 function Fixture() {
-  const [viewer, setViewer] = useState(() => new URLSearchParams(window.location.search).get("view") === "viewer");
+  const params = new URLSearchParams(window.location.search);
+  const [viewer, setViewer] = useState(() => params.get("view") === "viewer");
+  const [scratch, setScratch] = useState(() => params.get("mode") === "scratch");
   return (
     <div className="min-h-screen bg-background text-foreground p-4 space-y-3">
       <div className="flex gap-2">
-        <button type="button" className="border rounded px-2 py-1 text-sm" onClick={() => setViewer(false)}>Editor</button>
-        <button type="button" className="border rounded px-2 py-1 text-sm" onClick={() => setViewer(true)}>Viewer</button>
+        <button type="button" className="border rounded px-2 py-1 text-sm" onClick={() => { setViewer(false); setScratch(false); }}>Editor</button>
+        <button type="button" className="border rounded px-2 py-1 text-sm" onClick={() => { setViewer(true); setScratch(false); }}>Viewer</button>
+        <button type="button" className="border rounded px-2 py-1 text-sm" onClick={() => { setViewer(false); setScratch(true); }}>Scratch</button>
       </div>
-      <h1 className="text-lg font-semibold">BFLX deal 1 — both methods</h1>
+      <h1 className="text-lg font-semibold">{scratch ? "Scratch calculator" : "BFLX deal 1 — both methods"}</h1>
       <CalculatorTab
+        scratch={scratch}
         opportunityId={1}
         opportunity={opportunity}
         lines={[{

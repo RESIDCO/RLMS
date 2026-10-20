@@ -57,6 +57,7 @@ const mainNav: { href: string; label: string; icon: React.ElementType; aliases?:
   { href: "/",         label: "Dashboard",           icon: LayoutDashboard },
   { href: "/accounts", label: "Account Management",  icon: Building2, aliases: ["/account", "/account-transitions", "/territory-map"] },
   { href: "/opportunities", label: "Opportunities", icon: Target },
+  { href: "/opportunities/calculator", label: "Deal Calculator", icon: Calculator },
   { href: "/railcars", label: "Railcars",             icon: Train, aliases: ["/fleet", "/railcars/umler-queue", "/railcars/remark"] },
   { href: "/leases",   label: "Lease Management", icon: FileText },
   { href: "/history",  label: "Lineage",          icon: History },
@@ -82,6 +83,7 @@ const adminNav = [
 ];
 
 function isNavActive(href: string, location: string, aliases: string[] = []) {
+  if (href === "/opportunities" && location.startsWith("/opportunities/calculator")) return false;
   return [href, ...aliases].some(
     (h) =>
       location === h ||

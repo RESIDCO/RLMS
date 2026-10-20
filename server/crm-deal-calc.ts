@@ -308,7 +308,7 @@ export async function applyScenarioPrice(
   actor: string,
 ) {
   const choice = parseApplyPriceChoice(body);
-  if (!choice) throw httpError(400, "field must be prelim or final and which must be max, stretch, or wayne");
+  if (!choice) throw httpError(400, "field must be prelim or final and which must be max, stretch, or legacy bid model");
   const scenario = await loadScenario(opportunityId, scenarioId);
   if (scenario.deleted_at) throw httpError(404, "Scenario not found");
   const calculated = calculatedScenario(scenario.inputs);

@@ -1,7 +1,15 @@
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
+import { ConfirmActionHost } from "@/components/ConfirmActionDialog";
 import BidLinesGrid, { type BidLine } from "@/components/crm/BidLinesGrid";
+import {
+  OpportunityFilesView,
+  saveAttachmentBlob,
+  type OpportunityAttachment,
+  type OpportunityFileLine,
+} from "@/components/OpportunityFiles";
 import { bidStageLabel } from "@shared/crm";
 import { BFLX_C612_CARS, BFLX_LINES, BFLX_OFFERING, BFLX_PUBLISHED_PRICES } from "@shared/crm-bid-bflx";
 import "./index.css";
@@ -37,8 +45,68 @@ function money(value: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
 
+const fileLines: OpportunityFileLine[] = [
+  { id: 7, label: "7 – ACME", deleted: false },
+  { id: 8, label: "8 – Removed lessee", deleted: true },
+];
+
+const seedFiles: OpportunityAttachment[] = [
+  {
+    id: 1,
+    entity_type: "opportunity",
+    entity_id: 1,
+    file_name: "cars.xlsx",
+    file_size: 24000,
+    mime_type: "application/vnd.ms-excel",
+    storage_path: "opportunity/1/cars.xlsx",
+    uploaded_by: "bruce",
+    uploaded_at: "2026-10-19T15:00:00.000Z",
+    notes: null,
+    source_module: "crm",
+    doc_category: "pricing",
+    opportunity_line_id: 7,
+  },
+  {
+    id: 2,
+    entity_type: "opportunity",
+    entity_id: 1,
+    file_name: "note.msg",
+    file_size: 12000,
+    mime_type: "application/vnd.ms-outlook",
+    storage_path: "opportunity/1/note.msg",
+    uploaded_by: "bruce",
+    uploaded_at: "2026-10-19T16:00:00.000Z",
+    notes: null,
+    source_module: "crm",
+    doc_category: "correspondence",
+    opportunity_line_id: null,
+  },
+  {
+    id: 3,
+    entity_type: "opportunity",
+    entity_id: 1,
+    file_name: "drawing.pdf",
+    file_size: 80000,
+    mime_type: "application/pdf",
+    storage_path: "opportunity/1/drawing.pdf",
+    uploaded_by: "bruce",
+    uploaded_at: "2026-10-18T12:00:00.000Z",
+    notes: null,
+    source_module: "crm",
+    doc_category: "drawings",
+    opportunity_line_id: 8,
+  },
+];
+
 function Fixture() {
   const prices = BFLX_PUBLISHED_PRICES.map((row) => `${row.seller_deal_ref} ${money(row.prelim_price_per_car)}`).join(", ");
+  const [files, setFiles] = useState(seedFiles);
+  const [lineId, setLineId] = useState<number | undefined>(undefined);
+  const [lastOpen, setLastOpen] = useState("none");
+  const counts: Record<number, number> = {};
+  for (const file of files) {
+    if (file.opportunity_line_id != null) counts[file.opportunity_line_id] = (counts[file.opportunity_line_id] ?? 0) + 1;
+  }
   return (
     <div className="min-h-screen bg-background text-foreground">
       <PageHeader
@@ -59,7 +127,50 @@ function Fixture() {
           canSeePrices
           parentIsWon={false}
           onWonLine={() => undefined}
+          fileCounts={{ ...counts, 1: counts[7] ?? 0 }}
+          onOpenFiles={(id) => setLineId(id === 1 ? 7 : id)}
         />
+        <section className="max-w-3xl space-y-2 border rounded-md p-3">
+          <h2 className="text-sm font-semibold">Files</h2>
+          <p className="text-xs text-muted-foreground" data-testid="bid-file-last-open">Last open: {lastOpen}</p>
+          <OpportunityFilesView
+            attachments={files}
+            lines={fileLines}
+            lineId={lineId}
+            canEdit
+            onUpload={async (picked, category, pinned, notes) => {
+              setFiles((current) => [
+                ...picked.map((file, index) => ({
+                  id: Date.now() + index,
+                  entity_type: "opportunity",
+                  entity_id: 1,
+                  file_name: file.name,
+                  file_size: file.size,
+                  mime_type: file.type || "application/octet-stream",
+                  storage_path: `opportunity/1/${file.name}`,
+                  uploaded_by: "bruce",
+                  uploaded_at: new Date().toISOString(),
+                  notes: notes || null,
+                  source_module: "crm",
+                  doc_category: category,
+                  opportunity_line_id: pinned,
+                })),
+                ...current,
+              ]);
+            }}
+            onPatch={async (id, body) => {
+              setFiles((current) => current.map((file) => (file.id === id ? { ...file, ...body } : file)));
+            }}
+            onDelete={async (id) => {
+              setFiles((current) => current.filter((file) => file.id !== id));
+            }}
+            onDownload={async (file) => {
+              const blob = new Blob(["preview"], { type: file.mime_type });
+              saveAttachmentBlob(file.file_name, blob);
+              setLastOpen(file.file_name);
+            }}
+          />
+        </section>
       </div>
     </div>
   );
@@ -68,6 +179,7 @@ function Fixture() {
 document.documentElement.classList.add("dark");
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={new QueryClient()}>
+    <ConfirmActionHost />
     <Fixture />
   </QueryClientProvider>,
 );

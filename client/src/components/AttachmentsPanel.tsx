@@ -18,6 +18,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { formatAttachmentProvenance } from "@shared/attachment-source";
 import { confirmDelete } from "@/components/ConfirmActionDialog";
+import { OpportunityFilesPanel, type OpportunityFileLine } from "@/components/OpportunityFiles";
 
 type Attachment = {
   id: number;
@@ -31,6 +32,8 @@ type Attachment = {
   uploaded_at: string;
   notes: string | null;
   source_module?: string | null;
+  doc_category?: string | null;
+  opportunity_line_id?: number | null;
 };
 
 type EntityType = "master_lease" | "rider" | "railcar" | "company" | "company_contact" | "opportunity";
@@ -42,15 +45,11 @@ interface Props {
   compact?: boolean;
   /** Hide upload/delete even for editors (context-gated, e.g. Account Management). */
   readOnly?: boolean;
-}
-
-interface Props {
-  entityType: EntityType;
-  entityId: number;
-  /** compact=true renders as a small inline section (for use inside detail panels) */
-  compact?: boolean;
-  /** Hide upload/delete even for editors (context-gated, e.g. Account Management). */
-  readOnly?: boolean;
+  /** Bid files only. Category chips render when this is not false. */
+  categories?: boolean;
+  lines?: OpportunityFileLine[];
+  /** Pre-filter and pre-set the upload to this deal. Null means the whole offering. */
+  lineId?: number | null;
 }
 
 function fileIcon(mime: string) {
@@ -65,7 +64,23 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function AttachmentsPanel({ entityType, entityId, compact = false, readOnly = false }: Props) {
+export default function AttachmentsPanel(props: Props) {
+  if (props.entityType === "opportunity") {
+    return (
+      <OpportunityFilesPanel
+        entityId={props.entityId}
+        compact={props.compact}
+        readOnly={props.readOnly}
+        lines={props.lines}
+        lineId={props.lineId}
+        categories={props.categories !== false}
+      />
+    );
+  }
+  return <GenericAttachmentsPanel entityType={props.entityType} entityId={props.entityId} compact={props.compact} readOnly={props.readOnly} />;
+}
+
+function GenericAttachmentsPanel({ entityType, entityId, compact = false, readOnly = false }: Props) {
   const perms = usePermissions();
   const fleetEdit = useCanEdit();
   const contactsEntity = entityType === "company" || entityType === "company_contact";

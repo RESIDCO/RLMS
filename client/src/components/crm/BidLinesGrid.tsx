@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Paperclip } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { offerUndoToast } from "@/lib/undo";
 import { useToast } from "@/hooks/use-toast";
@@ -100,6 +101,8 @@ export default function BidLinesGrid({
   canSeePrices,
   parentIsWon,
   onWonLine,
+  fileCounts,
+  onOpenFiles,
 }: {
   opportunityId: number;
   lines: BidLine[];
@@ -107,6 +110,8 @@ export default function BidLinesGrid({
   canSeePrices: boolean;
   parentIsWon: boolean;
   onWonLine: () => void;
+  fileCounts?: Record<number, number>;
+  onOpenFiles?: (lineId: number) => void;
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -189,7 +194,18 @@ export default function BidLinesGrid({
                 ))}
                 <td className="px-2 py-1 font-mono-num whitespace-nowrap">{canSeePrices ? formatTotal(lineBidTotal(line)) : "—"}</td>
                 {canWrite ? (
-                  <td className="px-1 py-1">
+                  <td className="px-1 py-1 whitespace-nowrap">
+                    {onOpenFiles && line.id ? (
+                      <button
+                        type="button"
+                        className="text-xs inline-flex items-center gap-1 mr-2 text-muted-foreground hover:text-foreground"
+                        onClick={() => onOpenFiles(line.id!)}
+                        data-testid={`bid-line-files-${line.id}`}
+                      >
+                        <Paperclip className="h-3 w-3" />
+                        {fileCounts?.[line.id] ?? 0}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="text-xs text-destructive hover:underline"

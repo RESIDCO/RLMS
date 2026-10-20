@@ -1,3 +1,4 @@
+import { opportunityFileLineLabel } from "@shared/attachment-category";
 import {
   BID_PRICE_FIELDS,
   bidWinRate,
@@ -260,6 +261,28 @@ export async function listOpportunityLines(opportunityId: number, canSeePrices: 
   return (data ?? []).map((row) => presentLine(mapLine(row as Record<string, unknown>), canSeePrices));
 }
 
+export type OpportunityFileLine = {
+  id: number;
+  label: string;
+  deleted: boolean;
+};
+
+/** Live and soft-deleted lines, so a removed deal still shows its files. */
+export async function listOpportunityFileLines(opportunityId: number): Promise<OpportunityFileLine[]> {
+  const { data, error } = await supabaseAdmin
+    .from("opportunity_lines")
+    .select("id, seller_deal_ref, lessee_desc, deleted_at, sort_order")
+    .eq("opportunity_id", opportunityId)
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: Number(row.id),
+    label: opportunityFileLineLabel(String(row.seller_deal_ref ?? ""), row.lessee_desc == null ? null : String(row.lessee_desc)),
+    deleted: row.deleted_at != null,
+  }));
+}
+
 export async function saveOpportunityLines(
   opportunityId: number,
   body: { lines?: unknown; delete_ids?: unknown },
@@ -426,11 +449,13 @@ export async function listBidBoard(canSeePrices: boolean): Promise<BidCard[]> {
 export async function getBidOffering(id: number, canSeePrices: boolean): Promise<{
   opportunity: OpportunityRow & { seller_name: string | null; broker_name: string | null };
   lines: OpportunityLine[];
+  file_lines: OpportunityFileLine[];
 }> {
   const row = await requireOpportunity(id);
   const opportunity = mapOpportunityRow(row);
   const names = await companyNames([opportunity.seller_company_id ?? 0, opportunity.broker_company_id ?? 0]);
   const lines = await listOpportunityLines(id, canSeePrices);
+  const file_lines = await listOpportunityFileLines(id);
   return {
     opportunity: {
       ...opportunity,
@@ -438,6 +463,7 @@ export async function getBidOffering(id: number, canSeePrices: boolean): Promise
       broker_name: opportunity.broker_company_id ? names.get(opportunity.broker_company_id) ?? null : null,
     },
     lines,
+    file_lines,
   };
 }
 

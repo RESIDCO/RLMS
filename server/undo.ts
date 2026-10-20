@@ -15,6 +15,7 @@ import {
   type UndoConflict,
   type UndoLogRow,
 } from "@shared/undo";
+import { assertLineInsertUndoHasNoOutsideFiles } from "./crm-bid-attachments";
 
 function asRows(data: unknown): UndoLogRow[] {
   return ((data ?? []) as any[]).map((r) => ({
@@ -96,6 +97,8 @@ export async function previewUndo(group: string, actor: string) {
     throw err;
   }
 
+  await assertLineInsertUndoHasNoOutsideFiles(rows, group);
+
   const conflicts: UndoConflict[] = [];
   for (const r of rows) {
     if (!r.table_name || r.row_pk == null) {
@@ -146,6 +149,18 @@ export async function previewUndo(group: string, actor: string) {
   };
 }
 
+/** Storage is removed only when the undone activity is an attachments insert. */
+export function attachmentStoragePathsRemovedOnUndo(rows: Array<{
+  table_name?: string | null;
+  detail?: { op?: unknown; storage_path?: unknown } | null;
+  after?: { storage_path?: unknown } | null;
+}>): string[] {
+  return rows
+    .filter((row) => row.table_name === "attachments" && row.detail?.op === "insert")
+    .map((row) => String(row.after?.storage_path ?? row.detail?.storage_path ?? ""))
+    .filter(Boolean);
+}
+
 export async function applyUndo(group: string, actor: string) {
   const preview = await previewUndo(group, actor);
   if (!preview.ok) {
@@ -177,10 +192,10 @@ export async function applyUndo(group: string, actor: string) {
   }
 
   const rows = await loadChangeGroup(group);
-  const storagePaths = rows
-    .filter((r) => r.table_name === "attachments")
-    .map((r) => String(r.after?.storage_path ?? r.detail?.storage_path ?? ""))
-    .filter(Boolean);
+  // Only an undone insert created the object. Delete and recategorize keep it,
+  // so Undo can put the row back and the file still downloads. Lease-contract
+  // loads record detail.op = "insert", so those undos still remove the object.
+  const storagePaths = attachmentStoragePathsRemovedOnUndo(rows);
   if (storagePaths.length) {
     await supabaseAdmin.storage.from("rlms-attachments").remove(storagePaths);
   }

@@ -48,6 +48,7 @@ import {
   patchTerritoryOwner,
   revertTerritoryChangeSet,
 } from "./territories";
+import { attachmentDownloadHeaders } from "@shared/attachment-category";
 import {
   ACCOUNT_TRANSITIONS_SOURCE,
   genericUploadSource,
@@ -57,6 +58,14 @@ import {
   riderBelongsToAccount,
 } from "./attachments";
 import { assertAttachmentAccess } from "./attachment-access";
+import {
+  AttachmentHttpError,
+  deleteOpportunityAttachment,
+  filterAttachmentsByLine,
+  patchOpportunityAttachment,
+  pickAttachmentUploads,
+  uploadOpportunityFiles,
+} from "./crm-bid-attachments";
 import { persistOpsFlag, omitOpsFlagFields } from "./ops-flag-persist";
 import {
   MASTER_LEASE_DATE_KEYS,
@@ -4761,9 +4770,9 @@ export async function registerRoutes(
       if (dlErr || !fileBlob) throw dlErr ?? new Error("Could not download file from storage");
       const arrayBuffer = await fileBlob.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
-      const isPdf = att.file_name.toLowerCase().endsWith('.pdf');
-      res.setHeader('Content-Type', isPdf ? 'application/pdf' : (fileBlob.type || 'application/octet-stream'));
-      res.setHeader('Content-Disposition', isPdf ? `inline; filename="${att.file_name}"` : `attachment; filename="${att.file_name}"`);
+      const headers = attachmentDownloadHeaders(att.file_name, fileBlob.type || "application/octet-stream");
+      res.setHeader("Content-Type", headers.contentType);
+      res.setHeader("Content-Disposition", `${headers.disposition}; filename="${att.file_name}"`);
       res.setHeader('Content-Length', buffer.length);
       res.send(buffer);
     } catch (err) { errHandler(res, err); }
@@ -4784,14 +4793,24 @@ export async function registerRoutes(
         .eq("entity_id", entityId)
         .order("uploaded_at", { ascending: false });
       if (error) throw error;
-      res.json(data);
+      if (entityType === "opportunity") {
+        const line = Array.isArray(req.query.line) ? req.query.line[0] : req.query.line;
+        res.json(filterAttachmentsByLine(data ?? [], line));
+      } else {
+        res.json(data);
+      }
     } catch (err) { errHandler(res, err); }
   });
 
   // POST /api/attachments/:entityType/:entityId — upload a file
+  // Opportunity uploads may send several files (field "files") in one request.
+  // Every other entity still reads the single "file" field.
   app.post("/api/attachments/:entityType/:entityId",
-    upload.single("file"),
-    async (req: Request & { file?: Express.Multer.File }, res: Response) => {
+    upload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "files", maxCount: 20 },
+    ]),
+    async (req: Request, res: Response) => {
       try {
         const { entityType: entityTypeParam, entityId: entityIdParam } = req.params;
         const entityType = Array.isArray(entityTypeParam) ? entityTypeParam[0] ?? "" : entityTypeParam;
@@ -4803,7 +4822,29 @@ export async function registerRoutes(
         if (!writerId) return;
         const user = await getAuthUser(req);
         if (!user) return;
-        if (!req.file) return res.status(400).json({ error: "No file provided" });
+        const uploaded = pickAttachmentUploads(
+          req.files as { file?: Express.Multer.File[]; files?: Express.Multer.File[] } | undefined,
+          entityType,
+        );
+        if (entityType === "opportunity") {
+          try {
+            const result = await uploadOpportunityFiles({
+              opportunityId: parseInt(entityId, 10),
+              actor: writerId,
+              files: uploaded,
+              docCategory: (req.body as { doc_category?: unknown }).doc_category,
+              opportunityLineId: (req.body as { opportunity_line_id?: unknown }).opportunity_line_id,
+              notes: (req.body as { notes?: string }).notes ?? null,
+            });
+            res.status(201).json(result);
+          } catch (err) {
+            if (err instanceof AttachmentHttpError) return res.status(err.status).json({ error: err.message });
+            throw err;
+          }
+          return;
+        }
+        const file = uploaded[0];
+        if (!file) return res.status(400).json({ error: "No file provided" });
         const validTypes = ["master_lease", "rider", "railcar", "company", "company_contact", "opportunity"];
         if (!validTypes.includes(entityType) || !isAttachmentEntityType(entityType)) {
           return res.status(400).json({ error: "Invalid entity type" });
@@ -4813,13 +4854,13 @@ export async function registerRoutes(
         const source_module = genericUploadSource(entityType);
         // Build a unique storage path: entityType/entityId/timestamp-filename
         const ts = Date.now();
-        const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
         const storagePath = `${entityType}/${entityId}/${ts}-${safeName}`;
         // Upload to Supabase Storage using admin client
         const { error: uploadError } = await supabaseAdmin.storage
           .from(STORAGE_BUCKET)
-          .upload(storagePath, req.file.buffer, {
-            contentType: req.file.mimetype,
+          .upload(storagePath, file.buffer, {
+            contentType: file.mimetype,
             upsert: false,
           });
         if (uploadError) throw uploadError;
@@ -4829,9 +4870,9 @@ export async function registerRoutes(
           data = await insertAttachmentRow({
             entity_type: entityType as any,
             entity_id: parseInt(entityId, 10),
-            file_name: req.file.originalname,
-            file_size: req.file.size,
-            mime_type: req.file.mimetype,
+            file_name: file.originalname,
+            file_size: file.size,
+            mime_type: file.mimetype,
             storage_path: storagePath,
             uploaded_by: user.email ?? user.id,
             notes,
@@ -4850,7 +4891,7 @@ export async function registerRoutes(
             rider_id: entityType === "rider" ? eid : null,
             action: "attachment",
             actor: user.email ?? user.id,
-            detail: { file_name: req.file.originalname, notes },
+            detail: { file_name: file.originalname, notes },
             source_table: "attachments",
             source_id: data?.id ?? null,
           });
@@ -4868,12 +4909,22 @@ export async function registerRoutes(
       const { id } = req.params;
       const { data: att, error: fetchErr } = await supabase
         .from("attachments")
-        .select("storage_path, entity_type")
+        .select("*")
         .eq("id", id)
         .single();
       if (fetchErr || !att) return res.status(404).json({ error: "Attachment not found" });
       if (!(await assertAttachmentAccess(req, res, String(att.entity_type ?? "")))) return;
-      // Remove from storage first
+      if (att.entity_type === "opportunity") {
+        try {
+          const result = await deleteOpportunityAttachment(att as Record<string, unknown>, writerId);
+          res.json(result);
+        } catch (err) {
+          if (err instanceof AttachmentHttpError) return res.status(err.status).json({ error: err.message });
+          throw err;
+        }
+        return;
+      }
+      // Remove from storage first. Bid files skip this so Undo can restore the row.
       const { error: storageErr } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)
         .remove([att.storage_path]);
@@ -4882,6 +4933,33 @@ export async function registerRoutes(
       const { error: dbErr } = await supabase.from("attachments").delete().eq("id", id);
       if (dbErr) throw dbErr;
       res.json({ ok: true });
+    } catch (err) { errHandler(res, err); }
+  });
+
+  // PATCH /api/attachments/:id — bid category and deal line only
+  app.patch("/api/attachments/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { data: att, error: fetchErr } = await supabaseAdmin
+        .from("attachments")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!att) return res.status(404).json({ error: "Attachment not found" });
+      if (!(await assertAttachmentAccess(req, res, String(att.entity_type ?? "")))) return;
+      if (att.entity_type !== "opportunity") {
+        return res.status(404).json({ error: "Attachment not found" });
+      }
+      const writerId = await requireWrite(req, res);
+      if (!writerId) return;
+      try {
+        const result = await patchOpportunityAttachment(att as Record<string, unknown>, req.body ?? {}, writerId);
+        res.json(result);
+      } catch (err) {
+        if (err instanceof AttachmentHttpError) return res.status(err.status).json({ error: err.message });
+        throw err;
+      }
     } catch (err) { errHandler(res, err); }
   });
 

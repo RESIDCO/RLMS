@@ -1,3 +1,4 @@
+import type { OppDocCategory } from "@shared/attachment-category";
 import { supabaseAdmin } from "./supabase";
 import {
   ACCOUNT_TRANSITIONS_SOURCE,
@@ -14,6 +15,39 @@ export function isAttachmentEntityType(v: string): v is AttachmentEntityType {
   return (ATTACHMENT_ENTITY_TYPES as readonly string[]).includes(v);
 }
 
+export function attachmentInsertPayload(row: {
+  entity_type: AttachmentEntityType;
+  entity_id: number;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  storage_path: string;
+  uploaded_by: string | null;
+  notes: string | null;
+  source_module: AttachmentSourceModule;
+  doc_category?: OppDocCategory | null;
+  opportunity_line_id?: number | null;
+}): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    entity_type: row.entity_type,
+    entity_id: row.entity_id,
+    file_name: row.file_name,
+    file_size: row.file_size,
+    mime_type: row.mime_type,
+    storage_path: row.storage_path,
+    uploaded_by: row.uploaded_by,
+    notes: row.notes,
+    source_module: row.source_module,
+  };
+  // Only bid files write the new columns. Other callers keep today's insert body,
+  // so the columns stay null and Lease Management uploads do not send them.
+  if (row.entity_type === "opportunity") {
+    payload.doc_category = row.doc_category ?? "other";
+    payload.opportunity_line_id = row.opportunity_line_id ?? null;
+  }
+  return payload;
+}
+
 export async function insertAttachmentRow(row: {
   entity_type: AttachmentEntityType;
   entity_id: number;
@@ -24,20 +58,12 @@ export async function insertAttachmentRow(row: {
   uploaded_by: string | null;
   notes: string | null;
   source_module: AttachmentSourceModule;
+  doc_category?: OppDocCategory | null;
+  opportunity_line_id?: number | null;
 }) {
   const { data, error } = await supabaseAdmin
     .from("attachments")
-    .insert({
-      entity_type: row.entity_type,
-      entity_id: row.entity_id,
-      file_name: row.file_name,
-      file_size: row.file_size,
-      mime_type: row.mime_type,
-      storage_path: row.storage_path,
-      uploaded_by: row.uploaded_by,
-      notes: row.notes,
-      source_module: row.source_module,
-    })
+    .insert(attachmentInsertPayload(row))
     .select()
     .single();
   if (error) throw error;

@@ -6,7 +6,9 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ActivityDialog from "@/components/crm/ActivityDialog";
 import BidLinesGrid, { type BidLine } from "@/components/crm/BidLinesGrid";
 import OpportunityDialog from "@/components/crm/OpportunityDialog";
+import { opportunityFilesQueryKey, type OpportunityAttachment, type OpportunityFileLine } from "@/components/OpportunityFiles";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
@@ -16,6 +18,7 @@ import { acquiredLeaseTable, bidStageLabel, leaseWizardHref, type OpportunityRow
 type Offering = {
   opportunity: OpportunityRow & { seller_name?: string | null; broker_name?: string | null };
   lines: BidLine[];
+  file_lines?: OpportunityFileLine[];
 };
 
 type TimelineItem = { id: string; occurred_at: string; kind: string; body: string; actor: string | null };
@@ -27,6 +30,7 @@ export default function BidOfferingPage() {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [filesLineId, setFilesLineId] = useState<number | null>(null);
   const offering = useQuery({
     queryKey: ["/api/opportunities", id, "bid"],
     queryFn: () => apiGet<Offering>(`/api/opportunities/${id}/bid`),
@@ -37,8 +41,24 @@ export default function BidOfferingPage() {
     queryFn: () => apiGet<TimelineItem[]>(`/api/opportunities/${id}/timeline`),
     enabled: Number.isFinite(id) && id > 0,
   });
+  const files = useQuery({
+    queryKey: opportunityFilesQueryKey(id),
+    queryFn: () => apiGet<OpportunityAttachment[]>(`/api/attachments/opportunity/${id}`),
+    enabled: canWrite && Number.isFinite(id) && id > 0,
+  });
   const opp = offering.data?.opportunity;
   const lines = offering.data?.lines ?? [];
+  const fileLines: OpportunityFileLine[] = offering.data?.file_lines ?? lines.filter((line) => line.id).map((line) => ({
+    id: line.id!,
+    label: [line.seller_deal_ref, line.lessee_desc].filter(Boolean).join(" – "),
+    deleted: false,
+  }));
+  const fileCounts: Record<number, number> = {};
+  for (const file of files.data ?? []) {
+    if (file.opportunity_line_id != null) {
+      fileCounts[file.opportunity_line_id] = (fileCounts[file.opportunity_line_id] ?? 0) + 1;
+    }
+  }
   const wonLines = lines.filter((line) => line.outcome === "won");
   const title = opp?.offering_name || opp?.seller_name || (opp ? `Opportunity ${opp.id}` : "Offering");
 
@@ -75,12 +95,14 @@ export default function BidOfferingPage() {
                 canSeePrices={canWrite}
                 parentIsWon={opp.stage === "won"}
                 onWonLine={() => toast({ title: "Mark offering Won?" })}
+                fileCounts={fileCounts}
+                onOpenFiles={canWrite ? setFilesLineId : undefined}
               />
               {opp.stage === "won" ? <WonPanel opportunity={opp} lines={wonLines} canSeePrices={canWrite} /> : null}
             </TabsContent>
             {canWrite ? (
               <TabsContent value="files" className="mt-4">
-                <AttachmentsPanel entityType="opportunity" entityId={opp.id} />
+                <AttachmentsPanel entityType="opportunity" entityId={opp.id} lines={fileLines} />
               </TabsContent>
             ) : null}
             <TabsContent value="timeline" className="mt-4 space-y-3">
@@ -100,6 +122,19 @@ export default function BidOfferingPage() {
       </div>
       {opp ? (
         <OpportunityDialog open={editing} onOpenChange={setEditing} canWrite={canWrite} editing={opp} accountId={opp.account_id} accountName={opp.account_name ?? undefined} />
+      ) : null}
+      {opp && filesLineId != null ? (
+        <Dialog open onOpenChange={(open) => { if (!open) setFilesLineId(null); }}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Deal files</DialogTitle>
+              <DialogDescription>
+                {fileLines.find((line) => line.id === filesLineId)?.label ?? "This deal"}
+              </DialogDescription>
+            </DialogHeader>
+            <AttachmentsPanel entityType="opportunity" entityId={opp.id} lines={fileLines} lineId={filesLineId} />
+          </DialogContent>
+        </Dialog>
       ) : null}
       {opp ? (
         <ActivityDialog

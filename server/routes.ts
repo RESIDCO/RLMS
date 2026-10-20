@@ -81,7 +81,7 @@ import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates
 import { pickRow } from "@shared/change-log";
 import { diffProgramPatch } from "@shared/program-patch";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
-import { appendNotesInGroup, stripNotesField, withNoteReport } from "./append-note";
+import { appendNotesInGroup, normalizeAppendNote, stripNotesField, withNoteReport } from "./append-note";
 import { listLineage } from "./lineage-read";
 import { applyUndo, eligibleUndo, previewUndo, resolveUndoGroup } from "./undo";
 import { recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
@@ -1949,13 +1949,22 @@ export async function registerRoutes(
       } catch (e: any) {
         console.warn("[railcars] recompute after insert:", e?.message ?? e);
       }
-      const noteReport = await appendNotesInGroup({
-        entityType: "railcar",
-        ids: [Number(data.id)],
-        note: req.body?.append_note,
-        actor: writerId,
+      const created = hydrateOpsFlag({ ...data, ops_flag: flag ?? null });
+      const createNote = req.body?.append_note;
+      if (!normalizeAppendNote(createNote)) {
+        res.json(created);
+        return;
+      }
+      const noted = await withChangeGroupResult(writerId, async () => {
+        const noteReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: [Number(data.id)],
+          note: createNote,
+          actor: writerId,
+        });
+        return withNoteReport(created, createNote, noteReport);
       });
-      res.json(withNoteReport(hydrateOpsFlag({ ...data, ops_flag: flag ?? null }), req.body?.append_note, noteReport));
+      res.json(noted);
     } catch (err) {
       errHandler(res, err);
     }
@@ -2531,13 +2540,21 @@ export async function registerRoutes(
         .select()
         .single();
       if (error) throw error;
-      const noteReport = await appendNotesInGroup({
-        entityType: "rider",
-        ids: [Number(data.id)],
-        note: req.body?.append_note,
-        actor: writerId,
+      const createNote = req.body?.append_note;
+      if (!normalizeAppendNote(createNote)) {
+        res.json(data);
+        return;
+      }
+      const noted = await withChangeGroupResult(writerId, async () => {
+        const noteReport = await appendNotesInGroup({
+          entityType: "rider",
+          ids: [Number(data.id)],
+          note: createNote,
+          actor: writerId,
+        });
+        return withNoteReport(data, createNote, noteReport);
       });
-      res.json(withNoteReport(data, req.body?.append_note, noteReport));
+      res.json(noted);
     } catch (err) {
       errHandler(res, err);
     }

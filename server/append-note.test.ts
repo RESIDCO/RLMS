@@ -103,11 +103,53 @@ ok(
 );
 
 const inactivateStart = inactivateSrc.indexOf("export async function applyInactivate");
-const inactivateFn = inactivateSrc.slice(inactivateStart, inactivateStart + 2500);
+const inactivateFn = inactivateSrc.slice(inactivateStart, inactivateStart + 3200);
 ok(
   inactivateFn.indexOf("appendNotesInGroup") < inactivateFn.indexOf("inactivate_railcars"),
   "inactivate notes the cars before the freeze",
 );
+ok(
+  inactivateFn.indexOf("inactivate_railcars") < inactivateFn.indexOf("rollbackInactivateNote"),
+  "inactivate rolls the note back when the freeze fails",
+);
+
+const rentSrc = readFileSync(resolve(root, "server/rent-start.ts"), "utf8");
+const rentFnStart = rentSrc.indexOf("export async function setRentStartDate");
+const rentFnEnd = rentSrc.indexOf("export async function previewBulkRentStart");
+const rentFn = rentSrc.slice(rentFnStart, rentFnEnd);
+ok(!rentFn.includes("recordChange"), "rent start does not record the assignment change");
+ok(
+  rentFn.indexOf("railcar_assignments") < rentFn.indexOf("withChangeGroupResult") &&
+    rentFn.indexOf("withChangeGroupResult") < rentFn.indexOf("appendNotesInGroup"),
+  "rent start groups only the appended note",
+);
+const bulkRentStart = rentSrc.indexOf("export async function applyBulkRentStart");
+const bulkRentFn = rentSrc.slice(bulkRentStart, bulkRentStart + 900);
+ok(
+  bulkRentFn.indexOf("setRentStartDate") < bulkRentFn.indexOf("withChangeGroupResult"),
+  "bulk rent start writes dates before opening the note group",
+);
+
+const postRailStart = routesSrc.indexOf('app.post("/api/railcars"');
+const postRail = routesSrc.slice(postRailStart, routesSrc.indexOf('app.patch("/api/railcars/:id"'));
+ok(
+  postRail.indexOf("withChangeGroupResult") < postRail.indexOf("appendNotesInGroup"),
+  "POST /api/railcars appends the note inside a change group",
+);
+const postRiderStart = routesSrc.indexOf('app.post("/api/riders"');
+const postRider = routesSrc.slice(postRiderStart, routesSrc.indexOf('app.patch("/api/riders/:id"'));
+ok(
+  postRider.indexOf("withChangeGroupResult") < postRider.indexOf("appendNotesInGroup"),
+  "POST /api/riders appends the note inside a change group",
+);
+
+const commitmentSrc = readFileSync(resolve(root, "server/commitment.ts"), "utf8");
+const soldStart = commitmentSrc.indexOf("export async function applyMarkSold");
+const soldFn = commitmentSrc.slice(soldStart, commitmentSrc.indexOf("export async function previewRemoveSold"));
+ok(!soldFn.includes("rejected_inactive"), "mark sold notes only the active preview cars");
+const unsoldStart = commitmentSrc.indexOf("export async function applyRemoveSold");
+const unsoldFn = commitmentSrc.slice(unsoldStart, commitmentSrc.indexOf("export async function previewClassifySale"));
+ok(!unsoldFn.includes("rejected_inactive"), "remove sold notes only the active preview ids");
 
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

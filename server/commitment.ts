@@ -1005,10 +1005,7 @@ export async function applyMarkSold(
       });
       updated += 1;
     }
-    const noteIds = [
-      ...(preview.cars ?? []).map((car: { id?: number }) => Number(car.id)),
-      ...(preview.rejected_inactive ?? []).map((car: { id?: number }) => Number(car.id)),
-    ];
+    const noteIds = (preview.cars ?? []).map((car: { id?: number }) => Number(car.id));
     const noteReport = await appendNotesInGroup({
       entityType: "railcar",
       ids: noteIds,
@@ -1083,10 +1080,7 @@ export async function applyRemoveSold(previewToken: string, actor: string, appen
       });
       updated += 1;
     }
-    const noteIds = [
-      ...(preview.ids ?? []).map((id: number) => Number(id)),
-      ...(preview.rejected_inactive ?? []).map((car: { id?: number }) => Number(car.id)),
-    ];
+    const noteIds = (preview.ids ?? []).map((id: number) => Number(id));
     const noteReport = await appendNotesInGroup({
       entityType: "railcar",
       ids: noteIds,

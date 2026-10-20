@@ -1,8 +1,7 @@
 import type { Express, Request, Response } from "express";
-import { pickRow } from "@shared/change-log";
 import { supabaseAdmin } from "./supabase";
-import { appendNotesInGroup, withNoteReport } from "./append-note";
-import { recordChange, withChangeGroupResult } from "./change-log";
+import { appendNotesInGroup, normalizeAppendNote, withNoteReport } from "./append-note";
+import { withChangeGroupResult } from "./change-log";
 import { getPreview, putPreview, recomputeStatus } from "./commitment";
 import { annotateKpiDelta } from "./kpi-delta";
 import {
@@ -75,45 +74,36 @@ export async function setRentStartDate(
   if (!onOlOf(car, rider?.rider_name, assignment)) {
     throw Object.assign(new Error("not on OL"), { status: 400, code: "not_on_ol" });
   }
-  const prior = pickRow(assignment as Record<string, unknown>, ["rent_start_date", "rent_start_set_by", "rent_start_set_at"]);
+  const patch = {
+    rent_start_date: date,
+    rent_start_set_by: actor,
+    rent_start_set_at: new Date().toISOString(),
+  };
+  const { error } = await supabaseAdmin.from("railcar_assignments").update(patch).eq("id", assignment.id);
+  if (error) throw error;
+  await logRentStartHistory(railcarId, assignment, actor, date);
+  await recomputeStatus(railcarId);
+  const off = !(date && date <= new Date().toISOString().slice(0, 10));
+  const result = {
+    railcar_id: railcarId,
+    rent_start_date: date,
+    derived_status: derivedFleetStatus({
+      sold: false,
+      offRent: off,
+      onOl: true,
+      hasOpenCommitment: false,
+    }),
+  };
+  // The date write is not undoable. Only an appended note joins a change group.
+  if (!normalizeAppendNote(appendNote)) return result;
   return withChangeGroupResult(actor, async () => {
-    const patch = {
-      rent_start_date: date,
-      rent_start_set_by: actor,
-      rent_start_set_at: new Date().toISOString(),
-    };
-    const { error } = await supabaseAdmin.from("railcar_assignments").update(patch).eq("id", assignment.id);
-    if (error) throw error;
-    await recordChange({
-      table: "railcar_assignments",
-      pk: Number(assignment.id),
-      before: prior,
-      after: patch,
-      action: "rent_start",
-      entity_type: "railcar",
-      entity_id: railcarId,
-      railcar_id: railcarId,
-      actor,
-    });
-    await logRentStartHistory(railcarId, assignment, actor, date);
-    await recomputeStatus(railcarId);
-    const off = !(date && date <= new Date().toISOString().slice(0, 10));
     const noteReport = await appendNotesInGroup({
       entityType: "railcar",
       ids: [railcarId],
       note: appendNote,
       actor,
     });
-    return withNoteReport({
-      railcar_id: railcarId,
-      rent_start_date: date,
-      derived_status: derivedFleetStatus({
-        sold: false,
-        offRent: off,
-        onOl: true,
-        hasOpenCommitment: false,
-      }),
-    }, appendNote, noteReport);
+    return withNoteReport(result, appendNote, noteReport);
   });
 }
 
@@ -261,21 +251,23 @@ export async function previewBulkRentStart(
 
 export async function applyBulkRentStart(previewToken: string, actor: string, appendNote?: unknown) {
   const preview = await getPreview("rent_start", previewToken);
+  const written = [];
+  const ids: number[] = [];
+  for (const row of preview.write_ids ?? []) {
+    const result = await setRentStartDate(row.id, row.new_date, actor);
+    written.push(result);
+    ids.push(Number(row.id));
+  }
+  const base = { written: written.length, rows: written };
+  if (!normalizeAppendNote(appendNote)) return base;
   return withChangeGroupResult(actor, async () => {
-    const written = [];
-    const ids: number[] = [];
-    for (const row of preview.write_ids ?? []) {
-      const result = await setRentStartDate(row.id, row.new_date, actor);
-      written.push(result);
-      ids.push(Number(row.id));
-    }
     const noteReport = await appendNotesInGroup({
       entityType: "railcar",
       ids,
       note: appendNote,
       actor,
     });
-    return withNoteReport({ written: written.length, rows: written }, appendNote, noteReport);
+    return withNoteReport(base, appendNote, noteReport);
   });
 }
 

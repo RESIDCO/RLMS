@@ -10,6 +10,7 @@ import {
 import { appendNotesInGroup, normalizeAppendNote, withNoteReport } from "./append-note";
 import { withChangeGroupResult } from "./change-log";
 import { supabaseAdmin } from "./supabase";
+import { applyUndo } from "./undo";
 
 const CHUNK = 200;
 
@@ -173,6 +174,22 @@ export async function previewInactivate(
   return summarizeInactivate(rows);
 }
 
+/** Notes are written while cars are still active. Undo them if the freeze itself fails. */
+async function rollbackInactivateNote(
+  noted: { appended: number[]; change_group: string } | null,
+  actor: string,
+) {
+  if (!noted || noted.appended.length === 0) return;
+  try {
+    await applyUndo(noted.change_group, actor);
+  } catch (undoErr) {
+    console.warn(
+      "[inactivate] note rollback failed:",
+      undoErr instanceof Error ? undoErr.message : undoErr,
+    );
+  }
+}
+
 export async function applyInactivate(opts: {
   ids: number[];
   mode: "all" | "good";
@@ -211,6 +228,7 @@ export async function applyInactivate(opts: {
     p_end_date: endDate,
   });
   if (error) {
+    await rollbackInactivateNote(noted, opts.actor);
     const message = String(error.message ?? error);
     if (/inactivate_railcars/i.test(message) && /schema cache|does not exist|could not find|function/i.test(message)) {
       throw httpError(503, "Inactivate is not available until migrations/20261114_inactivate_railcars.sql is applied.");
@@ -218,7 +236,10 @@ export async function applyInactivate(opts: {
     throw error;
   }
   const out = (data ?? {}) as { ok?: boolean; error?: string; change_group?: string; applied?: number; closed_assignments?: number };
-  if (!out.ok) throw httpError(400, out.error || "Inactivate failed");
+  if (!out.ok) {
+    await rollbackInactivateNote(noted, opts.actor);
+    throw httpError(400, out.error || "Inactivate failed");
+  }
   const base = {
     ok: true as const,
     change_group: String(out.change_group),

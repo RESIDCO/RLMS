@@ -4,10 +4,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { PURCHASE_TYPE } from "@shared/crm-bid";
-import { opportunityAttachmentForbidden } from "./attachment-access";
 import { applyBidRules, readBidWrite } from "./crm-bid";
 import { CrmHttpError } from "./crm-error";
-import { presentLine, type OpportunityLine } from "./crm-bid-lines";
+
+process.env.SUPABASE_URL ??= "http://127.0.0.1:54321";
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 let passed = 0;
 let failed = 0;
@@ -63,7 +64,10 @@ try {
 }
 ok(rejected, "unknown flavor is rejected");
 
-const priced: OpportunityLine = {
+const { presentLine } = await import("./crm-bid-lines");
+const { opportunityAttachmentForbidden } = await import("./attachment-access");
+
+const priced = {
   id: 1,
   opportunity_id: 1,
   seller_deal_ref: "1",

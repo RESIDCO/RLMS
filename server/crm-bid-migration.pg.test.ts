@@ -61,7 +61,9 @@ function run(cmd: string, args: string[], input?: string): { status: number; std
 function psql(sql: string, database = "bid"): string {
   const res = run(bin("psql"), ["-h", sock, "-p", port, "-U", "postgres", "-d", database, "-v", "ON_ERROR_STOP=1", "-tA", "-c", sql]);
   if (res.status !== 0) throw new Error(res.stderr || res.stdout);
-  return res.stdout.trim();
+  const lines = res.stdout.split("\n").map((row) => row.trim()).filter(Boolean);
+  const data = lines.filter((row) => !/^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT|REVOKE|DO|SET|RESET|TRUNCATE)\b/.test(row));
+  return (data.length ? data : lines).join("\n");
 }
 
 function psqlFile(file: string): void {

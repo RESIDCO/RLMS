@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { compactSearch, matchesSearchQuery } from "@/lib/search-match";
 
@@ -166,11 +167,18 @@ export function RiderFreeTextInput({
   );
 }
 
-/** Resolve free-text label via API (match existing or create). */
+/** Match an existing rider. Does not create one. */
 export async function resolveRiderLabel(
   label: string
-): Promise<{ id: number; rider_name: string; created: boolean }> {
-  const { apiRequest } = await import("@/lib/queryClient");
+): Promise<{ id: number; rider_name: string; created: boolean; change_group?: string | null }> {
   const res = await apiRequest("POST", "/api/riders/resolve", { label: label.trim() });
+  return res.json();
+}
+
+/** Explicit lease create. This is the only resolve call that inserts an Ad Hoc rider. */
+export async function createRiderLease(
+  label: string
+): Promise<{ id: number; rider_name: string; created: boolean; change_group?: string | null }> {
+  const res = await apiRequest("POST", "/api/riders/resolve", { label: label.trim(), create: true });
   return res.json();
 }

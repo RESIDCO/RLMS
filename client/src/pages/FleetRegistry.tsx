@@ -13,6 +13,8 @@ import { carListSearchTokens } from "@shared/programs";
 import { RAILCARS_HANDOFF_KEY, markSearchRefresh } from "@/lib/searchState";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { ReassignCarForm } from "@/components/ReassignCarForm";
+import { MoveCarsDialog } from "@/components/MoveCarsDialog";
+import { idsEligibleForMove } from "@shared/move-plan";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -459,6 +461,8 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const [flagFilter, setFlagFilter] = useState<string>("all");
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveCarIds, setMoveCarIds] = useState<number[]>([]);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [pasteOnPage, setPasteOnPage] = useState(false);
   const [pasteMatch, setPasteMatch] = useState<{ ids: number[]; unmatched: string[]; tokenCount: number } | null>(null);
@@ -497,7 +501,6 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const [inactivateIds, setInactivateIds] = useState<number[] | null>(null);
   const [bulkFleetStatusPending, setBulkFleetStatusPending] = useState(false);
   const [selectingAllMatching, setSelectingAllMatching] = useState(false);
-  const [bulkRiderPending, setBulkRiderPending] = useState(false);
   const [bulkTransitPending, setBulkTransitPending] = useState(false);
   const [bulkValuesOpen, setBulkValuesOpen] = useState(false);
   const [bulkNbv, setBulkNbv] = useState("");
@@ -977,37 +980,6 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       toast({ title: "Update failed", description: err.message, variant: "destructive" });
     } finally {
       setBulkValuesPending(false);
-    }
-  };
-
-  const bulkAssignRider = async (riderId: number, riderName: string) => {
-    const ids = Array.from(selectedIds);
-    const ok = await confirmSave({
-      title: `Assign ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""} to rider ${riderName}?`,
-      description: "This reassigns the internal rider/schedule bucket. Lessee, Rider, and Lease on the list come from the car record and may not change.",
-    });
-    if (!ok) return;
-    setBulkRiderPending(true);
-    try {
-      await Promise.all(
-        ids.map((id) =>
-          apiRequest("POST", "/api/move", {
-            car_ids: [id],
-            to_rider_id: riderId,
-            moved_by: "bulk-action",
-            reason: "Bulk assignment from Railcars",
-          })
-        )
-      );
-      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/history"] });
-      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} moved to "${riderName}"` });
-      clearSelection();
-    } catch (e: any) {
-      toast({ title: "Bulk move failed", description: e.message, variant: "destructive" });
-    } finally {
-      setBulkRiderPending(false);
     }
   };
 
@@ -1670,21 +1642,28 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <SearchableSelect
-                value=""
-                actionMode
-                disabled={bulkRiderPending || selectionTouchesFrozen}
-                onChange={(v) => {
-                  const r = (riders ?? []).find((x: any) => String(x.id) === v);
-                  if (r) bulkAssignRider(r.id, r.rider_name);
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="bulk-move-cars"
+                onClick={() => {
+                  const known = filtered.filter((row) => selectedIds.has(row.id));
+                  const picked = idsEligibleForMove(selectedIds, known);
+                  if (!picked.ids.length) {
+                    toast({ title: "Inactive cars were left alone" });
+                    return;
+                  }
+                  if (picked.skippedInactive > 0) {
+                    toast({
+                      title: `${picked.skippedInactive} inactive car${picked.skippedInactive === 1 ? "" : "s"} left out of this move`,
+                    });
+                  }
+                  setMoveCarIds(picked.ids);
+                  setMoveOpen(true);
                 }}
-                options={riderOptions}
-                placeholder="Assign to Rider"
-                searchPlaceholder="Type OL number or lessee…"
-                emptyText="No riders match."
-                testId="bulk-assign-dropdown"
-                triggerClassName="h-8 w-auto min-w-[160px]"
-              />
+              >
+                Move…
+              </Button>
               {/* Bulk NBV / OAC */}
               <Button
                 variant="outline"
@@ -1927,6 +1906,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         onClose={() => setAddOpen(false)}
         car={null}
       />
+      <MoveCarsDialog open={moveOpen} onOpenChange={setMoveOpen} carIds={moveCarIds} />
       {workbenchOpen ? (
         <BulkEditDrawer
           railcarIds={[...selectedIds]}

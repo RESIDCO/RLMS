@@ -219,7 +219,7 @@ export default function HistoryPage() {
           </div>
         )}
 
-        <ActivityTimeline q={q || undefined} compact showSearchHint={!showResolved} />
+        <ActivityTimeline q={q || undefined} compact showSearchHint={!showResolved} usDates />
       </div>
 
       <RailcarDetailSheet carId={sheetCarId} onClose={() => setSheetCarId(null)} />

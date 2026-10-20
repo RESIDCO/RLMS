@@ -1,7 +1,6 @@
 import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { formatUsDate } from "@shared/display-date";
 import { useCanEdit } from "@/lib/AuthContext";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -115,7 +114,8 @@ interface InvoiceDetail extends Invoice {
 const fmt$ = (v: number | null | undefined) =>
   v == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(v);
 
-const fmtDate = (d: string | null | undefined) => (d ? (formatUsDate(d) || "—") : "—");
+const fmtDate = (d: string | null | undefined) =>
+  d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
 function daysOverdue(dueDate: string | null): number {
   if (!dueDate) return 0;

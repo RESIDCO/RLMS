@@ -83,6 +83,7 @@ export default function ActivityTimeline({
   title = "Activity",
   showSearchHint = false,
   compact = false,
+  usDates = false,
 }: {
   railcarId?: number;
   riderId?: number;
@@ -91,6 +92,8 @@ export default function ActivityTimeline({
   title?: string;
   showSearchHint?: boolean;
   compact?: boolean;
+  /** Lineage asks for MM/DD/YYYY h:mm ET. Other callers keep their existing clock. */
+  usDates?: boolean;
 }) {
   const { toast } = useToast();
   const [filter, setFilter] = useState<string>("all");
@@ -192,7 +195,7 @@ export default function ActivityTimeline({
             return (
               <li key={ev.id} className={cn("text-xs border-l-2 pl-3 py-1", accentClass(ev.action))}>
                 <div className="font-mono-num text-muted-foreground">
-                  {when ? (formatUsDateTimeEt(when) || "—") : "—"}
+                  {when ? (usDates ? (formatUsDateTimeEt(when) || "—") : new Date(when).toLocaleString()) : "—"}
                   {ev.actor ? <span> — {ev.actor}</span> : null}
                 </div>
                 <div className="mt-0.5 font-medium">

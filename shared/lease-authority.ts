@@ -9,7 +9,6 @@
  * rider_external_id.
  */
 
-import { formatUsDate } from "./display-date";
 import { isIndefiniteEndDate } from "./vcf-import";
 
 function genuineEndDate(iso: string): string | null {
@@ -103,10 +102,13 @@ export function estimatedExpiryDateFromAssetMonths(
   return formatIsoDateOnly(d);
 }
 
-/** Format a YYYY-MM-DD (or timestamp) as MM/DD/YYYY. Timestamps use the Eastern calendar day. */
+/** Format a YYYY-MM-DD (or timestamp) as a calendar date without UTC shift. */
 export function formatCalendarDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return formatUsDate(iso) || "—";
+  const s = String(iso).trim().slice(0, 10);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00`) : new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 
 export function formatAssetReportMonth(iso: string | null | undefined): string {

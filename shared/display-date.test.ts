@@ -1,5 +1,4 @@
 /** Run: npx tsx shared/display-date.test.ts */
-import { formatCalendarDate } from "./lease-authority";
 import { formatUsDate, formatUsDateTimeEt, hasClockTime } from "./display-date";
 
 let passed = 0;
@@ -15,8 +14,6 @@ function ok(cond: boolean, label: string) {
 ok(formatUsDate("2026-10-20") === "10/20/2026", "date-only is MM/DD/YYYY and does not shift a day");
 ok(formatUsDate("2026-01-05") === "01/05/2026", "month and day are zero-padded");
 ok(formatUsDate("") === "" && formatUsDate(null) === "", "blank date stays blank");
-ok(formatCalendarDate("2026-10-20") === "10/20/2026", "shared calendar formatter is MM/DD/YYYY");
-ok(formatCalendarDate(null) === "—", "missing calendar date is an em dash");
 
 const stamped = formatUsDateTimeEt("2026-10-20T16:30:00.000Z");
 ok(stamped === "10/20/2026 12:30 PM ET", `timestamp is Eastern and labeled ET (${stamped})`);

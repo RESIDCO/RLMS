@@ -66,7 +66,6 @@ import { activeFieldDefs } from "@shared/manage-columns";
 import { formatMoneyCell, isProgramMoneyField, moneyNumber, parseUsdInput } from "@shared/money";
 import { programCarMatchesQuery } from "@shared/program-car-filter";
 import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates";
-import { formatUsDateTimeEt } from "@shared/display-date";
 import { diffProgramPatch } from "@shared/program-patch";
 import { isCompleteProgramStatus, mergeProgramStatusOptions, statusLeavesComplete } from "@shared/program-status";
 import { GLOBAL_PROGRAM_CAR_COLUMN_ORDER } from "@shared/program-tracker-sync";
@@ -1804,7 +1803,7 @@ function ActivityList({
         const canUndoCar = Boolean(onUndoCar && detail.source === "program_tracker_sync" && detail.fields);
         return (
           <li key={a.id} className="text-xs border-l-2 border-primary/40 pl-3 py-1">
-            <div className="text-muted-foreground font-mono-num">{formatUsDateTimeEt(a.created_at) || "—"}</div>
+            <div className="text-muted-foreground font-mono-num">{new Date(a.created_at).toLocaleString()}</div>
             <div className="flex items-center gap-2">
               <span>{formatActivity(a)}</span>
               {canUndoCar ? (

@@ -1,5 +1,3 @@
-import { formatUsDate, formatUsDateTimeEt, hasClockTime } from "@shared/display-date";
-
 export function fmtUsd(n: number | null | undefined, opts?: { showZero?: boolean }): string {
   if (n == null || (!opts?.showZero && n === 0)) return "—";
   return new Intl.NumberFormat("en-US", {
@@ -22,10 +20,8 @@ export function fmtInt(n: number | null | undefined): string {
 
 export function fmtDate(d: string | Date | null | undefined): string {
   if (!d) return "—";
-  const formatted = hasClockTime(d) && !(typeof d === "string" && d.length === 10)
-    ? formatUsDateTimeEt(d)
-    : formatUsDate(d);
-  return formatted || "—";
+  const dt = typeof d === "string" ? new Date(d + (d.length === 10 ? "T00:00:00" : "")) : d;
+  return dt.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
 export function quarterLabel(qc: number | null | undefined): string {

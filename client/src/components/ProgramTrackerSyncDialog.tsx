@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { formatUsDateTimeEt } from "@shared/display-date";
 
 type PreviewGroup = {
   program: string;
@@ -106,7 +105,7 @@ export function ProgramTrackerSyncDialog({ open, onClose }: { open: boolean; onC
           {preview && (
             <>
               <div className="text-xs text-muted-foreground">
-                {preview.writes} writes · {preview.reviews.length} to review · {preview.inactive_skipped} inactive cars skipped · expires {formatUsDateTimeEt(preview.expires_at) || "—"}
+                {preview.writes} writes · {preview.reviews.length} to review · {preview.inactive_skipped} inactive cars skipped · expires {new Date(preview.expires_at).toLocaleString()}
               </div>
               {preview.shops.length > 0 && (
                 <div className="text-xs">New shops: {preview.shops.map((s) => s.name).join(", ")}</div>

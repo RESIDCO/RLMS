@@ -1,4 +1,3 @@
-import { formatUsDate } from "./display-date";
 import { parseIsoDateOnly } from "./lease-authority";
 
 /**
@@ -29,7 +28,7 @@ export function formatBuiltDisplay(car: {
   const iso = String(car.build_date ?? "").trim().slice(0, 10);
   const d = parseIsoDateOnly(iso);
   if (d) {
-    return formatUsDate(iso) || "—";
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
   }
   const year = carBuildYear(car);
   return year != null ? String(year) : "—";

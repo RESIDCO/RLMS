@@ -18,7 +18,6 @@ import { confirmSave } from "@/components/ConfirmActionDialog";
 import { useLocation } from "wouter";
 import type { AbCodeRow, CarDepRateRow, DvResult, EquipmentType, RailcarRow, CalculationPayload } from "@/lib/dv/types";
 import { fmtUsd, fmtPct, fmtDate, quarterLabel, fmtInt } from "@/lib/dv/format";
-import { formatUsDateTimeEt } from "@shared/display-date";
 import { shareCalculationPdf, canNativeShareFiles } from "@/lib/dv/pdf";
 import {
   isMaterialCompositionMissing,
@@ -579,7 +578,7 @@ function PreviewCard({ preview, error, form }: { preview: DvResult | null; error
           <div><strong>{form.carInitial || "—"} {form.carNumber || "—"}</strong></div>
           <div>{form.railroad || "—"} · DDCT {form.ddctNumber || "—"}</div>
           <div>Incident: {form.incidentDate ? fmtDate(form.incidentDate) : "—"}{form.incidentLocation ? ` · ${form.incidentLocation}` : ""}</div>
-          <div>Generated: {formatUsDateTimeEt(new Date())}</div>
+          <div>Generated: {new Date().toLocaleString()}</div>
         </div>
       </div>
 

@@ -15,6 +15,7 @@ import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTex
 import { ReassignCarForm } from "@/components/ReassignCarForm";
 import { MoveCarsDialog } from "@/components/MoveCarsDialog";
 import { idsEligibleForMove } from "@shared/move-plan";
+import { fleetMoveLaunch } from "@shared/move-legacy";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -369,6 +370,8 @@ function parseFleetQuery(searchStr: string): {
   transit: string;
   batch: string;
   needsCompletion: string;
+  riderId: string;
+  openMove: boolean;
 } {
   const fromWouter = new URLSearchParams(String(searchStr || "").replace(/^\?/, ""));
   const hash = typeof window !== "undefined" ? window.location.hash : "";
@@ -408,6 +411,7 @@ function parseFleetQuery(searchStr: string): {
     Number.isFinite(turning50Raw) && turning50Raw >= 1900 && turning50Raw <= 2100
       ? turning50Raw
       : null;
+  const launch = fleetMoveLaunch(qs.toString());
   return {
     assigned,
     entity,
@@ -422,6 +426,8 @@ function parseFleetQuery(searchStr: string): {
         : qs.get("needs_completion") === "no"
           ? "no"
           : "all",
+    riderId: launch.riderId,
+    openMove: launch.openMove,
   };
 }
 
@@ -441,7 +447,9 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
 
   const [search, setSearch] = useState(initQ.search);
   const [assignedFilter, setAssignedFilter] = useState<string>(initQ.assigned);
-  const [riderFilter, setRiderFilter] = useState<string>(scopedRiderId ? String(scopedRiderId) : "all");
+  const [riderFilter, setRiderFilter] = useState<string>(
+    scopedRiderId ? String(scopedRiderId) : initQ.riderId || "all",
+  );
   const [olCodeFilter, setOlCodeFilter] = useState<string>(initQ.riderOl);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   // §5 fleet membership — distinct from service-status filter below
@@ -461,8 +469,13 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const [flagFilter, setFlagFilter] = useState<string>("all");
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(!scopedRiderId && initQ.openMove);
   const [moveCarIds, setMoveCarIds] = useState<number[]>([]);
+  const [moveSourceRiderId, setMoveSourceRiderId] = useState<number | null>(() => {
+    if (scopedRiderId) return null;
+    const id = Number(initQ.riderId);
+    return initQ.openMove && id > 0 ? id : null;
+  });
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [pasteOnPage, setPasteOnPage] = useState(false);
   const [pasteMatch, setPasteMatch] = useState<{ ids: number[]; unmatched: string[]; tokenCount: number } | null>(null);
@@ -673,7 +686,13 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     setBatchFilter(q.batch || "all");
     setNeedsCompletionFilter(q.needsCompletion);
     if (q.turning50) setFleetActiveFilter("active");
-  }, [wouterSearch]);
+    if (!scopedRiderId && q.riderId) setRiderFilter(q.riderId);
+    if (!scopedRiderId && q.openMove) {
+      const id = Number(q.riderId);
+      if (id > 0) setMoveSourceRiderId(id);
+      setMoveOpen(true);
+    }
+  }, [wouterSearch, scopedRiderId]);
 
   const filtered = useMemo(() => {
     const getKey = (r: Row): string => {
@@ -1658,6 +1677,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
                       title: `${picked.skippedInactive} inactive car${picked.skippedInactive === 1 ? "" : "s"} left out of this move`,
                     });
                   }
+                  setMoveSourceRiderId(null);
                   setMoveCarIds(picked.ids);
                   setMoveOpen(true);
                 }}
@@ -1906,7 +1926,12 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         onClose={() => setAddOpen(false)}
         car={null}
       />
-      <MoveCarsDialog open={moveOpen} onOpenChange={setMoveOpen} carIds={moveCarIds} />
+      <MoveCarsDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        carIds={moveSourceRiderId ? undefined : moveCarIds}
+        sourceRiderId={moveSourceRiderId}
+      />
       {workbenchOpen ? (
         <BulkEditDrawer
           railcarIds={[...selectedIds]}

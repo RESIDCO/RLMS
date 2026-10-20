@@ -26,8 +26,14 @@ export function timelineFilters(variant: TimelineVariant): readonly TimelineFilt
   switch (variant) {
     case "activity":
       return ACTIVITY_TIMELINE_FILTERS;
-    case "lineage":
-      return [...ACTIVITY_TIMELINE_FILTERS, ...LINEAGE_SOURCE_FILTERS];
+    case "lineage": {
+      const filters: TimelineFilter[] = [];
+      for (const filter of ACTIVITY_TIMELINE_FILTERS) {
+        filters.push(filter);
+        if (filter.id === "reassignment") filters.push({ id: "moves", label: "Moves" });
+      }
+      return [...filters, ...LINEAGE_SOURCE_FILTERS];
+    }
     default: {
       const unreachable: never = variant;
       return unreachable;

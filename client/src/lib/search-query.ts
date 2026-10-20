@@ -91,6 +91,7 @@ function slimSearchResults(results: any) {
                   rider_name: rider.rider_name,
                   schedule_number: rider.schedule_number,
                   expiration_date: rider.expiration_date,
+                  entity: rider.entity ?? null,
                   master_lease: lease
                     ? {
                         id: lease.id,

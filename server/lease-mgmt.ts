@@ -17,6 +17,7 @@ import {
   isStandardRiderNumber,
   riderNumberDigits,
 } from "@shared/lease-mgmt";
+import { editedRiderEntity } from "@shared/rider-entity";
 
 type RequireWrite = (req: Request, res: Response) => Promise<string | null>;
 
@@ -740,12 +741,13 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
       if (!before) return res.status(404).json({ message: "Rider not found" });
       const allowed = [
         "effective_date", "expiration_date", "monthly_rent_per_car", "monthly_rate_pct",
-        "lessors_cost", "owner_entity", "sublessee", "contract_doc_url", "permissible_commodity",
+        "lessors_cost", "owner_entity", "entity", "sublessee", "contract_doc_url", "permissible_commodity",
       ];
       const patch: Record<string, unknown> = {};
       for (const k of allowed) {
         if (k in (req.body ?? {})) patch[k] = req.body[k] === "" ? null : req.body[k];
       }
+      if ("entity" in patch) patch.entity = editedRiderEntity(patch.entity);
       stripNotesField(patch);
       const result = await withChangeGroupResult(actor, async () => {
         let data = before;

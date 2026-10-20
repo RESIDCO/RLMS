@@ -10,6 +10,7 @@ import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { findRiderByOlLabel, type OlIdentity } from "@shared/ol-identity";
+import { confirmRiderEntityMismatch } from "@/lib/rider-entity-confirm";
 
 function dash(v: string | null | undefined): string {
   const s = String(v ?? "").trim();
@@ -28,6 +29,7 @@ export function ReassignCarForm({
   isReassign,
   initialRiderName,
   initialLessee,
+  carEntity,
   riders,
   onCancel,
 }: {
@@ -35,6 +37,7 @@ export function ReassignCarForm({
   isReassign: boolean;
   initialRiderName: string;
   initialLessee: string;
+  carEntity?: string | null;
   riders: RiderSuggestion[];
   onCancel: () => void;
 }) {
@@ -213,7 +216,19 @@ export function ReassignCarForm({
         <Button
           size="sm"
           disabled={!canSave}
-          onClick={() => save.mutate()}
+          onClick={async () => {
+            if (matchedId != null && identityQuery.isLoading) {
+              toast({ title: "OL details are still loading" });
+              return;
+            }
+            const ok = await confirmRiderEntityMismatch(identity?.entity, [{
+              id: carId,
+              entity: carEntity ?? null,
+              label: "this car",
+            }]);
+            if (!ok) return;
+            save.mutate();
+          }}
           data-testid="btn-save-assign"
         >
           {save.isPending ? "Saving…" : "Save Assignment"}

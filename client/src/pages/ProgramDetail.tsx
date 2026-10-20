@@ -85,6 +85,8 @@ import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates"
 import { diffProgramPatch } from "@shared/program-patch";
 import { isCompleteProgramStatus, mergeProgramStatusOptions, statusLeavesComplete } from "@shared/program-status";
 import { GLOBAL_PROGRAM_CAR_COLUMN_ORDER } from "@shared/program-tracker-sync";
+import { confirmRiderEntityMismatch } from "@/lib/rider-entity-confirm";
+import type { EntityCar } from "@shared/rider-entity";
 
 type Category = { id: number; name: string };
 type StatusOption = { id: number; value: string; sort_order: number };
@@ -147,6 +149,7 @@ type ProgramCar = {
     car_number: string;
     reporting_marks: string | null;
     rider_external_id: string | null;
+    entity?: string | null;
     active?: boolean | null;
     status?: string | null;
   } | null;
@@ -406,7 +409,7 @@ export default function ProgramDetailPage() {
     queryKey: ["/api/programs/shops"],
     queryFn: () => apiRequest("GET", "/api/programs/shops").then((r) => r.json()),
   });
-  const { data: riders = [] } = useQuery<{ id: number; rider_name: string | null; schedule_number: string | null }[]>({
+  const { data: riders = [] } = useQuery<{ id: number; rider_name: string | null; schedule_number: string | null; entity?: string | null }[]>({
     queryKey: ["/api/riders"],
     queryFn: () => apiRequest("GET", "/api/riders").then((r) => r.json()),
     enabled: rentOpen,
@@ -1721,6 +1724,11 @@ export default function ProgramDetailPage() {
         open={rentOpen}
         programId={id}
         linkIds={visibleSelectedIds}
+        cars={visibleCars.filter((car) => visibleSelectedIds.includes(car.id)).map((car) => ({
+          id: car.railcar_id,
+          entity: car.railcar?.entity ?? null,
+          label: [car.railcar?.reporting_marks, car.railcar?.car_number].filter(Boolean).join(" ") || `#${car.railcar_id}`,
+        }))}
         riders={riders}
         onClose={() => setRentOpen(false)}
         onApplied={() => {
@@ -2586,6 +2594,7 @@ function PutOnRentDialog({
   open,
   programId,
   linkIds,
+  cars,
   riders,
   onClose,
   onApplied,
@@ -2593,7 +2602,8 @@ function PutOnRentDialog({
   open: boolean;
   programId: number;
   linkIds: number[];
-  riders: { id: number; rider_name: string | null; schedule_number: string | null }[];
+  cars: EntityCar[];
+  riders: { id: number; rider_name: string | null; schedule_number: string | null; entity?: string | null }[];
   onClose: () => void;
   onApplied: () => void;
 }) {
@@ -2621,6 +2631,9 @@ function PutOnRentDialog({
 
   async function apply() {
     if (!preview?.preview_token) return;
+    const rider = riders.find((row) => String(row.id) === riderId);
+    const ok = await confirmRiderEntityMismatch(rider?.entity, cars);
+    if (!ok) return;
     setPending(true);
     try {
       const r = await apiRequest("POST", `/api/programs/${programId}/cars/put-on-rent/apply`, {

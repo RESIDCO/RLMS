@@ -31,7 +31,7 @@ scrapped_at, scrap_source, umler_status, umler_status_at,
 assignment:railcar_assignments(
   id, rider_id, fleet_name, sub_lease_number, sublease_expiration_date, assigned_at, assignment_status, sublessee,
   rider:riders(
-    id, rider_name, schedule_number, effective_date, expiration_date, monthly_rate_pct, lessors_cost, master_lease_id,
+    id, rider_name, schedule_number, effective_date, expiration_date, monthly_rate_pct, lessors_cost, entity, master_lease_id,
     master_lease:master_leases(id, lease_number, agreement_number, lessor, lessee, lease_type, sold_to)
   )
 )

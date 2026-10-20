@@ -7,6 +7,7 @@ export const RIDER_IMPORT_NEVER_WRITE = [
   "account_manager",
   "status_tag",
   "owner_entity",
+  "entity",
 ] as const;
 
 /**

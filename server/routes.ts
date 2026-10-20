@@ -181,6 +181,7 @@ import {
   changeCarNumberSchema,
   moveCarsSchema,
 } from "@shared/schema";
+import { requireRiderEntity } from "@shared/rider-entity";
 import {
   normalizeRow,
   deriveManagedCategory,
@@ -492,6 +493,7 @@ export async function registerRoutes(
       assertNewLesseeName(mlaRow.lessee ?? mlaRow.lease_number);
       for (const rp of riderPayloads ?? []) {
         assertNewRiderNumber(rp.rider?.rider_name ?? rp.rider?.schedule_number);
+        rp.rider.entity = requireRiderEntity(rp.rider?.entity);
       }
       const linkedAccountId = await resolveAccountIdForNewLease(requestedAccountId);
       mlaRow.account_id = linkedAccountId ?? await ensureAccountForLessee(mlaRow.lessee ?? null);
@@ -2529,8 +2531,9 @@ export async function registerRoutes(
       if (!writerId) return;
       const parsed = insertRiderSchema.parse(req.body);
       assertNewRiderNumber(parsed.rider_name);
+      const entity = requireRiderEntity(parsed.entity);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RIDER_DATE_KEYS]);
-      const insertRow = stripNotesField({ ...parsed } as Record<string, unknown>);
+      const insertRow = stripNotesField({ ...parsed, entity } as Record<string, unknown>);
       delete insertRow.account_manager;
       delete insertRow.status_tag;
       delete insertRow.account_mgmt_comment;

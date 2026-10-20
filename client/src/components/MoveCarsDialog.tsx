@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import { createRiderLease } from "@/components/RiderFreeTextInput";
-import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
+import { apiGet, apiRequest, asRailcarList, queryClient, railcarsQs } from "@/lib/queryClient";
+import { confirmRiderEntityMismatch } from "@/lib/rider-entity-confirm";
+import type { EntityCar } from "@shared/rider-entity";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
@@ -51,6 +53,7 @@ type SourceCar = {
   car_number?: string | null;
   reporting_marks?: string | null;
   active?: boolean | null;
+  entity?: string | null;
 };
 
 function sideText(side: PlanSide | null | undefined): string {
@@ -207,6 +210,27 @@ export function MoveCarsDialog({
 
   const rows = preview?.cars ?? [];
   const movable = rows.filter((row) => row.disposition === "move").length;
+
+  async function carsBeingMoved(): Promise<EntityCar[]> {
+    const moving = rows.filter((row) => row.disposition === "move").map((row) => row.railcar_id);
+    const ids = moving.length ? moving : selectedIds;
+    if (picking) {
+      return (sourceCars.data ?? [])
+        .filter((car) => ids.includes(car.id))
+        .map((car) => ({
+          id: car.id,
+          entity: car.entity ?? null,
+          label: [car.reporting_marks, car.car_number].filter(Boolean).join(" ") || `#${car.id}`,
+        }));
+    }
+    type ListedCar = { id: number; entity?: string | null; reporting_marks?: string | null; car_number?: string | null };
+    const data = await apiGet<ListedCar[] | { rows?: ListedCar[] }>(railcarsQs({ ids: ids.join(","), all: "1", active: "all" }));
+    return asRailcarList(data).map((car) => ({
+      id: car.id,
+      entity: car.entity ?? null,
+      label: [car.reporting_marks, car.car_number].filter(Boolean).join(" ") || `#${car.id}`,
+    }));
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -379,7 +403,20 @@ export function MoveCarsDialog({
           <Button type="button" variant="outline" disabled={!canPreview || previewMut.isPending || moveMut.isPending} onClick={() => previewMut.mutate()} data-testid="move-preview">
             {previewMut.isPending ? "Previewing…" : "Preview"}
           </Button>
-          <Button type="button" disabled={!preview || movable === 0 || moveMut.isPending || Boolean(result?.change_group)} onClick={() => moveMut.mutate()} data-testid="move-confirm">
+          <Button
+            type="button"
+            disabled={!preview || movable === 0 || moveMut.isPending || Boolean(result?.change_group)}
+            data-testid="move-confirm"
+            onClick={async () => {
+              if (identityQuery.isLoading) {
+                toast({ title: "Rider details are still loading" });
+                return;
+              }
+              const ok = await confirmRiderEntityMismatch(identityQuery.data?.entity, await carsBeingMoved());
+              if (!ok) return;
+              moveMut.mutate();
+            }}
+          >
             {moveMut.isPending ? "Moving…" : `Move ${movable || selectedIds.length}`}
           </Button>
         </DialogFooter>

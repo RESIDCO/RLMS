@@ -19,6 +19,7 @@ export type LeaseGlanceRider = {
   monthly_rate_pct?: number | string | null;
   lessors_cost?: number | string | null;
   car_count?: number | null;
+  entity?: string | null;
   master_lease?: LeaseGlanceLease | LeaseGlanceLease[] | null;
 };
 

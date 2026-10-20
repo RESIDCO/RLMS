@@ -7,8 +7,14 @@
 
 import { splitCarNumber } from "./residco-import";
 
-/** Same fan-out cap as the bare-number lookup in the activity resolver. */
-export const LINEAGE_CAR_CAP = 80;
+/** Bare-number partial match (ilike). Separate from the range and mark cap. */
+export const LINEAGE_BARE_NUMBER_LIMIT = 80;
+
+/** Distinct cars from ranges and bare marks, including their combined set. */
+export const LINEAGE_MATCH_CAP = 200;
+
+/** Inclusive numeric width. Wider than this is treated as a typo, not a search. */
+export const LINEAGE_RANGE_WIDTH_CAP = 100_000;
 
 export const LINEAGE_TOO_MANY_MESSAGE = "Too many cars, narrow it.";
 
@@ -29,7 +35,7 @@ export type LineageHistoryRow = {
 
 export type LineageIdentity =
   | { kind: "car"; mark: string | null; number: string }
-  | { kind: "range"; mark: string | null; numbers: string[] }
+  | { kind: "range"; mark: string | null; low: string; high: string }
   | { kind: "number"; number: string }
   | { kind: "mark"; mark: string };
 
@@ -89,18 +95,17 @@ function tokenShape(token: string): TokenShape {
   return { type: "skip" };
 }
 
-function expandRange(from: string, to: string): string[] | null {
+function rangeBounds(from: string, to: string): { low: string; high: string } | null {
   if (!/^\d+$/.test(from) || !/^\d+$/.test(to)) return null;
   const start = Number(from);
   const end = Number(to);
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
-  const low = Math.min(start, end);
-  const high = Math.max(start, end);
-  const count = high - low + 1;
-  if (!Number.isSafeInteger(count) || count > LINEAGE_CAR_CAP) return null;
-  const numbers: string[] = [];
-  for (let n = low; n <= high; n += 1) numbers.push(String(n));
-  return numbers;
+  const count = Math.abs(end - start) + 1;
+  if (!Number.isSafeInteger(count) || count > LINEAGE_RANGE_WIDTH_CAP) return null;
+  const width = Math.max(from.length, to.length);
+  const left = from.padStart(width, "0");
+  const right = to.padStart(width, "0");
+  return left <= right ? { low: left, high: right } : { low: right, high: left };
 }
 
 export function parseLineageQuery(raw: string): LineageQueryPlan {
@@ -109,13 +114,11 @@ export function parseLineageQuery(raw: string): LineageQueryPlan {
     .map(normalizeToken)
     .filter(Boolean);
   const identities: LineageIdentity[] = [];
-  let ranged = 0;
 
   const takeRange = (mark: string | null, from: string, to: string): boolean => {
-    const numbers = expandRange(from, to);
-    if (!numbers || ranged + numbers.length > LINEAGE_CAR_CAP) return false;
-    ranged += numbers.length;
-    identities.push({ kind: "range", mark, numbers });
+    const bounds = rangeBounds(from, to);
+    if (!bounds) return false;
+    identities.push({ kind: "range", mark, low: bounds.low, high: bounds.high });
     return true;
   };
 
@@ -190,13 +193,11 @@ export function lineageLookupNumbers(plan: LineageQueryPlan): { exact: string[];
       case "car":
         exact.push(item.number);
         break;
-      case "range":
-        exact.push(...item.numbers);
-        break;
       case "number":
         exact.push(item.number);
         loose.push(item.number);
         break;
+      case "range":
       case "mark":
         break;
       default: {
@@ -206,6 +207,27 @@ export function lineageLookupNumbers(plan: LineageQueryPlan): { exact: string[];
     }
   }
   return { exact, loose };
+}
+
+export function lineageLookupRanges(plan: LineageQueryPlan): Array<{ mark: string | null; low: string; high: string }> {
+  if (plan.message) return [];
+  const ranges: Array<{ mark: string | null; low: string; high: string }> = [];
+  for (const item of plan.identities) {
+    switch (item.kind) {
+      case "range":
+        ranges.push({ mark: item.mark, low: item.low, high: item.high });
+        break;
+      case "car":
+      case "number":
+      case "mark":
+        break;
+      default: {
+        const _never: never = item;
+        return _never;
+      }
+    }
+  }
+  return ranges;
 }
 
 export function lineageLookupMarks(plan: LineageQueryPlan): string[] {
@@ -238,6 +260,12 @@ function numberHit(stored: string | null | undefined, wanted: string, loose: boo
   if (!raw) return false;
   if (lineageNumberVariants(wanted).includes(raw)) return true;
   return loose && raw.includes(wanted);
+}
+
+function digitsInRange(stored: string | null | undefined, low: string, high: string): boolean {
+  const raw = String(stored ?? "").trim();
+  if (raw.length !== low.length || !/^\d+$/.test(raw)) return false;
+  return raw >= low && raw <= high;
 }
 
 function carHit(car: LineageCarRow, mark: string | null, number: string, loose: boolean): boolean {
@@ -276,6 +304,26 @@ function collectNumber(
   }
 }
 
+function collectRange(
+  cars: readonly LineageCarRow[],
+  history: readonly LineageHistoryRow[],
+  mark: string | null,
+  low: string,
+  high: string,
+  into: Set<number>,
+): void {
+  for (const car of cars) {
+    if (!digitsInRange(car.car_number, low, high)) continue;
+    if (mark && markOf(car.reporting_marks) !== mark && markOf(car.car_initial) !== mark) continue;
+    addId(into, Number(car.id));
+  }
+  for (const row of history) {
+    const inSpan = digitsInRange(row.old_car_number, low, high) || digitsInRange(row.new_car_number, low, high);
+    if (!inSpan || !historyMarkHit(row, mark)) continue;
+    addId(into, Number(row.railcar_id));
+  }
+}
+
 function collectMark(history: readonly LineageHistoryRow[], mark: string): Set<number> {
   const ids = new Set<number>();
   for (const row of history) {
@@ -292,8 +340,8 @@ export function resolveLineageIdentities(
 ): LineageIdentityResult {
   const plan = parseLineageQuery(raw);
   if (plan.message) return { ids: [], message: plan.message };
+  const fanout = new Set<number>();
   const ids = new Set<number>();
-  const ranged = new Set<number>();
   for (const item of plan.identities) {
     switch (item.kind) {
       case "car":
@@ -302,32 +350,19 @@ export function resolveLineageIdentities(
       case "number":
         collectNumber(cars, history, null, item.number, true, ids);
         break;
-      case "range": {
-        const found = new Set<number>();
-        for (const number of item.numbers) collectNumber(cars, history, item.mark, number, false, found);
-        const union = new Set<number>();
-        ranged.forEach((id) => union.add(id));
-        found.forEach((id) => union.add(id));
-        if (found.size > LINEAGE_CAR_CAP || union.size > LINEAGE_CAR_CAP) {
-          return { ids: [], message: LINEAGE_TOO_MANY_MESSAGE };
-        }
-        found.forEach((id) => {
-          ids.add(id);
-          ranged.add(id);
-        });
+      case "range":
+        collectRange(cars, history, item.mark, item.low, item.high, fanout);
         break;
-      }
-      case "mark": {
-        const found = collectMark(history, item.mark);
-        if (found.size > LINEAGE_CAR_CAP) return { ids: [], message: LINEAGE_TOO_MANY_MESSAGE };
-        found.forEach((id) => ids.add(id));
+      case "mark":
+        collectMark(history, item.mark).forEach((id) => fanout.add(id));
         break;
-      }
       default: {
         const _never: never = item;
         return _never;
       }
     }
   }
+  if (fanout.size > LINEAGE_MATCH_CAP) return { ids: [], message: LINEAGE_TOO_MANY_MESSAGE };
+  fanout.forEach((id) => ids.add(id));
   return { ids: setValues(ids).sort((a, b) => a - b), message: null };
 }

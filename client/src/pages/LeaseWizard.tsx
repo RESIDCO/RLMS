@@ -42,6 +42,9 @@ import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh"
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit } from "@/lib/AuthContext";
 import { isPlaceholderLessee, isStandardRiderNumber } from "@shared/lease-mgmt";
+import { entityMismatchWarning, isRiderEntity, RIDER_ENTITY_VALUES, withRequiredRiderEntity, type EntityCar } from "@shared/rider-entity";
+import { confirmAction } from "@/components/ConfirmActionDialog";
+import { RiderEntitySelect } from "@/components/RiderEntitySelect";
 import type { RailcarWithAssignment } from "@shared/schema";
 import { wizardRiderContactBody } from "@shared/directory-contacts";
 import { normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
@@ -79,6 +82,7 @@ type RiderForm = {
   base_term_months: string;
   monthly_rent_per_car: string;
   sold_to: string;
+  entity: string;
   notes: string;
   fleet_name: string;
   new_cars: NewCar[];
@@ -89,7 +93,7 @@ type RiderForm = {
   contact_phone: string;
 };
 
-const ENTITY_OPTIONS = ["Main", "Rail Partners Select", "Coal"];
+const ENTITY_OPTIONS: readonly string[] = RIDER_ENTITY_VALUES;
 const STATUS_OPTIONS = ["Active/In-Service", "Storage", "Bad Order", "Off-Lease", "Retired", "Scrapped"];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -106,6 +110,7 @@ function blankRider(): RiderForm {
     base_term_months: "",
     monthly_rent_per_car: "",
     sold_to: "",
+    entity: "",
     notes: "",
     fleet_name: "",
     new_cars: [],
@@ -559,13 +564,41 @@ export default function LeaseWizard() {
 
   // ── Validation ────────────────────────────────────────────────────────────
   const step1Valid = mla.lease_number.trim().length > 0 && mla.lessee.trim().length > 0 && !isPlaceholderLessee(mla.lessee) && !isPlaceholderLessee(mla.lease_number);
-  const step2Valid = riders.every((r) => isStandardRiderNumber(r.rider_name.trim().toUpperCase()));
+  const step2Valid = riders.every((r) => isStandardRiderNumber(r.rider_name.trim().toUpperCase()) && isRiderEntity(r.entity));
   const step3Valid = riders.every((r) =>
     r.new_cars.every((c) => c.car_number.trim().length > 0)
   );
 
   // ── Submit ────────────────────────────────────────────────────────────────
   async function handleSubmit() {
+    const mismatchNotes = riders.flatMap((r) => {
+      const cars: EntityCar[] = [
+        ...r.new_cars.map((c) => ({
+          id: 0,
+          entity: c.entity,
+          label: [c.reporting_marks, c.car_number].filter(Boolean).join(" ") || "new car",
+        })),
+        ...r.existing_car_ids.map((id) => {
+          const car = carById.get(id);
+          return {
+            id,
+            entity: car?.entity ?? null,
+            label: car ? [car.reporting_marks, car.car_number].filter(Boolean).join(" ") : `#${id}`,
+          };
+        }),
+      ];
+      const warning = entityMismatchWarning(r.entity, cars);
+      return warning ? [`${r.rider_name || "Rider"}: ${warning.message}`] : [];
+    });
+    if (mismatchNotes.length) {
+      const ok = await confirmAction({
+        title: "Car entity differs from this rider",
+        description: mismatchNotes.join("\n\n"),
+        confirmLabel: "Assign anyway",
+        cancelLabel: "Go back",
+      });
+      if (!ok) return;
+    }
     setSubmitting(true);
     try {
       const payload = {
@@ -580,7 +613,7 @@ export default function LeaseWizard() {
           ...(preselectAccountId != null ? { account_id: preselectAccountId } : {}),
         },
         riders: riders.map((r) => ({
-          rider: {
+          rider: withRequiredRiderEntity({
             rider_name: r.rider_name,
             schedule_number: r.schedule_number || null,
             effective_date: r.effective_date || null,
@@ -592,7 +625,7 @@ export default function LeaseWizard() {
             monthly_rent_per_car: r.monthly_rent_per_car ? parseFloat(r.monthly_rent_per_car) : null,
             sold_to: r.sold_to?.trim() || null,
             notes: r.notes || null,
-          },
+          }, r.entity),
           fleet_name: r.fleet_name || null,
           existing_car_ids: r.existing_car_ids,
           contact: wizardRiderContactBody(r),
@@ -775,6 +808,15 @@ export default function LeaseWizard() {
                   <Input placeholder="001" value={activeRider.schedule_number} onChange={(e) => updateRider(activeRiderIdx, { schedule_number: e.target.value })} />
                 </div>
                 <div>
+                  <Label>Entity <span className="text-destructive">*</span></Label>
+                  <RiderEntitySelect
+                    value={activeRider.entity}
+                    onChange={(entity) => updateRider(activeRiderIdx, { entity: entity ?? "" })}
+                    testId="wizard-rider-entity"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Fleet entity for this rider. Not the legal owner.</p>
+                </div>
+                <div>
                   <Label>Effective Date</Label>
                   <Input type="date" value={activeRider.effective_date} onChange={(e) => updateRider(activeRiderIdx, { effective_date: e.target.value })} />
                 </div>
@@ -843,7 +885,7 @@ export default function LeaseWizard() {
             {!step2Valid && (
               <div className="flex items-center gap-2 text-sm text-[hsl(var(--warning))]">
                 <AlertCircle className="h-4 w-4" />
-                Every rider needs a name before continuing.
+                Every rider needs an OL/EA number and an entity before continuing.
               </div>
             )}
           </div>
@@ -992,6 +1034,7 @@ export default function LeaseWizard() {
                     <Users className="h-4 w-4 text-primary" />
                     <h2 className="text-sm font-semibold">{r.rider_name}</h2>
                     {r.schedule_number && <span className="text-xs text-muted-foreground">Sch {r.schedule_number}</span>}
+                    {r.entity ? <EntityBadge entity={r.entity} /> : null}
                     {r.sold_to?.trim() && (
                       <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border bg-umler-amber/15 text-umler-amber border-umler-amber/30">
                         SOLD → {r.sold_to}

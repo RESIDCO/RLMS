@@ -95,6 +95,10 @@ export function LeaseGlanceSheet({
                   <dd className="font-mono-num mt-0.5">{fmtMoney(rider.lessors_cost)}</dd>
                 </div>
                 <div>
+                  <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Entity</dt>
+                  <dd className="mt-0.5">{rider.entity ?? "—"}</dd>
+                </div>
+                <div>
                   <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Cars on OL</dt>
                   <dd className="font-mono-num mt-0.5">
                     {rider.car_count == null ? "—" : Number(rider.car_count).toLocaleString()}

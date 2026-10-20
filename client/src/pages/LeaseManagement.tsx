@@ -42,6 +42,8 @@ import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
+import { RiderEntitySelect } from "@/components/RiderEntitySelect";
+import { isRiderEntity } from "@shared/rider-entity";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList, downloadXlsx } from "@/lib/queryClient";
 import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
@@ -736,6 +738,10 @@ export default function LeaseManagement() {
                                       <span title="Owner Entity">{(rider as any).owner_entity}</span>
                                     </>
                                   ) : null}
+                                  <>
+                                    {" · "}
+                                    <span title="Lease entity">Entity: {(rider as any).entity ?? "—"}</span>
+                                  </>
                                   {(rider as any).sold_to && (
                                     <> · <span className="text-amber-400">→ {(rider as any).sold_to}</span></>
                                   )}
@@ -1321,6 +1327,7 @@ function RiderForm({
         base_term_months: rider?.base_term_months ?? "",
         monthly_rent_per_car: rider?.monthly_rent_per_car ?? "",
         owner_entity: rider?.owner_entity ?? "",
+        entity: rider?.entity ?? "",
         sold_to: rider?.sold_to ?? "",
         notes: rider?.notes ?? "",
       });
@@ -1336,6 +1343,7 @@ function RiderForm({
         base_term_months: form.base_term_months === "" ? null : Number(form.base_term_months),
         monthly_rent_per_car: form.monthly_rent_per_car === "" ? null : Number(form.monthly_rent_per_car),
         owner_entity: form.owner_entity?.trim() || null,
+        entity: form.entity || null,
         sold_to: form.sold_to?.trim() || null,
       };
       delete (body as any).notes;
@@ -1459,6 +1467,18 @@ function RiderForm({
             <p className="text-xs text-muted-foreground mt-1">Typical range: $100 – $850 per car / month</p>
           </div>
           <div>
+            <Label>Entity {!rider ? <span className="text-destructive">*</span> : null}</Label>
+            <RiderEntitySelect
+              value={form.entity}
+              allowEmpty={Boolean(rider)}
+              onChange={(entity) => setForm({ ...form, entity: entity ?? "" })}
+              testId="rider-entity"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Fleet entity for this lease. Not the legal owner.
+            </p>
+          </div>
+          <div>
             <Label>Owner Entity</Label>
             <Input
               value={form.owner_entity ?? ""}
@@ -1498,6 +1518,10 @@ function RiderForm({
           </Button>
           <Button
             onClick={async () => {
+              if (!rider && !isRiderEntity(form.entity)) {
+                toast({ title: "Entity is required for a new rider", variant: "destructive" });
+                return;
+              }
               if (rider) {
                 const name = form.rider_name || rider.rider_name || `rider #${rider.id}`;
                 const ok = await confirmSave({
@@ -1508,7 +1532,7 @@ function RiderForm({
               }
               save.mutate();
             }}
-            disabled={save.isPending}
+            disabled={save.isPending || (!rider && !isRiderEntity(form.entity))}
           >
             {save.isPending ? "Saving…" : rider ? "Save" : "Create"}
           </Button>

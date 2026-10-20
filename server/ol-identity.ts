@@ -50,7 +50,7 @@ export async function loadOlIdentity(riderId: number): Promise<OlIdentity | null
   const { data, error } = await supabaseAdmin
     .from("riders")
     .select(
-      "id, rider_name, schedule_number, expiration_date, lease_status, owner_entity, sold_to, master_lease_id, master_lease:master_leases(id, lease_number, lessee, lease_type, account_id, sold_to)",
+      "id, rider_name, schedule_number, expiration_date, lease_status, owner_entity, entity, sold_to, master_lease_id, master_lease:master_leases(id, lease_number, lessee, lease_type, account_id, sold_to)",
     )
     .eq("id", riderId)
     .maybeSingle();
@@ -88,6 +88,7 @@ export async function loadOlIdentity(riderId: number): Promise<OlIdentity | null
     lease_status: data.lease_status ?? null,
     account_manager: (Number.isFinite(accountId) ? amMap.get(accountId) : null) ?? null,
     owner_entity: data.owner_entity ?? null,
+    entity: data.entity ?? null,
     sold_to,
     suggested_lessee: is_sold ? sold_to : null,
   };

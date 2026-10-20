@@ -73,6 +73,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, asRailcarList, queryClient, railcarsQs } from "@/lib/queryClient";
+import { confirmRiderEntityMismatch } from "@/lib/rider-entity-confirm";
+import type { OlIdentity } from "@shared/ol-identity";
 import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber, formatCarId, normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
@@ -2507,6 +2509,7 @@ export function CarDetail({
               isReassign={Boolean(r.assignment)}
               initialRiderName={r.assignment?.rider?.rider_name ?? ""}
               initialLessee={r.assignment?.fleet_name ?? r.lessee_name ?? ""}
+              carEntity={r.entity}
               riders={allRiders}
               onCancel={() => setAssignOpen(false)}
             />
@@ -2838,6 +2841,20 @@ export function RailcarFormDialog({
         if (opts?.reason) payload.inactive_change_reason = opts.reason;
         await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
       } else {
+        if (assignRiderId.trim()) {
+          const resolved = await resolveRiderLabel(assignRiderId);
+          const ident = await apiGet<OlIdentity>(`/api/riders/${resolved.id}/identity`);
+          const ok = await confirmRiderEntityMismatch(ident.entity, [{
+            id: 0,
+            entity: form.entity || null,
+            label: [form.reporting_marks, form.car_number].filter(Boolean).join(" ") || "new car",
+          }]);
+          if (!ok) {
+            const cancelled = new Error("Assignment cancelled");
+            cancelled.name = "AssignmentCancelled";
+            throw cancelled;
+          }
+        }
         const res = await apiRequest("POST", `/api/railcars`, payload);
         // If a rider/OL was entered, resolve (match or create) then assign
         if (assignRiderId.trim()) {
@@ -2877,8 +2894,10 @@ export function RailcarFormDialog({
       }
       onClose();
     },
-    onError: (e: Error) =>
-      toast({ title: "Save failed", description: e.message, variant: "destructive" }),
+    onError: (e: Error) => {
+      if (e.name === "AssignmentCancelled") return;
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    },
   });
 
   async function handleSave() {

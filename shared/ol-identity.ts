@@ -74,6 +74,8 @@ export type OlIdentity = {
   lease_status: string | null;
   account_manager: string | null;
   owner_entity: string | null;
+  /** Lease-level fleet entity. Null skips the car-entity mismatch warning. */
+  entity: string | null;
   sold_to: string | null;
   suggested_lessee: string | null;
 };

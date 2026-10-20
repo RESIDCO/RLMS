@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RIDER_ENTITY_VALUES } from "./rider-entity";
 import { normalizeStoredCarNumber } from "./residco-import";
 
 // ---- Database row types ----
@@ -60,6 +61,11 @@ export type Rider = {
    * One-time load — importers must never write it.
    */
   owner_entity?: string | null;
+  /**
+   * Lease-level fleet entity. Same values as railcars.entity.
+   * Null on existing riders until set. Not the legal owner.
+   */
+  entity?: "Main" | "Rail Partners Select" | "Coal" | null;
   lifecycle_status?: "active" | "off_lease_pending_remarketing" | "closed" | null;
   number_digits?: string | null;
   off_lease_at?: string | null;
@@ -288,6 +294,7 @@ export const insertRiderSchema = z.object({
   notes: z.string().nullable().optional(),
   account_manager: z.string().nullable().optional(),
   owner_entity: z.string().nullable().optional(),
+  entity: z.enum(RIDER_ENTITY_VALUES).nullable().optional(),
 });
 export type InsertRider = z.infer<typeof insertRiderSchema>;
 

@@ -28,6 +28,7 @@ import { ArrowLeft } from "lucide-react";
 import { BackToSearch } from "@/components/BackToSearch";
 import { useCanEdit } from "@/lib/AuthContext";
 import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
+import { RiderEntitySelect } from "@/components/RiderEntitySelect";
 
 export default function RiderPage() {
   const [, params] = useRoute("/leases/rider/:id");
@@ -66,6 +67,7 @@ export default function RiderPage() {
       sublessee: form.sublessee ?? h.sublessee,
       contract_doc_url: form.contract_doc_url ?? h.contract_doc_url,
       owner_entity: form.owner_entity ?? h.owner_entity,
+      entity: form.entity === undefined ? h.entity ?? null : form.entity || null,
       ...appendNoteBody(termsNote),
     }).then((r) => r.json()),
     onSuccess: () => {
@@ -172,6 +174,7 @@ export default function RiderPage() {
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm sm:px-8">
         <span>Effective {h.effective_date ?? "—"}</span>
         <span>Expiry {h.expiration_date ?? "—"}</span>
+        <span data-testid="rider-entity">Entity {h.entity ?? "—"}</span>
         <span>Rent/car {h.monthly_rent_per_car ?? h.rider_rent_per_car ?? "—"}</span>
         {h.sublessee ? <span className="rounded bg-muted px-1.5 py-0.5 text-xs">Operated by {h.sublessee}</span> : null}
         {docStatus ? (
@@ -228,6 +231,16 @@ export default function RiderPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Edit terms</DialogTitle></DialogHeader>
           <div className="grid gap-3">
+            <div>
+              <Label>Entity</Label>
+              <RiderEntitySelect
+                value={form.entity === undefined ? h.entity : form.entity}
+                allowEmpty
+                onChange={(entity) => setForm((f) => ({ ...f, entity: entity ?? "" }))}
+                testId="rider-edit-entity"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">Fleet entity for this lease. Not the legal owner.</p>
+            </div>
             <div><Label>Effective</Label><Input type="date" defaultValue={h.effective_date ?? ""} onChange={(e) => setForm((f) => ({ ...f, effective_date: e.target.value }))} /></div>
             <div><Label>Expiration</Label><Input type="date" defaultValue={h.expiration_date ?? ""} onChange={(e) => setForm((f) => ({ ...f, expiration_date: e.target.value }))} /></div>
             <div><Label>Rent / car</Label><Input type="number" defaultValue={h.monthly_rent_per_car ?? h.rider_rent_per_car ?? ""} onChange={(e) => setForm((f) => ({ ...f, monthly_rent_per_car: e.target.value }))} /></div>

@@ -9,6 +9,8 @@ import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
 import LeaseCrmLinks from "@/components/crm/LeaseCrmLinks";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
+import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
 import { ArrowLeft, FileText } from "lucide-react";
 import { BackToSearch } from "@/components/BackToSearch";
 import { useCanEdit } from "@/lib/AuthContext";
@@ -38,6 +40,7 @@ export default function LesseePage() {
   const header = data?.header ?? {};
   const [mla, setMla] = useState("");
   const [mlaDoc, setMlaDoc] = useState("");
+  const colPrefs = useColumnPrefs("lease_lessee_riders", new Set(["entity"]));
   const save = useMutation({
     mutationFn: () => apiRequest("PATCH", `/api/lease-mgmt/lessees/${id}`, {
       mla_number: mla || header.mla_number,
@@ -52,6 +55,13 @@ export default function LesseePage() {
   if (isLoading || !data) {
     return <div className="p-8 text-sm text-muted-foreground">Loading lessee…</div>;
   }
+
+  const showEntity = colPrefs.visibleCols.has("entity");
+  const riderHeaders = [
+    "Code", "Effective", "Expiry", "Cars", "On rent", "Off lease", "Rent/car", "Monthly rent",
+    ...(showEntity ? ["Entity"] : []),
+    "Owner entity", "Sublessee", "Doc",
+  ];
 
   const docs = [
     header.mla_doc_url ? { label: "MLA", url: header.mla_doc_url } : null,
@@ -93,12 +103,15 @@ export default function LesseePage() {
         )}
 
         <div>
-          <h2 className="text-sm font-semibold mb-2">OL / EA</h2>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">OL / EA</h2>
+            <ColumnPicker columns={[{ key: "entity", label: "Entity" }]} prefs={colPrefs} />
+          </div>
           <div className="border rounded-md">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-card text-xs text-muted-foreground border-b">
                 <tr>
-                  {["Code","Effective","Expiry","Cars","On rent","Off lease","Rent/car","Monthly rent","Owner entity","Sublessee","Doc"].map((h) => (
+                  {riderHeaders.map((h) => (
                     <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -120,6 +133,7 @@ export default function LesseePage() {
                       <td className="px-3 py-2 font-mono-num">{r.off_rent}</td>
                       <td className="px-3 py-2 font-mono-num">{r.rider_rent_per_car != null ? usd(r.rider_rent_per_car) : "—"}</td>
                       <td className="px-3 py-2 font-mono-num">{usd(r.monthly_rent)}</td>
+                      {showEntity ? <td className="px-3 py-2">{r.entity ?? "—"}</td> : null}
                       <td className="px-3 py-2">{r.owner_entity ?? "—"}</td>
                       <td className="px-3 py-2">{r.sublessee ? <span className="text-[11px] rounded bg-muted px-1.5 py-0.5">Operated by {r.sublessee}</span> : "—"}</td>
                       <td className="px-3 py-2">{r.contract_doc_url ? <FileText className="h-4 w-4" /> : <span className="text-[11px] text-muted-foreground">No contract on file</span>}</td>

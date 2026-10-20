@@ -34,6 +34,8 @@ import {
   type ProgramLifecycle,
   type ProgramStatus,
 } from "@shared/programs";
+import { withOnlyColumnsWithData } from "@shared/program-export-columns";
+import { OnlyColumnsWithDataToggle } from "@/components/OnlyColumnsWithDataToggle";
 
 type Category = { id: number; name: string };
 type ProgramRow = {
@@ -138,6 +140,8 @@ export default function ProgramsPage() {
   const [categoryFilter, setCategoryFilter] = useState(hashFilters.category);
   const [entityFilter, setEntityFilter] = useState(hashFilters.entity);
   const [managerFilter, setManagerFilter] = useState(hashFilters.manager);
+  const [onlyColumnsWithData, setOnlyColumnsWithData] = useState(true);
+  const [masterOnlyColumnsWithData, setMasterOnlyColumnsWithData] = useState(false);
 
   useEffect(() => {
     setSearch(hashFilters.q);
@@ -234,7 +238,7 @@ export default function ProgramsPage() {
       return;
     }
     try {
-      await downloadReport(`/api/programs/export?ids=${ids.join(",")}`);
+      await downloadReport(withOnlyColumnsWithData(`/api/programs/export?ids=${ids.join(",")}`, onlyColumnsWithData));
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message, variant: "destructive" });
     }
@@ -247,7 +251,7 @@ export default function ProgramsPage() {
       return;
     }
     try {
-      await downloadReport(`/api/programs/export?ids=${ids.join(",")}`);
+      await downloadReport(withOnlyColumnsWithData(`/api/programs/export?ids=${ids.join(",")}`, onlyColumnsWithData));
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message, variant: "destructive" });
     }
@@ -255,7 +259,7 @@ export default function ProgramsPage() {
 
   async function exportMaster() {
     try {
-      await downloadReport("/api/programs/export?scope=all");
+      await downloadReport(withOnlyColumnsWithData("/api/programs/export?scope=all", masterOnlyColumnsWithData));
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message, variant: "destructive" });
     }
@@ -268,7 +272,12 @@ export default function ProgramsPage() {
         title="Programs"
         subtitle="Open work across the fleet — returns, remarks, acquisitions, qualifications, inspections"
         actions={
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
+            <OnlyColumnsWithDataToggle
+              id="programs-export-only-columns-with-data"
+              checked={onlyColumnsWithData}
+              onCheckedChange={setOnlyColumnsWithData}
+            />
             <Button size="sm" variant="outline" onClick={exportOpen} data-testid="button-export-open-programs">
               <Download className="h-4 w-4" /> Export open
             </Button>
@@ -297,9 +306,16 @@ export default function ProgramsPage() {
               Every program — open, on hold, and complete — as one workbook. No selection needed.
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={exportMaster} data-testid="button-export-master-fleet-report">
-            <FileSpreadsheet className="h-4 w-4" /> Export Master Fleet Project Status Report
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <OnlyColumnsWithDataToggle
+              id="programs-master-export-only-columns-with-data"
+              checked={masterOnlyColumnsWithData}
+              onCheckedChange={setMasterOnlyColumnsWithData}
+            />
+            <Button size="sm" variant="outline" onClick={exportMaster} data-testid="button-export-master-fleet-report">
+              <FileSpreadsheet className="h-4 w-4" /> Export Master Fleet Project Status Report
+            </Button>
+          </div>
         </div>
         <div className="shrink-0 flex items-center gap-2 flex-wrap">
           <ClearableSearchInput

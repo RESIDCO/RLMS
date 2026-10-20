@@ -28,6 +28,7 @@ import {
   type ProgramStatus,
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
+import { PROGRAM_CAR_EXPORT_DATE_COLUMNS, selectProgramCarExportColumns } from "@shared/program-export-columns";
 import { activeFieldDefs, fieldDefsForProgram } from "@shared/manage-columns";
 import { excelMoneyValue, isProgramMoneyField } from "@shared/money";
 import { parseProgramDate } from "@shared/program-dates";
@@ -1106,11 +1107,25 @@ function carExportValue(row: any, key: string): string {
   }
 }
 
+function programCarExportCell(car: any, key: string, usedDefs: ProgramFieldDef[]): ExcelCell {
+  if (key === "repair_cost_total") return excelMoneyCell(car.repair_cost_total);
+  if (key.startsWith("cf:")) {
+    const d = usedDefs.find((x) => `cf:${x.field_key}` === key);
+    if (!d) return { value: "" };
+    if (isProgramMoneyField(d)) return excelMoneyCell(car.custom_fields?.[d.field_key]);
+    if (d.field_type === "date") return { value: excelStoredDate(car.custom_fields?.[d.field_key]) || null };
+    return { value: formatCustomField(car.custom_fields?.[d.field_key], d.field_type) };
+  }
+  return { value: carExportValue(car, key) };
+}
+
 export async function buildProgramReport(opts: {
   programIds: number[];
   includeExited: boolean;
   filename?: string;
   cols?: unknown;
+  /** Only an explicit true filters. A missing flag keeps every column. */
+  onlyColumnsWithData?: boolean;
 }): Promise<{ buffer: Buffer; filename: string }> {
   const ids = [...new Set(opts.programIds.filter((id) => Number.isFinite(id)))];
   if (!ids.length) throw new Error("Select at least one program");
@@ -1179,29 +1194,36 @@ export async function buildProgramReport(opts: {
       const d = usedDefs.find((x) => `cf:${x.field_key}` === key);
       return d?.label ?? key;
     };
-    const headers = keys.map(labelFor);
+    const packedByCar = cars.map((car) => keys.map((key) => programCarExportCell(car, key, usedDefs)));
+    const dateKeys = new Set<string>(PROGRAM_CAR_EXPORT_DATE_COLUMNS);
+    for (const def of usedDefs) {
+      if (def.field_type === "date") dateKeys.add(`cf:${def.field_key}`);
+    }
+    const exportKeys = selectProgramCarExportColumns(
+      keys,
+      packedByCar.map((packed) => {
+        const row: Record<string, unknown> = {};
+        keys.forEach((key, index) => {
+          row[key] = packed[index]?.value;
+        });
+        return row;
+      }),
+      opts.onlyColumnsWithData === true,
+      dateKeys,
+    );
+    const keyIndex = new Map(keys.map((key, index) => [key, index]));
+    const headers = exportKeys.map(labelFor);
     sheet.addRow(headers);
     sheet.getRow(1).font = { bold: true };
-    for (const car of cars) {
+    packedByCar.forEach((packed) => {
       const row = sheet.addRow([]);
-      keys.forEach((key, index) => {
+      exportKeys.forEach((key, index) => {
         const cell = row.getCell(index + 1);
-        let packed: ExcelCell;
-        if (key === "repair_cost_total") {
-          packed = excelMoneyCell(car.repair_cost_total);
-        } else if (key.startsWith("cf:")) {
-          const d = usedDefs.find((x) => `cf:${x.field_key}` === key);
-          if (!d) packed = { value: "" };
-          else if (isProgramMoneyField(d)) packed = excelMoneyCell(car.custom_fields?.[d.field_key]);
-          else if (d.field_type === "date") packed = { value: excelStoredDate(car.custom_fields?.[d.field_key]) || null };
-          else packed = { value: formatCustomField(car.custom_fields?.[d.field_key], d.field_type) };
-        } else {
-          packed = { value: carExportValue(car, key) };
-        }
-        cell.value = packed.value;
-        if (packed.numFmt && packed.value != null) cell.numFmt = packed.numFmt;
+        const source = packed[keyIndex.get(key) ?? -1] ?? { value: "" };
+        cell.value = source.value;
+        if (source.numFmt && source.value != null) cell.numFmt = source.numFmt;
       });
-    }
+    });
     sheet.columns.forEach((col) => {
       col.width = Math.min(40, Math.max(12, Number(col.width) || 16));
     });

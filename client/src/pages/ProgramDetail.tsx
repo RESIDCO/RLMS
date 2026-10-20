@@ -66,6 +66,8 @@ import {
 } from "@shared/programs";
 import { COMMITMENT_TYPES } from "@shared/commitment";
 import { activeFieldDefs } from "@shared/manage-columns";
+import { withOnlyColumnsWithData } from "@shared/program-export-columns";
+import { OnlyColumnsWithDataToggle } from "@/components/OnlyColumnsWithDataToggle";
 import { formatMoneyCell, isProgramMoneyField, moneyNumber, parseUsdInput } from "@shared/money";
 import {
   createProgramCarDraftSession,
@@ -341,6 +343,7 @@ export default function ProgramDetailPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [includeExited, setIncludeExited] = useState(false);
+  const [onlyColumnsWithData, setOnlyColumnsWithData] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
   const [levelFilter, setLevelFilter] = useState<Set<CompletionLevel>>(
     () => new Set<CompletionLevel>(["not_started", "in_progress", "work_done"]),
@@ -1166,13 +1169,21 @@ export default function ProgramDetailPage() {
             {savedFlash && !dirty && (
               <span className="text-xs text-emerald-400">Saved</span>
             )}
+            <OnlyColumnsWithDataToggle
+              id="program-detail-export-only-columns-with-data"
+              checked={onlyColumnsWithData}
+              onCheckedChange={setOnlyColumnsWithData}
+            />
             <Button
               size="sm"
               variant="outline"
               onClick={async () => {
                 try {
                   await downloadReport(
-                    `/api/programs/${id}/export?include_exited=1&cols=all`,
+                    withOnlyColumnsWithData(
+                      `/api/programs/${id}/export?include_exited=1&cols=all`,
+                      onlyColumnsWithData,
+                    ),
                   );
                 } catch (e: any) {
                   toast({ title: "Export failed", description: e.message, variant: "destructive" });

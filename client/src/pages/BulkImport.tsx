@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { queryClient, apiRequest, apiUpload } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { looksLikeVcf } from "@shared/vcf-import";
@@ -1190,6 +1191,7 @@ export default function BulkImportPage() {
                   <StatChip icon={<XCircle className="h-3.5 w-3.5 text-red-400" />} label="Errors (skip)" value={preview.errors} color="red" />
                 )}
                 {/* Error report download — shown whenever any row has issues */}
+                <CopyCarsButton rows={rawRows} testId="button-copy-cars-bulk-import" />
                 {(preview.errors > 0 || preview.dupes > 0 || preview.valid_with_warnings > 0) && (
                   <button
                     onClick={() => downloadErrorReport(rawRows, fileName ?? "import")}
@@ -1209,7 +1211,12 @@ export default function BulkImportPage() {
                       <tr>
                         <th className="px-3 py-2 text-left font-medium">#</th>
                         <th className="px-3 py-2 text-left font-medium">Marks</th>
-                        <th className="px-3 py-2 text-left font-medium">Car Number</th>
+                        <th className="px-3 py-2 text-left font-medium">
+                          <span className="inline-flex items-center gap-1">
+                            Car Number
+                            <CopyCarsButton appearance="header" rows={rawRows} testId="button-copy-cars-column-bulk-import" />
+                          </span>
+                        </th>
                         <th className="px-3 py-2 text-left font-medium">Type</th>
                         <th className="px-3 py-2 text-left font-medium">Status</th>
                         <th className="px-3 py-2 text-left font-medium">Lessee</th>

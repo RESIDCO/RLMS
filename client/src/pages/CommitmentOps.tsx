@@ -22,6 +22,7 @@ import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { Link } from "wouter";
 import { carPath, openAppTab } from "@/lib/browse-nav";
 import { LineageCarLink } from "@/components/LineageCarLink";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 
 function csvFromFile(file: File): Promise<string> {
   return file.text();
@@ -236,6 +237,16 @@ export function BulkCommitmentPage() {
             </>
           )}
           <Button onClick={() => runPreview.mutate()} disabled={!text.trim()}>Preview</Button>
+          {preview?.matched ? (
+            <CopyCarsButton
+              rows={preview.matched}
+              lineOf={(row: { marks?: string | null; car_number?: string | null }) => ({
+                reporting_marks: row.marks,
+                car_number: row.car_number,
+              })}
+              testId="button-copy-cars-bulk-commitment"
+            />
+          ) : null}
           {canEdit && <Button variant="secondary" disabled={!preview?.preview_token} onClick={() => apply.mutate()}>Apply reviewed preview</Button>}
         </div>
         {preview && (
@@ -294,6 +305,16 @@ export function BulkReturnPage() {
           </Select>
           <Button onClick={() => runPreview.mutate()}>Preview</Button>
           {canEdit && <Button variant="secondary" disabled={!preview?.preview_token} onClick={() => apply.mutate()}>Apply reviewed preview</Button>}
+          {preview?.rows ? (
+            <CopyCarsButton
+              rows={preview.rows}
+              lineOf={(row: { marks?: string | null; car_number?: string | null }) => ({
+                reporting_marks: row.marks,
+                car_number: row.car_number,
+              })}
+              testId="button-copy-cars-bulk-return"
+            />
+          ) : null}
         </div>
         {preview?.rows && (
           <table className="w-full text-xs">
@@ -328,6 +349,16 @@ export function StaleCommitmentsPage() {
     <div>
       <PageHeader title="Stale Commitments" subtitle="Open Commitments with no date, a past date, or older than 90 days — plus programs past target completion. Nothing clears silently." />
       <div className="p-6 space-y-6">
+        <div className="flex justify-end">
+          <CopyCarsButton
+            rows={data?.items ?? []}
+            lineOf={(row: { railcar?: { reporting_marks?: string | null; car_number?: string | null } | null }) => ({
+              reporting_marks: row.railcar?.reporting_marks,
+              car_number: row.railcar?.car_number,
+            })}
+            testId="button-copy-cars-stale-commitments"
+          />
+        </div>
         <table className="w-full text-sm">
           <thead><tr className="text-left text-muted-foreground text-xs"><th>Car</th><th>Commitment</th><th>Reason</th><th>Target</th><th></th></tr></thead>
           <tbody>
@@ -406,7 +437,17 @@ export function LeaseEndedWatchPage() {
     <div>
       <PageHeader title="Lease-ended watch" subtitle="Still on an OL whose end date is past, not Month to Month, no EA/xOL move yet." />
       <div className="p-6 space-y-3">
-        <Button onClick={() => nav(`/returns/bulk?cars=${encodeURIComponent(cars)}`)}>Move to EA x-lessee?</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => nav(`/returns/bulk?cars=${encodeURIComponent(cars)}`)}>Move to EA x-lessee?</Button>
+          <CopyCarsButton
+            rows={data?.rows ?? []}
+            lineOf={(row: { marks?: string | null; car_number?: string | null }) => ({
+              reporting_marks: row.marks,
+              car_number: row.car_number,
+            })}
+            testId="button-copy-cars-lease-ended"
+          />
+        </div>
         <table className="w-full text-sm">
           <thead><tr className="text-left text-muted-foreground text-xs"><th>Car</th><th>OL</th><th>Lessee</th><th>End</th><th>Days past</th></tr></thead>
           <tbody>
@@ -486,6 +527,13 @@ export function BulkRentStopsPage() {
           {canEdit && preview?.preview_token && (
             <Button disabled={apply.isPending} onClick={() => apply.mutate()}>Apply preview</Button>
           )}
+          {preview?.to_write ? (
+            <CopyCarsButton
+              rows={preview.to_write}
+              lineOf={(row: { car?: string | null }) => row.car ?? ""}
+              testId="button-copy-cars-bulk-rent-stops"
+            />
+          ) : null}
         </div>
         {preview && (
           <div className="text-sm space-y-2">
@@ -557,6 +605,16 @@ export function BulkRentStartPage() {
           {canEdit && preview?.preview_token && (
             <Button disabled={apply.isPending} onClick={() => apply.mutate()}>Apply preview</Button>
           )}
+          {preview?.to_write ? (
+            <CopyCarsButton
+              rows={preview.to_write}
+              lineOf={(row: { marks?: string | null; car_number?: string | null }) => ({
+                reporting_marks: row.marks,
+                car_number: row.car_number,
+              })}
+              testId="button-copy-cars-bulk-rent-start"
+            />
+          ) : null}
         </div>
         {preview && (
           <div className="text-sm space-y-2">
@@ -598,7 +656,14 @@ export function RentStartWatchPage({ kind }: { kind: "awaiting" | "shop" | "futu
   return (
     <div>
       <PageHeader title={titles[kind]} subtitle={kind === "awaiting" ? `On OL, no rent start, assigned more than ${data?.days ?? 60} days ago` : `${data?.rows?.length ?? 0} cars`} />
-      <div className="p-6">
+      <div className="p-6 space-y-3">
+        <div className="flex justify-end">
+          <CopyCarsButton
+            rows={data?.rows ?? []}
+            idOf={(row: { railcar_id?: number }) => row.railcar_id}
+            testId="button-copy-cars-rent-start-watch"
+          />
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-muted-foreground text-xs">

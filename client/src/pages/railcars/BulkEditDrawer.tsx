@@ -7,6 +7,7 @@ import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { offerUndoToast } from "@/lib/undo";
 import { markSearchRefresh } from "@/lib/searchState";
 import { useToast } from "@/hooks/use-toast";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 
 type PreviewRow = {
   car: string;
@@ -149,6 +150,13 @@ export function BulkEditDrawer({
       <Button size="sm" onClick={() => void runPreview()} disabled={busy || !ops().length}>Preview</Button>
       {preview ? (
         <div className="mt-3">
+          <div className="mb-2 flex justify-end">
+            <CopyCarsButton
+              rows={preview.rows}
+              lineOf={(row) => row.car}
+              testId="button-copy-cars-bulk-edit"
+            />
+          </div>
           <table className="w-full text-[11px]">
             <thead>
               <tr className="text-left text-muted-foreground">

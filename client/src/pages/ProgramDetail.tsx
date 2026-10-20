@@ -7,6 +7,7 @@ import { offerUndoToast } from "@/lib/undo";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { ProgramPreviewDialog } from "@/components/ProgramPreviewDialog";
 import PageHeader from "@/components/PageHeader";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -701,6 +702,18 @@ export default function ProgramDetailPage() {
         )}
         onResize={setColWidth}
         onMove={(from, to) => setColOrder(moveCol(movableKeys, from, to))}
+        accessory={key === "car" ? (
+          <CopyCarsButton
+            appearance="header"
+            rows={visibleCars}
+            selectedIds={selected}
+            idOf={(car) => car.id}
+            lineOf={(car) => ({
+              reporting_marks: car.railcar?.reporting_marks,
+              car_number: car.railcar?.car_number,
+            })}
+          />
+        ) : undefined}
         onSort={
           key === "_select" || key === "_actions"
             ? undefined
@@ -1460,6 +1473,15 @@ export default function ProgramDetailPage() {
                   Put on rent
                 </Button>
               )}
+              <CopyCarsButton
+                rows={visibleCars}
+                selectedIds={selected}
+                idOf={(car) => car.id}
+                lineOf={(car) => ({
+                  reporting_marks: car.railcar?.reporting_marks,
+                  car_number: car.railcar?.car_number,
+                })}
+              />
               <ColumnPicker
                 columns={[
                   ...PD_CORE.map((key) => ({ key, label: PD_LABELS[key] ?? key })),

@@ -30,6 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { ColumnHeaderLabel } from "@/components/ColumnHelp";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
@@ -153,7 +154,8 @@ function CarTable({
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <CopyCarsButton rows={cars} selectedIds={selection?.selected} />
         <ColumnPicker columns={[...BROWSE_CAR_OPT_COLS]} prefs={colPrefs} />
       </div>
       <div className="rounded-xl border border-card-border bg-card overflow-hidden">
@@ -171,7 +173,12 @@ function CarTable({
                   </th>
                 )}
                 <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="marks" /></th>
-                <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="car_number" fallback="Car #" /></th>
+                <th className="px-4 py-2.5 text-left font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    <ColumnHeaderLabel listKey="browse_car_list" colKey="car_number" fallback="Car #" />
+                    <CopyCarsButton appearance="header" rows={cars} selectedIds={selection?.selected} />
+                  </span>
+                </th>
                 <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="lease_type" /></th>
                 {show("entity") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="entity" /></th>}
                 {show("status") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="status" /></th>}

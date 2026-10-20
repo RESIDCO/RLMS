@@ -11,6 +11,7 @@ import { useLocation } from "wouter";
 import { useHashSearch } from "@/lib/hash-location";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -235,12 +236,21 @@ function ExistingCarPicker({
           <DialogTitle>Add Existing Unassigned Cars</DialogTitle>
           <p className="text-sm text-muted-foreground">Select cars from the registry that have no current assignment.</p>
         </DialogHeader>
+          <div className="flex items-center gap-2">
           <ClearableSearchInput
-            className="relative max-w-none"
+            className="relative max-w-none flex-1"
             placeholder="Search car #, marks, type…"
             value={search}
             onChange={setSearch}
           />
+          <CopyCarsButton
+            rows={visible}
+            selectedIds={selected}
+            totalCount={visible.length}
+            loadAll={async () => unassigned}
+            testId="button-copy-cars-lease-wizard"
+          />
+          </div>
         <div className="flex-1 overflow-y-auto border border-border rounded-lg">
           {isLoading ? (
             <div className="p-4 space-y-2">
@@ -256,7 +266,19 @@ function ExistingCarPicker({
                 <tr>
                   <th className="w-10 pl-4 py-2" />
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Marks</th>
-                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Car #</th>
+                  <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      Car #
+                      <CopyCarsButton
+                        appearance="header"
+                        rows={visible}
+                        selectedIds={selected}
+                        totalCount={visible.length}
+                        loadAll={async () => unassigned}
+                        testId="button-copy-cars-column-lease-wizard"
+                      />
+                    </span>
+                  </th>
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Type</th>
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Entity</th>
                   <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wide font-medium">Status</th>

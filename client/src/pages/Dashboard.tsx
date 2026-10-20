@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { openAppTab, lesseePath, olPath, entityPath, turning50Path, olKeyFromLabel, programsListPath } from "@/lib/browse-nav";
 import { LineageCarLink } from "@/components/LineageCarLink";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { accountListPath } from "@/lib/account-mgmt-nav";
 import { kpiDrillPath } from "@shared/kpi-drill-tiles";
 
@@ -300,6 +301,7 @@ function DrillDownDrawer({
               <div className="px-6 py-3 text-[10px] uppercase tracking-wider text-muted-foreground font-medium border-b border-border/50 flex items-center gap-2">
                 <span className="font-mono-num">{cars.length}</span> cars
                 {drillKey === "utilization_pct" && <span className="ml-1 text-muted-foreground">— showing unassigned (off-lease)</span>}
+                <CopyCarsButton rows={cars} className="ml-auto normal-case tracking-normal" testId="button-copy-cars-dashboard" />
               </div>
               {cars.length === 0 ? (
                 <div className="px-6 py-16 text-center text-muted-foreground text-sm">No cars in this group.</div>
@@ -308,7 +310,12 @@ function DrillDownDrawer({
                   <thead className="bg-muted/30 text-muted-foreground sticky top-0">
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Marks</th>
-                      <th className="px-4 py-2 text-left font-medium">Car #</th>
+                      <th className="px-4 py-2 text-left font-medium">
+                        <span className="inline-flex items-center gap-1">
+                          Car #
+                          <CopyCarsButton appearance="header" rows={cars} testId="button-copy-cars-column-dashboard" />
+                        </span>
+                      </th>
                       <th className="px-4 py-2 text-left font-medium">Entity</th>
                       <th className="px-4 py-2 text-left font-medium">Status</th>
                       <th className="px-4 py-2 text-left font-medium">Lessee / Rider</th>

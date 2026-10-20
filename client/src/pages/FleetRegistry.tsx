@@ -4,6 +4,7 @@ import { useHashSearch, navigateHash } from "@/lib/hash-location";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-status";
@@ -71,7 +72,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
+import { apiRequest, apiGet, asRailcarList, queryClient, railcarsQs } from "@/lib/queryClient";
 import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber, formatCarId, normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
@@ -1020,6 +1021,14 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   );
   const tableW = tableWidthFor(displayKeys, colWidths, FR_WIDTHS, 110);
 
+  async function loadAllFilteredRailcars() {
+    const data = await apiGet<Row[] | { rows?: Row[] }>(
+      railcarsQs({ ...listParams, page: undefined, pageSize: undefined, all: 1 }),
+      { timeoutMs: 60_000 },
+    );
+    return asRailcarList(data);
+  }
+
   function frHeader(key: string) {
     const pinned =
       (FR_PINNED_START as readonly string[]).includes(key) ||
@@ -1042,6 +1051,15 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         )}
         onResize={setColWidth}
         onMove={(from, to) => setColOrder(moveCol(movableKeys, from, to))}
+        accessory={key === "car_number" ? (
+          <CopyCarsButton
+            appearance="header"
+            rows={filtered}
+            selectedIds={selectedIds}
+            totalCount={totalCount}
+            loadAll={loadAllFilteredRailcars}
+          />
+        ) : undefined}
       >
         {key === "_select" ? (
           <Checkbox
@@ -1236,6 +1254,13 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               <Image className="h-4 w-4" />
               {selectedIds.size > 0 ? `Find Photos (${selectedIds.size})` : "Find Photos"}
             </Button>
+            <CopyCarsButton
+              rows={filtered}
+              selectedIds={selectedIds}
+              totalCount={totalCount}
+              loadAll={loadAllFilteredRailcars}
+              disabled={isLoading || totalCount === 0}
+            />
             <Button size="sm" variant="outline" asChild>
               <Link href="/railcars/umler-queue">UMLER queue</Link>
             </Button>
@@ -1465,6 +1490,16 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
             {totalCount.toLocaleString()} cars
             {totalCount > 0 ? ` · page ${page} of ${totalPages}` : ""}
           </div>
+          {scopedRiderId ? (
+            <CopyCarsButton
+              rows={filtered}
+              selectedIds={selectedIds}
+              totalCount={totalCount}
+              loadAll={loadAllFilteredRailcars}
+              disabled={isLoading || totalCount === 0}
+              testId="button-copy-cars-rider"
+            />
+          ) : null}
         </div>
 
         {turning50Year && (

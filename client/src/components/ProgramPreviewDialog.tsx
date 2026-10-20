@@ -1,5 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 
 export function ProgramPreviewDialog({
   open,
@@ -44,8 +45,17 @@ export function ProgramPreviewDialog({
           {groups.map(([label, rows]) =>
             rows?.length ? (
               <div key={label}>
-                <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
-                  {label} ({rows.length})
+                <div className="mb-1 flex items-center justify-between gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                  <span>{label} ({rows.length})</span>
+                  <CopyCarsButton
+                    rows={rows}
+                    lineOf={(row) => row.label ?? row.token ?? row.car ?? {
+                      reporting_marks: row.reporting_marks,
+                      car_number: row.car_number,
+                    }}
+                    className="normal-case tracking-normal"
+                    testId={`button-copy-cars-program-preview-${label}`}
+                  />
                 </div>
                 <ul className="text-xs max-h-28 overflow-auto border border-border rounded p-2 space-y-0.5">
                   {rows.slice(0, 40).map((r: any, i: number) => (

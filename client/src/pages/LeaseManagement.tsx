@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
@@ -1028,6 +1029,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                   <SelectItem value="all">All cars</SelectItem>
                 </SelectContent>
               </Select>
+              <CopyCarsButton rows={filtered} totalCount={filtered.length} testId={`button-copy-cars-rider-${riderId}`} />
               <ColumnPicker columns={RC_OPT_COLS} prefs={colPrefs} />
             </div>
           </div>
@@ -1056,6 +1058,14 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                       className="text-left px-3 py-2 font-medium bg-muted/40"
                       onResize={setColWidth}
                       onMove={(from, to) => setColOrder(moveCol(displayKeys.filter((x) => !RC_PINNED.includes(x as (typeof RC_PINNED)[number])), from, to))}
+                      accessory={k === "car_number" ? (
+                        <CopyCarsButton
+                          appearance="header"
+                          rows={filtered}
+                          totalCount={filtered.length}
+                          testId={`button-copy-cars-column-rider-${riderId}`}
+                        />
+                      ) : undefined}
                     >
                       {columnLabel("lease_rider_cars", k, RC_LABELS[k] ?? k)}
                     </GridColumnTh>

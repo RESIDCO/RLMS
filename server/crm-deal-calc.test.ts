@@ -140,8 +140,9 @@ ok(serverSrc.includes("saveOpportunityLines"), "apply-price uses the bid line sa
 for (const table of ["leases", "riders", "master_leases", "railcars", "rent_charges", "car_rent"]) {
   ok(!serverSrc.includes(`"${table}"`) && !serverSrc.includes(`'${table}'`), `deal calc source does not write ${table}`);
 }
+ok(!serverSrc.includes("applyDealCalcUndo"), "deal-calc undo is not applied in JavaScript");
 ok(!serverSrc.includes("CREATE OR REPLACE FUNCTION") && !serverSrc.includes(".rpc(\"rlms_undo_change_group\""), "server does not replace or call the frozen undo RPC");
-ok(undoSrc.includes("isDealCalcOnlyGroup"), "undo of a deal-calc group skips the frozen RPC");
+ok(undoSrc.includes("isDealCalcOnlyGroup") && undoSrc.includes("rlms_undo_deal_calc_group"), "applyUndo sends a deal-calc group to rlms_undo_deal_calc_group");
 ok(isUndoAllowedTable("deal_calc_scenarios") && isUndoAllowedTable("deal_calc_assumption_sets"), "deal calc tables are undoable at the app layer");
 
 ok(routeSrc.includes('app.get("/api/opportunities/:id/scenarios/:sid"') && /scenarios\/:sid", async[\s\S]*?requireWrite/.test(routeSrc), "viewer detail is requireWrite");
@@ -153,9 +154,16 @@ ok(routesSrc.includes("registerCrmDealCalcRoutes(app)"), "routes.ts registers th
 ok(migration.includes("66be7d422ec47e8c711f83c8ca001c79"), "migration guards apply md5");
 ok(migration.includes("fda2979bbd2d37e82c936b0abcdf8927"), "migration guards undo md5");
 ok(!migration.includes("CREATE OR REPLACE FUNCTION public.rlms_"), "migration does not replace undo functions");
+ok(migration.includes("create function public.rlms_undo_deal_calc_group"), "migration defines rlms_undo_deal_calc_group");
+ok(/security definer[\s\S]*set search_path = public, pg_temp/.test(migration.slice(migration.indexOf("rlms_undo_deal_calc_group"))), "deal-calc undo is security definer with search_path public, pg_temp");
+ok(migration.includes("revoke all on function public.rlms_undo_deal_calc_group(uuid, text) from public, anon, authenticated"), "deal-calc undo execute is revoked from public, anon, and authenticated");
+ok(migration.includes("grant execute on function public.rlms_undo_deal_calc_group(uuid, text) to service_role"), "deal-calc undo execute is granted to service_role");
+ok(migration.includes("audit_op := 'delete'"), "undo of an insert audits the row as delete");
+ok(migration.includes("order by id desc"), "deal-calc undo applies the newest change first");
 ok(migration.includes("public.set_updated_at()"), "migration requires set_updated_at");
 ok(migration.includes(JSON.stringify(companyDefaultInputs())), "seed JSON matches companyDefaultInputs()");
 ok(down.includes("down refused"), "down refuses when data exists");
+ok(down.includes("drop function if exists public.rlms_undo_deal_calc_group(uuid, text)"), "down drops the deal-calc undo function");
 ok(down.includes("66be7d422ec47e8c711f83c8ca001c79"), "down re-checks the md5 guard");
 
 console.log(`\n${passed} passed, ${failed} failed`);

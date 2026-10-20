@@ -1,13 +1,11 @@
 /**
  * Deal calculator persistence.
  * User edits go through withChangeGroupResult + recordChange.
- * Undo of a deal-calc-only change group is applied here, because the frozen
- * rlms_undo_change_group allowlist does not name these tables and must keep
- * its md5. That path writes the restored row and an undo audit row the same
- * way the SQL function does for allowlisted tables. It does not call the RPC.
+ * Undo of a deal-calc-only change group is rlms_undo_deal_calc_group, one
+ * transaction in the database. The four frozen rlms_ undo functions are not
+ * called or replaced.
  */
 
-import { randomUUID } from "node:crypto";
 import { changeCaptureRow } from "@shared/crm";
 import {
   applyPriceFieldName,
@@ -21,8 +19,7 @@ import {
   type ApplyPriceWhich,
 } from "@shared/dealCalcApi";
 import { buildInputsFromLine, companyDefaultInputs, type DealCalcInputs, type LineSeed } from "@shared/dealCalc";
-import { pinSlotFree, planPin, planSoftDelete, type ScenarioSlot } from "@shared/dealCalcUndo";
-import { opOf, undoApplyOrder, type UndoLogRow } from "@shared/undo";
+import { planPin, planSoftDelete, type ScenarioSlot } from "@shared/dealCalcUndo";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { CrmHttpError } from "./crm-error";
 import { saveOpportunityLines } from "./crm-bid-lines";
@@ -400,75 +397,6 @@ export async function patchAssumptionSet(id: number, body: Record<string, unknow
 
 export function isDealCalcOnlyGroup(rows: Array<{ table_name: string | null }>): boolean {
   return rows.length > 0 && rows.every((row) => row.table_name === SCENARIO_TABLE || row.table_name === SET_TABLE);
-}
-
-async function siblingHoldsPin(row: Record<string, unknown>): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from(SCENARIO_TABLE)
-    .select("id, opportunity_id, opportunity_line_id, is_pinned, deleted_at")
-    .eq("opportunity_id", row.opportunity_id)
-    .eq("is_pinned", true)
-    .is("deleted_at", null);
-  if (error) throw error;
-  const slots = (data ?? []).map((item) => asSlot(item as Record<string, unknown>));
-  const self = asSlot({ ...row, is_pinned: false, deleted_at: null });
-  return !pinSlotFree([...slots, self], self.id);
-}
-
-export async function applyDealCalcUndo(group: string, actor: string, rows: UndoLogRow[]) {
-  const ordered = undoApplyOrder(rows);
-  let restored = 0;
-  for (const rec of ordered) {
-    if (!rec.table_name || rec.row_pk == null) continue;
-    const op = opOf(rec);
-    if (op === "insert") {
-      const { error } = await supabaseAdmin.from(rec.table_name).delete().eq("id", rec.row_pk);
-      if (error) throw error;
-      restored += 1;
-      continue;
-    }
-    const patch: Record<string, unknown> = { ...(rec.before ?? {}) };
-    delete patch.updated_at;
-    if (rec.table_name === SCENARIO_TABLE && patch.is_pinned === true) {
-      const { data: current, error } = await supabaseAdmin.from(SCENARIO_TABLE).select("*").eq("id", rec.row_pk).maybeSingle();
-      if (error) throw error;
-      const merged = { ...(current ?? {}), ...patch, id: rec.row_pk };
-      if (merged.deleted_at || await siblingHoldsPin(merged as Record<string, unknown>)) patch.is_pinned = false;
-    }
-    const { error } = await supabaseAdmin.from(rec.table_name).update(patch).eq("id", rec.row_pk);
-    if (error) throw error;
-    restored += 1;
-  }
-
-  const undoGroup = randomUUID();
-  const audit = ordered.map((rec) => ({
-    entity_type: rec.entity_type ?? "deal_calc_scenario",
-    entity_id: rec.entity_id ?? rec.row_pk,
-    action: "undo",
-    actor,
-    railcar_id: rec.railcar_id,
-    rider_id: null,
-    detail: { op: "update", undid: rec.action, original_group: group },
-    source: "undo",
-    occurred_at: new Date().toISOString(),
-    change_group: undoGroup,
-    table_name: rec.table_name,
-    row_pk: rec.row_pk,
-    before: rec.after ?? {},
-    after: rec.before ?? {},
-    undoable: false,
-    undo_of: rec.id,
-  }));
-  if (audit.length) {
-    const { error } = await supabaseAdmin.from("activity_log").insert(audit);
-    if (error) throw error;
-  }
-  const { error: markErr } = await supabaseAdmin
-    .from("activity_log")
-    .update({ undone_at: new Date().toISOString(), undone_by: actor })
-    .eq("change_group", group);
-  if (markErr) throw markErr;
-  return { ok: true, restored, undo_group: undoGroup, original_group: group };
 }
 
 export type { ApplyPriceField, ApplyPriceWhich };

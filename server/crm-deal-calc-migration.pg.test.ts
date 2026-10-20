@@ -231,6 +231,51 @@ try {
   ok(/restrict|foreign key/i.test(psqlFails(`delete from opportunity_lines where id = ${lineA}`)), "deleting the line is RESTRICT");
   ok(/restrict|foreign key/i.test(psqlFails(`delete from deal_calc_assumption_sets where id = ${seed}`)), "deleting the assumption set is RESTRICT");
 
+  const undoCfg = psql("select proconfig::text from pg_proc where proname = 'rlms_undo_deal_calc_group'");
+  ok(undoCfg.includes("search_path=public, pg_temp"), `deal-calc undo search_path is public, pg_temp (${undoCfg})`);
+  ok(psql("select prosecdef::text from pg_proc where proname = 'rlms_undo_deal_calc_group'") === "true", "deal-calc undo is security definer");
+  ok(psql("select has_function_privilege('anon', 'public.rlms_undo_deal_calc_group(uuid,text)', 'execute')") === "f", "anon cannot execute deal-calc undo");
+  ok(psql("select has_function_privilege('authenticated', 'public.rlms_undo_deal_calc_group(uuid,text)', 'execute')") === "f", "authenticated cannot execute deal-calc undo");
+  ok(psql("select has_function_privilege('public', 'public.rlms_undo_deal_calc_group(uuid,text)', 'execute')") === "f", "public cannot execute deal-calc undo");
+  ok(psql("select has_function_privilege('service_role', 'public.rlms_undo_deal_calc_group(uuid,text)', 'execute')") === "t", "service_role can execute deal-calc undo");
+
+  const mixed = psql("select gen_random_uuid()");
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, undoable) values ('opportunity', ${oppA}, 'update', 'tester', '{"op":"update"}'::jsonb, '${mixed}', 'opportunities', ${oppA}, true)`);
+  ok(psql(`select public.rlms_undo_deal_calc_group('${mixed}'::uuid, 'tester')->>'error'`) === "not_deal_calc_group", "a group that is not entirely deal calc is refused");
+
+  // Newer row renames the set; older row deletes it. Newest-first applies the
+  // rename, then the delete hits the scenario FK. A partial commit would leave
+  // the name as Extra.
+  const extraSet = psql("insert into deal_calc_assumption_sets (name, is_default, inputs, created_by) values ('Renamed', false, '{}'::jsonb, 'test') returning id");
+  const fkGroup = psql("select gen_random_uuid()");
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, before, after, undoable) values ('deal_calc_assumption_set', ${extraSet}, 'create_deal_calc_assumption_set', 'tester', '{"op":"insert"}'::jsonb, '${fkGroup}', 'deal_calc_assumption_sets', ${extraSet}, null, '{"name":"Renamed"}'::jsonb, true)`);
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, before, after, undoable) values ('deal_calc_assumption_set', ${extraSet}, 'update_deal_calc_assumption_set', 'tester', '{"op":"update"}'::jsonb, '${fkGroup}', 'deal_calc_assumption_sets', ${extraSet}, '{"name":"Extra"}'::jsonb, '{"name":"Renamed"}'::jsonb, true)`);
+  const blocker = psql(`insert into deal_calc_scenarios (opportunity_id, assumption_set_id, name, deal_type, method, calc_version, inputs, results) values (${oppA}, ${extraSet}, 'uses extra', 'portfolio_bid', 'cash_flow', 'dc-1.0.0', '{}'::jsonb, '{}'::jsonb) returning id`);
+  const rolledBack = psqlFails(`select public.rlms_undo_deal_calc_group('${fkGroup}'::uuid, 'tester')`);
+  ok(/foreign key|violates/i.test(rolledBack), "undo of an in-use assumption set fails on the scenario FK");
+  ok(psql(`select name from deal_calc_assumption_sets where id = ${extraSet}`) === "Renamed", "the rename inside the failed undo rolls back");
+  ok(psql(`select count(*) from deal_calc_assumption_sets where id = ${extraSet}`) === "1", "the assumption set is still present");
+  ok(psql(`select count(*) from activity_log where change_group = '${fkGroup}' and undone_at is not null`) === "0", "the failed undo does not mark the group undone");
+  ok(psql("select count(*) from activity_log where source = 'undo'") === "0", "the failed undo leaves no audit row");
+
+  const inserted = psql(`insert into deal_calc_scenarios (opportunity_id, name, deal_type, method, calc_version, inputs, results) values (${oppA}, 'Undo me', 'portfolio_bid', 'cash_flow', 'dc-1.0.0', '{}'::jsonb, '{}'::jsonb) returning id`);
+  const insertGroup = psql("select gen_random_uuid()");
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, before, after, undoable) values ('deal_calc_scenario', ${inserted}, 'create_deal_calc_scenario', 'tester', '{"op":"insert"}'::jsonb, '${insertGroup}', 'deal_calc_scenarios', ${inserted}, null, '{"name":"Undo me"}'::jsonb, true)`);
+  ok(psql(`select public.rlms_undo_deal_calc_group('${insertGroup}'::uuid, 'tester')->>'ok'`) === "true", "undo of a scenario insert succeeds");
+  ok(psql(`select count(*) from deal_calc_scenarios where id = ${inserted}`) === "0", "undo of an insert deletes the scenario");
+  ok(psql(`select detail->>'op' from activity_log where source = 'undo' and table_name = 'deal_calc_scenarios' and row_pk = ${inserted}`) === "delete", "undo of an insert labels the audit row delete");
+
+  const unpinned = psql(`insert into deal_calc_scenarios (opportunity_id, opportunity_line_id, name, deal_type, method, calc_version, inputs, results, is_pinned) values (${oppA}, ${lineA}, 'other', 'portfolio_bid', 'cash_flow', 'dc-1.0.0', '{}'::jsonb, '{}'::jsonb, false) returning id`);
+  const pinGroup = psql("select gen_random_uuid()");
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, before, after, undoable) values ('deal_calc_scenario', ${unpinned}, 'update_deal_calc_scenario', 'tester', '{"op":"update"}'::jsonb, '${pinGroup}', 'deal_calc_scenarios', ${unpinned}, '{"is_pinned":true}'::jsonb, '{"is_pinned":false}'::jsonb, true)`);
+  ok(psql(`select public.rlms_undo_deal_calc_group('${pinGroup}'::uuid, 'tester')->>'ok'`) === "true", "undo that would re-pin beside a live pin succeeds");
+  ok(psql(`select is_pinned from deal_calc_scenarios where id = ${unpinned}`) === "f", "a restored row stays unpinned when the pin slot is taken");
+  ok(psql(`select is_pinned from deal_calc_scenarios where id = ${scenario}`) === "t", "the live pin is left in place");
+
+  psql(`delete from deal_calc_scenarios where id in (${blocker}, ${unpinned})`);
+  psql(`delete from deal_calc_assumption_sets where id = ${extraSet}`);
+  psql("delete from activity_log where entity_type in ('deal_calc_scenario','deal_calc_assumption_set') or source = 'undo' or change_group = '" + mixed + "'");
+
   const refused = psqlFileFails(join(repo, "migrations/20261120_crm_deal_calc_p1_down.sql"));
   ok(/down refused:/.test(refused), "down refuses, with counts, when a scenario exists");
   ok(psql("select to_regclass('public.deal_calc_scenarios')") === "deal_calc_scenarios", "refused down leaves the table");
@@ -246,6 +291,7 @@ try {
   ok(psql("select to_regclass('public.deal_calc_scenarios')") === "", "down drops scenarios");
   ok(psql("select to_regclass('public.deal_calc_assumption_sets')") === "", "down drops assumption sets");
   ok(psql("select count(*) from pg_proc where proname = 'crm_calc_scenario_line_matches'") === "0", "down drops the trigger function");
+  ok(psql("select count(*) from pg_proc where proname = 'rlms_undo_deal_calc_group'") === "0", "down drops the deal-calc undo function");
   ok(!psql("select pg_get_constraintdef(oid) from pg_constraint where conname = 'activity_log_entity_type_check'").includes("deal_calc_scenario"), "down restores the activity check without the new types");
 } catch (err) {
   failed += 1;

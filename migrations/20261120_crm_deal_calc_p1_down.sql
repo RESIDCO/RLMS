@@ -38,6 +38,7 @@ drop trigger if exists trg_deal_calc_scenarios_line_matches on public.deal_calc_
 drop trigger if exists trg_deal_calc_scenarios_updated_at on public.deal_calc_scenarios;
 drop trigger if exists trg_deal_calc_assumption_sets_updated_at on public.deal_calc_assumption_sets;
 drop function if exists public.crm_calc_scenario_line_matches();
+drop function if exists public.rlms_undo_deal_calc_group(uuid, text);
 drop table if exists public.deal_calc_scenarios;
 drop table if exists public.deal_calc_assumption_sets;
 

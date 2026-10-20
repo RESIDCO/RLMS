@@ -12,6 +12,7 @@ import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { displayStatusInputFromRailcar, FLEET_STATUSES } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -1556,6 +1557,13 @@ export default function SearchPage() {
     return all.slice(0, EXPORT_CAP);
   }
 
+  async function loadAllSearchCars() {
+    return asRailcarList(await apiGet<any[] | { rows?: any[] }>(
+      railcarsQs({ ...listParams, page: undefined, pageSize: undefined, all: 1 }),
+      { timeoutMs: 60_000 },
+    ));
+  }
+
   async function exportResults(kind: "xlsx" | "csv") {
     if (totalCount === 0) return;
     setExporting(true);
@@ -2514,6 +2522,13 @@ export default function SearchPage() {
                 <option value="all">All (≤500)</option>
               </select>
             </label>
+            <CopyCarsButton
+              rows={fixedMode || isPaste ? rows : pageRows}
+              selectedIds={selected}
+              totalCount={totalCount}
+              loadAll={fixedMode || isPaste ? undefined : loadAllSearchCars}
+              disabled={loading || totalCount === 0}
+            />
             {totalCount > 0 && (
               <div className="inline-flex">
                 <Button
@@ -2759,6 +2774,16 @@ export default function SearchPage() {
                           )}
                           onResize={resizeColumn}
                           onMove={moveColumn}
+                          accessory={key === "car_number" ? (
+                            <CopyCarsButton
+                              appearance="header"
+                              rows={fixedMode || isPaste ? rows : pageRows}
+                              selectedIds={selected}
+                              totalCount={totalCount}
+                              loadAll={fixedMode || isPaste ? undefined : loadAllSearchCars}
+                              disabled={loading || totalCount === 0}
+                            />
+                          ) : undefined}
                           onSort={(fullSetLoaded || key === "car_number" || key === "id") && !focusLocked ? (col) => {
                             setDir(sort === col && dir === "asc" ? "desc" : "asc");
                             setSort(col);

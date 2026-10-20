@@ -11,6 +11,7 @@ import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { REMARK_CONFIRM, remarkPreviewToCsv, type RemarkPreviewRow, type RemarkStatus } from "@shared/remark-in-place";
 import { Download } from "lucide-react";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 
 type PreviewResponse = {
   ok: boolean;
@@ -207,6 +208,15 @@ export default function RemarkCars() {
                   {item.label} {item.n}
                 </span>
               ))}
+              <CopyCarsButton
+                rows={preview.rows}
+                lineOf={(row) => ({
+                  reporting_marks: row.old_mark,
+                  car_number: row.old_number,
+                  car: row.input,
+                })}
+                testId="button-copy-cars-remark"
+              />
               <Button type="button" variant="outline" size="sm" onClick={downloadCsv} data-testid="button-remark-csv">
                 <Download className="h-4 w-4" />
                 Download preview CSV

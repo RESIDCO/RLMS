@@ -28,6 +28,8 @@ import { colsQuery } from "@shared/column-views";
 import { columnLabel } from "@shared/column-dictionary";
 import { ColumnHelp, KpiReasonHelp } from "@/components/ColumnHelp";
 import { formatCarId } from "@shared/residco-import";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
+import { collectPages } from "@/lib/copy-cars";
 import { FormerlyBadge } from "@/components/FormerlyBadge";
 import { LineageCarLink } from "@/components/LineageCarLink";
 import { overlayLifecycle } from "@shared/programs";
@@ -389,6 +391,17 @@ export function KpiCarListPage() {
     return `/api/kpi/cars/export?${p.toString()}`;
   };
 
+  async function loadAllKpiRows() {
+    const pageSize = 500;
+    return collectPages(async (pageNumber, size) => {
+      const params = new URLSearchParams(listQs);
+      params.set("page", String(pageNumber));
+      params.set("page_size", String(size));
+      const body = await apiGet<{ rows?: Row[]; total?: number }>(`/api/kpi/cars?${params.toString()}`);
+      return { rows: body.rows ?? [], total: Number(body.total ?? 0) };
+    }, pageSize);
+  }
+
   const pageIds = rows.map((r) => r.railcar_id);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
 
@@ -399,6 +412,15 @@ export function KpiCarListPage() {
         subtitle={`${total.toLocaleString()} cars`}
         actions={
           <div className="flex flex-wrap gap-2">
+            <CopyCarsButton
+              rows={rows}
+              selectedIds={selectAllMatching ? null : selected}
+              idOf={(row) => row.railcar_id}
+              lineOf={(row) => row.car}
+              totalCount={total}
+              loadAll={loadAllKpiRows}
+              disabled={isLoading || total === 0}
+            />
             <Button variant="outline" size="sm" onClick={() => downloadXlsx(exportHref("csv"), `RLMS_${bucket}.csv`)}>
               Export CSV
             </Button>
@@ -574,6 +596,18 @@ export function KpiCarListPage() {
                         <button type="button" className="hover:underline" onClick={() => toggleSort(col)}>
                           {columnLabel("kpi_cars", col)}{sort === col ? (dir === "asc" ? " ↑" : " ↓") : ""}
                         </button>
+                        {col === "car" ? (
+                          <CopyCarsButton
+                            appearance="header"
+                            rows={rows}
+                            selectedIds={selectAllMatching ? null : selected}
+                            idOf={(row) => row.railcar_id}
+                            lineOf={(row) => row.car}
+                            totalCount={total}
+                            loadAll={loadAllKpiRows}
+                            disabled={isLoading || total === 0}
+                          />
+                        ) : null}
                         <ColumnHelp listKey="kpi_cars" colKey={col} />
                       </span>
                     </th>

@@ -11,6 +11,7 @@ import { createRiderLease } from "@/components/RiderFreeTextInput";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { previewAndUndo } from "@/lib/undo";
 import { formatUsDate } from "@shared/display-date";
 import { todayIsoDateOnly } from "@shared/lease-authority";
@@ -212,7 +213,14 @@ export function MoveCarsDialog({
         <div className="space-y-3 overflow-y-auto pr-1" style={{ maxHeight: "calc(80vh - 140px)" }}>
           {picking ? (
             <div className="rounded-md border border-border">
-              <div className="px-3 py-2 text-xs text-muted-foreground">Active cars on this rider</div>
+              <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs text-muted-foreground">
+                <span>Active cars on this rider</span>
+                <CopyCarsButton
+                  rows={sourceCars.data ?? []}
+                  selectedIds={picked}
+                  testId="button-copy-cars-move-source"
+                />
+              </div>
               <div className="max-h-40 overflow-auto">
                 {(sourceCars.data ?? []).map((car) => {
                   const label = [car.reporting_marks, car.car_number].filter(Boolean).join(" ") || `#${car.id}`;
@@ -317,6 +325,13 @@ export function MoveCarsDialog({
 
           {rows.length > 0 ? (
             <div className="overflow-auto rounded-md border border-border">
+              <div className="flex justify-end border-b border-border px-2 py-1.5">
+                <CopyCarsButton
+                  rows={rows}
+                  lineOf={(row) => row.label}
+                  testId="button-copy-cars-move-preview"
+                />
+              </div>
               <table className="w-full text-xs">
                 <thead className="bg-muted/40 text-left text-muted-foreground">
                   <tr>

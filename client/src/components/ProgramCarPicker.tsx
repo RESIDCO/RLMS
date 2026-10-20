@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { carListSearchTokens, pasteSearchBatches, programPickerFromSearch, type SearchPastePage } from "@shared/programs";
 import { apiGet, apiRequest, asRailcarList, railcarsQs } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
@@ -151,7 +152,9 @@ export default function ProgramCarPicker({
 
       {mode === "search" ? (
         <>
+          <div className="flex items-center gap-2">
           <ClearableSearchInput
+            className="flex-1"
             placeholder="Type a car number, or paste a list…"
             value={q}
             onChange={setQ}
@@ -166,6 +169,20 @@ export default function ProgramCarPicker({
               void resolvePaste(list);
             }}
           />
+          <CopyCarsButton
+            rows={rows}
+            selectedIds={pickedIds}
+            totalCount={rows.length}
+            loadAll={async () => {
+              const have = new Set(rows.map((row) => Number(row.id)));
+              const extras = value
+                .filter((car) => !have.has(car.id))
+                .map((car) => ({ id: car.id, car: car.label }));
+              return [...rows, ...extras];
+            }}
+            testId="button-copy-cars-program-picker"
+          />
+          </div>
           <div className="max-h-56 overflow-auto border rounded-md">
             <table className="w-full text-xs">
               <tbody>
@@ -229,9 +246,19 @@ export default function ProgramCarPicker({
               placeholder={"TFOX 901745\nKCS 310100\n475002"}
             />
           </div>
+          <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="outline" onClick={() => void resolvePaste()} disabled={!paste.trim() || resolving}>
             {resolving ? "Matching…" : "Match list"}
           </Button>
+          {preview ? (
+            <CopyCarsButton
+              rows={preview.matched}
+              idOf={(row) => row.railcar_id}
+              lineOf={(row) => row.label || row.token}
+              testId="button-copy-cars-program-paste"
+            />
+          ) : null}
+          </div>
           {resolveError && (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {resolveError}

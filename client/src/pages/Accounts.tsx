@@ -22,6 +22,7 @@ import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
 import { AmCommentThread } from "@/components/AmCommentThread";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 import { navigateHash } from "@/lib/hash-location";
 import {
@@ -813,10 +814,26 @@ function OlRows({
             ) : (cars.data?.cars ?? []).length === 0 ? (
               <p className="text-xs text-muted-foreground">No active cars on this OL.</p>
             ) : (
+              <>
+              <div className="mb-1 flex justify-end">
+                <CopyCarsButton
+                  rows={cars.data?.cars ?? []}
+                  testId={`button-copy-cars-account-ol-${ol.id}`}
+                />
+              </div>
               <table className="w-full text-xs">
                 <thead className="text-muted-foreground">
                   <tr>
-                    <th className="text-left font-medium py-1">Car</th>
+                    <th className="text-left font-medium py-1">
+                      <span className="inline-flex items-center gap-1">
+                        Car
+                        <CopyCarsButton
+                          appearance="header"
+                          rows={cars.data?.cars ?? []}
+                          testId={`button-copy-cars-column-account-ol-${ol.id}`}
+                        />
+                      </span>
+                    </th>
                     <th className="text-left font-medium py-1">Type</th>
                     <th className="text-left font-medium py-1">Expiration</th>
                   </tr>
@@ -842,6 +859,7 @@ function OlRows({
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </td>
         </tr>

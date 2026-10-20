@@ -16,6 +16,7 @@ export function GridColumnTh({
   onMove,
   onSort,
   sortDir,
+  accessory,
 }: {
   colKey: string;
   listKey?: string;
@@ -29,6 +30,8 @@ export function GridColumnTh({
   onMove?: (fromKey: string, toKey: string) => void;
   onSort?: (key: string) => void;
   sortDir?: "asc" | "desc" | null;
+  /** Extra control rendered beside the label. Omitted columns stay unchanged. */
+  accessory?: ReactNode;
 }) {
   const startX = useRef(0);
   const startW = useRef(width ?? minWidth);
@@ -103,6 +106,7 @@ export function GridColumnTh({
         ) : (
           children
         )}
+        {accessory}
         {listKey ? <ColumnHelp listKey={listKey} colKey={colKey} /> : null}
       </span>
       {onResize && (

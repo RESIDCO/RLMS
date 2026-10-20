@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Link } from "wouter";
 import { useCanEdit } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -469,10 +470,17 @@ export default function AcquisitionImportSection() {
                   </table>
                 </div>
               )}
-              <Button variant="ghost" size="sm" className="mt-1 h-7 px-2 text-xs" onClick={() => downloadSkipped(review.skipped)}>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+              <CopyCarsButton
+                rows={review.skipped}
+                lineOf={(row) => ({ reporting_marks: row.marks, car_number: row.car_number })}
+                testId="button-copy-cars-acquisition-skipped"
+              />
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => downloadSkipped(review.skipped)}>
                 <Download className="h-3.5 w-3.5 mr-1" />
                 Download skipped rows
               </Button>
+              </div>
             </div>
           )}
 

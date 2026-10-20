@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import { BulkEditDrawer } from "./BulkEditDrawer";
 import { formatCarId } from "@shared/residco-import";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 
 export default function UmlerQueue() {
   const { data = [] } = useQuery<any[]>({
@@ -29,6 +30,7 @@ export default function UmlerQueue() {
         >
           Mark deleted in UMLER ({date})
         </Button>
+        <CopyCarsButton rows={data} testId="button-copy-cars-umler" />
       </div>
       <table className="w-full text-sm">
         <thead>

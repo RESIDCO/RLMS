@@ -21,6 +21,7 @@ import {
   type InactivateStatus,
 } from "@shared/inactivate-cars";
 import { Download } from "lucide-react";
+import { CopyCarsButton } from "@/components/CopyCarsButton";
 
 type PreviewResponse = {
   rows: InactivatePreviewRow[];
@@ -209,6 +210,11 @@ export function InactivateCarsDialog({
                     {item.label} {item.n}
                   </span>
                 ))}
+                <CopyCarsButton
+                  rows={preview.rows}
+                  lineOf={(row) => row.car}
+                  testId="button-copy-cars-inactivate"
+                />
                 <Button type="button" variant="outline" size="sm" onClick={downloadCsv}>
                   <Download className="h-4 w-4" />
                   Download preview CSV

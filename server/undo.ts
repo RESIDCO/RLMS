@@ -16,6 +16,7 @@ import {
   type UndoLogRow,
 } from "@shared/undo";
 import { assertLineInsertUndoHasNoOutsideFiles } from "./crm-bid-attachments";
+import { applyDealCalcUndo, isDealCalcOnlyGroup } from "./crm-deal-calc";
 
 function asRows(data: unknown): UndoLogRow[] {
   return ((data ?? []) as any[]).map((r) => ({
@@ -168,6 +169,11 @@ export async function applyUndo(group: string, actor: string) {
     err.status = 409;
     err.conflicts = preview.conflicts;
     throw err;
+  }
+  const rowsBefore = await loadChangeGroup(group);
+  if (isDealCalcOnlyGroup(rowsBefore)) {
+    const result = await applyDealCalcUndo(group, actor, rowsBefore);
+    return { ...result, preview };
   }
   const { data, error } = await supabaseAdmin.rpc("rlms_undo_change_group", {
     p_group: group,

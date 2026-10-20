@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
+import CalculatorTab, { scenarioQueryKey } from "@/pages/opportunity/CalculatorTab";
+import { pinnedBidFigure } from "@shared/dealCalcApi";
 import { useToast } from "@/hooks/use-toast";
 import { acquiredLeaseTable, bidStageLabel, leaseWizardHref, type OpportunityRow } from "@shared/crm";
 
@@ -31,6 +33,28 @@ export default function BidOfferingPage() {
   const [editing, setEditing] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [filesLineId, setFilesLineId] = useState<number | null>(null);
+  const [tab, setTab] = useState("lines");
+  const [priceLineId, setPriceLineId] = useState<number | null>(null);
+  const scenarios = useQuery({
+    queryKey: scenarioQueryKey(id),
+    queryFn: () => apiGet<{ numbersHidden: boolean; scenarios: Array<{ opportunity_line_id: number | null; is_pinned: boolean; verdict?: string | null; method: string; max_bid_per_car?: number | null; wayne_bid_per_car?: number | null }> }>(`/api/opportunities/${id}/scenarios`),
+    enabled: canWrite && Number.isFinite(id) && id > 0,
+  });
+  const calcByLine = useMemo(() => {
+    const map: Record<number, { verdict: string | null; bid: number | null }> = {};
+    for (const row of scenarios.data?.scenarios ?? []) {
+      if (!row.is_pinned || row.opportunity_line_id == null) continue;
+      map[row.opportunity_line_id] = {
+        verdict: row.verdict ?? null,
+        bid: pinnedBidFigure({
+          method: row.method,
+          max_bid_per_car: row.max_bid_per_car ?? null,
+          wayne_bid_per_car: row.wayne_bid_per_car ?? null,
+        }),
+      };
+    }
+    return map;
+  }, [scenarios.data]);
   const offering = useQuery({
     queryKey: ["/api/opportunities", id, "bid"],
     queryFn: () => apiGet<Offering>(`/api/opportunities/${id}/bid`),
@@ -81,9 +105,10 @@ export default function BidOfferingPage() {
           <p className="text-sm">This opportunity is not a portfolio bid. Open it from the pipeline to edit the usual fields.</p>
         ) : null}
         {opp && opp.flavor === "portfolio_bid" ? (
-          <Tabs defaultValue="lines">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="lines">Lines</TabsTrigger>
+              <TabsTrigger value="calculator">Calculator</TabsTrigger>
               {canWrite ? <TabsTrigger value="files">Files</TabsTrigger> : null}
               <TabsTrigger value="timeline">Timeline</TabsTrigger>
             </TabsList>
@@ -97,8 +122,19 @@ export default function BidOfferingPage() {
                 onWonLine={() => toast({ title: "Mark offering Won?" })}
                 fileCounts={fileCounts}
                 onOpenFiles={canWrite ? setFilesLineId : undefined}
+                calcByLine={calcByLine}
+                onPriceLine={canWrite ? (lineId) => { setPriceLineId(lineId); setTab("calculator"); } : undefined}
               />
               {opp.stage === "won" ? <WonPanel opportunity={opp} lines={wonLines} canSeePrices={canWrite} /> : null}
+            </TabsContent>
+            <TabsContent value="calculator" className="mt-4">
+              <CalculatorTab
+                opportunityId={opp.id}
+                opportunity={opp}
+                lines={lines}
+                canWrite={canWrite}
+                focusLineId={priceLineId}
+              />
             </TabsContent>
             {canWrite ? (
               <TabsContent value="files" className="mt-4">

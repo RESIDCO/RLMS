@@ -141,6 +141,7 @@ export default function ProgramsPage() {
   const [entityFilter, setEntityFilter] = useState(hashFilters.entity);
   const [managerFilter, setManagerFilter] = useState(hashFilters.manager);
   const [onlyColumnsWithData, setOnlyColumnsWithData] = useState(true);
+  const [masterOnlyColumnsWithData, setMasterOnlyColumnsWithData] = useState(false);
 
   useEffect(() => {
     setSearch(hashFilters.q);
@@ -258,7 +259,7 @@ export default function ProgramsPage() {
 
   async function exportMaster() {
     try {
-      await downloadReport(withOnlyColumnsWithData("/api/programs/export?scope=all", onlyColumnsWithData));
+      await downloadReport(withOnlyColumnsWithData("/api/programs/export?scope=all", masterOnlyColumnsWithData));
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message, variant: "destructive" });
     }
@@ -308,8 +309,8 @@ export default function ProgramsPage() {
           <div className="flex flex-wrap items-center gap-3">
             <OnlyColumnsWithDataToggle
               id="programs-master-export-only-columns-with-data"
-              checked={onlyColumnsWithData}
-              onCheckedChange={setOnlyColumnsWithData}
+              checked={masterOnlyColumnsWithData}
+              onCheckedChange={setMasterOnlyColumnsWithData}
             />
             <Button size="sm" variant="outline" onClick={exportMaster} data-testid="button-export-master-fleet-report">
               <FileSpreadsheet className="h-4 w-4" /> Export Master Fleet Project Status Report

@@ -28,7 +28,7 @@ import {
   type ProgramStatus,
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
-import { selectProgramCarExportColumns } from "@shared/program-export-columns";
+import { PROGRAM_CAR_EXPORT_DATE_COLUMNS, selectProgramCarExportColumns } from "@shared/program-export-columns";
 import { activeFieldDefs, fieldDefsForProgram } from "@shared/manage-columns";
 import { excelMoneyValue, isProgramMoneyField } from "@shared/money";
 import { parseProgramDate } from "@shared/program-dates";
@@ -1124,7 +1124,7 @@ export async function buildProgramReport(opts: {
   includeExited: boolean;
   filename?: string;
   cols?: unknown;
-  /** Default on. Off keeps the column set this report wrote before the filter. */
+  /** Only an explicit true filters. A missing flag keeps every column. */
   onlyColumnsWithData?: boolean;
 }): Promise<{ buffer: Buffer; filename: string }> {
   const ids = [...new Set(opts.programIds.filter((id) => Number.isFinite(id)))];
@@ -1195,6 +1195,10 @@ export async function buildProgramReport(opts: {
       return d?.label ?? key;
     };
     const packedByCar = cars.map((car) => keys.map((key) => programCarExportCell(car, key, usedDefs)));
+    const dateKeys = new Set<string>(PROGRAM_CAR_EXPORT_DATE_COLUMNS);
+    for (const def of usedDefs) {
+      if (def.field_type === "date") dateKeys.add(`cf:${def.field_key}`);
+    }
     const exportKeys = selectProgramCarExportColumns(
       keys,
       packedByCar.map((packed) => {
@@ -1204,7 +1208,8 @@ export async function buildProgramReport(opts: {
         });
         return row;
       }),
-      opts.onlyColumnsWithData !== false,
+      opts.onlyColumnsWithData === true,
+      dateKeys,
     );
     const keyIndex = new Map(keys.map((key, index) => [key, index]));
     const headers = exportKeys.map(labelFor);

@@ -41,7 +41,7 @@ export default function Reports() {
   const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
   const [exportingPrograms, setExportingPrograms] = useState(false);
-  const [onlyColumnsWithData, setOnlyColumnsWithData] = useState(true);
+  const [onlyColumnsWithData, setOnlyColumnsWithData] = useState(false);
 
   async function exportVValid() {
     setExporting(true);

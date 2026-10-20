@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatUsDateTimeEt } from "@shared/display-date";
+import { timelineFilters, type TimelineVariant } from "@shared/timeline-filters";
 import { UndoLastChange } from "@/components/UndoLastChange";
 
 export type ActivityEvent = {
@@ -27,22 +28,6 @@ export type ActivityEvent = {
     master_lease?: { lease_number?: string | null } | null;
   } | null;
 };
-
-const FILTERS = [
-  { id: "all", label: "All" },
-  { id: "mark_change", label: "Marks" },
-  { id: "status_change", label: "Status" },
-  { id: "rent_event", label: "Rent" },
-  { id: "reassignment", label: "Assignment" },
-  { id: "note", label: "Notes" },
-  { id: "attachment", label: "Files" },
-] as const;
-
-const LINEAGE_SOURCE_FILTERS = [
-  { id: "rent_stop", label: "Rent stops" },
-  { id: "program", label: "Programs" },
-  { id: "import", label: "Imports" },
-] as const;
 
 function carLabel(c?: ActivityEvent["railcar"] | null) {
   if (!c) return "";
@@ -112,7 +97,7 @@ export default function ActivityTimeline({
   showSearchHint = false,
   compact = false,
   usDates = false,
-  lineage = false,
+  variant = "activity",
   events: externalEvents,
   eventsLoading = false,
 }: {
@@ -125,8 +110,8 @@ export default function ActivityTimeline({
   compact?: boolean;
   /** Lineage asks for MM/DD/YYYY h:mm ET. Other callers keep their existing clock. */
   usDates?: boolean;
-  /** Lineage page: merged read-only feed and the extra source filters. */
-  lineage?: boolean;
+  /** `activity` is the original filter list. Only the Lineage page uses `lineage`. */
+  variant?: TimelineVariant;
   events?: ActivityEvent[];
   eventsLoading?: boolean;
 }) {
@@ -138,9 +123,10 @@ export default function ActivityTimeline({
   if (railcarId) params.set("railcar_id", String(railcarId));
   if (riderId) params.set("rider_id", String(riderId));
   if (q?.trim()) params.set("q", q.trim());
-  const base = lineage ? "/api/lineage" : "/api/activity";
+  const isLineage = variant === "lineage";
+  const base = isLineage ? "/api/lineage" : "/api/activity";
   const path = `${base}?${params.toString()}`;
-  const filters = lineage ? [...FILTERS, ...LINEAGE_SOURCE_FILTERS] : FILTERS;
+  const filters = timelineFilters(variant);
 
   const { data, isLoading } = useQuery<{ events: ActivityEvent[] }>({
     queryKey: [base, { railcarId, riderId, q: q ?? "" }],
@@ -253,7 +239,7 @@ export default function ActivityTimeline({
                 {reason && ev.action !== "note" && (
                   <div className="text-muted-foreground italic mt-0.5">{reason}</div>
                 )}
-                {lineage && captureFields(ev) ? (
+                {isLineage && captureFields(ev) ? (
                   <div className="text-muted-foreground mt-0.5">{captureFields(ev)}</div>
                 ) : null}
               </li>

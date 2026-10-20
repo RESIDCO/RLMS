@@ -240,7 +240,7 @@ export default function HistoryPage() {
           compact
           showSearchHint={!showResolved}
           usDates
-          lineage
+          variant="lineage"
           events={data?.events ?? []}
           eventsLoading={isLoading}
         />

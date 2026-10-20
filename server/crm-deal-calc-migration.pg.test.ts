@@ -6,8 +6,8 @@
  * Does not touch the live Supabase project.
  */
 
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -75,6 +75,41 @@ function psqlFileFails(file: string): string {
   const res = run(bin("psql"), ["-h", sock, "-p", port, "-U", "postgres", "-d", "bid", "-v", "ON_ERROR_STOP=1", "-f", file]);
   if (res.status === 0) throw new Error(`expected failure, got ${res.stdout}`);
   return `${res.stderr}\n${res.stdout}`;
+}
+
+function waitUntil(sql: string, want: string, label: string, ms = 15000): void {
+  const deadline = Date.now() + ms;
+  let last = "";
+  while (Date.now() < deadline) {
+    last = psql(sql);
+    if (last === want) return;
+    spawnSync("sleep", ["0.05"]);
+  }
+  throw new Error(`${label}: saw ${JSON.stringify(last)}`);
+}
+
+function waitPid(pid: number, ms = 20000): void {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const stat = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout?.trim() ?? "";
+    if (stat === "" || stat.startsWith("Z")) return;
+    spawnSync("sleep", ["0.05"]);
+  }
+  const activity = psql("select pid || '|' || coalesce(state,'') || '|' || coalesce(wait_event_type,'') || '|' || coalesce(wait_event,'') || '|' || left(replace(query, E'\\n', ' '), 160) from pg_stat_activity where datname = 'bid' and pid <> pg_backend_pid()");
+  spawnSync("kill", ["-9", String(pid)]);
+  throw new Error(`pid ${pid} still running\n${activity}`);
+}
+
+function psqlBackground(file: string): { pid: number; out: string; err: string } {
+  const out = `${file}.out`;
+  const err = `${file}.err`;
+  const child = spawn(bin("psql"), ["-h", sock, "-p", port, "-U", "postgres", "-d", "bid", "-v", "ON_ERROR_STOP=1", "-tA", "-f", file], {
+    stdio: ["ignore", openSync(out, "w"), openSync(err, "w")],
+    detached: true,
+  });
+  child.unref();
+  if (!child.pid) throw new Error(`psql did not start for ${file}`);
+  return { pid: child.pid, out, err };
 }
 
 function md5s(): Record<keyof typeof POST, string> {
@@ -272,7 +307,42 @@ try {
   ok(psql(`select is_pinned from deal_calc_scenarios where id = ${unpinned}`) === "f", "a restored row stays unpinned when the pin slot is taken");
   ok(psql(`select is_pinned from deal_calc_scenarios where id = ${scenario}`) === "t", "the live pin is left in place");
 
-  psql(`delete from deal_calc_scenarios where id in (${blocker}, ${unpinned})`);
+  // Session A undoes an insert and holds the transaction open. Session B blocks
+  // on the activity_log row lock, then sees undone_at and writes nothing.
+  const raceScenario = psql(`insert into deal_calc_scenarios (opportunity_id, name, deal_type, method, calc_version, inputs, results) values (${oppA}, 'Race', 'portfolio_bid', 'cash_flow', 'dc-1.0.0', '{}'::jsonb, '{}'::jsonb) returning id`);
+  const raceGroup = psql("select gen_random_uuid()");
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, before, after, undoable) values ('deal_calc_scenario', ${raceScenario}, 'create_deal_calc_scenario', 'tester', '{"op":"insert"}'::jsonb, '${raceGroup}', 'deal_calc_scenarios', ${raceScenario}, null, '{"name":"Race"}'::jsonb, true)`);
+  const holdFile = join(root, "hold-undo.sql");
+  writeFileSync(holdFile, `begin;\nselect public.rlms_undo_deal_calc_group('${raceGroup}'::uuid, 'tester');\nselect pg_sleep(6);\ncommit;\n`);
+  const holder = psqlBackground(holdFile);
+  waitUntil(
+    "select count(*) from pg_stat_activity where pid <> pg_backend_pid() and wait_event_type = 'Timeout' and wait_event = 'PgSleep'",
+    "1",
+    "first undo is holding its transaction open",
+  );
+  const secondFile = join(root, "second-undo.sql");
+  writeFileSync(secondFile, `select public.rlms_undo_deal_calc_group('${raceGroup}'::uuid, 'tester')->>'error';\n`);
+  const second = psqlBackground(secondFile);
+  // Row-lock waits show up as a transactionid lock, with the tuple on activity_log.
+  waitUntil(
+    `select count(*) from pg_stat_activity a join pg_locks l on l.pid = a.pid and l.locktype = 'tuple' and l.relation = 'public.activity_log'::regclass where a.pid <> pg_backend_pid() and a.wait_event_type = 'Lock' and a.wait_event = 'transactionid' and a.query like '%${raceGroup}%' and pg_blocking_pids(a.pid) <> '{}'`,
+    "1",
+    "second undo waits on the activity_log row lock",
+  );
+  waitPid(holder.pid);
+  waitPid(second.pid);
+  const holdOut = readFileSync(holder.out, "utf8");
+  const holdErr = readFileSync(holder.err, "utf8");
+  const secondOut = readFileSync(second.out, "utf8");
+  const secondErr = readFileSync(second.err, "utf8");
+  ok(holdErr.trim() === "" && holdOut.includes('"ok": true'), `first session undoes the insert (${holdErr} ${holdOut})`);
+  ok(secondErr.trim() === "" && secondOut.trim() === "already_undone", `second session returns already_undone (${secondErr} ${secondOut})`);
+  ok(psql(`select count(*) from activity_log where source = 'undo' and table_name = 'deal_calc_scenarios' and row_pk = ${raceScenario}`) === "1", "concurrent undos write one audit row");
+  ok(psql(`select count(*) from activity_log where change_group = '${raceGroup}' and undone_at is not null`) === "1", "the insert group is marked undone once");
+  ok(psql(`select public.rlms_undo_deal_calc_group('${raceGroup}'::uuid, 'tester')->>'error'`) === "already_undone", "a sequential re-run after the lock is already_undone");
+  ok(psql(`select count(*) from activity_log where source = 'undo' and table_name = 'deal_calc_scenarios' and row_pk = ${raceScenario}`) === "1", "the re-run does not write a second audit row");
+
+  psql(`delete from deal_calc_scenarios where id in (${blocker}, ${unpinned}, ${raceScenario})`);
   psql(`delete from deal_calc_assumption_sets where id = ${extraSet}`);
   psql("delete from activity_log where entity_type in ('deal_calc_scenario','deal_calc_assumption_set') or source = 'undo' or change_group = '" + mixed + "'");
 

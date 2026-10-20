@@ -219,7 +219,8 @@ begin
   end loop;
 end $$;
 
--- Deal-calc undo. One transaction: lock, re-check, apply, audit, mark undone.
+-- Deal-calc undo. One transaction: lock the log rows, re-check undone_at,
+-- lock the data rows, apply, audit, mark undone.
 -- Does not replace rlms_apply_jsonb_patch or rlms_undo_change_group.
 create function public.rlms_undo_deal_calc_group(p_group uuid, p_actor text)
 returns jsonb
@@ -255,6 +256,18 @@ begin
   if p_group is null or coalesce(btrim(p_actor), '') = '' then
     return jsonb_build_object('ok', false, 'error', 'missing_group_or_actor', 'status', 400);
   end if;
+
+  -- Lock the log rows before reading undone_at. Otherwise two undos of an
+  -- insert-only group can both pass the check and each write an audit row.
+  for lock_rec in
+    select a.id
+    from public.activity_log a
+    where a.change_group = p_group
+    order by a.id
+    for update
+  loop
+    null;
+  end loop;
 
   select min(a.actor), min(a.occurred_at),
     count(*) filter (where a.undone_at is not null),

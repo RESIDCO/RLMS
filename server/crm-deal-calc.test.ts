@@ -160,6 +160,9 @@ ok(migration.includes("revoke all on function public.rlms_undo_deal_calc_group(u
 ok(migration.includes("grant execute on function public.rlms_undo_deal_calc_group(uuid, text) to service_role"), "deal-calc undo execute is granted to service_role");
 ok(migration.includes("audit_op := 'delete'"), "undo of an insert audits the row as delete");
 ok(migration.includes("order by id desc"), "deal-calc undo applies the newest change first");
+const undoFn = migration.slice(migration.indexOf("create function public.rlms_undo_deal_calc_group"));
+const logLock = undoFn.indexOf("order by a.id\n    for update");
+ok(logLock >= 0 && logLock < undoFn.indexOf("'already_undone'"), "activity_log rows are locked before the already_undone re-check");
 ok(migration.includes("public.set_updated_at()"), "migration requires set_updated_at");
 ok(migration.includes(JSON.stringify(companyDefaultInputs())), "seed JSON matches companyDefaultInputs()");
 ok(down.includes("down refused"), "down refuses when data exists");

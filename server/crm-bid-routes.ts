@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { requireUser, requireWrite } from "./auth";
+import { registerBidImportRoutes } from "./crm-bid-import";
 import { bidSummary, getBidOffering, listBidBoard, listBidTimeline, listOpportunityLines, presentLine, saveOpportunityLines } from "./crm-bid-lines";
 import { CrmHttpError } from "./crm-error";
 
@@ -23,6 +24,8 @@ function positiveInt(value: unknown): number | undefined {
 }
 
 export function registerCrmBidRoutes(app: Express) {
+  registerBidImportRoutes(app);
+
   app.get("/api/opportunities/bids/summary", async (req, res) => {
     try {
       const user = await requireWrite(req, res);

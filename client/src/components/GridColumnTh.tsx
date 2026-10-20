@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { GRID_COL_MIN } from "@/lib/grid-columns";
+import { blockColumnDragFromResizeHandle } from "@/lib/grid-column-layout";
 import { ColumnHelp } from "@/components/ColumnHelp";
 
 export function GridColumnTh({
@@ -17,6 +18,7 @@ export function GridColumnTh({
   onSort,
   sortDir,
   accessory,
+  isolateResizeDrag = false,
 }: {
   colKey: string;
   listKey?: string;
@@ -32,6 +34,11 @@ export function GridColumnTh({
   sortDir?: "asc" | "desc" | null;
   /** Extra control rendered beside the label. Omitted columns stay unchanged. */
   accessory?: ReactNode;
+  /**
+   * When set, a drag that starts on the resize handle does not reorder the column.
+   * Off by default so Railcars, Lease, Program Detail, and Search keep their current drag.
+   */
+  isolateResizeDrag?: boolean;
 }) {
   const startX = useRef(0);
   const startW = useRef(width ?? minWidth);
@@ -62,6 +69,13 @@ export function GridColumnTh({
     <th
       draggable={!pinned && !!onMove}
       onDragStart={(e) => {
+        if (isolateResizeDrag) {
+          const target = e.target instanceof Element ? e.target : null;
+          if (blockColumnDragFromResizeHandle(true, !!target?.closest("[data-col-resize]"))) {
+            e.preventDefault();
+            return;
+          }
+        }
         if (pinned || !onMove) {
           e.preventDefault();
           return;
@@ -114,9 +128,14 @@ export function GridColumnTh({
           role="separator"
           aria-orientation="vertical"
           aria-label={`Resize ${colKey}`}
+          {...(isolateResizeDrag ? { "data-col-resize": "" } : {})}
           className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize z-20 hover:bg-primary/50"
           onMouseDown={startResize}
           onClick={(e) => e.stopPropagation()}
+          onDragStart={isolateResizeDrag ? (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          } : undefined}
         />
       )}
     </th>

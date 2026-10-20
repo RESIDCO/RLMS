@@ -18,6 +18,7 @@ import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/li
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { todayIsoDateOnly } from "@shared/lease-authority";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import type { RailcarWithAssignment } from "@shared/schema";
 
 function Step({
@@ -484,7 +485,7 @@ export default function MoveCars() {
                 {(history ?? []).slice(0, 50).map((h: any) => (
                   <tr key={h.id} className="border-t border-border">
                     <td className="px-4 py-2 font-mono-num text-muted-foreground">
-                      {new Date(h.moved_at).toLocaleString()}
+                      {formatUsDateTimeEt(h.moved_at) || "—"}
                     </td>
                     <td className="px-4 py-2 font-mono-num">
                       {h.railcar ? [h.railcar.reporting_marks, h.railcar.car_number].filter(Boolean).join(" ") : `#${h.railcar_id}`}

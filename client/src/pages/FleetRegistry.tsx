@@ -7,6 +7,7 @@ import PageHeader from "@/components/PageHeader";
 import { InactiveFleetBadge, FleetAwareStatusBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-status";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import { CommitmentPanel } from "@/pages/CommitmentOps";
 import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
@@ -1984,7 +1985,7 @@ function downloadRentEventsCsv(events: any[], carNumber: string) {
     e.event_date,
     e.reason,
     e.created_by,
-    new Date(e.created_at).toLocaleString(),
+    formatUsDateTimeEt(e.created_at) || "",
   ].map(escape).join(","));
   const csv = [headers.map(escape).join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });

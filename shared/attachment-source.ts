@@ -1,3 +1,5 @@
+import { formatUsDateTimeEt } from "./display-date";
+
 export const ATTACHMENT_SOURCE_MODULES = [
   "manual",
   "account_transitions",
@@ -27,9 +29,7 @@ export function formatAttachmentProvenance(
   source: string | null | undefined,
   uploadedAt: string | null | undefined,
 ): string {
-  const when = uploadedAt
-    ? new Date(uploadedAt).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" })
-    : "—";
+  const when = uploadedAt ? (formatUsDateTimeEt(uploadedAt) || "—") : "—";
   return `${attachmentSourceLabel(source)} · ${when}`;
 }
 

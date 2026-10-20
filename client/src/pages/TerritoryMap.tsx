@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { accountListPath, readAccountMgmtListState } from "@/lib/account-mgmt-nav";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import { contactsDirectoryPath } from "@/lib/directory-nav";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -713,7 +714,7 @@ export default function TerritoryMapPage() {
                 <div className="space-y-2 max-h-64 overflow-auto mt-2">
                   {(histQ.data?.change_sets ?? []).map((cs) => (
                     <div key={cs.change_set_id} className="text-xs border-b border-border pb-2">
-                      <div className="text-foreground">{new Date(cs.changed_at).toLocaleString()} · {cs.counties} counties</div>
+                      <div className="text-foreground">{formatUsDateTimeEt(cs.changed_at) || "—"} · {cs.counties} counties</div>
                       <div className="text-muted-foreground">{cs.changed_by}{cs.note ? ` · ${cs.note}` : ""}</div>
                       <Button size="sm" variant="outline" className="mt-1 h-7" onClick={() => revertSet(cs.change_set_id)}>Revert</Button>
                     </div>

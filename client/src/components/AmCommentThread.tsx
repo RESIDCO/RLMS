@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmDelete } from "@/components/ConfirmActionDialog";
 import { useToast } from "@/hooks/use-toast";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import { formatCalendarDate } from "@shared/lease-authority";
 
 export type AmComment = {
@@ -40,15 +41,7 @@ export function displayAmAuthor(email: string): string {
 }
 
 function formatAmWhen(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return formatCalendarDate(iso);
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatUsDateTimeEt(iso) || formatCalendarDate(iso);
 }
 
 export function AmCommentThread({

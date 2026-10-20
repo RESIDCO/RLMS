@@ -15,6 +15,7 @@ import { confirmDelete } from "@/components/ConfirmActionDialog";
 import { useRoute } from "wouter";
 import type { DvCalculation } from "@/lib/dv/types";
 import { fmtUsd, fmtDate, fmtPct, quarterLabel } from "@/lib/dv/format";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import { shareCalculationPdf, canNativeShareFiles, buildCalculationPdfDoc, buildPdfFilename, downloadCalculationPdf } from "@/lib/dv/pdf";
 
 /** Builds a blob URL for a calculation PDF. Caller is responsible for revoking it. */
@@ -302,7 +303,7 @@ function Detail({ calc }: { calc: DvCalculation }) {
           <div><strong>Calc #{calc.id}</strong> · {calc.car_initial} {calc.car_number}</div>
           <div>{calc.railroad || "—"} · DDCT {calc.ddct_incident_no || "—"}</div>
           <div>Incident: {fmtDate(calc.incident_date)}{calc.incident_location ? ` · ${calc.incident_location}` : ""}</div>
-          <div>Generated: {new Date().toLocaleString()}</div>
+          <div>Generated: {formatUsDateTimeEt(new Date())}</div>
         </div>
       </div>
 

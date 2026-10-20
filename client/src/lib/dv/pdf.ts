@@ -10,6 +10,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { fmtUsd, fmtPct, fmtDate, quarterLabel } from "./format";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import type { DvResult } from "./types";
 
 export interface PdfMeta {
@@ -51,7 +52,7 @@ export function buildCalculationPdfDoc(r: DvResult, meta: PdfMeta): { doc: jsPDF
       label: "Incident",
       value: `${meta.incidentDate ? fmtDate(meta.incidentDate) : "-"}${meta.incidentLocation ? ` · ${meta.incidentLocation}` : ""}`,
     },
-    { label: "Generated", value: new Date().toLocaleString() },
+    { label: "Generated", value: formatUsDateTimeEt(new Date()) },
   ];
 
   // ---- Header brand strip (left side)

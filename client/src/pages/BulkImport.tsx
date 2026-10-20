@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiUpload } from "@/lib/queryClient";
 import { looksLikeVcf } from "@shared/vcf-import";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import { confirmSave } from "@/components/ConfirmActionDialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import AcquisitionImportSection from "./AcquisitionImportSection";
@@ -1106,7 +1107,7 @@ export default function BulkImportPage() {
                   const failed = (row.checks ?? []).some((c) => !c.pass);
                   return (
                     <li key={row.id} className="flex flex-wrap gap-x-3">
-                      <span className="text-muted-foreground">{new Date(row.loaded_at).toLocaleString()}</span>
+                      <span className="text-muted-foreground">{formatUsDateTimeEt(row.loaded_at) || "—"}</span>
                       <span className="text-muted-foreground">{row.file_name || "—"}</span>
                       <span className={failed ? "text-red-500" : "text-emerald-500"}>{failed ? "checks failed" : "checks passed"}</span>
                     </li>
@@ -1495,7 +1496,7 @@ export default function BulkImportPage() {
                   return (
                     <li key={row.id} className="flex flex-wrap gap-x-3">
                       <span className="font-mono">{String(row.snapshot_month).slice(0, 7)}</span>
-                      <span className="text-muted-foreground">{new Date(row.loaded_at).toLocaleString()}</span>
+                      <span className="text-muted-foreground">{formatUsDateTimeEt(row.loaded_at) || "—"}</span>
                       <span className="text-muted-foreground">{row.file_name || "—"}</span>
                       <span className={failed ? "text-red-500" : "text-emerald-500"}>{failed ? "checks failed" : "checks passed"}</span>
                     </li>

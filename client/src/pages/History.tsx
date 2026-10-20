@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import ActivityTimeline from "@/components/ActivityTimeline";
-import { hashSearchParams } from "@/lib/hash-location";
+import { hashSearchParams, navigateHash, useHashSearch } from "@/lib/hash-location";
+import { LINEAGE_SEARCH_DEBOUNCE_MS, lineageSearchCommit, lineageSearchPath } from "@shared/lineage-search";
 import { apiRequest } from "@/lib/queryClient";
 import { carPath } from "@/lib/browse-nav";
 import { displayLeaseNumber } from "@shared/residco-import";
@@ -56,15 +57,33 @@ function carLabel(car: ResolvedCar) {
 
 export default function HistoryPage() {
   const [, navigate] = useLocation();
-  const [search, setSearch] = useState(() => hashSearchParams().get("q") ?? "");
+  const hashSearch = useHashSearch();
+  const urlQ = new URLSearchParams(hashSearch.replace(/^\?/, "")).get("q") ?? "";
+  const [search, setSearch] = useState(urlQ);
+  const [settled, setSettled] = useState(urlQ.trim());
   const [sheetCarId, setSheetCarId] = useState<number | null>(null);
-  const q = search.trim();
+  const q = settled;
 
   useEffect(() => {
     const prev = document.title;
     document.title = "Lineage · RLMS";
     return () => { document.title = prev; };
   }, []);
+
+  useEffect(() => {
+    setSearch(urlQ);
+    setSettled(urlQ.trim());
+  }, [urlQ]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      const current = hashSearchParams().get("q") ?? "";
+      const committed = lineageSearchCommit(search, current);
+      setSettled(committed.settled);
+      if (committed.push) navigateHash(lineageSearchPath(committed.settled));
+    }, LINEAGE_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [search]);
 
   const { data, isLoading } = useQuery<ActivityResponse>({
     queryKey: ["/api/activity", "history-page", q],

@@ -7,6 +7,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { formatUsDateTimeEt } from "@shared/display-date";
 import { UndoLastChange } from "@/components/UndoLastChange";
 
 export type ActivityEvent = {
@@ -191,7 +192,7 @@ export default function ActivityTimeline({
             return (
               <li key={ev.id} className={cn("text-xs border-l-2 pl-3 py-1", accentClass(ev.action))}>
                 <div className="font-mono-num text-muted-foreground">
-                  {when ? new Date(when).toLocaleString() : "—"}
+                  {when ? (formatUsDateTimeEt(when) || "—") : "—"}
                   {ev.actor ? <span> — {ev.actor}</span> : null}
                 </div>
                 <div className="mt-0.5 font-medium">

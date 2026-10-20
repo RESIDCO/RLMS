@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { UserPlus, Trash2, ShieldCheck, Eye, Pencil, MailIcon, KeyRound, Link2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
+import { formatUsDateTimeEt } from "@shared/display-date";
 
 type AppRole = "admin" | "editor" | "viewer";
 
@@ -324,7 +325,7 @@ export default function UserManagement() {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {u.user_id
-                        ? new Date(u.created_at).toLocaleDateString()
+                        ? (formatUsDateTimeEt(u.created_at) || "—")
                         : "Not yet signed in"}
                     </td>
                     <td className="px-4 py-3">

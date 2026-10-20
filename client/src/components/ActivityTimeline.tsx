@@ -7,15 +7,19 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
+import { formatUsDateTimeEt } from "@shared/display-date";
+import { timelineFilters, type TimelineVariant } from "@shared/timeline-filters";
 import { UndoLastChange } from "@/components/UndoLastChange";
 
 export type ActivityEvent = {
-  id: number;
+  id: number | string;
   action: string;
   actor?: string | null;
   occurred_at?: string | null;
   created_at?: string | null;
   detail?: Record<string, any> | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
   railcar?: { id: number; car_number?: string | null; reporting_marks?: string | null } | null;
   rider?: {
     id: number;
@@ -24,16 +28,6 @@ export type ActivityEvent = {
     master_lease?: { lease_number?: string | null } | null;
   } | null;
 };
-
-const FILTERS = [
-  { id: "all", label: "All" },
-  { id: "mark_change", label: "Marks" },
-  { id: "status_change", label: "Status" },
-  { id: "rent_event", label: "Rent" },
-  { id: "reassignment", label: "Assignment" },
-  { id: "note", label: "Notes" },
-  { id: "attachment", label: "Files" },
-] as const;
 
 function carLabel(c?: ActivityEvent["railcar"] | null) {
   if (!c) return "";
@@ -60,9 +54,29 @@ function eventHeadline(ev: ActivityEvent): string {
       return String(d.body ?? "").trim() || "Note";
     case "attachment":
       return `Attachment: ${d.file_name ?? "file"}`;
+    case "rent_stop": {
+      const type = String(d.type ?? "Rent stop");
+      const resumed = d.actual_resume_date ? " resumed" : "";
+      return `${type}${resumed}`;
+    }
+    case "program": {
+      const name = String(d.program ?? "program");
+      return d.kind === "exited" ? `Left ${name}` : `Joined ${name}`;
+    }
+    case "import": {
+      const kind = d.kind === "asset_report" ? "Asset report" : "VCF import";
+      return d.file_name ? `${kind}: ${d.file_name}` : kind;
+    }
     default:
       return String(ev.action ?? "event").replace(/_/g, " ");
   }
+}
+
+function captureFields(ev: ActivityEvent): string {
+  const after = ev.after && typeof ev.after === "object" ? ev.after : null;
+  const before = ev.before && typeof ev.before === "object" ? ev.before : null;
+  const names = Object.keys(after ?? before ?? {});
+  return names.slice(0, 8).join(", ");
 }
 
 function accentClass(action: string) {
@@ -82,6 +96,10 @@ export default function ActivityTimeline({
   title = "Activity",
   showSearchHint = false,
   compact = false,
+  usDates = false,
+  variant = "activity",
+  events: externalEvents,
+  eventsLoading = false,
 }: {
   railcarId?: number;
   riderId?: number;
@@ -90,26 +108,38 @@ export default function ActivityTimeline({
   title?: string;
   showSearchHint?: boolean;
   compact?: boolean;
+  /** Lineage asks for MM/DD/YYYY h:mm ET. Other callers keep their existing clock. */
+  usDates?: boolean;
+  /** `activity` is the original filter list. Only the Lineage page uses `lineage`. */
+  variant?: TimelineVariant;
+  events?: ActivityEvent[];
+  eventsLoading?: boolean;
 }) {
   const { toast } = useToast();
   const [filter, setFilter] = useState<string>("all");
   const [note, setNote] = useState("");
+  const supplied = externalEvents !== undefined;
   const params = new URLSearchParams();
   if (railcarId) params.set("railcar_id", String(railcarId));
   if (riderId) params.set("rider_id", String(riderId));
   if (q?.trim()) params.set("q", q.trim());
-  const path = `/api/activity?${params.toString()}`;
+  const isLineage = variant === "lineage";
+  const base = isLineage ? "/api/lineage" : "/api/activity";
+  const path = `${base}?${params.toString()}`;
+  const filters = timelineFilters(variant);
 
   const { data, isLoading } = useQuery<{ events: ActivityEvent[] }>({
-    queryKey: ["/api/activity", { railcarId, riderId, q: q ?? "" }],
+    queryKey: [base, { railcarId, riderId, q: q ?? "" }],
+    enabled: !supplied,
     queryFn: ({ signal }) => apiRequest("GET", path, undefined, undefined, { timeoutMs: 12_000, signal }).then((r) => r.json()),
   });
 
   const events = useMemo(() => {
-    const rows = data?.events ?? [];
+    const rows = supplied ? externalEvents : (data?.events ?? []);
     if (filter === "all") return rows;
     return rows.filter((e) => e.action === filter);
-  }, [data, filter]);
+  }, [data, externalEvents, filter, supplied]);
+  const loading = supplied ? eventsLoading : isLoading;
 
   const entityType = riderId && !railcarId ? "rider" : "railcar";
   const entityId = entityType === "rider" ? riderId : railcarId;
@@ -147,7 +177,7 @@ export default function ActivityTimeline({
         </p>
       )}
       <div className="flex flex-wrap gap-1 mb-3">
-        {FILTERS.map((f) => (
+        {filters.map((f) => (
           <button
             key={f.id}
             type="button"
@@ -177,7 +207,7 @@ export default function ActivityTimeline({
           </Button>
         </div>
       ) : null}
-      {isLoading ? (
+      {loading ? (
         <Skeleton className="h-20 w-full" />
       ) : events.length === 0 ? (
         <div className="text-sm text-muted-foreground italic">No activity recorded yet.</div>
@@ -191,7 +221,7 @@ export default function ActivityTimeline({
             return (
               <li key={ev.id} className={cn("text-xs border-l-2 pl-3 py-1", accentClass(ev.action))}>
                 <div className="font-mono-num text-muted-foreground">
-                  {when ? new Date(when).toLocaleString() : "—"}
+                  {when ? (usDates ? (formatUsDateTimeEt(when) || "—") : new Date(when).toLocaleString()) : "—"}
                   {ev.actor ? <span> — {ev.actor}</span> : null}
                 </div>
                 <div className="mt-0.5 font-medium">
@@ -209,6 +239,9 @@ export default function ActivityTimeline({
                 {reason && ev.action !== "note" && (
                   <div className="text-muted-foreground italic mt-0.5">{reason}</div>
                 )}
+                {isLineage && captureFields(ev) ? (
+                  <div className="text-muted-foreground mt-0.5">{captureFields(ev)}</div>
+                ) : null}
               </li>
             );
           })}

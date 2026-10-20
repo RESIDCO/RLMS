@@ -30,6 +30,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { openAppTab, lesseePath, olPath, entityPath, turning50Path, olKeyFromLabel, programsListPath } from "@/lib/browse-nav";
+import { LineageCarLink } from "@/components/LineageCarLink";
 import { accountListPath } from "@/lib/account-mgmt-nav";
 import { kpiDrillPath } from "@shared/kpi-drill-tiles";
 
@@ -316,7 +317,12 @@ function DrillDownDrawer({
                     {cars.map((c) => (
                       <tr key={c.id} className="border-t border-border/40 hover:bg-muted/20">
                         <td className="px-4 py-2.5 text-muted-foreground font-mono">{c.reporting_marks ?? "—"}</td>
-                        <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{c.car_number}</td>
+                        <td className="px-4 py-2.5 font-mono font-semibold text-foreground">
+                          <span className="inline-flex items-center gap-2">
+                            {c.car_number}
+                            <LineageCarLink id={c.id} reportingMarks={c.reporting_marks} carNumber={c.car_number} />
+                          </span>
+                        </td>
                         <td className="px-4 py-2.5"><EntityBadge entity={c.entity} /></td>
                         <td className="px-4 py-2.5"><StatusPill car={c} /></td>
                         <td className="px-4 py-2.5">

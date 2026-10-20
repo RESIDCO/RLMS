@@ -33,6 +33,7 @@ import { ColumnPicker } from "@/components/ColumnPicker";
 import { ColumnHeaderLabel } from "@/components/ColumnHelp";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
+import { LineageCarLink } from "@/components/LineageCarLink";
 
 type RiderRow = {
   ol: string;
@@ -193,9 +194,12 @@ function CarTable({
                   )}
                   <td className="px-4 py-2.5 font-mono text-muted-foreground">{c.reporting_marks ?? "—"}</td>
                   <td className="px-4 py-2.5 font-mono font-semibold">
-                    <Link href={hrefFor(c)} className="hover:text-primary">
-                      {c.car_number}
-                    </Link>
+                    <span className="inline-flex items-center gap-2">
+                      <Link href={hrefFor(c)} className="hover:text-primary">
+                        {c.car_number}
+                      </Link>
+                      <LineageCarLink id={c.id} reportingMarks={c.reporting_marks} carNumber={c.car_number} />
+                    </span>
                   </td>
                   <td className="px-4 py-2.5">
                     <LeaseTypeBadge carType={c.lease_type} mlaType={mlaType} />

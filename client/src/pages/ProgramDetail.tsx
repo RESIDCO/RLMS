@@ -23,6 +23,7 @@ import AccountCombobox from "@/components/AccountCombobox";
 import { UndoLastChange } from "@/components/UndoLastChange";
 import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
 import { carPathFromProgram, navigateHash, programsPathFromQuery, useHashSearch } from "@/lib/hash-location";
+import { LineageCarLink } from "@/components/LineageCarLink";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, ChevronDown, ChevronRight, Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -758,13 +759,20 @@ export default function ProgramDetailPage() {
         return (
           <td key={key} className="px-2 py-1.5 font-mono whitespace-nowrap">
             {c.railcar_id ? (
-              <Link
-                href={carPathFromProgram(c.railcar_id, id, programQuery)}
-                className="hover:underline"
-                data-testid={`link-program-car-${c.railcar_id}`}
-              >
-                {label}
-              </Link>
+              <span className="inline-flex items-center gap-2">
+                <Link
+                  href={carPathFromProgram(c.railcar_id, id, programQuery)}
+                  className="hover:underline"
+                  data-testid={`link-program-car-${c.railcar_id}`}
+                >
+                  {label}
+                </Link>
+                <LineageCarLink
+                  id={c.railcar_id}
+                  reportingMarks={c.railcar?.reporting_marks}
+                  carNumber={c.railcar?.car_number}
+                />
+              </span>
             ) : (
               label
             )}

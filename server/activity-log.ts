@@ -1,6 +1,12 @@
 import { splitCarNumber } from "@shared/residco-import";
 import { asOne } from "@shared/lease-type";
 import type { ActivityEntityType } from "@shared/change-log";
+import { formatUsDateTimeEt } from "@shared/display-date";
+import {
+  appendTimestampedNote,
+  capActivityEvents,
+  noteWriteDecision,
+} from "@shared/lineage-notes";
 import { currentChangeGroup, recordChange, withChangeGroupResult } from "./change-log";
 import { supabaseAdmin } from "./supabase";
 
@@ -242,14 +248,6 @@ export type ListActivityOpts = {
   limit?: number;
 };
 
-function isVcfAssignmentNoise(row: any): boolean {
-  if (row.action !== "reassignment") return false;
-  const actor = String(row.actor ?? "");
-  const source = String(row.source ?? "");
-  const reason = String(row.detail?.reason ?? "");
-  return source === "vcf-import" || actor === "vcf-import" || /V_VALID_CARS assignment period/i.test(reason);
-}
-
 export async function listActivityLog(opts: ListActivityOpts) {
   const limit = Math.min(Math.max(opts.limit ?? 500, 1), 1000);
   const qText = opts.q != null ? String(opts.q).trim() : "";
@@ -279,36 +277,45 @@ export async function listActivityLog(opts: ListActivityOpts) {
     resolved.riders = riderRows;
   }
 
-  let q = supabaseAdmin
-    .from("activity_log")
-    .select(
-      `*,
-      railcar:railcars(id, car_number, reporting_marks),
-      rider:riders(id, rider_name, schedule_number, master_lease:master_leases(id, lease_number))`,
-    )
-    .order("occurred_at", { ascending: false })
-    .limit(limit);
-
-  if (railcarIds.length && riderIds.length) {
-    q = q.or(
-      `railcar_id.in.(${railcarIds.join(",")}),rider_id.in.(${riderIds.join(",")})`,
-    );
-  } else if (railcarIds.length) {
-    q = q.in("railcar_id", railcarIds);
-  } else if (riderIds.length) {
-    q = q.in("rider_id", riderIds);
-  } else if (qText) {
+  if (!railcarIds.length && !riderIds.length && qText) {
     return { events: [], resolved, query: qText };
   }
 
-  const { data, error } = await q;
-  if (error) throw error;
-  let events = (data ?? []).map((row: any) => ({
-    ...row,
-    railcar: Array.isArray(row.railcar) ? row.railcar[0] ?? null : row.railcar,
-    rider: Array.isArray(row.rider) ? row.rider[0] ?? null : row.rider,
-  }));
-  if (!opts.includeVcfNoise) events = events.filter((e) => !isVcfAssignmentNoise(e));
+  const pageSize = 500;
+  const scanned: any[] = [];
+  for (let offset = 0; offset < 20000; offset += pageSize) {
+    let page = supabaseAdmin
+      .from("activity_log")
+      .select(
+        `*,
+        railcar:railcars(id, car_number, reporting_marks),
+        rider:riders(id, rider_name, schedule_number, master_lease:master_leases(id, lease_number))`,
+      )
+      .order("occurred_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+
+    if (railcarIds.length && riderIds.length) {
+      page = page.or(
+        `railcar_id.in.(${railcarIds.join(",")}),rider_id.in.(${riderIds.join(",")})`,
+      );
+    } else if (railcarIds.length) {
+      page = page.in("railcar_id", railcarIds);
+    } else if (riderIds.length) {
+      page = page.in("rider_id", riderIds);
+    }
+
+    const { data, error } = await page;
+    if (error) throw error;
+    const batch = (data ?? []).map((row: any) => ({
+      ...row,
+      railcar: Array.isArray(row.railcar) ? row.railcar[0] ?? null : row.railcar,
+      rider: Array.isArray(row.rider) ? row.rider[0] ?? null : row.rider,
+    }));
+    scanned.push(...batch);
+    const keptSoFar = capActivityEvents(scanned, limit, Boolean(opts.includeVcfNoise));
+    if (keptSoFar.length >= limit || batch.length < pageSize) break;
+  }
+  const events = capActivityEvents(scanned, limit, Boolean(opts.includeVcfNoise));
   return { events, resolved, query: qText || null };
 }
 
@@ -323,24 +330,31 @@ export async function addNote(opts: {
   const actor = opts.actor ?? null;
   const occurred_at = new Date().toISOString();
 
+  const stamp = formatUsDateTimeEt(occurred_at);
+
   if (opts.entity_type === "railcar") {
     return withChangeGroupResult(actor || "system", async () => {
       const { data: prior, error: priorErr } = await supabaseAdmin
         .from("railcars")
-        .select("id, notes")
+        .select("id, notes, active, status")
         .eq("id", opts.entity_id)
-        .single();
+        .maybeSingle();
       if (priorErr) throw priorErr;
+      const decision = noteWriteDecision(prior);
+      if (!decision.ok) {
+        throw Object.assign(new Error(decision.message), { status: decision.status });
+      }
+      const notes = appendTimestampedNote(prior?.notes, body, stamp);
       const { error: updErr } = await supabaseAdmin
         .from("railcars")
-        .update({ notes: body })
+        .update({ notes })
         .eq("id", opts.entity_id);
       if (updErr) throw updErr;
       const rec = await recordChange({
         table: "railcars",
         pk: opts.entity_id,
-        before: { notes: prior.notes },
-        after: { notes: body },
+        before: { notes: prior?.notes ?? null },
+        after: { notes },
         action: "note",
         entity_type: "railcar",
         entity_id: opts.entity_id,
@@ -354,19 +368,35 @@ export async function addNote(opts: {
     });
   }
 
-  const insert: Record<string, unknown> = {
-    entity_type: opts.entity_type,
-    entity_id: opts.entity_id,
-    action: "note",
-    actor,
-    detail: { body },
-    source: "ui",
-    occurred_at,
-    railcar_id: null,
-    rider_id: opts.entity_id,
-  };
-  const { data, error } = await supabaseAdmin.from("activity_log").insert(insert).select().single();
-  if (error) throw error;
-  await supabaseAdmin.from("riders").update({ notes: body }).eq("id", opts.entity_id);
-  return data;
+  return withChangeGroupResult(actor || "system", async () => {
+    const { data: prior, error: priorErr } = await supabaseAdmin
+      .from("riders")
+      .select("id, notes")
+      .eq("id", opts.entity_id)
+      .maybeSingle();
+    if (priorErr) throw priorErr;
+    if (!prior) throw Object.assign(new Error("Rider not found"), { status: 404 });
+    const notes = appendTimestampedNote(prior.notes, body, stamp);
+    const { error: updErr } = await supabaseAdmin
+      .from("riders")
+      .update({ notes })
+      .eq("id", opts.entity_id);
+    if (updErr) throw updErr;
+    const rec = await recordChange({
+      table: "riders",
+      pk: opts.entity_id,
+      before: { notes: prior.notes ?? null },
+      after: { notes },
+      action: "note",
+      entity_type: "rider",
+      entity_id: opts.entity_id,
+      railcar_id: null,
+      rider_id: opts.entity_id,
+      actor,
+      force: true,
+      detail: { body },
+      occurred_at,
+    });
+    return { id: rec?.id ?? null, action: "note" };
+  });
 }

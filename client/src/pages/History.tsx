@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import ActivityTimeline from "@/components/ActivityTimeline";
-import { hashSearchParams } from "@/lib/hash-location";
+import { hashSearchParams, navigateHash, useHashSearch } from "@/lib/hash-location";
+import { LINEAGE_SEARCH_DEBOUNCE_MS, lineageSearchCommit, lineageSearchPath } from "@shared/lineage-search";
+import { safeLineageBack } from "@shared/lineage-link";
 import { apiRequest } from "@/lib/queryClient";
 import { carPath } from "@/lib/browse-nav";
 import { displayLeaseNumber } from "@shared/residco-import";
@@ -56,9 +58,14 @@ function carLabel(car: ResolvedCar) {
 
 export default function HistoryPage() {
   const [, navigate] = useLocation();
-  const [search, setSearch] = useState(() => hashSearchParams().get("q") ?? "");
+  const hashSearch = useHashSearch();
+  const urlParams = new URLSearchParams(hashSearch.replace(/^\?/, ""));
+  const urlQ = urlParams.get("q") ?? "";
+  const back = safeLineageBack(urlParams.get("back"));
+  const [search, setSearch] = useState(urlQ);
+  const [settled, setSettled] = useState(urlQ.trim());
   const [sheetCarId, setSheetCarId] = useState<number | null>(null);
-  const q = search.trim();
+  const q = settled;
 
   useEffect(() => {
     const prev = document.title;
@@ -66,10 +73,27 @@ export default function HistoryPage() {
     return () => { document.title = prev; };
   }, []);
 
+  useEffect(() => {
+    setSearch(urlQ);
+    setSettled(urlQ.trim());
+  }, [urlQ]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      const params = hashSearchParams();
+      const current = params.get("q") ?? "";
+      const backPath = safeLineageBack(params.get("back"));
+      const committed = lineageSearchCommit(search, current);
+      setSettled(committed.settled);
+      if (committed.push) navigateHash(lineageSearchPath(committed.settled, backPath));
+    }, LINEAGE_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [search]);
+
   const { data, isLoading } = useQuery<ActivityResponse>({
-    queryKey: ["/api/activity", "history-page", q],
+    queryKey: ["/api/lineage", "history-page", q],
     queryFn: () =>
-      apiRequest("GET", q ? `/api/activity?q=${encodeURIComponent(q)}` : "/api/activity").then((r) => r.json()),
+      apiRequest("GET", q ? `/api/lineage?q=${encodeURIComponent(q)}` : "/api/lineage").then((r) => r.json()),
   });
 
   const carsFromApi = data?.resolved?.railcars ?? [];
@@ -98,10 +122,21 @@ export default function HistoryPage() {
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <PageHeader
         title="Lineage"
-        subtitle="Lineage of railcars and leases — mark changes, assignments, notes, status, and rent events"
+        subtitle="Read-only history from the activity log, change capture, moves, marks, status, rent stops, programs, notes, and imports"
       />
 
       <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-4 sm:py-6 gap-4 overflow-auto">
+        {back ? (
+          <div className="mb-3">
+            <Link
+              href={back}
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
+              data-testid="link-lineage-back"
+            >
+              ‹ Back
+            </Link>
+          </div>
+        ) : null}
         <BackToSearch />
         <ClearableSearchInput
           className="flex-none w-full max-w-md"
@@ -200,7 +235,15 @@ export default function HistoryPage() {
           </div>
         )}
 
-        <ActivityTimeline q={q || undefined} compact showSearchHint={!showResolved} />
+        <ActivityTimeline
+          q={q || undefined}
+          compact
+          showSearchHint={!showResolved}
+          usDates
+          variant="lineage"
+          events={data?.events ?? []}
+          eventsLoading={isLoading}
+        />
       </div>
 
       <RailcarDetailSheet carId={sheetCarId} onClose={() => setSheetCarId(null)} />

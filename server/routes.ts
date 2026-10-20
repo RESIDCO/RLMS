@@ -71,6 +71,7 @@ import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates
 import { pickRow } from "@shared/change-log";
 import { diffProgramPatch } from "@shared/program-patch";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
+import { listLineage } from "./lineage-read";
 import { applyUndo, eligibleUndo, previewUndo, resolveUndoGroup } from "./undo";
 import { recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
@@ -4441,6 +4442,28 @@ export async function registerRoutes(
       res.json({ ...result, undoable: false });
     } catch (err: any) {
       if (err?.status) return res.status(err.status).json({ message: err.message, conflicts: err.conflicts });
+      errHandler(res, err);
+    }
+  });
+
+  app.get("/api/lineage", async (req, res) => {
+    try {
+      const railcarId = req.query.railcar_id ? Number(req.query.railcar_id) : undefined;
+      const riderId = req.query.rider_id ? Number(req.query.rider_id) : undefined;
+      const qRaw = req.query.q;
+      const q = qRaw == null || qRaw === ""
+        ? undefined
+        : String(Array.isArray(qRaw) ? qRaw[0] : qRaw).trim() || undefined;
+      const includeVcf = req.query.include_vcf === "1" || req.query.include_vcf === "true";
+      const result = await listLineage({
+        railcarId: Number.isFinite(railcarId) ? railcarId : undefined,
+        riderId: Number.isFinite(riderId) ? riderId : undefined,
+        q,
+        includeVcfNoise: includeVcf,
+        limit: Number.isFinite(riderId) && !Number.isFinite(railcarId) ? 80 : undefined,
+      });
+      res.json(result);
+    } catch (err) {
       errHandler(res, err);
     }
   });

@@ -57,6 +57,7 @@ import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { Checkbox } from "@/components/ui/checkbox";
 import { openAppTab, carPath } from "@/lib/browse-nav";
+import { LineageCarLink } from "@/components/LineageCarLink";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1112,6 +1113,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
               >
                 {r.car_number}
               </button>
+              <LineageCarLink id={r.id} reportingMarks={r.reporting_marks} carNumber={r.car_number} />
               <FormerlyBadge formerly={(r as { formerly?: string | null }).formerly} />
               <InactiveFleetBadge active={r.active} />
               {(r.assignment as any)?.assignment_status === "off_lease_pending_remarketing" ? (

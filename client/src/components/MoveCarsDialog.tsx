@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
 import { createRiderLease } from "@/components/RiderFreeTextInput";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { previewAndUndo } from "@/lib/undo";
 import { formatUsDate } from "@shared/display-date";
@@ -176,6 +177,7 @@ export function MoveCarsDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
       queryClient.invalidateQueries({ queryKey: ["/api/history"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Move complete", description: `${moved} car${moved === 1 ? "" : "s"} reassigned.` });
     },
     onError: (err: Error) => {
@@ -192,6 +194,7 @@ export function MoveCarsDialog({
       setCreateLabel("");
       setPreview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Lease created", description: row.rider_name });
     },
     onError: (err: Error) => toast({ title: "Could not create lease", description: err.message, variant: "destructive" }),

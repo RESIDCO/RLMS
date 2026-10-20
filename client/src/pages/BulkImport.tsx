@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiUpload } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { looksLikeVcf } from "@shared/vcf-import";
 import { confirmSave } from "@/components/ConfirmActionDialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -637,6 +638,7 @@ export default function BulkImportPage() {
       setFinReview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(queryClient);
       void refreshFinLoadLog();
       toast({ title: `Financial refresh committed for ${finSnapshotMonth}` });
     } catch (e: any) {
@@ -710,6 +712,7 @@ export default function BulkImportPage() {
       setVcfReview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(queryClient);
       void refreshVcfLoadLog();
       toast({ title: "Valid Car File committed" });
     } catch (e: any) {
@@ -731,6 +734,7 @@ export default function BulkImportPage() {
       setPreview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: `Imported ${result.imported} railcars successfully` });
     } catch (e: any) {
       toast({ title: "Import failed", description: e.message, variant: "destructive" });

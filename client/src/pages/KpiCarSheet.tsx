@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiGet, apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
@@ -130,6 +131,7 @@ export function KpiCarSheet({
       qc.invalidateQueries({ queryKey: ["/api/kpi/car"] });
       qc.invalidateQueries({ queryKey: ["/api/commitments/car", carId] });
       qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(qc);
     },
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });

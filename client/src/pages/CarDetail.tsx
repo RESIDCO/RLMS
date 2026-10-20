@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { fmtUsd } from "@/lib/dv/format";
 import { useCanEdit } from "@/lib/AuthContext";
@@ -74,6 +75,7 @@ export default function CarDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Railcar deleted" });
       navigate("/railcars");
     },

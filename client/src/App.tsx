@@ -2,6 +2,7 @@ import { Switch, Route, Router, Redirect, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { useAppHashLocation } from "./lib/hash-location";
 import { queryClient } from "./lib/queryClient";
+import { installFleetQueryRefresh } from "./lib/fleetQueryRefresh";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -55,6 +56,8 @@ import {
   RentStartWatchPage,
 } from "@/pages/CommitmentOps";
 import SaleClassAdmin from "@/pages/SaleClassAdmin";
+
+installFleetQueryRefresh(queryClient);
 
 function RedirectAllCars() {
   const [loc] = useLocation();

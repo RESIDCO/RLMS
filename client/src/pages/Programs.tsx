@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -467,6 +468,7 @@ export default function ProgramsPage() {
         onCreated={(id) => {
           setCreateOpen(false);
           qc.invalidateQueries({ queryKey: ["/api/programs"] });
+          void invalidateFleetQueries(qc);
           openProgram(id);
         }}
       />

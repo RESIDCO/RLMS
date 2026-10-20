@@ -5,6 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
 import LeaseCrmLinks from "@/components/crm/LeaseCrmLinks";
 import { displayRiderCode, lifecycleLabel } from "@shared/lease-mgmt";
@@ -42,7 +43,10 @@ export default function LesseePage() {
       mla_number: mla || header.mla_number,
       mla_doc_url: mlaDoc || header.mla_doc_url,
     }).then((r) => r.json()),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/lease-mgmt/lessees", id] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["/api/lease-mgmt/lessees", id] });
+      void invalidateFleetQueries(queryClient);
+    },
   });
 
   if (isLoading || !data) {

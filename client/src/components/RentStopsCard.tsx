@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiGet, apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 
 const REASONS = ["quality repair", "goodwill", "damage", "dispute", "other"] as const;
@@ -33,6 +34,7 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
     qc.invalidateQueries({ queryKey: ["/api/rent-stops/car", carId] });
     qc.invalidateQueries({ queryKey: ["/api/kpi/car", carId] });
     qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    void invalidateFleetQueries(qc);
   };
 
   const setAbate = useMutation({

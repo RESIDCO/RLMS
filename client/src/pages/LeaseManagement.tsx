@@ -42,6 +42,7 @@ import { GridColumnTh } from "@/components/GridColumnTh";
 import { colWidth, mergeColOrder, moveCol, tableWidthFor } from "@/lib/grid-columns";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList, downloadXlsx } from "@/lib/queryClient";
+import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { carBuildYear } from "@shared/build-year";
@@ -364,6 +365,7 @@ export default function LeaseManagement() {
     mutationFn: async (id: number) => apiRequest("DELETE", `/api/leases/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Master lease deleted" });
     },
     onError: (e: Error) =>
@@ -374,6 +376,7 @@ export default function LeaseManagement() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Rider deleted" });
     },
     onError: (e: Error) =>
@@ -924,7 +927,7 @@ function RiderDetailPanels({
     queryKey: ["/api/riders", riderId, "cars", "active"],
     queryFn: ({ signal }) =>
       apiGet(`/api/riders/${riderId}/cars?active=active`, { timeoutMs: 45_000, signal }),
-    staleTime: 45_000,
+    staleTime: FLEET_STALE_MS,
   });
   const restReady = cars.isFetched || cars.isError;
   return (
@@ -963,7 +966,7 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
         `/api/riders/${riderId}/cars?active=${encodeURIComponent(activeFilter)}`,
         { timeoutMs: 45_000, signal },
       ),
-    staleTime: 45_000,
+    staleTime: FLEET_STALE_MS,
   });
   const colPrefs = useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
   const {
@@ -1140,6 +1143,7 @@ function MasterLeaseForm({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: lease ? "Lease updated" : "Lease created" });
       onClose();
     },
@@ -1331,6 +1335,7 @@ function RiderForm({
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounts"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: rider ? "Rider updated" : "Rider created" });
       onClose();
     },

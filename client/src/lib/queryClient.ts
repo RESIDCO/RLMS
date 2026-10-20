@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { FLEET_STALE_MS } from "./fleetQueryRefresh";
 import { supabase } from "./supabase";
 
 // VITE_API_BASE is set at build time for the Render-hosted backend.
@@ -211,8 +212,10 @@ export const queryClient = new QueryClient({
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
-      refetchOnWindowFocus: false,
-      staleTime: 45_000,
+      // Focus manager listens to window focus and visibilitychange.
+      // staleTime dedupes those refetches so a quick tab switch does not refetch.
+      refetchOnWindowFocus: true,
+      staleTime: FLEET_STALE_MS,
       retry: false,
     },
     mutations: {

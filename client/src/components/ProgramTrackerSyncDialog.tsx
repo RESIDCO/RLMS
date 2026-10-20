@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { offerUndoToast } from "@/lib/undo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +68,7 @@ export function ProgramTrackerSyncDialog({ open, onClose }: { open: boolean; onC
       }).then((r) => r.json());
       offerUndoToast(applied);
       await qc.invalidateQueries({ queryKey: ["/api/programs"] });
+      void invalidateFleetQueries(qc);
       toast({ title: "Tracker sync applied" });
       onClose();
     } catch (e: any) {

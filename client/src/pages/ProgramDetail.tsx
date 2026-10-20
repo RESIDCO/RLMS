@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { offerUndoToast } from "@/lib/undo";
 import { useCanEdit, useIsAdmin } from "@/lib/AuthContext";
 import { ProgramPreviewDialog } from "@/components/ProgramPreviewDialog";
@@ -443,6 +444,7 @@ export default function ProgramDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
       qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
+      void invalidateFleetQueries(qc);
     },
     onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
@@ -589,6 +591,7 @@ export default function ProgramDetailPage() {
         await qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
         if (detailId) qc.invalidateQueries({ queryKey: ["/api/programs", id, "cars", detailId, "milestones"] });
       }
+      void invalidateFleetQueries(qc);
       return applied;
     } catch (e: any) {
       setCarSaveError(e.message || "Save failed");
@@ -635,6 +638,7 @@ export default function ProgramDetailPage() {
         qc.invalidateQueries({ queryKey: carsKey }),
         qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] }),
       ]);
+      void invalidateFleetQueries(qc);
     } catch (e: any) {
       toast({ title: "Undo failed", description: e.message, variant: "destructive" });
     }
@@ -974,6 +978,7 @@ export default function ProgramDetailPage() {
                   qc.invalidateQueries({ queryKey: carsKey });
                   qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
                   qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
+                  void invalidateFleetQueries(qc);
                 }}
               >
                 <UserMinus className="h-3.5 w-3.5" />
@@ -1635,6 +1640,7 @@ export default function ProgramDetailPage() {
           qc.invalidateQueries({ queryKey: carsKey });
           qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
           qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
+          void invalidateFleetQueries(qc);
         }}
       />
       <ManageColumnsDialog
@@ -1662,6 +1668,7 @@ export default function ProgramDetailPage() {
           setSelected(new Set());
           qc.invalidateQueries({ queryKey: carsKey });
           qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
+          void invalidateFleetQueries(qc);
         }}
       />
       <ProgramPreviewDialog
@@ -1675,6 +1682,7 @@ export default function ProgramDetailPage() {
           setLifePreview(null);
           qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
           qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
+          void invalidateFleetQueries(qc);
           toast({ title: "Applied" });
         }}
       />

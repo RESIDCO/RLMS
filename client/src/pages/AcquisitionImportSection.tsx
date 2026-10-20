@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { FLEET_STATUSES, type FleetStatus } from "@shared/fleet-status";
 import { todayIsoDateOnly } from "@shared/lease-authority";
 import {
@@ -232,6 +233,7 @@ export default function AcquisitionImportSection() {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/acquisition-batches"] });
+      void invalidateFleetQueries(queryClient);
     } catch (e: any) {
       toast({ title: "Import failed", description: e.message, variant: "destructive" });
     } finally {

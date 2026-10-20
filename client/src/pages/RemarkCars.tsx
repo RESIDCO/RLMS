@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { apiRequest, apiUpload } from "@/lib/queryClient";
+import { apiRequest, apiUpload, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { REMARK_CONFIRM, remarkPreviewToCsv, type RemarkPreviewRow, type RemarkStatus } from "@shared/remark-in-place";
 import { Download } from "lucide-react";
@@ -110,6 +111,7 @@ export default function RemarkCars() {
         reason,
       });
       const data = await res.json();
+      void invalidateFleetQueries(queryClient);
       toast({
         title: `Remarked ${data.applied} car${data.applied === 1 ? "" : "s"}`,
         description: "Undo reverses the whole batch, including the mark history rows.",

@@ -6,10 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import PartyPicker, { type PartySelection } from "@/components/crm/PartyPicker";
 import SourceCombo from "@/components/crm/SourceCombo";
 import SetupLesseeNote from "@/components/crm/SetupLesseeNote";
 import { useToast } from "@/hooks/use-toast";
+import {
+  BID_FLAVOR,
+  buildOpportunityPayload,
+  isBidOpportunity,
+  rollupBidLines,
+  type BidLineLike,
+} from "@shared/crm-bid";
 import {
   CAR_TYPE_SUGGESTIONS,
   LESSEE_ROLES,
@@ -163,6 +171,20 @@ function numOrNull(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+const TOTALS_TIP = "Sum of deal lines; edit the lines to change";
+
+function formatTotalCars(roll: { cars_total: number; cars_bid: number; line_count: number } | null): string {
+  if (!roll || roll.line_count === 0) return "—";
+  const total = roll.cars_total.toLocaleString("en-US");
+  if (roll.cars_bid !== roll.cars_total) return `${total} (${roll.cars_bid.toLocaleString("en-US")} in bid)`;
+  return total;
+}
+
+function formatBidDollars(roll: { dollars: number | null; line_count: number } | null): string {
+  if (!roll || roll.line_count === 0 || roll.dollars == null) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(roll.dollars);
+}
+
 export default function OpportunityDialog({
   open,
   onOpenChange,
@@ -227,6 +249,13 @@ export default function OpportunityDialog({
     queryFn: () => apiGet<OpportunityContactRow[]>(`/api/opportunities/${editing!.id}/contacts`),
     enabled: open && editing != null,
   });
+  const { isPurchase, isPortfolioBid } = isBidOpportunity(form.type, form.portfolio_bid ? BID_FLAVOR : null);
+  const canSeePrices = canWrite;
+  const bidOffering = useQuery({
+    queryKey: ["/api/opportunities", editing?.id, "bid"],
+    queryFn: () => apiGet<{ lines: BidLineLike[] }>(`/api/opportunities/${editing!.id}/bid`),
+    enabled: open && !!editing?.id,
+  });
 
   const riderId = numOrNull(form.rider_id);
   const wonRiderId = numOrNull(form.won_rider_id);
@@ -234,32 +263,16 @@ export default function OpportunityDialog({
   const needsRemarket = wonReletNeedsRemarket({ type: form.type, stage: form.stage, won_rider_id: wonRiderId });
   const remarket = remarketRiderUrl(riderId);
   const needsEndDate = form.type === "renewal" && form.stage === "won" && !form.new_expiry_date;
+  const bidRollup = useMemo(() => {
+    if (!editing?.id || !bidOffering.data) return null;
+    return rollupBidLines(bidOffering.data.lines ?? []);
+  }, [bidOffering.data, editing?.id]);
 
   const save = useMutation({
     mutationFn: async () => {
+      const flags = isBidOpportunity(form.type, form.portfolio_bid ? BID_FLAVOR : null);
       const payload: Record<string, unknown> = {
-        type: form.type,
-        stage: form.stage,
-        source: form.source,
-        owner: form.owner.trim() || null,
-        rider_id: riderId,
-        car_type: form.car_type.trim() || null,
-        car_count: numOrNull(form.car_count),
-        current_rate: numOrNull(form.current_rate),
-        target_rate: numOrNull(form.target_rate),
-        term_months: numOrNull(form.term_months),
-        est_value: numOrNull(form.est_value),
-        expiry_date: form.expiry_date || null,
-        new_expiry_date: form.new_expiry_date || null,
-        expected_close: form.expected_close || null,
-        won_rider_id: wonRiderId,
-        lessee_role: form.lessee_role,
-        sublessee_note: form.lessee_role === "sublessee" ? form.sublessee_note.trim() || null : null,
-        competitor: form.competitor.trim() || null,
-        loss_reason: form.loss_reason || null,
-        notes: form.notes.trim() || null,
-        tags: form.tags,
-        referral_note: form.referral_note.trim() || null,
+        ...buildOpportunityPayload(form, flags),
       };
       if (form.type === "purchase" && form.portfolio_bid) {
         const bid = bidStageOption(form.bid_stage);
@@ -330,7 +343,10 @@ export default function OpportunityDialog({
         </DialogHeader>
         <div className="grid sm:grid-cols-2 gap-3 text-sm">
           <div className="sm:col-span-2">
-            <Label>{form.portfolio_bid ? "Seller" : "Who is this deal with?"}</Label>
+            <LabelTip
+              label={form.portfolio_bid ? "Seller" : "Who is this deal with?"}
+              tip={form.portfolio_bid ? "Seller for this portfolio bid." : "Account, company, or contact this opportunity is with."}
+            />
             {lockedAccount ? (
               <div className="mt-1">{accountLabel}</div>
             ) : (
@@ -346,7 +362,7 @@ export default function OpportunityDialog({
               </div>
             )}
           </div>
-          <Field label="Type">
+          <Field label="Type" tip="Kind of opportunity: renewal, re-lease, purchase, sale, or another type.">
             <SelectValue
               value={form.type}
               disabled={!canWrite}
@@ -366,10 +382,15 @@ export default function OpportunityDialog({
                 disabled={!canWrite}
                 onChange={(e) => set("portfolio_bid", e.target.checked)}
               />
-              Portfolio bid
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help">Portfolio bid</span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-sm">A purchase made of deal lines. Add the lines on the offering, or import them from a bid sheet.</TooltipContent>
+              </Tooltip>
             </label>
           ) : null}
-          <Field label="Stage">
+          <Field label="Stage" tip="Where this opportunity sits in the pipeline.">
             {form.portfolio_bid ? (
               <SelectValue
                 value={form.bid_stage}
@@ -387,23 +408,23 @@ export default function OpportunityDialog({
           </Field>
           {form.portfolio_bid ? (
             <>
-              <Field label="Offering name">
+              <Field label="Offering name" tip="Name of the seller's bid package.">
                 <Input value={form.offering_name} disabled={!canWrite} onChange={(e) => set("offering_name", e.target.value)} placeholder="BFLX Oct 2026" />
               </Field>
-              <Field label="Received">
+              <Field label="Received" tip="Date the bid request arrived.">
                 <Input type="date" value={form.received_date} disabled={!canWrite} onChange={(e) => set("received_date", e.target.value)} />
               </Field>
-              <Field label="Preliminary due">
+              <Field label="Preliminary due" tip="Deadline for the preliminary bid.">
                 <Input type="date" value={form.bid_due_prelim} disabled={!canWrite} onChange={(e) => set("bid_due_prelim", e.target.value)} />
               </Field>
-              <Field label="Final due">
+              <Field label="Final due" tip="Deadline for the final bid.">
                 <Input type="date" value={form.bid_due_final} disabled={!canWrite} onChange={(e) => set("bid_due_final", e.target.value)} />
               </Field>
-              <Field label="Award date">
+              <Field label="Award date" tip="Date the seller expects to award the package.">
                 <Input type="date" value={form.award_date} disabled={!canWrite} onChange={(e) => set("award_date", e.target.value)} />
               </Field>
               <div className="sm:col-span-2">
-                <Label>Broker / manager (optional)</Label>
+                <LabelTip label="Broker / manager (optional)" tip="Broker or manager for this bid, if there is one." />
                 <div className="mt-1">
                   <PartyPicker
                     selected={broker}
@@ -417,14 +438,22 @@ export default function OpportunityDialog({
               </div>
             </>
           ) : null}
-          <Field label="Expected close">
+          <Field label="Expected close" tip="Date you expect this opportunity to close.">
             <Input type="date" value={form.expected_close} disabled={!canWrite} onChange={(e) => set("expected_close", e.target.value)} />
           </Field>
-          <Field label="Owner">
-            <Input value={form.owner} disabled={!canWrite} onChange={(e) => set("owner", e.target.value)} placeholder="Account manager" />
+          <Field
+            label={isPurchase ? "Bid lead" : "Owner"}
+            tip={isPurchase ? "Optional. Who is working this bid. Leave blank if that is not known yet." : "Optional. The account manager for this opportunity."}
+          >
+            <Input
+              value={form.owner}
+              disabled={!canWrite}
+              onChange={(e) => set("owner", e.target.value)}
+              placeholder={isPurchase ? "Optional, who is working this bid" : "Optional, account manager"}
+            />
           </Field>
           {form.stage === "lost" ? (
-            <Field label="Loss reason">
+            <Field label="Loss reason" tip="Why this opportunity was lost. Required before a lost opportunity can be saved.">
               <SelectValue
                 value={form.loss_reason}
                 disabled={!canWrite}
@@ -434,7 +463,7 @@ export default function OpportunityDialog({
             </Field>
           ) : null}
           {form.type === "renewal" && form.stage === "won" ? (
-            <Field label="New end date">
+            <Field label="New end date" tip="New lease end date for a won renewal. Nothing is written back to the rider.">
               <Input type="date" value={form.new_expiry_date} disabled={!canWrite} onChange={(e) => set("new_expiry_date", e.target.value)} />
             </Field>
           ) : null}
@@ -449,13 +478,13 @@ export default function OpportunityDialog({
                   "Run remarket in Lease Management, then record the new OL id."
                 )}
               </p>
-              <Field label="Won rider id">
+              <Field label="Won rider id" tip="Successor rider id from remarket.">
                 <Input value={form.won_rider_id} disabled={!canWrite} onChange={(e) => set("won_rider_id", e.target.value)} placeholder="successor rider id" />
               </Field>
             </div>
           ) : null}
           <div className="sm:col-span-2">
-            <Label>Notes</Label>
+            <LabelTip label="Notes" tip="Free-form notes saved on the opportunity." />
             <textarea
               className="mt-1 w-full min-h-20 rounded-md border border-input bg-background px-2 py-1"
               value={form.notes}
@@ -466,7 +495,7 @@ export default function OpportunityDialog({
           <details className="sm:col-span-2 rounded-md border border-border p-3">
             <summary className="cursor-pointer text-sm">More details</summary>
             <div className="grid sm:grid-cols-2 gap-3 mt-3">
-              <Field label="Source">
+              <Field label="Source" tip="Where this opportunity came from. Pick one or type a new source.">
                 <SourceCombo
                   open={open}
                   value={form.source}
@@ -474,51 +503,80 @@ export default function OpportunityDialog({
                   onChange={(value) => set("source", value)}
                 />
               </Field>
-              <Field label="Lessee or sublessee">
-                <SelectValue value={form.lessee_role} disabled={!canWrite} onChange={(value) => set("lessee_role", value as LesseeRole)} options={LESSEE_ROLES.map((value) => ({ value, label: value === "lessee" ? "Lessee" : "Sublessee" }))} />
-              </Field>
-              {form.lessee_role === "sublessee" ? (
-                <Field label="Sublessee note">
+              {isPurchase ? null : (
+                <Field label="Lessee or sublessee" tip="Whether the account is the lessee or a sublessee.">
+                  <SelectValue value={form.lessee_role} disabled={!canWrite} onChange={(value) => set("lessee_role", value as LesseeRole)} options={LESSEE_ROLES.map((value) => ({ value, label: value === "lessee" ? "Lessee" : "Sublessee" }))} />
+                </Field>
+              )}
+              {!isPurchase && form.lessee_role === "sublessee" ? (
+                <Field label="Sublessee note" tip="Detail on the sublessee. Saved only when the role is sublessee.">
                   <Input value={form.sublessee_note} disabled={!canWrite} onChange={(e) => set("sublessee_note", e.target.value)} />
                 </Field>
               ) : null}
-              <Field label="Car type">
-                <Input list="crm-car-types" value={form.car_type} disabled={!canWrite} onChange={(e) => set("car_type", e.target.value)} />
-                <datalist id="crm-car-types">
-                  {CAR_TYPE_SUGGESTIONS.map((value) => <option key={value} value={value} />)}
-                </datalist>
-              </Field>
-              <Field label="Car count">
-                <Input value={form.car_count} disabled={!canWrite} onChange={(e) => set("car_count", e.target.value)} />
-              </Field>
-              <Field label="OL rider id">
-                <Input value={form.rider_id} disabled={!canWrite} onChange={(e) => set("rider_id", e.target.value)} />
-              </Field>
-              <Field label="Current rate">
-                <Input value={form.current_rate} disabled={!canWrite} onChange={(e) => set("current_rate", e.target.value)} />
-              </Field>
-              <Field label="Target rate">
-                <Input value={form.target_rate} disabled={!canWrite} onChange={(e) => set("target_rate", e.target.value)} />
-              </Field>
-              <Field label="Term months">
-                <Input value={form.term_months} disabled={!canWrite} onChange={(e) => set("term_months", e.target.value)} />
-              </Field>
-              <Field label="Est. value">
-                <Input value={form.est_value} disabled={!canWrite} onChange={(e) => set("est_value", e.target.value)} />
-              </Field>
-              <Field label="Expiry snapshot">
-                <Input type="date" value={form.expiry_date} disabled={!canWrite} onChange={(e) => set("expiry_date", e.target.value)} />
-              </Field>
-              <Field label="Competitor">
+              {isPortfolioBid ? null : (
+                <>
+                  <Field label="Car type" tip="Car type for this opportunity. Pick a suggestion or type another.">
+                    <Input list="crm-car-types" value={form.car_type} disabled={!canWrite} onChange={(e) => set("car_type", e.target.value)} />
+                    <datalist id="crm-car-types">
+                      {CAR_TYPE_SUGGESTIONS.map((value) => <option key={value} value={value} />)}
+                    </datalist>
+                  </Field>
+                  <Field label="Car count" tip="Number of cars on this opportunity.">
+                    <Input value={form.car_count} disabled={!canWrite} onChange={(e) => set("car_count", e.target.value)} />
+                  </Field>
+                </>
+              )}
+              {isPurchase ? null : (
+                <>
+                  <Field label="Deal / OL rider ID" tip="Operating lease or deal rider this opportunity is about.">
+                    <Input value={form.rider_id} disabled={!canWrite} onChange={(e) => set("rider_id", e.target.value)} />
+                  </Field>
+                  <Field label="Current rate" tip="Current lease rate.">
+                    <Input value={form.current_rate} disabled={!canWrite} onChange={(e) => set("current_rate", e.target.value)} />
+                  </Field>
+                  <Field label="Target rate" tip="Target lease rate.">
+                    <Input value={form.target_rate} disabled={!canWrite} onChange={(e) => set("target_rate", e.target.value)} />
+                  </Field>
+                  <Field label="Term months" tip="Lease term in months.">
+                    <Input value={form.term_months} disabled={!canWrite} onChange={(e) => set("term_months", e.target.value)} />
+                  </Field>
+                </>
+              )}
+              {isPortfolioBid ? null : (
+                <Field label="Est. value" tip="Estimated value of this opportunity. A portfolio bid total comes from the deal lines instead.">
+                  <Input value={form.est_value} disabled={!canWrite} onChange={(e) => set("est_value", e.target.value)} />
+                </Field>
+              )}
+              {isPurchase ? null : (
+                <Field label="Expiry snapshot" tip="Lease expiry as recorded on this opportunity.">
+                  <Input type="date" value={form.expiry_date} disabled={!canWrite} onChange={(e) => set("expiry_date", e.target.value)} />
+                </Field>
+              )}
+              {isPortfolioBid ? (
+                <div className="sm:col-span-2 space-y-2">
+                  <p className="text-sm text-muted-foreground">Deals go in as deal lines, or use Import from bid sheet.</p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <Field label="Total cars (from deal lines)" tip={TOTALS_TIP}>
+                      <ReadOnlyTotal value={formatTotalCars(editing?.id ? bidRollup : null)} />
+                    </Field>
+                    {canSeePrices ? (
+                      <Field label="Total bid $ (from deal lines)" tip={TOTALS_TIP}>
+                        <ReadOnlyTotal value={formatBidDollars(editing?.id ? bidRollup : null)} />
+                      </Field>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              <Field label="Competitor" tip="Competitor on this opportunity, if any.">
                 <Input value={form.competitor} disabled={!canWrite} onChange={(e) => set("competitor", e.target.value)} />
               </Field>
               {form.source === "referral" ? (
-                <Field label="Referral note">
+                <Field label="Referral note" tip="Who referred this opportunity. Shown when the source is referral.">
                   <Input value={form.referral_note} disabled={!canWrite} onChange={(e) => set("referral_note", e.target.value)} />
                 </Field>
               ) : null}
               <div className="sm:col-span-2">
-                <Label>Tags</Label>
+                <LabelTip label="Tags" tip="Labels for filtering. Type a tag and press Enter. Click a tag to remove it." />
                 <div className="mt-1 flex flex-wrap gap-1">
                   {form.tags.map((tag) => (
                     <button key={tag} type="button" className="rounded bg-muted px-2 py-0.5 text-xs" disabled={!canWrite} onClick={() => set("tags", form.tags.filter((item) => item !== tag))}>
@@ -546,7 +604,12 @@ export default function OpportunityDialog({
                 />
               </div>
               <div className="sm:col-span-2 space-y-2">
-                <div className="text-xs text-muted-foreground">People</div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="w-fit cursor-help text-xs text-muted-foreground">People</div>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-sm">Contacts tied to this opportunity.</TooltipContent>
+                </Tooltip>
                 {(savedContacts.data ?? []).map((row) => (
                   <div key={row.id} className="text-xs">{row.name || `Contact ${row.contact_id}`} · {OPPORTUNITY_CONTACT_ROLE_LABEL[row.role]}</div>
                 ))}
@@ -581,11 +644,30 @@ export default function OpportunityDialog({
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function LabelTip({ label, tip }: { label: string; tip: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Label className="w-fit cursor-help">{label}</Label>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm">{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function Field({ label, tip, children }: { label: string; tip: string; children: ReactNode }) {
   return (
     <div>
-      <Label>{label}</Label>
+      <LabelTip label={label} tip={tip} />
       <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+function ReadOnlyTotal({ value }: { value: string }) {
+  return (
+    <div className="h-9 rounded-md border border-input bg-muted px-2 flex items-center font-mono-num" aria-readonly="true">
+      {value}
     </div>
   );
 }

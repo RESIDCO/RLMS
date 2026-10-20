@@ -107,9 +107,9 @@ export async function refreshVisibleFleetQueries(client: QueryClient): Promise<v
 
 /**
  * Focus and visibility refresh for car/lease screens, plus cross-tab sync.
- * React Query's focus manager also listens to `visibilitychange` when
- * `refetchOnWindowFocus` is on; this deduped listener covers fleet keys even
- * when that default is left off for other modules.
+ * The app-wide `refetchOnWindowFocus` default stays off so other modules are
+ * not refetched on tab return. This listener covers fleet keys only, and the
+ * stale window skips a second pass when focus and visibilitychange fire together.
  */
 export function installFleetQueryRefresh(
   client: QueryClient,

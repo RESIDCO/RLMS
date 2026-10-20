@@ -3,16 +3,17 @@ export type MoveLegacyDestination =
   | { kind: "redirect"; path: string };
 
 /**
- * `/move` is retired. A bare visit is a notice. `?rider=` is a rider id
- * (the old Move Cars query), never the Railcars OL-code filter named `rider`.
+ * `/move` is retired. A bare visit is a notice.
+ * `?rider=` is a rider id from the old page. It opens the Move dialog with that
+ * source rider and does not set a Railcars filter.
  */
 export function moveLegacyDestination(search: string): MoveLegacyDestination {
   const rider = new URLSearchParams(String(search ?? "").replace(/^\?/, "")).get("rider") ?? "";
   const trimmed = rider.trim();
-  if (!trimmed) return { kind: "notice" };
+  if (!/^\d+$/.test(trimmed) || Number(trimmed) <= 0) return { kind: "notice" };
   return {
     kind: "redirect",
-    path: `/railcars?rider_id=${encodeURIComponent(trimmed)}&move=1`,
+    path: `/railcars?move_source=${encodeURIComponent(trimmed)}`,
   };
 }
 
@@ -27,11 +28,10 @@ export function moveLegacyDestinationFromSources(
   return fromHash;
 }
 
-/** `rider_id` filters Railcars by rider. `rider` stays the OL-code filter. */
-export function fleetMoveLaunch(search: string): { riderId: string; openMove: boolean } {
-  const qs = new URLSearchParams(String(search ?? "").replace(/^\?/, ""));
-  return {
-    riderId: (qs.get("rider_id") || "").trim(),
-    openMove: qs.get("move") === "1",
-  };
+/** Opens the Move dialog for a source rider. Does not read `rider` or `rider_id`. */
+export function fleetMoveSource(search: string): number | null {
+  const raw = (new URLSearchParams(String(search ?? "").replace(/^\?/, "")).get("move_source") ?? "").trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return id > 0 ? id : null;
 }

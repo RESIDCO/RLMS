@@ -12,6 +12,7 @@ import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
 import { RAILCARS_HANDOFF_KEY, markSearchRefresh } from "@/lib/searchState";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
+import { ReassignCarForm } from "@/components/ReassignCarForm";
 import { MoveCarsDialog } from "@/components/MoveCarsDialog";
 import { idsEligibleForMove } from "@shared/move-plan";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
@@ -2068,7 +2069,8 @@ export function CarDetail({
   const [rentEventType, setRentEventType] = useState<"off_rent" | "on_rent">("off_rent");
   const [rentEventDate, setRentEventDate] = useState(new Date().toISOString().slice(0, 10));
   const [rentReason, setRentReason] = useState("");
-  const [moveOpen, setMoveOpen] = useState(false);
+  // Assign / reassign state
+  const [assignOpen, setAssignOpen] = useState(false);
   const { data, isLoading } = useQuery<{
     railcar: RailcarWithAssignment;
     history: any[];
@@ -2076,6 +2078,10 @@ export function CarDetail({
   }>({
     queryKey: ["/api/railcars", carId],
   });
+
+  // Riders list for the assign dropdown (cached from parent's query)
+  const { data: ridersData } = useQuery<any[]>({ queryKey: ["/api/riders"] });
+  const allRiders: any[] = ridersData ?? [];
 
   // Rent events for this car
   const { data: rentEventsData } = useQuery<any[]>({
@@ -2378,16 +2384,26 @@ export function CarDetail({
       {/* Assign / Reassign panel */}
       {allowEdits && (
         <div className="mt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => setMoveOpen(true)}
-            data-testid="btn-open-assign"
-          >
-            {r.assignment ? "Reassign to Different Rider" : "Assign to Rider"}
-          </Button>
-          <MoveCarsDialog open={moveOpen} onOpenChange={setMoveOpen} carIds={[carId]} />
+          {!assignOpen ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => setAssignOpen(true)}
+              data-testid="btn-open-assign"
+            >
+              {r.assignment ? "Reassign to Different Rider" : "Assign to Rider"}
+            </Button>
+          ) : (
+            <ReassignCarForm
+              carId={carId}
+              isReassign={Boolean(r.assignment)}
+              initialRiderName={r.assignment?.rider?.rider_name ?? ""}
+              initialLessee={r.assignment?.fleet_name ?? r.lessee_name ?? ""}
+              riders={allRiders}
+              onCancel={() => setAssignOpen(false)}
+            />
+          )}
         </div>
       )}
 
@@ -2709,7 +2725,7 @@ export function RailcarFormDialog({
         await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
       } else {
         const res = await apiRequest("POST", `/api/railcars`, payload);
-        // Optional assignment only when the typed label already matches a rider.
+        // If a rider/OL was entered, resolve (match or create) then assign
         if (assignRiderId.trim()) {
           const newCar = await res.json();
           const resolved = await resolveRiderLabel(assignRiderId);
@@ -3067,7 +3083,7 @@ export function RailcarFormDialog({
                   riders={allRiders}
                   listId="new-car-rider-suggestions"
                   data-testid="select-new-car-rider"
-                  placeholder="Optional — existing rider or OL code"
+                  placeholder="Optional — type rider / OL code…"
                 />
               </div>
               {assignRiderId.trim() && (

@@ -26,7 +26,6 @@ import { todayIsoDateOnly } from "@shared/lease-authority";
 import { ArrowLeft } from "lucide-react";
 import { BackToSearch } from "@/components/BackToSearch";
 import { useCanEdit } from "@/lib/AuthContext";
-import { MoveCarsDialog } from "@/components/MoveCarsDialog";
 
 export default function RiderPage() {
   const [, params] = useRoute("/leases/rider/:id");
@@ -46,7 +45,6 @@ export default function RiderPage() {
   const [newOl, setNewOl] = useState("");
   const [remarkDate, setRemarkDate] = useState(todayIsoDateOnly);
   const [carIdsText, setCarIdsText] = useState("");
-  const [moveOpen, setMoveOpen] = useState(false);
   const [section, setSection] = useState<"cars" | "documents">("cars");
   const docsPath = leaseDocumentsPath("rider", id);
   const docs = useQuery<{ rows: LeaseDoc[] }>({
@@ -155,11 +153,6 @@ export default function RiderPage() {
               </Link>
             </Button>
             {canEdit && <Button size="sm" variant="outline" onClick={() => { setForm({}); setEdit(true); }}>Edit terms</Button>}
-            {canEdit && (
-              <Button size="sm" variant="outline" onClick={() => setMoveOpen(true)} data-testid="rider-move-cars">
-                Move cars
-              </Button>
-            )}
             {canEdit && <Button size="sm" variant="outline" onClick={() => setOffOpen(true)}>Off lease</Button>}
             {canEdit && <Button size="sm" onClick={() => setRemarkOpen(true)}>Remarket → new OL</Button>}
           </div>
@@ -220,7 +213,6 @@ export default function RiderPage() {
         </TabsContent>
       </Tabs>
 
-      <MoveCarsDialog open={moveOpen} onOpenChange={setMoveOpen} sourceRiderId={id} />
       <Dialog open={edit} onOpenChange={setEdit}>
         <DialogContent>
           <DialogHeader><DialogTitle>Edit terms</DialogTitle></DialogHeader>

@@ -1,24 +1,19 @@
 import { useMemo, useState } from "react";
 import { useCanEdit } from "@/lib/AuthContext";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
+import { MoveCarsDialog } from "@/components/MoveCarsDialog";
 import SearchableSelect, { riderToOption } from "@/components/SearchableSelect";
-import { ArrowRight } from "lucide-react";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
-import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList } from "@/lib/queryClient";
+import { apiGet, railcarsQs, asRailcarList } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { displayLeaseNumber } from "@shared/residco-import";
-import { todayIsoDateOnly } from "@shared/lease-authority";
 import { formatUsDateTimeEt } from "@shared/display-date";
+import { idsEligibleForMove } from "@shared/move-plan";
 import type { RailcarWithAssignment } from "@shared/schema";
 
 function Step({
@@ -58,12 +53,9 @@ export default function MoveCars() {
     ? new URLSearchParams(window.location.search).get("rider") ?? ""
     : "";
   const [fromRiderId, setFromRiderId] = useState<string>(initRider);
-  const [toRiderLabel, setToRiderLabel] = useState<string>("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [newFleetName, setNewFleetName] = useState("");
-  const [reason, setReason] = useState("");
-  const [effectiveDate, setEffectiveDate] = useState(todayIsoDateOnly);
-  const [rentStartDate, setRentStartDate] = useState("");
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveCarIds, setMoveCarIds] = useState<number[]>([]);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
 
@@ -82,13 +74,6 @@ export default function MoveCars() {
   const sourceRiderOptions = useMemo(
     () => (riders ?? []).map(riderToOption),
     [riders],
-  );
-
-  const fromRider = riders?.find((r) => String(r.id) === fromRiderId);
-  const toRiderMatch = riders?.find(
-    (r) =>
-      String(r.rider_name ?? "").trim().toUpperCase() === toRiderLabel.trim().toUpperCase() ||
-      String(r.schedule_number ?? "").trim().toUpperCase() === toRiderLabel.trim().toUpperCase()
   );
 
   const sourceCars = useMemo(() => {
@@ -117,52 +102,28 @@ export default function MoveCars() {
     else setSelected(new Set(sourceCars.map((c) => c.id)));
   };
 
-  const move = useMutation({
-    mutationFn: async () => {
-      const resolved = await resolveRiderLabel(toRiderLabel);
-      if (String(resolved.id) === fromRiderId) {
-        throw new Error("Destination rider must differ from the source rider");
-      }
-      await apiRequest("POST", "/api/move", {
-        car_ids: Array.from(selected),
-        to_rider_id: resolved.id,
-        new_fleet_name: newFleetName.trim() || null,
-        reason: reason.trim() || null,
-        moved_by: "rlms-ui",
-        effective_date: effectiveDate || null,
-        rent_start_date: rentStartDate || null,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries();
+  function openMoveDialog() {
+    const known = asRailcarList(railcars).filter((car) => selected.has(car.id));
+    const picked = idsEligibleForMove(selected, known);
+    if (!picked.ids.length) {
+      toast({ title: "Inactive cars were left alone" });
+      return;
+    }
+    if (picked.skippedInactive > 0) {
       toast({
-        title: "Move complete",
-        description: `${selected.size} car${selected.size > 1 ? "s" : ""} reassigned.`,
+        title: `${picked.skippedInactive} inactive car${picked.skippedInactive === 1 ? "" : "s"} left out of this move`,
       });
-      setSelected(new Set());
-      setFromRiderId("");
-      setToRiderLabel("");
-      setNewFleetName("");
-      setReason("");
-      setEffectiveDate(todayIsoDateOnly());
-      setRentStartDate("");
-    },
-    onError: (e: Error) =>
-      toast({ title: "Move failed", description: e.message, variant: "destructive" }),
-  });
-
-  const canConfirm =
-    !!fromRiderId &&
-    toRiderLabel.trim().length > 0 &&
-    selected.size > 0 &&
-    !(toRiderMatch && String(toRiderMatch.id) === fromRiderId);
+    }
+    setMoveCarIds(picked.ids);
+    setMoveOpen(true);
+  }
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <div className="mx-4 sm:mx-8 mt-4 rounded-md border border-border bg-muted/30 px-4 py-3 text-sm">
         Ending an OL? Prompt: Move to EA x-lessee? Use{" "}
         <a className="underline" href="#/returns/bulk">Bulk return</a> so the preview shows old link → new link.
-        Moving onto a new OL clears Rent Start Date unless you supply one below — the car stays Idle (awaiting rent start), not Unassigned.
+        Moving onto a new OL clears Rent Start Date unless you supply one in the move dialog — the car stays Idle (awaiting rent start), not Unassigned.
       </div>
       <PageHeader
         title="Move Cars"
@@ -291,175 +252,16 @@ export default function MoveCars() {
             )}
           </Step>
 
-          <Step n={3} title="Destination rider / OL" done={!!toRiderLabel.trim()}>
-            <RiderFreeTextInput
-              value={toRiderLabel}
-              onChange={setToRiderLabel}
-              riders={riders ?? []}
-              excludeId={fromRiderId}
-              listId="move-to-rider-suggestions"
-              data-testid="select-to-rider"
-              placeholder="Type destination rider / OL…"
-            />
-          </Step>
-
-          <Step n={4} title="New lessee name & reason (optional)">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <Label>New lessee name</Label>
-                <Input
-                  value={newFleetName}
-                  onChange={(e) => setNewFleetName(e.target.value)}
-                  placeholder="Leave blank to keep existing"
-                  data-testid="input-new-lessee"
-                />
-              </div>
-              <div>
-                <Label>Reason</Label>
-                <Input
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g. New Assignment"
-                  data-testid="input-reason"
-                />
-              </div>
-              <div>
-                <Label>Effective date</Label>
-                <Input
-                  type="date"
-                  value={effectiveDate}
-                  onChange={(e) => setEffectiveDate(e.target.value)}
-                  data-testid="input-effective-date"
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Defaults to today. Set a past date to backdate the History log. Does not recalculate this month’s rent or depreciation.
-                </p>
-              </div>
-              <div>
-                <Label>Rent start date (optional)</Label>
-                <Input
-                  type="date"
-                  value={rentStartDate}
-                  onChange={(e) => setRentStartDate(e.target.value)}
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Leave blank to reset rent start on the new OL (Idle until a date is set).
-                </p>
-              </div>
-            </div>
-          </Step>
+          <Button
+            disabled={!canEdit || selected.size === 0}
+            onClick={openMoveDialog}
+            data-testid="button-confirm-move"
+          >
+            {!canEdit ? "View only" : `Move ${selected.size || ""} selected`}
+          </Button>
         </div>
-
-        {/* Preview */}
-        <aside className="xl:sticky xl:top-4 self-start rounded-lg border border-card-border bg-card p-5 h-fit">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
-            Move Preview
-          </div>
-          {canConfirm ? (
-            <div className="space-y-4">
-              <div className="text-sm">
-                <div className="text-muted-foreground text-xs mb-1">Moving</div>
-                <div className="text-2xl font-semibold font-mono-num">
-                  {selected.size}{" "}
-                  <span className="text-base font-normal text-muted-foreground">
-                    car{selected.size > 1 ? "s" : ""}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <div className="flex-1 min-w-0 rounded-md border border-border p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    From
-                  </div>
-                  <div className="font-medium truncate">{fromRider?.rider_name}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {displayLeaseNumber(fromRider?.master_lease?.lease_number)}
-                  </div>
-                </div>
-                <ArrowRight className="h-4 w-4 text-primary shrink-0" />
-                <div className="flex-1 min-w-0 rounded-md border border-primary/40 bg-primary/5 p-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    To
-                  </div>
-                  <div className="font-medium truncate">{toRiderMatch?.rider_name ?? toRiderLabel}</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {displayLeaseNumber(toRiderMatch?.master_lease?.lease_number) || (toRiderMatch ? "—" : "Existing rider required")}
-                  </div>
-                </div>
-              </div>
-              {/* Selected cars — reporting mark preview */}
-              {(() => {
-                const selectedCars = asRailcarList(railcars).filter((c) => selected.has(c.id));
-                return (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
-                      Selected cars
-                    </div>
-                    <div className="rounded-md border border-dashed border-border/70 bg-muted/20 max-h-[180px] overflow-y-auto">
-                      {selectedCars.length === 0 ? (
-                        <div className="px-3 py-3 text-xs text-muted-foreground italic">None selected</div>
-                      ) : (
-                        <div className="divide-y divide-border/40">
-                          {selectedCars.map((c) => {
-                            const numSuffix = c.reporting_marks && c.car_number.toUpperCase().startsWith(c.reporting_marks.toUpperCase())
-                              ? c.car_number.slice(c.reporting_marks.length)
-                              : null;
-                            return (
-                              <div key={c.id} className="flex items-center justify-between px-3 py-1.5 gap-2">
-                                <span className="font-mono font-semibold text-xs text-foreground tracking-wide">
-                                  {c.reporting_marks && numSuffix !== null ? (
-                                    <><span className="text-primary">{c.reporting_marks}</span>{numSuffix}</>
-                                  ) : c.car_number}
-                                </span>
-                                {c.reporting_marks && (
-                                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                                    {c.reporting_marks} · {numSuffix ?? c.car_number}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {newFleetName && (
-                <div className="text-xs">
-                  <span className="text-muted-foreground">New lessee name: </span>
-                  <span className="font-mono-num">{newFleetName}</span>
-                </div>
-              )}
-              {reason && (
-                <div className="text-xs">
-                  <span className="text-muted-foreground">Reason: </span>
-                  <span className="italic">{reason}</span>
-                </div>
-              )}
-              {effectiveDate && (
-                <div className="text-xs">
-                  <span className="text-muted-foreground">Effective date: </span>
-                  <span className="font-mono-num">{effectiveDate}</span>
-                </div>
-              )}
-              <Button
-                className="w-full"
-                onClick={() => move.mutate()}
-                disabled={move.isPending || !canEdit}
-                data-testid="button-confirm-move"
-              >
-                {!canEdit ? "View only" : move.isPending ? "Moving…" : "Confirm move"}
-              </Button>
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              Select source, cars, and destination rider to preview.
-            </div>
-          )}
-        </aside>
       </div>
+      <MoveCarsDialog open={moveOpen} onOpenChange={setMoveOpen} carIds={moveCarIds} />
 
       {/* Recent moves */}
       <div className="px-4 sm:px-8 pb-10">

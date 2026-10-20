@@ -6,8 +6,6 @@ import { carListSearchTokens, looksLikeCarToken, parseCarPasteListDetailed } fro
 import { classifyFleetQuery, summaryCarTypeKey } from "@shared/carTypeAliases";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatCalendarDate, carLeaseEndDate } from "@shared/lease-authority";
-import { idsEligibleForMove } from "@shared/move-plan";
-import { MoveCarsDialog } from "@/components/MoveCarsDialog";
 import { FleetMembershipBadge, FleetAwareStatusBadge, InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { FormerlyBadge } from "@/components/FormerlyBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
@@ -818,8 +816,6 @@ export default function SearchPage() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [savingView, setSavingView] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
-  const [moveOpen, setMoveOpen] = useState(false);
-  const [moveCarIds, setMoveCarIds] = useState<number[]>([]);
   const [selectingAll, setSelectingAll] = useState(false);
   const canEdit = useCanEdit();
   const isAdmin = useIsAdmin();
@@ -2719,21 +2715,6 @@ export default function SearchPage() {
             onRemove={() => { void removeSelection(); }}
             onPhotos={() => setPhotoOpen(true)}
             onExport={(kind) => { void exportSelected(kind); }}
-            onMove={() => {
-              const known = rows.filter((row) => selected.has(Number(row.id)));
-              const picked = idsEligibleForMove(selected, known);
-              if (!picked.ids.length) {
-                toast({ title: "Inactive cars were left alone" });
-                return;
-              }
-              if (picked.skippedInactive > 0) {
-                toast({
-                  title: `${picked.skippedInactive} inactive car${picked.skippedInactive === 1 ? "" : "s"} left out of this move`,
-                });
-              }
-              setMoveCarIds(picked.ids);
-              setMoveOpen(true);
-            }}
           />
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <button type="button" className="text-primary hover:underline" onClick={selectPage}>Select page</button>
@@ -2871,7 +2852,6 @@ export default function SearchPage() {
           </div>
         </div>
       ) : null}
-      <MoveCarsDialog open={moveOpen} onOpenChange={setMoveOpen} carIds={moveCarIds} />
       {photoOpen ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/40 p-6" onClick={() => setPhotoOpen(false)}>
           <div className="w-full max-w-3xl" onClick={(event) => event.stopPropagation()}>

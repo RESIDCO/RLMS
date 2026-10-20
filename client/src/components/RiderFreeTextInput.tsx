@@ -31,8 +31,7 @@ type Props = {
  * Free-text Rider/OL input with a visible filtered suggestion list.
  * Native <datalist> does not render reliably (especially in Chromium with
  * hundreds of options / a trailing chevron), so this is a custom combobox.
- * A typed value is accepted in the field. Saving matches an existing rider.
- * A new lease is created only by an explicit create action.
+ * Any typed value is still accepted — new OL codes are created on resolve.
  */
 export function RiderFreeTextInput({
   value,
@@ -162,7 +161,7 @@ export function RiderFreeTextInput({
         )}
       </div>
       <p className="text-[10px] text-muted-foreground">
-        Suggestions are existing riders. A new lease is a separate create step.
+        Type any OL/rider code. Suggestions are existing riders — new codes are accepted.
       </p>
     </div>
   );

@@ -13,6 +13,8 @@ import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { displayStatusInputFromRailcar, FLEET_STATUSES } from "@shared/fleet-status";
 import { Button } from "@/components/ui/button";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
+import { LastNoteCell } from "@/components/LastNoteCell";
+import { lastNoteForRow, lastNoteSortKey } from "@shared/lineage-notes";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -288,7 +290,7 @@ function renderOptTd(key: string, r: any, compact = false) {
     case "program_milestone":
       return <td key={key} className={`${text} max-w-[160px] truncate`}>{[r.program_milestone, r.program_milestone_at].filter(Boolean).join(" · ") || "—"}</td>;
     case "latest_note":
-      return <td key={key} className={`${text} max-w-[220px] truncate`} title={[r.latest_note_at, r.latest_note_actor].filter(Boolean).join(" · ")}>{r.latest_note || "—"}</td>;
+      return <LastNoteCell key={key} row={r} className={text} />;
     case "tags":
       return (
         <td key={key} className={text}>
@@ -521,6 +523,7 @@ function sortValue(row: any, key: string): string {
   if (key === "type") return String(row.car_type ?? "");
   if (key === "entity") return String(row.entity ?? "");
   if (key === "tags") return Array.isArray(row.tags) ? row.tags.join(", ") : "";
+  if (key === "latest_note") return lastNoteSortKey(lastNoteForRow(row));
   if (key === "program_milestone") return [row.program_milestone, row.program_milestone_at].filter(Boolean).join(" ");
   const value = row[key];
   return value == null ? "" : String(value);

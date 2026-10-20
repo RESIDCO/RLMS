@@ -18,6 +18,7 @@ import {
 import { apiGet, apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit } from "@/lib/AuthContext";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
@@ -243,6 +244,7 @@ export function KpiCarListPage() {
     [programOpts],
   );
   const [preview, setPreview] = useState<any>(null);
+  const [addNote, setAddNote] = useState("");
   const [commitType, setCommitType] = useState<CommitmentType>("deal");
   const [commitName, setCommitName] = useState("");
   const [target, setTarget] = useState("");
@@ -329,9 +331,10 @@ export function KpiCarListPage() {
     mutationFn: async () => {
       const token = preview?.preview_token;
       if (!token) throw new Error("Preview first");
-      if (bulk === "sold") return (await apiRequest("POST", "/api/railcars/sold/apply", { preview_token: token })).json();
-      if (bulk === "unsold") return (await apiRequest("POST", "/api/railcars/unsold/apply", { preview_token: token })).json();
-      if (bulk === "rent_start") return (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: token })).json();
+      const note = bulk === "sold" || bulk === "unsold" || bulk === "rent_start" ? appendNoteBody(addNote) : {};
+      if (bulk === "sold") return (await apiRequest("POST", "/api/railcars/sold/apply", { preview_token: token, ...note })).json();
+      if (bulk === "unsold") return (await apiRequest("POST", "/api/railcars/unsold/apply", { preview_token: token, ...note })).json();
+      if (bulk === "rent_start") return (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: token, ...note })).json();
       if (bulk === "add_program") {
         return (await apiRequest("POST", `/api/programs/${programId}/cars/apply`, { preview_token: token })).json();
       }
@@ -534,6 +537,11 @@ export function KpiCarListPage() {
                   Overwrite
                 </label>
               </>
+            )}
+            {(bulk === "sold" || bulk === "unsold" || bulk === "rent_start") && (
+              <div className="min-w-[220px]">
+                <AddNoteField id="kpi-list-note" value={addNote} onChange={setAddNote} />
+              </div>
             )}
             <Button size="sm" disabled={!bulk} onClick={() => runPreview.mutate()}>Preview</Button>
             <Button size="sm" variant="secondary" disabled={!preview?.preview_token} onClick={() => apply.mutate()}>

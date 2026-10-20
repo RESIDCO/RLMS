@@ -2,6 +2,8 @@ import type { Express, Request, Response } from "express";
 import multer from "multer";
 import { requireUser, requireWrite } from "./auth";
 import { REMARK_CONFIRM, parseRemarkMatrix, parseRemarkText, type RemarkInputRow } from "@shared/remark-in-place";
+import { appendNotesInGroup, normalizeAppendNote, withNoteReport } from "./append-note";
+import { withChangeGroupResult } from "./change-log";
 import { applyRemarkInPlace, chooseRemarkItems, parseRemarkUpload, previewRemark } from "./remark-in-place";
 import { resolvePriorMarkCars } from "./prior-marks";
 
@@ -66,14 +68,25 @@ export function registerRemarkRoutes(app: Express) {
           conflicts: result.conflicts ?? null,
         });
       }
-      res.json({
+      const noted = normalizeAppendNote(req.body?.append_note)
+        ? await withChangeGroupResult(writerId, async () =>
+            appendNotesInGroup({
+              entityType: "railcar",
+              ids: selected.items.map((item) => item.id),
+              note: req.body?.append_note,
+              actor: writerId,
+            }),
+          )
+        : null;
+      res.json(withNoteReport({
         ok: true,
         undoable: true,
         change_group: result.change_group,
         applied: selected.items.length,
         results: result.results ?? [],
         counts: preview.counts,
-      });
+        ...(noted ? { note_change_group: noted.change_group } : {}),
+      }, req.body?.append_note, noted ?? { appended: [], skipped: [] }));
     } catch (err) {
       errHandler(res, err);
     }

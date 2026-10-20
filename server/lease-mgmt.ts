@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
+import { appendNotesInGroup, stripNotesField, withNoteReport } from "./append-note";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { pickRow } from "@shared/change-log";
 import { parseCarPasteList } from "@shared/programs";
@@ -739,27 +740,39 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
       if (!before) return res.status(404).json({ message: "Rider not found" });
       const allowed = [
         "effective_date", "expiration_date", "monthly_rent_per_car", "monthly_rate_pct",
-        "lessors_cost", "owner_entity", "notes", "sublessee", "contract_doc_url", "permissible_commodity",
+        "lessors_cost", "owner_entity", "sublessee", "contract_doc_url", "permissible_commodity",
       ];
       const patch: Record<string, unknown> = {};
       for (const k of allowed) {
         if (k in (req.body ?? {})) patch[k] = req.body[k] === "" ? null : req.body[k];
       }
+      stripNotesField(patch);
       const result = await withChangeGroupResult(actor, async () => {
-        const { data, error } = await supabaseAdmin.from("riders").update(patch).eq("id", id).select().single();
-        if (error) throw error;
-        await recordChange({
-          table: "riders",
-          pk: id,
-          before: pickRow(before, Object.keys(patch)),
-          after: pickRow(data, Object.keys(patch)),
-          action: "update_rider",
-          entity_type: "rider",
-          entity_id: id,
-          rider_id: id,
+        let data = before;
+        const keys = Object.keys(patch);
+        if (keys.length) {
+          const { data: updated, error } = await supabaseAdmin.from("riders").update(patch).eq("id", id).select().single();
+          if (error) throw error;
+          data = updated;
+          await recordChange({
+            table: "riders",
+            pk: id,
+            before: pickRow(before, keys),
+            after: pickRow(updated, keys),
+            action: "update_rider",
+            entity_type: "rider",
+            entity_id: id,
+            rider_id: id,
+            actor,
+          });
+        }
+        const noteReport = await appendNotesInGroup({
+          entityType: "rider",
+          ids: [id],
+          note: req.body?.append_note,
           actor,
         });
-        return data;
+        return withNoteReport(data, req.body?.append_note, noteReport);
       });
       res.json(result);
     } catch (err) {
@@ -827,7 +840,25 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
             force: true,
           });
         }
-        return { updated: ok.length, skipped, partial: stillOn.length > 0 };
+        const carReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: ok,
+          note: req.body?.append_note,
+          actor,
+        });
+        const riderReport = Object.keys(riderPatch).length
+          ? await appendNotesInGroup({
+              entityType: "rider",
+              ids: [id],
+              note: req.body?.append_note,
+              actor,
+            })
+          : { appended: [], skipped: [] };
+        return withNoteReport(
+          { updated: ok.length, skipped, partial: stillOn.length > 0 },
+          req.body?.append_note,
+          { appended: [...carReport.appended, ...riderReport.appended], skipped: [...carReport.skipped, ...riderReport.skipped] },
+        );
       });
       res.json(result);
     } catch (err) {
@@ -918,7 +949,23 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
           actor,
           force: true,
         });
-        return { new_rider_id: Number(dest.id), moved: ok.length, skipped };
+        const carReport = await appendNotesInGroup({
+          entityType: "railcar",
+          ids: ok,
+          note: req.body?.append_note,
+          actor,
+        });
+        const riderReport = await appendNotesInGroup({
+          entityType: "rider",
+          ids: [id],
+          note: req.body?.append_note,
+          actor,
+        });
+        return withNoteReport(
+          { new_rider_id: Number(dest.id), moved: ok.length, skipped },
+          req.body?.append_note,
+          { appended: [...carReport.appended, ...riderReport.appended], skipped: [...carReport.skipped, ...riderReport.skipped] },
+        );
       });
       res.json(result);
     } catch (err) {

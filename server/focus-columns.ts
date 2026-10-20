@@ -1,3 +1,4 @@
+import { lastNoteFromNotes } from "@shared/lineage-notes";
 import {
   openStopFocusFields,
   pickOpenPrograms,
@@ -204,7 +205,7 @@ export async function attachFocusColumns<T extends { id: number; notes?: string 
   return rows.map((row) => {
     const program = pickOpenPrograms(programByCar.get(row.id) ?? []);
     const latest = noteByCar.get(row.id);
-    const fallback = String(row.notes ?? "").trim();
+    const parsedNote = lastNoteFromNotes(row.notes);
     const milestone = String(program.latest?.milestone ?? "").trim();
     return {
       ...row,
@@ -216,8 +217,8 @@ export async function attachFocusColumns<T extends { id: number; notes?: string 
       program_milestone: milestone || null,
       program_milestone_at: program.latest?.milestone_at ? String(program.latest.milestone_at).slice(0, 10) : null,
       program_note: program.latest?.notes ? String(program.latest.notes) : null,
-      latest_note: latest?.body || fallback || null,
-      latest_note_at: latest?.at ?? null,
+      latest_note: latest?.body || parsedNote?.text || null,
+      latest_note_at: latest?.at ?? parsedNote?.at ?? null,
       latest_note_actor: latest?.actor ?? null,
       tags: tagsByCar.get(row.id) ?? [],
       view_note: viewNoteByCar.get(row.id) ?? null,

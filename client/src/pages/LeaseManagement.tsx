@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -1303,9 +1304,11 @@ function RiderForm({
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState<any>({});
+  const [addNote, setAddNote] = useState("");
 
   useEffect(() => {
     if (open) {
+      setAddNote("");
       setForm({
         master_lease_id: rider?.master_lease_id ?? masterLeaseId,
         rider_name: rider?.rider_name ?? "",
@@ -1337,6 +1340,7 @@ function RiderForm({
       };
       delete (body as any).notes;
       delete (body as any).account_manager;
+      Object.assign(body, appendNoteBody(addNote));
       if (rider) await apiRequest("PATCH", `/api/riders/${rider.id}`, body);
       else await apiRequest("POST", `/api/riders`, body);
     },
@@ -1486,12 +1490,7 @@ function RiderForm({
               </p>
             )}
           </div>
-          <div>
-            <Label>Notes</Label>
-            <p className="text-xs text-muted-foreground mt-1">
-              Add timestamped notes on the rider Activity timeline after saving. Prior comments are never overwritten.
-            </p>
-          </div>
+          <AddNoteField id="rider-add-note" value={addNote} onChange={setAddNote} />
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>

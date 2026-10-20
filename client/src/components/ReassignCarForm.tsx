@@ -8,6 +8,7 @@ import { RiderFreeTextInput, resolveRiderLabel, type RiderSuggestion } from "@/c
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { findRiderByOlLabel, type OlIdentity } from "@shared/ol-identity";
 
 function dash(v: string | null | undefined): string {
@@ -41,6 +42,7 @@ export function ReassignCarForm({
   const [riderLabel, setRiderLabel] = useState(initialRiderName);
   const [lessee, setLessee] = useState(initialLessee);
   const [reason, setReason] = useState("");
+  const [addNote, setAddNote] = useState("");
   const [lesseeUnlocked, setLesseeUnlocked] = useState(false);
 
   const matched = useMemo(() => findRiderByOlLabel(riders, riderLabel), [riders, riderLabel]);
@@ -88,6 +90,7 @@ export function ReassignCarForm({
         reason: reason.trim() || null,
         moved_by: "user",
         lessee_override: overrideActive || undefined,
+        ...appendNoteBody(addNote),
       });
     },
     onSuccess: () => {
@@ -204,6 +207,7 @@ export function ReassignCarForm({
           data-testid="input-assign-reason"
         />
       </div>
+      <AddNoteField id="reassign-add-note" value={addNote} onChange={setAddNote} />
 
       <div className="flex gap-2 pt-1">
         <Button

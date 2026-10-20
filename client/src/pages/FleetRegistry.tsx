@@ -84,7 +84,10 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ActivityTimeline from "@/components/ActivityTimeline";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { confirmDelete, confirmSave, confirmWithReason } from "@/components/ConfirmActionDialog";
+import { AddNoteField, appendNoteBody, noteSkipDescription } from "@/components/AddNoteField";
+import { LastNoteCell } from "@/components/LastNoteCell";
+import { confirmDelete, confirmSave, confirmSaveWithNote, confirmWithReason } from "@/components/ConfirmActionDialog";
+import { lastNoteForRow, lastNoteSortKey } from "@shared/lineage-notes";
 import { LeaseGlanceSheet } from "@/components/LeaseGlanceSheet";
 import { glanceRiderFromCar, type LeaseGlanceRider } from "@/lib/glance-rider";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
@@ -179,7 +182,8 @@ type SortKey =
   | "fleet"
   | "rider"
   | "lease"
-  | "expiration";
+  | "expiration"
+  | "latest_note";
 
 const FR_PINNED_START = ["_select", "marks", "car_number", "lease_type"] as const;
 const FR_PINNED_END = ["_actions"] as const;
@@ -191,6 +195,7 @@ const FR_SORT: Record<string, SortKey> = {
   rider: "rider",
   lease: "lease",
   expires: "expiration",
+  latest_note: "latest_note",
 };
 const FR_LABELS: Record<string, string> = {
   entity: "Entity",
@@ -204,6 +209,7 @@ const FR_LABELS: Record<string, string> = {
   rider: "Rider",
   lease: "Lease",
   expires: "Expires",
+  latest_note: "Last note",
 };
 const FR_WIDTHS: Record<string, number> = {
   _select: 40,
@@ -218,6 +224,7 @@ const FR_WIDTHS: Record<string, number> = {
   rider: 130,
   lease: 110,
   expires: 110,
+  latest_note: 200,
   _actions: 40,
 };
 
@@ -358,6 +365,8 @@ function renderOptTd(key: string, r: any) {
           {r.comment_event_note ?? "—"}
         </td>
       );
+    case "latest_note":
+      return <LastNoteCell key={key} row={r} className={text} />;
     default:
       return <td key={key} className={text}>—</td>;
   }
@@ -519,6 +528,8 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
   const [bulkRentalTarget, setBulkRentalTarget] = useState<FleetStatus | null>(null);
   const [bulkRentalEffectiveDate, setBulkRentalEffectiveDate] = useState(todayIsoDateOnly);
   const [soldPreview, setSoldPreview] = useState<any>(null);
+  const [soldNote, setSoldNote] = useState("");
+  const [bulkValuesNote, setBulkValuesNote] = useState("");
   const [bulkNeedsCompletionPending, setBulkNeedsCompletionPending] = useState(false);
   const [bulkEntityPending, setBulkEntityPending] = useState(false);
   const [bulkFlagPending, setBulkFlagPending] = useState(false);
@@ -574,7 +585,8 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     | "monthly_rent_per_car" | "monthly_depr_per_car"
     | "commodity" | "commodity_family"
     | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
-    | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials" | "am_note";
+    | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials" | "am_note"
+    | "latest_note";
   const OPT_COLS: { key: OptCol; label: string }[] = [
     { key: "nbv",                 label: "NBV" },
     { key: "oac",                 label: "OAC" },
@@ -599,6 +611,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     { key: "account_manager_initials", label: "Acct Mgr" },
     { key: "am_note", label: "Latest AM Note" },
     { key: "comment_event_note",  label: "Comment / Event Note" },
+    { key: "latest_note", label: "Last note" },
   ];
   const colPrefs = useColumnPrefs("fleet_registry", FR_DEFAULT_COLS);
   const {
@@ -702,6 +715,12 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
           return r.assignment?.rider?.master_lease?.lease_number ?? "";
         case "expiration":
           return r.assignment?.rider?.expiration_date ?? "";
+        case "latest_note":
+          return lastNoteSortKey(lastNoteForRow(r));
+        default: {
+          const unhandled: never = sort.key;
+          return unhandled;
+        }
       }
     };
     return [...railcars].sort((a, b) => {
@@ -791,6 +810,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       const res = await apiRequest("POST", "/api/railcars/sold/apply", {
         preview_token: soldPreview.preview_token,
         effective_date: bulkRentalEffectiveDate || todayIsoDateOnly(),
+        ...appendNoteBody(soldNote),
       });
       const d = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
@@ -798,8 +818,12 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       queryClient.invalidateQueries({ queryKey: ["/api/history"] });
       void invalidateFleetQueries(queryClient);
       markSearchRefresh();
-      toast({ title: `${d.updated ?? soldPreview.ids?.length ?? 0} car(s) marked Sold` });
+      toast({
+        title: `${d.updated ?? soldPreview.ids?.length ?? 0} car(s) marked Sold`,
+        description: noteSkipDescription(d),
+      });
       setBulkRentalOpen(false);
+      setSoldNote("");
       setBulkRentalTarget(null);
       setSoldPreview(null);
       clearSelection();
@@ -812,21 +836,22 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
 
   const bulkUpdateOpsFlag = async (ops_flag: string | null, label: string) => {
     const ids = Array.from(selectedIds);
-    const ok = await confirmSave({
+    const confirmed = await confirmSaveWithNote({
       title: `Set flag on ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
       description:
         ops_flag == null
           ? "This clears the exception flag. It does not change rental status or assignments."
           : `Flag as “${label.replace(/^flagged\s+/i, "")}”. This does not change rental status or assignments.`,
     });
-    if (!ok) return;
+    if (!confirmed.ok) return;
     setBulkFlagPending(true);
     try {
-      await apiRequest("POST", "/api/railcars/bulk-ops-flag", { ids, ops_flag });
+      const res = await apiRequest("POST", "/api/railcars/bulk-ops-flag", { ids, ops_flag, ...appendNoteBody(confirmed.note) });
+      const body = await res.json().catch(() => null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       void invalidateFleetQueries(queryClient);
       markSearchRefresh();
-      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${label}` });
+      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${label}`, description: noteSkipDescription(body) });
       clearSelection();
     } catch (e: any) {
       toast({ title: "Could not set flag", description: e.message, variant: "destructive" });
@@ -837,21 +862,23 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
 
   const bulkClearNeedsCompletion = async () => {
     const ids = Array.from(selectedIds);
-    const ok = await confirmSave({
+    const confirmed = await confirmSaveWithNote({
       title: `Clear Needs Completion on ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
       description: "This only clears the flag. It does not change rental status, assignments, or financials.",
     });
-    if (!ok) return;
+    if (!confirmed.ok) return;
     setBulkNeedsCompletionPending(true);
     try {
-      await apiRequest("POST", "/api/railcars/bulk-needs-completion", {
+      const res = await apiRequest("POST", "/api/railcars/bulk-needs-completion", {
         ids,
         needs_completion: false,
+        ...appendNoteBody(confirmed.note),
       });
+      const body = await res.json().catch(() => null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       void invalidateFleetQueries(queryClient);
       markSearchRefresh();
-      toast({ title: `Needs Completion cleared on ${ids.length} car${ids.length !== 1 ? "s" : ""}` });
+      toast({ title: `Needs Completion cleared on ${ids.length} car${ids.length !== 1 ? "s" : ""}`, description: noteSkipDescription(body) });
       clearSelection();
     } catch (e: any) {
       toast({ title: "Could not clear Needs Completion", description: e.message, variant: "destructive" });
@@ -862,19 +889,20 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
 
   const bulkMoveEntity = async (label: "Main" | "RPS" | "Coal") => {
     const ids = Array.from(selectedIds);
-    const ok = await confirmSave({
+    const confirmed = await confirmSaveWithNote({
       title: `Move ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""} to ${label}?`,
       description: "This only changes Entity. It does not change rental status, assignments, or financials.",
     });
-    if (!ok) return;
+    if (!confirmed.ok) return;
     setBulkEntityPending(true);
     try {
-      await apiRequest("POST", "/api/railcars/bulk-entity", { ids, entity: label });
+      const res = await apiRequest("POST", "/api/railcars/bulk-entity", { ids, entity: label, ...appendNoteBody(confirmed.note) });
+      const body = await res.json().catch(() => null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       void invalidateFleetQueries(queryClient);
       markSearchRefresh();
-      toast({ title: `${ids.length} railcar${ids.length !== 1 ? "s" : ""} moved to ${label}` });
+      toast({ title: `${ids.length} railcar${ids.length !== 1 ? "s" : ""} moved to ${label}`, description: noteSkipDescription(body) });
       clearSelection();
     } catch (e: any) {
       toast({ title: "Bulk entity move failed", description: e.message, variant: "destructive" });
@@ -909,6 +937,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       return;
     }
     let reason: string | null = null;
+    let statusNote = "";
     if (anyFrozen || (unseen && isAdmin)) {
       reason = await confirmWithReason({
         title: `Set car status to ${newStatus} for ${n} selected railcar${n !== 1 ? "s" : ""}?`,
@@ -919,23 +948,26 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       });
       if (reason == null) return;
     } else {
-      const ok = await confirmSave({
+      const confirmed = await confirmSaveWithNote({
         title: `Set car status to ${newStatus} for ${n} selected railcar${n !== 1 ? "s" : ""}?`,
         description: "This keeps the car active. Only Inactive freezes the asset.",
       });
-      if (!ok) return;
+      if (!confirmed.ok) return;
+      statusNote = confirmed.note;
     }
 
     setBulkStatusPending(true);
     try {
-      await apiRequest("POST", "/api/railcars/car-status", {
+      const res = await apiRequest("POST", "/api/railcars/car-status", {
         ids,
         status: newStatus,
         reason: reason ?? undefined,
+        ...appendNoteBody(statusNote),
       });
+      const body = await res.json().catch(() => null);
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       void invalidateFleetQueries(queryClient);
-      toast({ title: `${n} car${n !== 1 ? "s" : ""} updated to "${newStatus}"` });
+      toast({ title: `${n} car${n !== 1 ? "s" : ""} updated to "${newStatus}"`, description: noteSkipDescription(body) });
       clearSelection();
     } catch (e: any) {
       toast({ title: "Bulk update failed", description: e.message, variant: "destructive" });
@@ -946,24 +978,30 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
 
   const bulkUpdateTransit = async (transitStatus: string, label: string) => {
     const ids = Array.from(selectedIds);
-    const ok = await confirmSave({
+    const confirmed = await confirmSaveWithNote({
       title: `Update transit status for ${ids.length} selected railcar${ids.length !== 1 ? "s" : ""}?`,
       description: transitStatus === "none" ? "Clear transit/repair flags." : `Flag as "${label}".`,
     });
-    if (!ok) return;
+    if (!confirmed.ok) return;
     setBulkTransitPending(true);
     try {
-      await Promise.all(
+      const responses = await Promise.all(
         ids.map((id) =>
           apiRequest("PATCH", `/api/railcars/${id}`, {
             transit_status: transitStatus === "none" ? null : transitStatus,
             transit_label: transitStatus === "none" ? null : undefined,
+            ...appendNoteBody(confirmed.note),
           })
         )
       );
+      const bodies = await Promise.all(responses.map((res) => res.json().catch(() => null)));
+      const skipped = bodies.flatMap((body) => (Array.isArray(body?.note_skipped) ? body.note_skipped : []));
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       void invalidateFleetQueries(queryClient);
-      toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${transitStatus === "none" ? "cleared" : `flagged as "${label}"`}` });
+      toast({
+        title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${transitStatus === "none" ? "cleared" : `flagged as "${label}"`}`,
+        description: noteSkipDescription({ note_skipped: skipped }),
+      });
       clearSelection();
     } catch (e: any) {
       toast({ title: "Bulk transit update failed", description: e.message, variant: "destructive" });
@@ -986,14 +1024,20 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     if (bulkOac.trim()) payload.oac = parseFloat(bulkOac);
     if (bulkOec.trim()) payload.oec = parseFloat(bulkOec);
     try {
-      await Promise.all(ids.map((id) => apiRequest("PATCH", `/api/railcars/${id}`, payload)));
+      const responses = await Promise.all(ids.map((id) => apiRequest("PATCH", `/api/railcars/${id}`, { ...payload, ...appendNoteBody(bulkValuesNote) })));
+      const bodies = await Promise.all(responses.map((res) => res.json().catch(() => null)));
+      const skipped = bodies.flatMap((body) => (Array.isArray(body?.note_skipped) ? body.note_skipped : []));
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       void invalidateFleetQueries(queryClient);
-      toast({ title: "Values updated", description: `NBV/OAC updated for ${ids.length} car${ids.length !== 1 ? "s" : ""}.` });
+      toast({
+        title: "Values updated",
+        description: [ `NBV/OAC updated for ${ids.length} car${ids.length !== 1 ? "s" : ""}.`, noteSkipDescription({ note_skipped: skipped }) ].filter(Boolean).join(" "),
+      });
       setBulkValuesOpen(false);
       setBulkNbv("");
       setBulkOac("");
       setBulkOec("");
+      setBulkValuesNote("");
       clearSelection();
     } catch (err: any) {
       toast({ title: "Update failed", description: err.message, variant: "destructive" });
@@ -1855,6 +1899,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
                 Defaults to today. A past date is stored on the History log. Does not recalculate this month’s rent or depreciation.
               </p>
             </div>
+            <AddNoteField id="sold-add-note" value={soldNote} onChange={setSoldNote} />
             {(soldPreview?.cars ?? []).length > 0 && (
               <ul className="max-h-40 overflow-auto text-xs font-mono space-y-0.5">
                 {(soldPreview.cars as any[]).map((c) => (
@@ -1921,6 +1966,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
                 onChange={(e) => setBulkOec(e.target.value)}
               />
             </div>
+            <AddNoteField id="values-add-note" value={bulkValuesNote} onChange={setBulkValuesNote} />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setBulkValuesOpen(false)}>Cancel</Button>
@@ -2606,8 +2652,9 @@ function RemarkChangeDialog({
   const { toast } = useToast();
   const [newNumber, setNewNumber] = useState("");
   const [reason, setReason] = useState("");
+  const [addNote, setAddNote] = useState("");
 
-  useEffect(() => { if (open) { setNewNumber(""); setReason(""); } }, [open]);
+  useEffect(() => { if (open) { setNewNumber(""); setReason(""); setAddNote(""); } }, [open]);
 
   const preview = newNumber.trim() ? normalizeMarkAndNumber(newNumber) : null;
 
@@ -2618,6 +2665,7 @@ function RemarkChangeDialog({
       const res = await apiRequest("POST", `/api/railcars/${carId}/change-number`, {
         new_car_number: `${parsed.reporting_marks ?? ""} ${parsed.car_number}`.trim(),
         reason: reason.trim() || null,
+        ...appendNoteBody(addNote),
       });
       return res.json();
     },
@@ -2690,6 +2738,7 @@ function RemarkChangeDialog({
               placeholder="Leave blank to auto-record Remarked from … to …"
             />
           </div>
+          <AddNoteField id="remark-add-note" value={addNote} onChange={setAddNote} />
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -2757,6 +2806,7 @@ export function RailcarFormDialog({
   const [assignRiderId, setAssignRiderId] = useState("");
   const [assignFleetName, setAssignFleetName] = useState("");
   const [assignReason, setAssignReason] = useState("");
+  const [addNote, setAddNote] = useState("");
 
   // reset when opening
   useMemoReset(open, car, setForm);
@@ -2765,6 +2815,7 @@ export function RailcarFormDialog({
       setAssignRiderId("");
       setAssignFleetName("");
       setAssignReason("");
+      setAddNote("");
     }
   }, [open]);
 
@@ -2775,6 +2826,7 @@ export function RailcarFormDialog({
     mutationFn: async (opts?: { reason?: string | null; statusOnly?: boolean } | null) => {
       const payload: Record<string, unknown> = opts?.statusOnly ? { status: form.status } : { ...form };
       if (!opts?.statusOnly) delete payload.notes;
+      Object.assign(payload, appendNoteBody(addNote));
       if (!car) {
         const num = normalizeStoredCarNumber(form.car_number);
         if (!num.ok) throw new Error(num.message);
@@ -3125,12 +3177,7 @@ export function RailcarFormDialog({
               />
             </div>
           )}
-          <div>
-            <Label>Notes</Label>
-            <p className="text-xs text-muted-foreground mt-1">
-              Notes are now append-only on the Activity timeline on the car detail panel. Adding a note there keeps every prior comment.
-            </p>
-          </div>
+          <AddNoteField id="railcar-add-note" value={addNote} onChange={setAddNote} hidden={frozenCar} />
 
           {/* ── Assign to Rider (new cars only) ──────────────────────────── */}
           {!car && (

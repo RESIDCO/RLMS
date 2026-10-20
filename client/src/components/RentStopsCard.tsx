@@ -13,6 +13,7 @@ import {
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 
 const REASONS = ["quality repair", "goodwill", "damage", "dispute", "other"] as const;
 
@@ -29,6 +30,7 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
   const [stopDate, setStopDate] = useState(new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState<(typeof REASONS)[number]>("quality repair");
   const [resume, setResume] = useState("");
+  const [addNote, setAddNote] = useState("");
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["/api/rent-stops/car", carId] });
@@ -43,6 +45,7 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
         stop_date: stopDate,
         reason,
         expected_resume_date: resume || null,
+        ...appendNoteBody(addNote),
       })).json(),
     onSuccess: () => {
       toast({ title: "Abatement set" });
@@ -51,7 +54,7 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
     onError: (e: Error) => toast({ title: "Failed", description: e.message, variant: "destructive" }),
   });
   const doResume = useMutation({
-    mutationFn: async () => (await apiRequest("POST", `/api/rent-stops/car/${carId}/resume`, {})).json(),
+    mutationFn: async () => (await apiRequest("POST", `/api/rent-stops/car/${carId}/resume`, { ...appendNoteBody(addNote) })).json(),
     onSuccess: () => {
       toast({ title: "Resumed" });
       invalidate();
@@ -60,7 +63,7 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
   });
   const convert = useMutation({
     mutationFn: async () =>
-      (await apiRequest("POST", `/api/rent-stops/car/${carId}/convert-off-rent`, { reason })).json(),
+      (await apiRequest("POST", `/api/rent-stops/car/${carId}/convert-off-rent`, { reason, ...appendNoteBody(addNote) })).json(),
     onSuccess: () => {
       toast({ title: "Converted to off rent (assignment unchanged)" });
       invalidate();
@@ -82,13 +85,16 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
             {open.lease_ref ? ` · ${open.lease_ref}` : ""}
           </div>
           {canEdit && (
-            <div className="flex flex-wrap gap-2 pt-1">
+            <div className="space-y-2 pt-1">
+              <AddNoteField id={`rent-stop-note-${carId}`} value={addNote} onChange={setAddNote} />
+              <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={() => doResume.mutate()}>Resume</Button>
               {open.type === "Abatement" && (
                 <Button size="sm" variant="outline" onClick={() => convert.mutate()}>
                   Convert to off rent
                 </Button>
               )}
+              </div>
             </div>
           )}
         </div>
@@ -110,6 +116,7 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
           </Select>
           <Label>Expected resume (optional)</Label>
           <Input type="date" value={resume} onChange={(e) => setResume(e.target.value)} />
+          <AddNoteField id={`rent-stop-new-note-${carId}`} value={addNote} onChange={setAddNote} />
           <Button size="sm" onClick={() => setAbate.mutate()}>Set abatement</Button>
         </div>
       )}

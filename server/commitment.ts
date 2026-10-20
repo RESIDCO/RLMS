@@ -18,6 +18,7 @@ import {
 import { pickRow } from "@shared/change-log";
 import { fetchAllRows } from "./fetch-all";
 import { logActivity } from "./activity-log";
+import { appendNotesInGroup, withNoteReport } from "./append-note";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { annotateKpiDelta } from "./kpi-delta";
 import { formatCarId } from "@shared/residco-import";
@@ -934,7 +935,7 @@ export async function previewMarkSold(idsRaw: number[], opts?: { sold_to?: strin
 export async function applyMarkSold(
   previewToken: string,
   actor: string,
-  opts: { sold_to?: string | null; effective_date?: string | null },
+  opts: { sold_to?: string | null; effective_date?: string | null; append_note?: unknown },
 ) {
   return withChangeGroupResult(actor, async () => {
     const preview = await getPreview("sold", previewToken);
@@ -1004,7 +1005,17 @@ export async function applyMarkSold(
       });
       updated += 1;
     }
-    return { preview, updated, fleet_status: "Sold" };
+    const noteIds = [
+      ...(preview.cars ?? []).map((car: { id?: number }) => Number(car.id)),
+      ...(preview.rejected_inactive ?? []).map((car: { id?: number }) => Number(car.id)),
+    ];
+    const noteReport = await appendNotesInGroup({
+      entityType: "railcar",
+      ids: noteIds,
+      note: opts.append_note,
+      actor,
+    });
+    return withNoteReport({ preview, updated, fleet_status: "Sold" as const }, opts.append_note, noteReport);
   });
 }
 
@@ -1026,7 +1037,7 @@ export async function previewRemoveSold(idsRaw: number[], bucket?: string | null
   return { preview_token: await putPreview("unsold", snapshot), ...snapshot };
 }
 
-export async function applyRemoveSold(previewToken: string, actor: string) {
+export async function applyRemoveSold(previewToken: string, actor: string, appendNote?: unknown) {
   return withChangeGroupResult(actor, async () => {
     const preview = await getPreview("unsold", previewToken);
     let updated = 0;
@@ -1072,7 +1083,17 @@ export async function applyRemoveSold(previewToken: string, actor: string) {
       });
       updated += 1;
     }
-    return { preview, updated };
+    const noteIds = [
+      ...(preview.ids ?? []).map((id: number) => Number(id)),
+      ...(preview.rejected_inactive ?? []).map((car: { id?: number }) => Number(car.id)),
+    ];
+    const noteReport = await appendNotesInGroup({
+      entityType: "railcar",
+      ids: noteIds,
+      note: appendNote,
+      actor,
+    });
+    return withNoteReport({ preview, updated }, appendNote, noteReport);
   });
 }
 
@@ -1431,6 +1452,7 @@ export function registerCommitmentRoutes(
         await applyMarkSold(String(req.body?.preview_token ?? ""), actor, {
           sold_to: req.body && Object.prototype.hasOwnProperty.call(req.body, "sold_to") ? req.body.sold_to : undefined,
           effective_date: req.body?.effective_date ?? null,
+          append_note: req.body?.append_note,
         }),
       );
     } catch (e) {
@@ -1457,7 +1479,7 @@ export function registerCommitmentRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      res.json(await applyRemoveSold(String(req.body?.preview_token ?? ""), actor));
+      res.json(await applyRemoveSold(String(req.body?.preview_token ?? ""), actor, req.body?.append_note));
     } catch (e) {
       errHandler(res, e);
     }

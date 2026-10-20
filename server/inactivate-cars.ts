@@ -7,6 +7,8 @@ import {
   type InactivateFacts,
   type InactivatePreview,
 } from "@shared/inactivate-cars";
+import { appendNotesInGroup, normalizeAppendNote, withNoteReport } from "./append-note";
+import { withChangeGroupResult } from "./change-log";
 import { supabaseAdmin } from "./supabase";
 
 const CHUNK = 200;
@@ -179,7 +181,8 @@ export async function applyInactivate(opts: {
   endDate: string | null;
   actor: string;
   changedBy: string;
-}): Promise<{ ok: true; change_group: string; applied: number; closed_assignments: number }> {
+  appendNote?: unknown;
+}): Promise<{ ok: true; change_group: string; applied: number; closed_assignments: number; note_change_group?: string; note_appended?: number[]; note_skipped?: { id: number; status: number; message: string }[] }> {
   const reason = opts.reason.trim();
   if (!reason) throw httpError(400, "A reason is required");
   const dateError = inactivateEndDateError(opts.closeAssignment, opts.endDate);
@@ -187,6 +190,17 @@ export async function applyInactivate(opts: {
   const preview = await previewInactivate(opts.ids, { closeAssignment: opts.closeAssignment });
   const selected = chooseInactivateIds(preview, opts.mode);
   if (!selected.ok) throw httpError(400, selected.error);
+  let noted: { appended: number[]; skipped: { id: number; status: number; message: string }[]; change_group: string } | null = null;
+  if (normalizeAppendNote(opts.appendNote)) {
+    noted = await withChangeGroupResult(opts.actor, async () =>
+      appendNotesInGroup({
+        entityType: "railcar",
+        ids: selected.ids,
+        note: opts.appendNote,
+        actor: opts.actor,
+      }),
+    );
+  }
   const endDate = opts.closeAssignment ? String(opts.endDate).slice(0, 10) : null;
   const { data, error } = await supabaseAdmin.rpc("inactivate_railcars", {
     p_ids: selected.ids,
@@ -205,10 +219,12 @@ export async function applyInactivate(opts: {
   }
   const out = (data ?? {}) as { ok?: boolean; error?: string; change_group?: string; applied?: number; closed_assignments?: number };
   if (!out.ok) throw httpError(400, out.error || "Inactivate failed");
-  return {
-    ok: true,
+  const base = {
+    ok: true as const,
     change_group: String(out.change_group),
     applied: Number(out.applied ?? selected.ids.length),
     closed_assignments: Number(out.closed_assignments ?? 0),
   };
+  if (!noted) return base;
+  return withNoteReport({ ...base, note_change_group: noted.change_group }, opts.appendNote, noted);
 }

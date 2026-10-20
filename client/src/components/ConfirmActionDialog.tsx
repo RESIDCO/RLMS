@@ -9,6 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { AddNoteField } from "@/components/AddNoteField";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -27,12 +28,16 @@ export type ConfirmReasonOptions = ConfirmActionOptions & {
   reasonPlaceholder?: string;
 };
 
+export type ConfirmNoteResult = { ok: true; note: string } | { ok: false };
+
 type Pending =
   | (ConfirmActionOptions & { mode: "confirm"; resolve: (ok: boolean) => void })
-  | (ConfirmReasonOptions & { mode: "reason"; resolve: (reason: string | null) => void });
+  | (ConfirmReasonOptions & { mode: "reason"; resolve: (reason: string | null) => void })
+  | (ConfirmActionOptions & { mode: "note"; resolve: (result: ConfirmNoteResult) => void });
 
 let openConfirm: ((opts: ConfirmActionOptions) => Promise<boolean>) | null = null;
 let openReason: ((opts: ConfirmReasonOptions) => Promise<string | null>) | null = null;
+let openNote: ((opts: ConfirmActionOptions) => Promise<ConfirmNoteResult>) | null = null;
 
 /** Imperative confirm — only resolves true after the user clicks the confirm button. */
 export function confirmAction(opts: ConfirmActionOptions): Promise<boolean> {
@@ -59,6 +64,19 @@ export function confirmSave(opts: Omit<ConfirmActionOptions, "variant">): Promis
   });
 }
 
+/** Confirm stays enabled when the note is empty. Resolves the trimmed note with the save. */
+export function confirmSaveWithNote(opts: Omit<ConfirmActionOptions, "variant">): Promise<ConfirmNoteResult> {
+  if (!openNote) {
+    console.error("ConfirmActionHost is not mounted");
+    return Promise.resolve({ ok: false });
+  }
+  return openNote({
+    confirmLabel: "Save",
+    variant: "default",
+    ...opts,
+  });
+}
+
 /**
  * Confirm with a mandatory free-text reason.
  * Resolves to the trimmed reason on confirm, or null on cancel.
@@ -76,41 +94,64 @@ export function confirmWithReason(opts: ConfirmReasonOptions): Promise<string | 
 export function ConfirmActionHost() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [reason, setReason] = useState("");
+  const [noteText, setNoteText] = useState("");
   const pendingRef = useRef<Pending | null>(null);
   pendingRef.current = pending;
+
+  const resetFields = useCallback(() => {
+    setReason("");
+    setNoteText("");
+  }, []);
 
   const closeConfirm = useCallback((ok: boolean) => {
     const p = pendingRef.current;
     setPending(null);
-    setReason("");
+    resetFields();
     if (p?.mode === "confirm") p.resolve(ok);
     else if (p?.mode === "reason") p.resolve(null);
-  }, []);
+    else if (p?.mode === "note") p.resolve({ ok: false });
+  }, [resetFields]);
 
   const closeReason = useCallback((value: string | null) => {
     const p = pendingRef.current;
     setPending(null);
-    setReason("");
+    resetFields();
     if (p?.mode === "reason") p.resolve(value);
     else if (p?.mode === "confirm") p.resolve(false);
-  }, []);
+    else if (p?.mode === "note") p.resolve({ ok: false });
+  }, [resetFields]);
+
+  const closeNote = useCallback((result: ConfirmNoteResult) => {
+    const p = pendingRef.current;
+    setPending(null);
+    resetFields();
+    if (p?.mode === "note") p.resolve(result);
+    else if (p?.mode === "confirm") p.resolve(false);
+    else if (p?.mode === "reason") p.resolve(null);
+  }, [resetFields]);
 
   useEffect(() => {
     openConfirm = (opts) =>
       new Promise<boolean>((resolve) => {
-        setReason("");
+        resetFields();
         setPending({ ...opts, mode: "confirm", resolve });
       });
     openReason = (opts) =>
       new Promise<string | null>((resolve) => {
-        setReason("");
+        resetFields();
         setPending({ ...opts, mode: "reason", resolve });
+      });
+    openNote = (opts) =>
+      new Promise<ConfirmNoteResult>((resolve) => {
+        resetFields();
+        setPending({ ...opts, mode: "note", resolve });
       });
     return () => {
       openConfirm = null;
       openReason = null;
+      openNote = null;
     };
-  }, []);
+  }, [resetFields]);
 
   const variant = pending?.variant ?? "default";
   const confirmLabel =
@@ -121,9 +162,10 @@ export function ConfirmActionHost() {
   return (
     <AlertDialog
       open={!!pending}
-      onOpenChange={(o) => {
+        onOpenChange={(o) => {
         if (!o) {
           if (pending?.mode === "reason") closeReason(null);
+          else if (pending?.mode === "note") closeNote({ ok: false });
           else closeConfirm(false);
         }
       }}
@@ -139,6 +181,9 @@ export function ConfirmActionHost() {
             <AlertDialogDescription className="sr-only">Confirm this action</AlertDialogDescription>
           )}
         </AlertDialogHeader>
+        {pending?.mode === "note" && (
+          <AddNoteField id="confirm-add-note" value={noteText} onChange={setNoteText} />
+        )}
         {pending?.mode === "reason" && (
           <div className="space-y-2 py-1">
             <Label htmlFor="confirm-action-reason">
@@ -160,9 +205,11 @@ export function ConfirmActionHost() {
         )}
         <AlertDialogFooter>
           <AlertDialogCancel
-            onClick={() =>
-              pending?.mode === "reason" ? closeReason(null) : closeConfirm(false)
-            }
+            onClick={() => {
+              if (pending?.mode === "reason") closeReason(null);
+              else if (pending?.mode === "note") closeNote({ ok: false });
+              else closeConfirm(false);
+            }}
           >
             {pending?.cancelLabel ?? "Cancel"}
           </AlertDialogCancel>
@@ -177,6 +224,7 @@ export function ConfirmActionHost() {
               e.preventDefault();
               if (!canConfirm) return;
               if (pending?.mode === "reason") closeReason(reason.trim());
+              else if (pending?.mode === "note") closeNote({ ok: true, note: noteText.trim() });
               else closeConfirm(true);
             }}
           >

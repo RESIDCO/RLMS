@@ -42,6 +42,7 @@ export function registerInactivateRoutes(app: Express) {
         endDate: typeof req.body?.end_date === "string" ? req.body.end_date : null,
         actor: writerId,
         changedBy: req.authUser?.email ?? writerId,
+        appendNote: req.body?.append_note,
       });
       res.json({ ...result, undoable: true });
     } catch (err) {

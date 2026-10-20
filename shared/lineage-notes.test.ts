@@ -2,8 +2,13 @@
 import {
   appendTimestampedNote,
   capActivityEvents,
+  formatLastNoteWhen,
   isVcfAssignmentNoise,
+  lastNoteForRow,
+  lastNoteFromNotes,
+  lastNoteSortKey,
   noteWriteDecision,
+  resolveLastNote,
 } from "./lineage-notes";
 
 let passed = 0;
@@ -35,6 +40,24 @@ try {
   emptyThrew = true;
 }
 ok(emptyThrew, "an empty note is refused");
+
+const last = lastNoteFromNotes("older line\n[10/20/2026 9:00 AM ET] Shop called\n");
+ok(last?.text === "Shop called" && last.at === "10/20/2026 9:00 AM ET", "last stamped line is the last note");
+ok(lastNoteFromNotes("   \n") === null, "blank notes have no last note");
+ok(lastNoteFromNotes("plain comment")?.text === "plain comment" && lastNoteFromNotes("plain comment")?.at === null, "an unstamped last line is still a note");
+const fromActivity = resolveLastNote({
+  notes: "[01/01/2020] old",
+  activityBody: "Newest",
+  activityAt: "2026-10-20T13:00:00.000Z",
+});
+ok(fromActivity?.text === "Newest" && fromActivity.at === "2026-10-20T13:00:00.000Z", "activity note wins over the notes blob");
+ok(resolveLastNote({ notes: "[10/20/2026 9:00 AM ET] Shop called" })?.text === "Shop called", "no activity falls back to the last stamped line");
+const rowNote = lastNoteForRow({ notes: "[10/20/2026 9:00 AM ET] from notes", latest_note: "from activity", latest_note_at: "2026-10-20T13:00:00.000Z" });
+ok(rowNote?.text === "from activity", "a grid row prefers latest_note");
+ok(lastNoteSortKey(null) === "", "missing notes sort last");
+ok(lastNoteSortKey({ text: "B", at: "10/01/2026" }) < lastNoteSortKey({ text: "A", at: "2026-10-20T00:00:00.000Z" }), "ISO and US stamps sort by date");
+ok(formatLastNoteWhen("2026-10-20T13:00:00.000Z").length > 0, "ISO stamps format for display");
+ok(formatLastNoteWhen("10/20/2026 9:00 AM ET") === "10/20/2026 9:00 AM ET", "an existing stamp is shown as written");
 
 const noise = { action: "reassignment", source: "vcf-import", actor: "someone", detail: { reason: "load" } };
 const real = { action: "note", source: "ui", actor: "ada@example.com", detail: { body: "hello" } };

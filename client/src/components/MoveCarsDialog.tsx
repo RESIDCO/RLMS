@@ -12,6 +12,7 @@ import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
+import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { previewAndUndo } from "@/lib/undo";
 import { formatUsDate } from "@shared/display-date";
 import { todayIsoDateOnly } from "@shared/lease-authority";
@@ -85,6 +86,7 @@ export function MoveCarsDialog({
   const [effectiveDate, setEffectiveDate] = useState(todayIsoDateOnly);
   const [rentStartDate, setRentStartDate] = useState("");
   const [reason, setReason] = useState("");
+  const [addNote, setAddNote] = useState("");
   const [lessee, setLessee] = useState("");
   const [lesseeOverride, setLesseeOverride] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -115,6 +117,7 @@ export function MoveCarsDialog({
     setEffectiveDate(todayIsoDateOnly());
     setRentStartDate("");
     setReason("");
+    setAddNote("");
     setLessee("");
     setLesseeOverride(false);
     setCreateOpen(false);
@@ -141,6 +144,7 @@ export function MoveCarsDialog({
       effective_date: effectiveDate || null,
       rent_start_date: rentStartDate || null,
       lessee_override: lesseeOverride || undefined,
+      ...appendNoteBody(addNote),
     };
   }
 
@@ -315,6 +319,7 @@ export function MoveCarsDialog({
             <Label className="text-xs">Reason {lesseeOverride ? "(required for a lessee override)" : "(optional)"}</Label>
             <Input value={reason} onChange={(e) => setReason(e.target.value)} data-testid="move-reason" />
           </div>
+          <AddNoteField id="move-add-note" value={addNote} onChange={setAddNote} />
 
           {progress ? (
             <div className="space-y-1" data-testid="move-progress">

@@ -404,6 +404,8 @@ export const moveCarsSchema = z.object({
   rent_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   /** When true, keep the client lessee instead of the OL's master-lease lessee. Requires reason. */
   lessee_override: z.boolean().optional(),
+  /** Optional activity note. Appended; never written into railcars.notes by this field. */
+  append_note: z.string().nullable().optional(),
 });
 export type MoveCarsInput = z.infer<typeof moveCarsSchema>;
 

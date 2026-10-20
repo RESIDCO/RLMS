@@ -112,6 +112,13 @@ const SHARED: ColumnDictEntry[] = [
   d("account_manager_initials", "Acct mgr", "Account manager initials for the current lessee/account.", "calculated", "From the account on the current assignment."),
   d("am_note", "Latest AM note", "Most recent account-manager note on this rider/account.", "rider account comments", "Latest comment snippet, not a car field."),
   d("comment_event_note", "Comment / event note", "Free-text comment or event note on the car.", "railcars.comment_event_note", "Stored on the railcar."),
+  d(
+    "latest_note",
+    "Last note",
+    "The most recent timestamped note on the car.",
+    "activity_log action=note, else the last line of railcars.notes",
+    "Read-only. Prefer the latest activity note body and time. If none, the last non-empty line of railcars.notes.",
+  ),
   d("complete", "Outcome", "Whether this program car has reached its outcome (done).", "calculated", "Done if the car is inactive, has an outcome date, or is marked complete."),
 ];
 
@@ -229,6 +236,7 @@ export const RENDERED_COLUMNS: Record<string, readonly string[]> = {
     "account_manager_initials",
     "am_note",
     "comment_event_note",
+    "latest_note",
   ],
   search_results: [
     "marks",
@@ -264,6 +272,7 @@ export const RENDERED_COLUMNS: Record<string, readonly string[]> = {
     "account_manager_initials",
     "am_note",
     "comment_event_note",
+    "latest_note",
   ],
   browse_car_list: ["marks", "car_number", "lease_type", "entity", "status", "type", "lessee", "ol"],
   browse_ol_list: ["ol", "lease_type", "effective", "expires", "car_count"],

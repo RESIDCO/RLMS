@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
@@ -157,6 +158,7 @@ export default function ActivityTimeline({
       setNote("");
       queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
       if (railcarId) queryClient.invalidateQueries({ queryKey: ["/api/railcars", railcarId] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Note added" });
     },
     onError: (e: Error) => toast({ title: "Could not add note", description: e.message, variant: "destructive" }),

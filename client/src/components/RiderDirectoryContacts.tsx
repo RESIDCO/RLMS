@@ -18,6 +18,7 @@ import {
 import ContactLeaseLinks from "@/components/ContactLeaseLinks";
 import { confirmDelete, confirmSave } from "@/components/ConfirmActionDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { contactsDirectoryPath } from "@/lib/directory-nav";
 import { navigateHash } from "@/lib/hash-location";
@@ -73,6 +74,7 @@ function RiderContactForm({
       queryClient.invalidateQueries({ queryKey: ["/api/directory-search"] });
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
       queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/accounts" });
+      void invalidateFleetQueries(queryClient);
       toast({ title: contact ? "Contact updated" : "Contact added" });
       onClose();
     },
@@ -174,6 +176,7 @@ export function RiderDirectoryContacts({
       queryClient.invalidateQueries({ queryKey: [`/api/riders/${riderId}/contact-links`] });
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
       queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/accounts" });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Contact removed from this OL" });
     },
     onError: (e: Error) =>

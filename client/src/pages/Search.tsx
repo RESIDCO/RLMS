@@ -93,6 +93,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel";
 import { queryClient } from "@/lib/queryClient";
+import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 
 type SearchScope = { leases: boolean; cars: boolean; carData: boolean };
 
@@ -872,14 +873,14 @@ export default function SearchPage() {
     queryKey: ["/api/railcars", "search-page", listParams],
     queryFn: ({ signal }) => apiGet<RailcarPage>(railcarsQs(listParams), { timeoutMs: 20_000, signal }),
     enabled: textSearchLive,
-    staleTime: 30_000,
+    staleTime: FLEET_STALE_MS,
   });
   const summaryParams = { ...listParams, page: undefined, pageSize: undefined };
   const summaryQuery = useQuery<Summary & { match?: FleetMatch }>({
     queryKey: ["/api/railcars/summary", "search-page", summaryParams],
     queryFn: ({ signal }) => apiGet(railcarsQs(summaryParams).replace("/api/railcars", "/api/railcars/summary"), { timeoutMs: 20_000, signal }),
     enabled: textSearchLive,
-    staleTime: 30_000,
+    staleTime: FLEET_STALE_MS,
   });
   const peopleQuery = useQuery<DirectoryPage>({
     queryKey: ["/api/directory-search", "from-search", committed],
@@ -1775,6 +1776,7 @@ export default function SearchPage() {
     try {
       await apiRequest("PATCH", `/api/views/${viewId}/members/${railcarId}`, { note });
       void queryClient.invalidateQueries({ queryKey: ["/api/railcars", "view-fixed", viewId] });
+      void invalidateFleetQueries(queryClient);
     } catch (e: any) {
       toast({ title: "Note not saved", description: e.message ?? "inactive – left alone", variant: "destructive" });
     }

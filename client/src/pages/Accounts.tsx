@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import PageHeader from "@/components/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -744,6 +745,7 @@ function OlRows({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/accounts", accountId] });
       scheduleOverviewInvalidate(qc);
+      void invalidateFleetQueries(qc);
     },
   });
 

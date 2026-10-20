@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, apiRequest, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import FleetRegistry from "@/pages/FleetRegistry";
 import LeaseDocumentsPanel from "@/pages/leases/LeaseDocumentsPanel";
 import LeaseCrmLinks from "@/components/crm/LeaseCrmLinks";
@@ -65,6 +66,7 @@ export default function RiderPage() {
     onSuccess: () => {
       setEdit(false);
       void queryClient.invalidateQueries({ queryKey: ["/api/lease-mgmt/riders", id] });
+      void invalidateFleetQueries(queryClient);
     },
   });
   const offLease = useMutation({
@@ -78,6 +80,7 @@ export default function RiderPage() {
     onSuccess: () => {
       setOffOpen(false);
       void queryClient.invalidateQueries();
+      void invalidateFleetQueries(queryClient);
     },
   });
   const remarket = useMutation({
@@ -93,6 +96,7 @@ export default function RiderPage() {
     onSuccess: (body) => {
       setRemarkOpen(false);
       void queryClient.invalidateQueries();
+      void invalidateFleetQueries(queryClient);
       if (body?.new_rider_id) window.location.hash = `#/leases/rider/${body.new_rider_id}`;
     },
   });

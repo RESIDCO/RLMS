@@ -1,6 +1,7 @@
 import { ToastAction } from "@/components/ui/toast";
 import { confirmAction } from "@/components/ConfirmActionDialog";
 import { toast } from "@/hooks/use-toast";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { createElement } from "react";
 
@@ -43,6 +44,7 @@ export async function previewAndUndo(changeGroup: string): Promise<boolean> {
       message?: string;
     };
     await queryClient.invalidateQueries();
+    void invalidateFleetQueries(queryClient);
     const n = Number(body.restored ?? body.preview?.count ?? prev.count ?? 0);
     undoResultToast(n === 1 ? "Reverted 1 change" : `Reverted ${n} changes`);
     return true;

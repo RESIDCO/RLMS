@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmDelete } from "@/components/ConfirmActionDialog";
@@ -82,6 +83,7 @@ export function AmCommentThread({
       qc.invalidateQueries({ queryKey: qk });
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
       qc.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(qc);
     },
     onError: (e: Error) => toast({ title: "Could not post note", description: e.message, variant: "destructive" }),
   });
@@ -92,6 +94,7 @@ export function AmCommentThread({
       qc.invalidateQueries({ queryKey: qk });
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
       qc.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(qc);
     },
     onError: (e: Error) => toast({ title: "Could not delete note", description: e.message, variant: "destructive" }),
   });

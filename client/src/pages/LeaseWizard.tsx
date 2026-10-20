@@ -37,6 +37,7 @@ import {
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
+import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit } from "@/lib/AuthContext";
 import { isPlaceholderLessee, isStandardRiderNumber } from "@shared/lease-mgmt";
@@ -203,7 +204,7 @@ function ExistingCarPicker({
     queryKey: ["/api/railcars", { all: "1", assigned: "unassigned" }],
     queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1", assigned: "unassigned" })),
     enabled: open,
-    staleTime: 45_000,
+    staleTime: FLEET_STALE_MS,
   });
 
   // Only show unassigned cars
@@ -490,7 +491,7 @@ export default function LeaseWizard() {
   const { data: allCars } = useQuery<RailcarWithAssignment[]>({
     queryKey: ["/api/railcars", { all: "1" }],
     queryFn: () => apiGet<RailcarWithAssignment[]>(railcarsQs({ all: "1" })),
-    staleTime: 45_000,
+    staleTime: FLEET_STALE_MS,
   });
   const carById = new Map((allCars ?? []).map((c) => [c.id, c]));
 
@@ -591,6 +592,7 @@ export default function LeaseWizard() {
       await apiRequest("POST", "/api/setup-lease", payload);
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ["/api/directory-search"] });
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
 

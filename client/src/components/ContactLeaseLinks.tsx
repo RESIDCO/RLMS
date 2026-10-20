@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import SearchableSelect from "@/components/SearchableSelect";
@@ -132,6 +133,7 @@ export default function ContactLeaseLinks({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [listUrl] });
       if (riderId) qc.invalidateQueries({ queryKey: ["/api/riders", riderId, "contacts"] });
+      void invalidateFleetQueries(qc);
       setNote("");
       toast({ title: "Lease linked" });
     },
@@ -149,6 +151,7 @@ export default function ContactLeaseLinks({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [listUrl] });
       if (riderId) qc.invalidateQueries({ queryKey: ["/api/riders", riderId, "contacts"] });
+      void invalidateFleetQueries(qc);
     },
   });
 

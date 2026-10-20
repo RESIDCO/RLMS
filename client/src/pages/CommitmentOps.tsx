@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiGet, apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
@@ -50,6 +51,7 @@ export function CommitmentPanel({ carId }: { carId: number }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/commitments/car", carId] });
       qc.invalidateQueries({ queryKey: ["/api/railcars", carId] });
+      void invalidateFleetQueries(qc);
       toast({ title: "Rent start saved" });
     },
     onError: (e: Error) => toast({ title: "Could not set rent start", description: e.message, variant: "destructive" }),
@@ -64,6 +66,7 @@ export function CommitmentPanel({ carId }: { carId: number }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/commitments/car", carId] });
       qc.invalidateQueries({ queryKey: ["/api/railcars", carId] });
+      void invalidateFleetQueries(qc);
       toast({ title: "Commitment saved" });
     },
     onError: (e: Error) => toast({ title: "Could not save", description: e.message, variant: "destructive" }),
@@ -73,6 +76,7 @@ export function CommitmentPanel({ carId }: { carId: number }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/commitments/car", carId] });
       qc.invalidateQueries({ queryKey: ["/api/railcars", carId] });
+      void invalidateFleetQueries(qc);
       toast({ title: "Commitment cleared" });
     },
     onError: (e: Error) => toast({ title: "Could not clear", description: e.message, variant: "destructive" }),
@@ -164,6 +168,7 @@ function PasteBox({ onText }: { onText: (t: string) => void }) {
 export function BulkCommitmentPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [type, setType] = useState<CommitmentType>("deal");
@@ -183,7 +188,10 @@ export function BulkCommitmentPage() {
     mutationFn: async () => (await apiRequest("POST", "/api/commitments/bulk/apply", {
       preview_token: preview?.preview_token,
     })).json(),
-    onSuccess: (d) => toast({ title: "Applied", description: JSON.stringify({ set: d.set, skipped: d.skipped, cleared: d.cleared }) }),
+    onSuccess: (d) => {
+      void invalidateFleetQueries(qc);
+      toast({ title: "Applied", description: JSON.stringify({ set: d.set, skipped: d.skipped, cleared: d.cleared }) });
+    },
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });
   return (
@@ -245,6 +253,7 @@ export function BulkCommitmentPage() {
 export function BulkReturnPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();
+  const qc = useQueryClient();
   const search = useHashSearch();
   const prefill = useMemo(() => new URLSearchParams(search.replace(/^\?/, "")).get("cars") ?? "", [search]);
   const [text, setText] = useState(prefill);
@@ -262,7 +271,10 @@ export function BulkReturnPage() {
     mutationFn: async () => (await apiRequest("POST", "/api/returns/bulk/apply", {
       preview_token: preview?.preview_token,
     })).json(),
-    onSuccess: (d) => toast({ title: "Return applied", description: `Moved ${d.moved}` }),
+    onSuccess: (d) => {
+      void invalidateFleetQueries(qc);
+      toast({ title: "Return applied", description: `Moved ${d.moved}` });
+    },
   });
   return (
     <div>
@@ -343,6 +355,7 @@ export function StaleCommitmentsPage() {
                       <Button size="sm" variant="ghost" onClick={async () => {
                         await apiRequest("POST", `/api/commitments/${c.id}/clear`);
                         qc.invalidateQueries({ queryKey: ["/api/commitments/stale"] });
+                        void invalidateFleetQueries(qc);
                       }}>Clear</Button>
                     </>
                   )}
@@ -359,6 +372,7 @@ export function StaleCommitmentsPage() {
               await apiRequest("POST", `/api/commitments/${extendId}/extend`, { target_date: date, note });
               setExtendId(null);
               qc.invalidateQueries({ queryKey: ["/api/commitments/stale"] });
+              void invalidateFleetQueries(qc);
               toast({ title: "Extended" });
             }}>Save date</Button>
           </div>
@@ -373,6 +387,7 @@ export function StaleCommitmentsPage() {
                 if (!window.confirm(`Close ${p.name}? Releases ${preview.commitments_released?.length ?? 0} Commitment(s). Links stay.`)) return;
                 await apiRequest("POST", `/api/programs/${p.id}/close/apply`, { preview_token: preview.preview_token });
                 qc.invalidateQueries({ queryKey: ["/api/commitments/stale"] });
+                void invalidateFleetQueries(qc);
                 toast({ title: "Program closed" });
               }}>Close program</Button>
             )}
@@ -416,6 +431,7 @@ export { KpiCarListPage } from "@/pages/KpiCarList";
 export function BulkRentStopsPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [text, setText] = useState("");
   const [action, setAction] = useState("abatement");
   const [stopDate, setStopDate] = useState(new Date().toISOString().slice(0, 10));
@@ -435,7 +451,10 @@ export function BulkRentStopsPage() {
   const apply = useMutation({
     mutationFn: async () =>
       (await apiRequest("POST", "/api/rent-stops/bulk/apply", { preview_token: preview?.preview_token })).json(),
-    onSuccess: (d) => toast({ title: "Applied", description: `${d.written} rows written` }),
+    onSuccess: (d) => {
+      void invalidateFleetQueries(qc);
+      toast({ title: "Applied", description: `${d.written} rows written` });
+    },
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });
   return (
@@ -498,6 +517,7 @@ export function BulkRentStopsPage() {
 export function BulkRentStartPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [text, setText] = useState("");
   const [date, setDate] = useState("");
   const [overwrite, setOverwrite] = useState(false);
@@ -511,7 +531,10 @@ export function BulkRentStartPage() {
   const apply = useMutation({
     mutationFn: async () =>
       (await apiRequest("POST", "/api/rent-start/bulk/apply", { preview_token: preview?.preview_token })).json(),
-    onSuccess: (d) => toast({ title: "Applied", description: `${d.written} dates written` }),
+    onSuccess: (d) => {
+      void invalidateFleetQueries(qc);
+      toast({ title: "Applied", description: `${d.written} dates written` });
+    },
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });
   return (

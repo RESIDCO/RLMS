@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiGet, apiRequest, downloadXlsx } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
@@ -180,6 +181,7 @@ export default function SaleClassAdmin() {
                       setRtexPreview(null);
                       qc.invalidateQueries({ queryKey: ["/api/previews/ol2144-rtex"] });
                       qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+                      void invalidateFleetQueries(qc);
                     } catch (e: any) {
                       toast({ title: "Apply failed", description: e.message, variant: "destructive" });
                     }

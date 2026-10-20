@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { hashSearchParams } from "@/lib/hash-location";
 import { isDirectoryLeaseReviewTab } from "@/lib/directory-review-tab";
 import { apiGet, apiRequest } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -142,6 +143,7 @@ export default function ContactsDedupReview() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/directory-lease-gaps"] });
+      void invalidateFleetQueries(qc);
       toast({ title: "Company linked to lease" });
     },
     onError: (e: Error) => toast({ title: "Link failed", description: e.message, variant: "destructive" }),
@@ -156,6 +158,7 @@ export default function ContactsDedupReview() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/directory-lease-gaps"] });
+      void invalidateFleetQueries(qc);
       toast({ title: "Lessee linked to the directory" });
     },
     onError: (e: Error) => toast({ title: "Link failed", description: e.message, variant: "destructive" }),
@@ -169,6 +172,7 @@ export default function ContactsDedupReview() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["/api/directory-lease-gaps"] });
       qc.invalidateQueries({ queryKey: ["/api/contacts"] });
+      void invalidateFleetQueries(qc);
       toast({ title: data.linked ? `Linked ${data.linked} unique lessee matches` : "No additional unique matches" });
     },
     onError: (e: Error) => toast({ title: "Link failed", description: e.message, variant: "destructive" }),

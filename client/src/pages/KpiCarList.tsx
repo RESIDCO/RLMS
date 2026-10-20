@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiGet, apiRequest, downloadXlsx } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
@@ -344,6 +345,7 @@ export function KpiCarListPage() {
       setSelectAllMatching(false);
       qc.invalidateQueries({ queryKey: ["/api/kpi/cars"] });
       qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(qc);
     },
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });

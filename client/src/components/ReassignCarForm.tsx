@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RiderFreeTextInput, resolveRiderLabel, type RiderSuggestion } from "@/components/RiderFreeTextInput";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { findRiderByOlLabel, type OlIdentity } from "@shared/ol-identity";
 
@@ -95,6 +96,7 @@ export function ReassignCarForm({
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Car assigned", description: "Assignment saved successfully." });
       onCancel();
     },

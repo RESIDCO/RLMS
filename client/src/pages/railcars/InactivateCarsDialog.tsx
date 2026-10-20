@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import {
   INACTIVATE_CONFIRM,
   inactivatePreviewToCsv,
@@ -142,6 +143,7 @@ export function InactivateCarsDialog({
       });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(queryClient);
       onApplied?.();
       onClose();
     } catch (err) {

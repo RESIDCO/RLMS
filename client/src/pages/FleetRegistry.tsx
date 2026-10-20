@@ -72,6 +72,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs } from "@/lib/queryClient";
+import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber, formatCarId, normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
 import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
@@ -641,7 +642,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     queryKey: ["/api/railcars", listParams],
     queryFn: ({ signal }) =>
       apiGet<RailcarPage>(railcarsQs(listParams), { timeoutMs: 15_000, signal }),
-    staleTime: 45_000,
+    staleTime: FLEET_STALE_MS,
     enabled: !carListLookup && !pasteEmpty,
     // Don't keep the unfiltered page on screen while a search request is in flight —
     // that made mark/lessee queries look like they matched unrelated cars (or didn't fire).
@@ -794,6 +795,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/history"] });
+      void invalidateFleetQueries(queryClient);
       markSearchRefresh();
       toast({ title: `${d.updated ?? soldPreview.ids?.length ?? 0} car(s) marked Sold` });
       setBulkRentalOpen(false);
@@ -821,6 +823,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     try {
       await apiRequest("POST", "/api/railcars/bulk-ops-flag", { ids, ops_flag });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(queryClient);
       markSearchRefresh();
       toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${label}` });
       clearSelection();
@@ -845,6 +848,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         needs_completion: false,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(queryClient);
       markSearchRefresh();
       toast({ title: `Needs Completion cleared on ${ids.length} car${ids.length !== 1 ? "s" : ""}` });
       clearSelection();
@@ -867,6 +871,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
       await apiRequest("POST", "/api/railcars/bulk-entity", { ids, entity: label });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(queryClient);
       markSearchRefresh();
       toast({ title: `${ids.length} railcar${ids.length !== 1 ? "s" : ""} moved to ${label}` });
       clearSelection();
@@ -928,6 +933,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         reason: reason ?? undefined,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: `${n} car${n !== 1 ? "s" : ""} updated to "${newStatus}"` });
       clearSelection();
     } catch (e: any) {
@@ -955,6 +961,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
         )
       );
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: `${ids.length} car${ids.length !== 1 ? "s" : ""} ${transitStatus === "none" ? "cleared" : `flagged as "${label}"`}` });
       clearSelection();
     } catch (e: any) {
@@ -980,6 +987,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     try {
       await Promise.all(ids.map((id) => apiRequest("PATCH", `/api/railcars/${id}`, payload)));
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Values updated", description: `NBV/OAC updated for ${ids.length} car${ids.length !== 1 ? "s" : ""}.` });
       setBulkValuesOpen(false);
       setBulkNbv("");
@@ -2020,6 +2028,7 @@ export function RailcarDetailSheet({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Railcar deleted" });
       onClose();
     },
@@ -2123,6 +2132,7 @@ export function CarDetail({
       queryClient.invalidateQueries({ queryKey: ["/api/rent-events"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
+      void invalidateFleetQueries(queryClient);
       toast({ title: "Rent event logged", description: "Rental status updated successfully." });
       setRentFormOpen(false);
       setRentReason("");
@@ -2581,6 +2591,7 @@ function RemarkChangeDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/railcars", carId] });
       if (d.new_id) queryClient.invalidateQueries({ queryKey: ["/api/railcars", d.new_id] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
+      void invalidateFleetQueries(queryClient);
       const from = [d.old_car_initial, d.old_car_number].filter(Boolean).join(" ") || d.old_car_number;
       const to = [d.new_car_initial, d.new_car_number].filter(Boolean).join(" ") || d.new_car_number;
       toast({ title: `Remarked ${from} → ${to}`, description: "Old identity is Off-Lease; the new identity is the active car." });
@@ -2760,6 +2771,7 @@ export function RailcarFormDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/riders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/leases"] });
+      void invalidateFleetQueries(queryClient);
       if (car?.id) {
         queryClient.invalidateQueries({ queryKey: ["/api/railcars", car.id] });
         queryClient.invalidateQueries({ queryKey: ["/api/car-status-history/car", car.id] });

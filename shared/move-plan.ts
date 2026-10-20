@@ -230,6 +230,16 @@ export function planMoveBatch(cars: MovePlanCarInput[], opts: MovePlanOptions): 
   return cars.map((car) => planMoveCar(car, opts));
 }
 
+/**
+ * The old move endpoint rejected a frozen car with 409.
+ * A batch that is entirely inactive does the same. A mix still moves the rest.
+ */
+export function allRequestedCarsInactive(
+  plans: readonly { disposition: string; left_alone_reason: string | null }[],
+): boolean {
+  return plans.length > 0 && plans.every((row) => row.disposition === "left_alone" && row.left_alone_reason === "inactive");
+}
+
 /** Known inactive cars are not part of a move selection. Unknown ids stay for the server to judge. */
 export function idsEligibleForMove(
   selectedIds: Iterable<number>,

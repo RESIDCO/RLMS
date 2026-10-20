@@ -1,6 +1,7 @@
 import { pickRow } from "@shared/change-log";
 import { effectiveDateToTimestamp } from "@shared/lease-authority";
 import {
+  allRequestedCarsInactive,
   moveHistoryCapture,
   planMoveBatch,
   withCurrentAssignmentPointer,
@@ -9,6 +10,7 @@ import {
 } from "@shared/move-plan";
 import type { MoveCarsInput } from "@shared/schema";
 import { recordChange, withChangeGroupResult } from "./change-log";
+import { FROZEN_CAR_MESSAGE } from "./frozen-cars";
 import { pointCurrentAssignmentAt } from "./current-assignment";
 import { loadOlIdentity, railcarIdentityPatch } from "./ol-identity";
 import { supabaseAdmin } from "./supabase";
@@ -173,6 +175,9 @@ export async function applyMove(input: MoveCarsInput, actor: string) {
   const { plans, cars, movedAt } = await buildPlans(input, actor);
   const identity = await loadOlIdentity(input.to_rider_id);
   if (!identity) throw httpError(400, "Destination rider not found");
+  if (allRequestedCarsInactive(plans)) {
+    throw httpError(409, FROZEN_CAR_MESSAGE);
+  }
   const moving = plans.filter((row) => row.disposition === "move" && row.assignment);
   return withChangeGroupResult(actor, async () => {
     const historyRows: Record<string, unknown>[] = [];

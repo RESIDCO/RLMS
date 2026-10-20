@@ -1,5 +1,6 @@
 /** Run: npx tsx shared/move-plan.test.ts */
 import {
+  allRequestedCarsInactive,
   idsEligibleForMove,
   moveActor,
   moveHistoryCapture,
@@ -72,6 +73,10 @@ ok(plans[0].status_impact.length > 0, "status impact is present");
 ok(plans[1].disposition === "left_alone" && plans[1].left_alone_reason === "inactive", "inactive car is left alone");
 ok(plans[1].after == null, "a left-alone car has no after state");
 ok(plans[2].disposition === "left_alone" && plans[2].left_alone_reason === "blocked", "a missing car is blocked and left alone");
+ok(!allRequestedCarsInactive(plans), "a batch with a movable car is not an all-inactive refusal");
+ok(allRequestedCarsInactive([plans[1]]), "every requested car inactive is the old inactive-car refusal");
+ok(!allRequestedCarsInactive([plans[2]]), "a blocked car that is not inactive is not that refusal");
+ok(!allRequestedCarsInactive([]), "an empty request is not an inactive refusal");
 
 ok(moveActor({ email: "ada@example.com", userId: "u1", clientMovedBy: "rlms-ui" }) === "ada@example.com", "moved by is the real user, not the client label");
 ok(moveActor({ email: "", userId: "user-9", clientMovedBy: "bulk-action" }) === "user-9", "user id is the fallback actor");

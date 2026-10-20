@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { ClipboardList, Download, FileSpreadsheet } from "lucide-react";
 import { apiRequest, apiGet, downloadXlsx } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { withOnlyColumnsWithData } from "@shared/program-export-columns";
+import { OnlyColumnsWithDataToggle } from "@/components/OnlyColumnsWithDataToggle";
 
 type ExportJob = {
   id: string;
@@ -39,6 +41,7 @@ export default function Reports() {
   const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
   const [exportingPrograms, setExportingPrograms] = useState(false);
+  const [onlyColumnsWithData, setOnlyColumnsWithData] = useState(true);
 
   async function exportVValid() {
     setExporting(true);
@@ -81,7 +84,10 @@ export default function Reports() {
   async function exportProgramReport() {
     setExportingPrograms(true);
     try {
-      await downloadXlsx("/api/programs/export?scope=all", "Master_Fleet_Project_Status_Report.xlsx");
+      await downloadXlsx(
+        withOnlyColumnsWithData("/api/programs/export?scope=all", onlyColumnsWithData),
+        "Master_Fleet_Project_Status_Report.xlsx",
+      );
     } catch (e: unknown) {
       toast({
         title: "Export failed",
@@ -144,15 +150,21 @@ export default function Reports() {
                 Every program — open, on hold, and complete — as one workbook. Same Master Fleet
                 Project Status Report already available from Programs.
               </p>
-              <Button
-                className="mt-4"
-                onClick={exportProgramReport}
-                disabled={exportingPrograms}
-                data-testid="button-export-program-report"
-              >
-                <Download className="h-4 w-4" />
-                {exportingPrograms ? "Building export…" : "Export Master Fleet Project Status Report (.xlsx)"}
-              </Button>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <OnlyColumnsWithDataToggle
+                  id="reports-program-export-only-columns-with-data"
+                  checked={onlyColumnsWithData}
+                  onCheckedChange={setOnlyColumnsWithData}
+                />
+                <Button
+                  onClick={exportProgramReport}
+                  disabled={exportingPrograms}
+                  data-testid="button-export-program-report"
+                >
+                  <Download className="h-4 w-4" />
+                  {exportingPrograms ? "Building export…" : "Export Master Fleet Project Status Report (.xlsx)"}
+                </Button>
+              </div>
               <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
                 Uses the live Programs export. No selection needed — every program is included.
               </p>

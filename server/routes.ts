@@ -121,6 +121,7 @@ import {
   listProgramCarMilestones,
   matchProgramCarsPaste,
 } from "./programs";
+import { parseOnlyColumnsWithData } from "@shared/program-export-columns";
 import { moveActor } from "@shared/move-plan";
 import { registerCommitmentRoutes, recomputeStatus, previewMarkSold, applyMarkSold } from "./commitment";
 import {
@@ -6167,6 +6168,7 @@ export async function registerRoutes(
         includeExited: true,
         filename: scopeAll ? masterReportFilename() : undefined,
         cols: req.query.cols,
+        onlyColumnsWithData: parseOnlyColumnsWithData(req.query.only_with_data),
       });
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -6196,6 +6198,7 @@ export async function registerRoutes(
         programIds: [Number(req.params.id)],
         includeExited: true,
         cols: req.query.cols,
+        onlyColumnsWithData: parseOnlyColumnsWithData(req.query.only_with_data),
       });
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

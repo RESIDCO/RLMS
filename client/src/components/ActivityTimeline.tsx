@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { displayLeaseNumber } from "@shared/residco-import";
 import { formatUsDateTimeEt } from "@shared/display-date";
+import { activityMatchesFilter } from "@shared/lineage-filters";
 import { timelineFilters, type TimelineVariant } from "@shared/timeline-filters";
 import { UndoLastChange } from "@/components/UndoLastChange";
 
@@ -135,9 +136,8 @@ export default function ActivityTimeline({
   });
 
   const events = useMemo(() => {
-    const rows = supplied ? externalEvents : (data?.events ?? []);
-    if (filter === "all") return rows;
-    return rows.filter((e) => e.action === filter);
+    const rows = supplied ? (externalEvents ?? []) : (data?.events ?? []);
+    return rows.filter((e) => activityMatchesFilter(e.action, filter));
   }, [data, externalEvents, filter, supplied]);
   const loading = supplied ? eventsLoading : isLoading;
 
@@ -181,6 +181,7 @@ export default function ActivityTimeline({
           <button
             key={f.id}
             type="button"
+            data-testid={`lineage-filter-${f.id}`}
             className={cn(
               "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border",
               filter === f.id

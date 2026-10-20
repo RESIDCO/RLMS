@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { Link, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
@@ -67,6 +67,19 @@ import {
 import { COMMITMENT_TYPES } from "@shared/commitment";
 import { activeFieldDefs } from "@shared/manage-columns";
 import { formatMoneyCell, isProgramMoneyField, moneyNumber, parseUsdInput } from "@shared/money";
+import {
+  createProgramCarDraftSession,
+  datePatchValue,
+  draftDiffers,
+  emptySaveToast,
+  keptEditsToast,
+  moneyPatchValue,
+  patchApplyMadeNoChanges,
+  planCarSave,
+  saveFailureToast,
+  textPatchValue,
+} from "@/lib/program-car-drafts";
+import { ProgramCarDraftContext, useEditorFlush } from "@/lib/program-car-draft-editor";
 import { programCarMatchesQuery } from "@shared/program-car-filter";
 import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates";
 import { diffProgramPatch } from "@shared/program-patch";
@@ -220,17 +233,6 @@ function programCarSortValue(c: ProgramCar, key: string): string {
   }
 }
 
-function mergeCarPatch(cur: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
-  const next = { ...cur, ...patch };
-  if (patch.custom_fields && typeof patch.custom_fields === "object") {
-    next.custom_fields = {
-      ...((cur.custom_fields && typeof cur.custom_fields === "object" ? cur.custom_fields : {}) as Record<string, unknown>),
-      ...(patch.custom_fields as Record<string, unknown>),
-    };
-  }
-  return next;
-}
-
 function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefined, shops: ShopOption[]): ProgramCar {
   if (!patch) return car;
   const next: ProgramCar = { ...car, custom_fields: { ...(car.custom_fields ?? {}) } };
@@ -352,8 +354,14 @@ export default function ProgramDetailPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [header, setHeader] = useState<HeaderDraft | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
-  const [carDrafts, setCarDrafts] = useState<Record<number, Record<string, unknown>>>({});
+  const draftSessionRef = useRef<ReturnType<typeof createProgramCarDraftSession> | null>(null);
+  if (!draftSessionRef.current) draftSessionRef.current = createProgramCarDraftSession();
+  const draftSession = draftSessionRef.current;
+  const draftSnap = useSyncExternalStore(draftSession.subscribe, draftSession.getSnapshot, draftSession.getSnapshot);
+  const carDrafts = draftSnap.drafts;
+  const editorPending = draftSnap.editorPending;
   const [carSaving, setCarSaving] = useState(false);
+  const [savingCount, setSavingCount] = useState(0);
   const [carSavedFlash, setCarSavedFlash] = useState(false);
   const [carSaveError, setCarSaveError] = useState<string | null>(null);
   const [carFilter, setCarFilter] = useState("");
@@ -371,6 +379,8 @@ export default function ProgramDetailPage() {
   const [rentOpen, setRentOpen] = useState(false);
   const [manageColsOpen, setManageColsOpen] = useState(false);
   const lastSelectId = useRef<number | null>(null);
+  const carsRef = useRef<ProgramCar[]>([]);
+  const visibleIdsRef = useRef<Set<number>>(new Set());
   const leaveDirtyRef = useRef(false);
   const heldHashRef = useRef(typeof window !== "undefined" ? window.location.hash : "");
   const skipHashRef = useRef(false);
@@ -437,8 +447,12 @@ export default function ProgramDetailPage() {
     if (!program || !header) return false;
     return JSON.stringify(header) !== JSON.stringify(headerFrom(program));
   }, [program, header]);
-  const gridDirty = Object.keys(carDrafts).length > 0;
-  leaveDirtyRef.current = dirty || gridDirty;
+  const gridDirty = useMemo(
+    () => cars.some((car) => draftDiffers(car, carDrafts[car.id])),
+    [cars, carDrafts],
+  );
+  const serverById = useMemo(() => new Map(cars.map((car) => [car.id, car])), [cars]);
+  leaveDirtyRef.current = dirty || gridDirty || editorPending;
 
   const patchProgram = useMutation({
     mutationFn: (body: Record<string, unknown>) => apiRequest("PATCH", `/api/programs/${id}`, body).then((r) => r.json()),
@@ -563,14 +577,13 @@ export default function ProgramDetailPage() {
   }
 
   function queueCarPatch(linkId: number, patch: Record<string, unknown>) {
-    setCarDrafts((prev) => ({ ...prev, [linkId]: mergeCarPatch(prev[linkId] ?? {}, patch) }));
+    draftSession.queue(linkId, patch);
   }
 
   async function runPatchApply(
     n: number,
     body: Record<string, unknown>,
-  ): Promise<{ updated?: number; commitments_written?: number }> {
-    setCarSaving(true);
+  ): Promise<{ updated?: number; commitments_written?: number; no_changes?: boolean; change_group?: string }> {
     setCarSaveError(null);
     toast({ title: `Saving ${n} car${n === 1 ? "" : "s"}…` });
     try {
@@ -578,11 +591,7 @@ export default function ProgramDetailPage() {
       const applied = await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, {
         preview_token: prev.preview_token,
       }).then((r) => r.json());
-      offerUndoToast({
-        ...applied,
-        change_group: applied.change_group,
-        no_changes: applied.no_changes === true || Number(applied.updated ?? 0) === 0,
-      });
+      if (!patchApplyMadeNoChanges(applied)) offerUndoToast(applied);
       await Promise.all([
         qc.invalidateQueries({ queryKey: carsKey }),
         qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true }),
@@ -595,39 +604,47 @@ export default function ProgramDetailPage() {
       void invalidateFleetQueries(qc);
       return applied;
     } catch (e: any) {
-      setCarSaveError(e.message || "Save failed");
-      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+      const failure = saveFailureToast(e?.message);
+      setCarSaveError(failure.description);
+      toast(failure);
       throw e;
-    } finally {
-      setCarSaving(false);
     }
   }
 
   async function saveCarDrafts() {
-    const visibleIds = new Set(visibleCars.map((car) => car.id));
-    const entries = Object.entries(carDrafts).filter(([linkId]) => visibleIds.has(Number(linkId)));
-    const hidden = Object.keys(carDrafts).length - entries.length;
     if (!canEdit) return;
-    if (!entries.length) {
-      if (hidden) toast({ title: `${hidden} unsaved car${hidden === 1 ? "" : "s"} hidden by the filter` });
-      return;
-    }
+    if (!draftSession.beginSave()) return;
     try {
-      await runPatchApply(entries.length, {
-        items: entries.map(([linkId, updates]) => ({ link_id: Number(linkId), updates })),
-      });
-      setCarDrafts((prev) => {
-        const next = { ...prev };
-        for (const [linkId] of entries) delete next[Number(linkId)];
-        return next;
-      });
+      const flushed = draftSession.flushEditors();
+      const plan = planCarSave(
+        draftSession.getDrafts(),
+        visibleIdsRef.current,
+        new Map(carsRef.current.map((car) => [car.id, car])),
+      );
+      draftSession.replaceDrafts(plan.retained);
+      if (!plan.items.length) {
+        toast(emptySaveToast(flushed.invalid, plan.hidden));
+        return;
+      }
+      setSavingCount(plan.count);
+      setCarSaving(true);
+      const applied = await runPatchApply(plan.count, { items: plan.items });
+      if (patchApplyMadeNoChanges(applied)) {
+        toast(keptEditsToast());
+        return;
+      }
+      draftSession.commitSave(plan.items, "saved");
       setCarSavedFlash(true);
       window.setTimeout(() => setCarSavedFlash(false), 2500);
-      if (hidden) {
-        toast({ title: `Saved ${entries.length}. ${hidden} hidden car${hidden === 1 ? "" : "s"} still unsaved.` });
+      if (plan.hidden) {
+        toast({ title: `Saved ${plan.count}. ${plan.hidden} hidden car${plan.hidden === 1 ? "" : "s"} still unsaved.` });
       }
+      if (flushed.invalid) toast(emptySaveToast(true, 0));
     } catch {
-      /* toast already shown */
+      /* error toast already shown; drafts stay */
+    } finally {
+      draftSession.endSave();
+      setCarSaving(false);
     }
   }
 
@@ -977,17 +994,14 @@ export default function ProgramDetailPage() {
                     confirmLabel: "Remove from program",
                   });
                   if (!ok) return;
-                  if (carDrafts[c.id] && !window.confirm("This car has unsaved edits. Remove anyway?")) return;
+                  const serverCar = carsRef.current.find((row) => row.id === c.id);
+                  const pendingPatch = draftSession.getDrafts()[c.id];
+                  if (serverCar && draftDiffers(serverCar, pendingPatch) && !window.confirm("This car has unsaved edits. Remove anyway?")) return;
                   const prev = await apiRequest("POST", `/api/programs/${id}/cars/remove/preview`, {
                     link_ids: [c.id],
                   }).then((r) => r.json());
                   await apiRequest("POST", `/api/programs/${id}/cars/remove/apply`, { preview_token: prev.preview_token });
-                  setCarDrafts((prev) => {
-                    if (!prev[c.id]) return prev;
-                    const next = { ...prev };
-                    delete next[c.id];
-                    return next;
-                  });
+                  draftSession.clearLinks([c.id]);
                   qc.invalidateQueries({ queryKey: carsKey });
                   qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true });
                   qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true });
@@ -1050,6 +1064,8 @@ export default function ProgramDetailPage() {
       return true;
     });
   }, [sortedCars, pasteMatch, levelFilter, carFilter]);
+  carsRef.current = cars;
+  visibleIdsRef.current = new Set(visibleCars.map((car) => car.id));
 
   useEffect(() => {
     const ids = new Set(visibleCars.map((car) => car.id));
@@ -1113,6 +1129,7 @@ export default function ProgramDetailPage() {
   }
 
   return (
+    <ProgramCarDraftContext.Provider value={draftSession}>
     <div className="h-full flex flex-col overflow-hidden">
       <div className="shrink-0 px-4 sm:px-8 pt-4 pb-0 space-y-1.5">
         <button
@@ -1346,11 +1363,20 @@ export default function ProgramDetailPage() {
                 <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> Add cars</Button>
               )}
               {canEdit && (
-                <Button size="sm" disabled={!gridDirty || carSaving} onClick={() => void saveCarDrafts()} data-testid="button-save-program-cars">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={carSaving}
+                  onMouseDown={() => {
+                    draftSession.flushEditors();
+                  }}
+                  onClick={() => void saveCarDrafts()}
+                  data-testid="button-save-program-cars"
+                >
                   {carSaving ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving {Object.keys(carDrafts).length || ""} car{Object.keys(carDrafts).length === 1 ? "" : "s"}…
+                      Saving {savingCount} car{savingCount === 1 ? "" : "s"}…
                     </>
                   ) : (
                     "Save Changes"
@@ -1539,13 +1565,23 @@ export default function ProgramDetailPage() {
                     confirmLabel: "Apply",
                   });
                   if (!ok) return;
-                  await runPatchApply(ids.length, { link_ids: ids, updates });
-                  setCarDrafts((prev) => {
-                    const next = { ...prev };
-                    for (const linkId of ids) delete next[linkId];
-                    return next;
-                  });
-                  setSelected(new Set());
+                  if (!draftSession.beginSave()) return;
+                  setCarSaving(true);
+                  setSavingCount(ids.length);
+                  try {
+                    const applied = await runPatchApply(ids.length, { link_ids: ids, updates });
+                    if (patchApplyMadeNoChanges(applied)) {
+                      toast({ title: "No changes" });
+                      return;
+                    }
+                    draftSession.clearLinks(ids);
+                    setSelected(new Set());
+                  } catch {
+                    /* toast already shown */
+                  } finally {
+                    draftSession.endSave();
+                    setCarSaving(false);
+                  }
                 }}
               />
               </div>
@@ -1589,6 +1625,8 @@ export default function ProgramDetailPage() {
                     const label = carLabelOf(c);
                     const exited = Boolean(c.exited_date);
                     const done = Boolean(c.completed);
+                    const serverCar = serverById.get(c.id) ?? c;
+                    const rowDirty = draftDiffers(serverCar, carDrafts[c.id]);
                     return (
                       <tr
                         key={c.id}
@@ -1596,8 +1634,8 @@ export default function ProgramDetailPage() {
                         className={cn(
                           "border-t border-border/50 cursor-pointer",
                           exited && "opacity-60",
-                          done && !exited && !carDrafts[c.id] && "bg-muted/20",
-                          carDrafts[c.id] && "border-l-2 border-l-primary bg-primary/5",
+                          done && !exited && !rowDirty && "bg-muted/20",
+                          rowDirty && "border-l-2 border-l-primary bg-primary/5",
                           detailId === c.id && "bg-primary/10",
                         )}
                       >
@@ -1761,6 +1799,7 @@ export default function ProgramDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </ProgramCarDraftContext.Provider>
   );
 }
 
@@ -1881,11 +1920,36 @@ function CellInput({
   placeholder?: string;
 }) {
   const [v, setV] = useState(value);
-  useEffect(() => { setV(value); }, [value]);
+  const vRef = useRef(value);
+  const valueRef = useRef(value);
+  const onSaveRef = useRef(onSave);
+  const userDirtyRef = useRef(false);
+  valueRef.current = value;
+  onSaveRef.current = onSave;
+
+  useEffect(() => {
+    if (userDirtyRef.current && value !== vRef.current) return;
+    userDirtyRef.current = false;
+    if (vRef.current !== value) {
+      vRef.current = value;
+      setV(value);
+    }
+  }, [value]);
 
   function commit(next: string) {
-    if (next !== value) onSave(next);
+    vRef.current = next;
+    const result = textPatchValue(valueRef.current, next);
+    if (result === "unchanged") return;
+    userDirtyRef.current = true;
+    onSaveRef.current(result);
   }
+
+  useEditorFlush(!readOnly && v !== value, () => {
+    const next = vRef.current;
+    if (readOnly || textPatchValue(valueRef.current, next) === "unchanged") return "unchanged";
+    commit(next);
+    return "queued";
+  });
 
   return (
     <input
@@ -1895,8 +1959,9 @@ function CellInput({
       placeholder={placeholder}
       onChange={(e) => {
         const next = e.target.value;
+        vRef.current = next;
         setV(next);
-        if (next !== value) onSave(next);
+        commit(next);
       }}
       onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => {
@@ -1920,22 +1985,50 @@ function ProgramStatusSelect({
   allowCustom?: boolean;
 }) {
   const [custom, setCustom] = useState(false);
+  const [customText, setCustomText] = useState("");
+  const customRef = useRef(false);
+  const textRef = useRef("");
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+  customRef.current = custom;
   const inList = !value || options.some((option) => option.toLowerCase() === value.toLowerCase());
+
+  function commitCustom(raw: string) {
+    const next = raw.trim();
+    customRef.current = false;
+    setCustom(false);
+    if (textPatchValue(valueRef.current, next) === "unchanged") return "unchanged" as const;
+    onChangeRef.current(next);
+    return "queued" as const;
+  }
+
+  useEditorFlush(custom && customText.trim() !== value, () => {
+    if (!customRef.current) return "unchanged";
+    return commitCustom(textRef.current);
+  });
+
   if (custom) {
     return (
       <input
         autoFocus
         className={cn("h-7 bg-transparent border border-border rounded px-1", className)}
-        defaultValue={inList ? "" : value}
+        value={customText}
         placeholder="Custom status"
+        onChange={(e) => {
+          textRef.current = e.target.value;
+          setCustomText(e.target.value);
+        }}
         onBlur={(e) => {
-          const next = e.target.value.trim();
-          setCustom(false);
-          if (next !== value) onChange(next);
+          commitCustom(e.target.value);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          if (e.key === "Escape") setCustom(false);
+          if (e.key === "Escape") {
+            customRef.current = false;
+            setCustom(false);
+          }
         }}
       />
     );
@@ -1947,6 +2040,10 @@ function ProgramStatusSelect({
       onChange={(e) => {
         const next = e.target.value;
         if (next === "__custom__") {
+          const start = inList ? "" : value;
+          textRef.current = start;
+          setCustomText(start);
+          customRef.current = true;
           setCustom(true);
           return;
         }
@@ -1998,26 +2095,78 @@ function DateCell({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
-  const shown = editing ? text : formatProgramDate(value);
+  const [held, setHeld] = useState<string | null | undefined>(undefined);
+  const editingRef = useRef(false);
+  const textRef = useRef("");
+  const heldRef = useRef<string | null | undefined>(undefined);
+  const valueRef = useRef(value);
+  const onSaveRef = useRef(onSave);
+  const allowMonthRef = useRef(allowMonthOnly);
+  valueRef.current = value;
+  onSaveRef.current = onSave;
+  allowMonthRef.current = allowMonthOnly;
+
+  function commitRaw(raw: string) {
+    const result = datePatchValue(valueRef.current, raw, allowMonthRef.current);
+    if (result === "invalid") return "invalid" as const;
+    editingRef.current = false;
+    setEditing(false);
+    if (result === "unchanged") return "unchanged" as const;
+    heldRef.current = result;
+    setHeld(result);
+    onSaveRef.current(result);
+    return "queued" as const;
+  }
+
+  const pending = editing && datePatchValue(value, text, allowMonthOnly) !== "unchanged";
+  const heldDirty = held !== undefined && formatProgramDate(value) !== formatProgramDate(held);
+  useEditorFlush((!readOnly && pending) || heldDirty, () => {
+    if (readOnly) return "unchanged";
+    if (editingRef.current) return commitRaw(textRef.current);
+    if (heldRef.current !== undefined && formatProgramDate(valueRef.current) !== formatProgramDate(heldRef.current)) {
+      onSaveRef.current(heldRef.current);
+      return "queued";
+    }
+    return "unchanged";
+  });
+
+  useEffect(() => {
+    if (held !== undefined && formatProgramDate(value) === formatProgramDate(held)) {
+      heldRef.current = undefined;
+      setHeld(undefined);
+    }
+  }, [value, held]);
+
   if (readOnly) return <span>{formatProgramDate(value) || "—"}</span>;
+  const shown = editing ? text : formatProgramDate(held !== undefined ? held : value);
   return (
     <input
       className="h-7 w-full bg-transparent border border-transparent hover:border-border rounded px-1"
       value={shown}
       placeholder="MM/DD/YYYY"
       onFocus={() => {
+        editingRef.current = true;
         setEditing(true);
-        setText(formatProgramDate(value));
+        const next = formatProgramDate(heldRef.current !== undefined ? heldRef.current : valueRef.current);
+        textRef.current = next;
+        setText(next);
       }}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={() => {
-        setEditing(false);
-        const parsed = parseProgramDateInput(text);
-        if (parsed === undefined) return;
-        if (parsed && !allowMonthOnly && parsed.length !== 10) return;
-        const current = formatProgramDate(value);
-        if ((parsed == null && !current) || formatProgramDate(parsed) === current) return;
-        onSave(parsed);
+      onChange={(e) => {
+        textRef.current = e.target.value;
+        setText(e.target.value);
+      }}
+      onBlur={(e) => {
+        textRef.current = e.target.value;
+        if (commitRaw(e.target.value) === "invalid") {
+          editingRef.current = true;
+          setEditing(true);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
       }}
     />
   );
@@ -2034,25 +2183,76 @@ function MoneyCell({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
-  const shown = editing ? text : formatMoneyCell(value);
+  const [held, setHeld] = useState<number | null | undefined>(undefined);
+  const editingRef = useRef(false);
+  const textRef = useRef("");
+  const heldRef = useRef<number | null | undefined>(undefined);
+  const valueRef = useRef(value);
+  const onSaveRef = useRef(onSave);
+  valueRef.current = value;
+  onSaveRef.current = onSave;
+
+  function commitRaw(raw: string) {
+    const result = moneyPatchValue(valueRef.current, raw);
+    if (result === "invalid") return "invalid" as const;
+    editingRef.current = false;
+    setEditing(false);
+    if (result === "unchanged") return "unchanged" as const;
+    heldRef.current = result;
+    setHeld(result);
+    onSaveRef.current(result);
+    return "queued" as const;
+  }
+
+  const pending = editing && moneyPatchValue(value, text) !== "unchanged";
+  const heldDirty = held !== undefined && moneyNumber(value) !== held;
+  useEditorFlush((!readOnly && pending) || heldDirty, () => {
+    if (readOnly) return "unchanged";
+    if (editingRef.current) return commitRaw(textRef.current);
+    if (heldRef.current !== undefined && moneyNumber(valueRef.current) !== heldRef.current) {
+      onSaveRef.current(heldRef.current);
+      return "queued";
+    }
+    return "unchanged";
+  });
+
+  useEffect(() => {
+    if (held !== undefined && moneyNumber(value) === held) {
+      heldRef.current = undefined;
+      setHeld(undefined);
+    }
+  }, [value, held]);
+
   if (readOnly) return <span className="block text-right">{formatMoneyCell(value) || "—"}</span>;
+  const shown = editing ? text : formatMoneyCell(held !== undefined ? held : value);
   return (
     <input
       className="h-7 w-full bg-transparent border border-transparent hover:border-border rounded px-1 text-right"
       value={shown}
       onFocus={() => {
+        editingRef.current = true;
         setEditing(true);
-        const n = moneyNumber(value);
-        setText(n == null ? "" : String(n));
+        const n = moneyNumber(heldRef.current !== undefined ? heldRef.current : valueRef.current);
+        const next = n == null ? "" : String(n);
+        textRef.current = next;
+        setText(next);
       }}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={() => {
-        setEditing(false);
-        const parsed = parseUsdInput(text);
-        if (parsed === undefined) return;
-        const current = moneyNumber(value);
-        if (parsed === current) return;
-        onSave(parsed);
+      onChange={(e) => {
+        textRef.current = e.target.value;
+        setText(e.target.value);
+      }}
+      onBlur={(e) => {
+        textRef.current = e.target.value;
+        if (commitRaw(e.target.value) === "invalid") {
+          editingRef.current = true;
+          setEditing(true);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
       }}
     />
   );

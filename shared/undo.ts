@@ -28,6 +28,8 @@ export const UNDO_ALLOWED_TABLES = [
   "user_column_prefs",
   "program_field_defs",
   "opportunity_lines",
+  "deal_calc_scenarios",
+  "deal_calc_assumption_sets",
 ] as const;
 
 export const REFERENCED_SINCE_TABLES = ["accounts", "companies", "company_contacts", "opportunities"] as const;

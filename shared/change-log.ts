@@ -12,7 +12,9 @@ export type ActivityEntityType =
   | "company"
   | "company_contact"
   | "opportunity_contact"
-  | "opportunity_line";
+  | "opportunity_line"
+  | "deal_calc_scenario"
+  | "deal_calc_assumption_set";
 
 export function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;

@@ -149,6 +149,7 @@ import { registerRemarkRoutes } from "./remark-routes";
 import { loadVcfRemarkAliases } from "./remark-in-place";
 import { registerLeaseMgmtRoutes, assertNewLesseeName, assertNewRiderNumber } from "./lease-mgmt";
 import { registerCrmRoutes } from "./crm";
+import { registerCrmDealCalcRoutes } from "./crm-deal-calc-routes";
 import { registerColumnPrefRoutes } from "./column-prefs";
 import { createShopRecord, registerProgramTrackerRoutes } from "./program-tracker-sync";
 import { registerProgramColumnRoutes } from "./program-columns";
@@ -5862,6 +5863,7 @@ export async function registerRoutes(
   });
 
   registerCrmRoutes(app);
+  registerCrmDealCalcRoutes(app);
 
   app.get("/api/accounts/:id", async (req, res) => {
     try {

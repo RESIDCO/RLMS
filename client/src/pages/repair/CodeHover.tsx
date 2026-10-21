@@ -16,9 +16,10 @@ export type CodeHoverKind =
   | "car_part"
   | "category"
   | "detail_source"
-  | "facility_type";
+  | "facility_type"
+  | "record_format";
 
-function formatTip(code: string, found: boolean, description: string): string {
+export function formatCodeTip(code: string, found: boolean, description: string): string {
   const c = (code || "").trim() || "—";
   if (!found) return `${c} – not in reference table`;
   const desc = (description || "").trim() || "not in reference table";
@@ -73,10 +74,10 @@ export function CodeHover({
         const cat = [data.category, data.sub_category].filter(Boolean).join(" / ");
         const base = data.description || "not in reference table";
         const withCat = cat ? `${base} · ${cat}` : base;
-        setTip(formatTip(code ?? "", Boolean(data.found), withCat));
+        setTip(formatCodeTip(code ?? "", Boolean(data.found), withCat));
       })
       .catch(() => {
-        if (!cancelled) setTip(formatTip(code ?? "", false, "not in reference table"));
+        if (!cancelled) setTip(formatCodeTip(code ?? "", false, "not in reference table"));
       });
     return () => {
       cancelled = true;
@@ -108,6 +109,44 @@ export function CodeHover({
         </span>
       ) : null}
     </span>
+  );
+}
+
+export type CodeFace = { found: boolean; description: string };
+
+/** Visible code plus description. Missing reference rows say "unknown code". */
+export function repairCodeText(code: string | null | undefined, face: CodeFace | null | undefined): string {
+  const c = (code || "").trim() || "—";
+  if (!face) return c;
+  if (!face.found) return `${c} – unknown code`;
+  const desc = face.description.trim();
+  if (!desc || desc.toLowerCase() === "not in reference table") return `${c} – unknown code`;
+  return `${c} – ${desc}`;
+}
+
+/**
+ * Same hover tooltip as estimate review, with the decoded description in the cell
+ * when a reference lookup result is already available.
+ */
+export function RepairCode({
+  kind,
+  code,
+  qualifier,
+  face,
+}: {
+  kind: CodeHoverKind;
+  code?: string | null;
+  qualifier?: string | null;
+  face?: CodeFace | null;
+}) {
+  const text = repairCodeText(code, face);
+  const tip = face
+    ? formatCodeTip(code ?? "", face.found, face.found ? face.description : "not in reference table")
+    : undefined;
+  return (
+    <CodeHover kind={kind} code={code} qualifier={qualifier}>
+      <span title={tip}>{text}</span>
+    </CodeHover>
   );
 }
 

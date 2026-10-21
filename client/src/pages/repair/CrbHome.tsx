@@ -1,5 +1,5 @@
 /**
- * §I r2 Invoice Worklist. `#/repair/crb`
+ * §I CRB Staging. `#/repair/crb`
  * Dense master rows, car children, line grandchildren.
  * Bulk action is mark reviewed only. Approval stays on the car or invoice.
  */
@@ -10,7 +10,7 @@ import { RepairBreadcrumbs } from "./RepairNavChrome";
 import { repairUi } from "./repairTokens";
 import { shopAa } from "./RepairNavChrome";
 import { CrbCarTable, type CrbGridCar } from "./CrbGrid";
-import { CrbChip, crbCarTokens, crbJson, crbMoney, crbPct, toneForStatus, type ChipTone } from "./CrbUi";
+import { CrbChip, crbCarTokens, crbJson, crbMoney, crbPct, toneForStatus, useCrbTitle, type ChipTone } from "./CrbUi";
 
 type FileRow = {
   id: string;
@@ -95,6 +95,7 @@ export default function CrbHome() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandSignal, setExpandSignal] = useState(0);
   const listGen = useRef(0);
+  useCrbTitle("CRB Staging");
 
   const tokens = crbCarTokens(carQuery);
 
@@ -214,8 +215,8 @@ export default function CrbHome() {
   return (
     <RepairOwnerShell>
       <div className={`${shopAa.page} p-3 space-y-3`}>
-        <RepairBreadcrumbs items={[{ label: "Worklist" }]} />
-        <h1 className="text-xl font-semibold">Invoice Worklist</h1>
+        <RepairBreadcrumbs items={[{ label: "CRB Staging" }]} />
+        <h1 className="text-xl font-semibold">CRB Staging</h1>
         {error ? <div className={`${repairUi.badge} repair-chip-stop`}>{error}</div> : null}
         {msg ? <div className={repairUi.badge}>{msg}</div> : null}
 

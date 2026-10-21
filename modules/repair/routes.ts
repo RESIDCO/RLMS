@@ -4345,7 +4345,8 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       | "car_part"
       | "category"
       | "detail_source"
-      | "facility_type";
+      | "facility_type"
+      | "record_format";
     const hit = await lookupRefCode({
       kind,
       code: String(req.query.code ?? ""),

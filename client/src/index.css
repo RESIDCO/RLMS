@@ -420,10 +420,17 @@
 .repair-owner-ui .crb-lines td {
   white-space: nowrap;
 }
-.repair-owner-ui .crb-line-findings td {
+.repair-owner-ui .crb-line-findings td,
+.repair-owner-ui .crb-line-narrative td {
   white-space: normal;
-  background: var(--repair-panel-muted);
+  background: var(--repair-surface);
   color: var(--repair-text);
+}
+.repair-owner-ui .crb-line-findings td {
+  background: var(--repair-panel-muted);
+}
+.repair-owner-ui .crb-lines thead th {
+  color: var(--repair-btn-primary-text);
 }
 .repair-owner-ui .crb-field-strip {
   display: grid;

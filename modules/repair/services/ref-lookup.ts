@@ -15,7 +15,8 @@ export type RefLookupKind =
   | "car_part"
   | "category"
   | "detail_source"
-  | "facility_type";
+  | "facility_type"
+  | "record_format";
 
 export type RefLookupHit = {
   kind: RefLookupKind;
@@ -540,6 +541,8 @@ export async function lookupRefCode(opts: {
       return staticCode(opts.kind, code, DETAIL_SOURCE_LABELS);
     case "facility_type":
       return staticCode(opts.kind, code, FACILITY_TYPE_LABELS);
+    case "record_format":
+      return staticCode(opts.kind, code, RECORD_FORMAT_LABELS);
     default: {
       const _exhaustive: never = opts.kind;
       return {
@@ -573,6 +576,14 @@ const DETAIL_SOURCE_LABELS: Record<string, string> = {
   RS: "Resubmit",
   RJ: "Return unpaid",
   EZ: "Exception summary",
+};
+
+const RECORD_FORMAT_LABELS: Record<string, string> = {
+  "1": "Detail billing line",
+  "2": "Exception detail",
+  "6": "Contact",
+  "8": "Invoice control total",
+  "9": "File control total",
 };
 
 const FACILITY_TYPE_LABELS: Record<string, string> = {

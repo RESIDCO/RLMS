@@ -7,7 +7,7 @@ import RepairOwnerShell from "./RepairOwnerShell";
 import { RepairBreadcrumbs, shopAa } from "./RepairNavChrome";
 import { repairUi } from "./repairTokens";
 import { CrbCarTable } from "./CrbGrid";
-import { CrbChip, crbJson, crbMoney, crbPct, toneForStatus, type ChipTone } from "./CrbUi";
+import { CrbChip, crbJson, crbMoney, crbPct, toneForStatus, useCrbTitle, type ChipTone } from "./CrbUi";
 
 type Countdown = { key: string; label: string; tone: ChipTone; text: string };
 type Panel = {
@@ -109,6 +109,11 @@ export default function CrbInvoice() {
     void load().catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
   }, [load]);
 
+  const invoiceHeading = invoice
+    ? `Invoice ${invoice.billing_party} ${invoice.invoice_number}`
+    : "Invoice";
+  useCrbTitle(`CRB Staging › ${invoiceHeading}`);
+
   if (!invoice) {
     return (
       <RepairOwnerShell>
@@ -166,13 +171,11 @@ export default function CrbInvoice() {
       <div className={`${shopAa.page} p-3 space-y-3`}>
         <RepairBreadcrumbs
           items={[
-            { label: "Worklist", href: "/repair/crb" },
-            { label: `${invoice.billing_party} ${invoice.invoice_number}` },
+            { label: "CRB Staging", href: "/repair/crb" },
+            { label: invoiceHeading },
           ]}
         />
-        <h1 className="text-xl font-semibold">
-          {invoice.billing_party} {invoice.invoice_number}
-        </h1>
+        <h1 className="text-xl font-semibold">{invoiceHeading}</h1>
         {error ? <div className={`${repairUi.badge} repair-chip-stop`}>{error}</div> : null}
         {msg ? <div className={repairUi.badge}>{msg}</div> : null}
 

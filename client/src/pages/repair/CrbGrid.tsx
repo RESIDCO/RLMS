@@ -4,7 +4,7 @@
  */
 import React, { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "wouter";
-import { CodeHover } from "./CodeHover";
+import { RepairCode, type CodeFace } from "./CodeHover";
 import { repairUi } from "./repairTokens";
 import {
   CrbChip,
@@ -49,9 +49,19 @@ export type CrbBillingLine = {
   record_format?: string | null;
   applied_job_code: string | null;
   applied_qualifier?: string | null;
+  condition_code?: string | null;
   why_made: string | null;
   location_on_car: string | null;
   quantity?: string | null;
+  decoded?: {
+    job?: CodeFace | null;
+    qualifier?: CodeFace | null;
+    why_made?: CodeFace | null;
+    condition?: CodeFace | null;
+    location?: CodeFace | null;
+    responsibility?: CodeFace | null;
+    record_format?: CodeFace | null;
+  } | null;
   labor_cents: number;
   material_cents: number;
   material_sign?: string | null;
@@ -77,6 +87,14 @@ type Modal =
 
 const REASON_MIN = 8;
 const CAR_COLUMNS = 10;
+const LINE_COLUMNS = 15;
+
+function narrativesOf(line: CrbBillingLine): { wheel: string; nonWheel: string } {
+  const fields = line.parsed && typeof line.parsed === "object" ? line.parsed : {};
+  const wheel = String(fields.narrative ?? "").trim();
+  const nonWheel = String(fields.narrative_non_wheel ?? line.narrative ?? "").trim();
+  return { wheel, nonWheel };
+}
 
 function ownedLabel(car: CrbGridCar): { text: string; tone: "ok" | "stop" | "info" } {
   const notOwned = car.owned_on_repair_date === false || (car.flags ?? []).some((flag) => flag.includes("NOT_OWNED"));
@@ -144,119 +162,137 @@ export function CrbBillingLines<F extends CrbBillingFinding>({
   return (
     <div className="crb-lines-wrap">
       <h3 className="font-semibold">Billing lines ({lines.length})</h3>
-      <table className="crb-grid crb-lines" aria-label="Billing lines">
-        <thead>
-          <tr>
-            <th>Line</th>
-            <th>Record format</th>
-            <th>Job code</th>
-            <th>Why made</th>
-            <th>Location / position</th>
-            <th>Qty</th>
-            <th>Labor hrs</th>
-            <th>Labor</th>
-            <th>Material</th>
-            <th>Total</th>
-            <th>Responsibility</th>
-            <th>Audit</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line) => {
-            const lineFindings = findings.filter((finding) => finding.target_id === line.id);
-            const primary = lineFindings.find((finding) => finding.scope === "LINE") ?? lineFindings[0] ?? null;
-            const findingText = lineFindings.map((finding) => finding.message).join("\n");
-            const material = signedMaterialCents(line.material_cents, line.material_sign);
-            const total = Number(line.labor_cents) + material;
-            const expanded = openFindings.has(line.id);
-            return (
-              <Fragment key={line.id}>
-                <tr>
-                  <td>{line.line_number?.trim() || (line.sort_order != null ? String(line.sort_order) : "—")}</td>
-                  <td>{recordFormatLabel(line.record_format)}</td>
-                  <td>
-                    <CodeHover kind="job" code={line.applied_job_code}><span>{line.applied_job_code || "—"}</span></CodeHover>
-                    {line.applied_qualifier ? (
-                      <>
-                        {" "}
-                        <CodeHover kind="qualifier" code={line.applied_job_code} qualifier={line.applied_qualifier}>
-                          <span>{line.applied_qualifier}</span>
-                        </CodeHover>
-                      </>
-                    ) : null}
-                  </td>
-                  <td><CodeHover kind="why_made" code={line.why_made}><span>{line.why_made || "—"}</span></CodeHover></td>
-                  <td><CodeHover kind="location" code={line.location_on_car}><span>{line.location_on_car || "—"}</span></CodeHover></td>
-                  <td>{qtyLabel(line.quantity)}</td>
-                  <td>{laborHoursLabel(Number(line.labor_cents), line.parsed)}</td>
-                  <td>{crbMoney(Number(line.labor_cents))}</td>
-                  <td>{crbMoney(material)}</td>
-                  <td>{crbMoney(total)}</td>
-                  <td><CodeHover kind="responsibility" code={line.responsibility}><span>{line.responsibility || "—"}</span></CodeHover></td>
-                  <td>
-                    <button
-                      type="button"
-                      className={repairUi.btnSecondary}
-                      aria-expanded={expanded}
-                      title={findingText || "No line findings."}
-                      onClick={() => {
-                        setOpenFindings((cur) => {
-                          const next = new Set(cur);
-                          if (next.has(line.id)) next.delete(line.id);
-                          else next.add(line.id);
-                          return next;
-                        });
-                      }}
-                    >
-                      {lineFindings.length === 0 ? (
-                        <CrbChip tone="ok">Clear</CrbChip>
-                      ) : lineFindings.map((finding) => (
-                        <CrbChip key={finding.id} tone={finding.invalid ? "info" : toneForStatus(finding.severity || finding.status)}>
-                          {finding.invalid ? "INVALID" : finding.severity || finding.status}
-                        </CrbChip>
-                      ))}
-                    </button>
-                  </td>
-                  <td>
-                    <div className="flex flex-wrap gap-1">
-                      <button type="button" className={repairUi.btnSecondary} onClick={() => onReject(line.id)}>Reject</button>
-                      <button type="button" className={repairUi.btnSecondary} onClick={() => onOverride(line.id, primary)}>Override</button>
-                    </div>
-                  </td>
-                </tr>
-                {expanded ? (
-                  <tr className="crb-line-findings">
-                    <td colSpan={13}>
-                      {lineFindings.length === 0 ? <p>No line findings.</p> : lineFindings.map((finding) => (
-                        <p key={finding.id}>
-                          <CrbChip tone={finding.invalid ? "info" : toneForStatus(finding.severity || "WARN")}>
-                            {finding.invalid ? "INVALID" : finding.severity || "WARN"}
-                          </CrbChip>{" "}
-                          {finding.rule_code} v{finding.rule_version} {finding.rule_ref ? `(${finding.rule_ref})` : ""} — {finding.message} {finding.status}
-                          <button type="button" className={`${repairUi.btnSecondary} ml-2`} onClick={() => onOverride(line.id, finding)}>
-                            Override
-                          </button>
-                        </p>
-                      ))}
+      <div className="overflow-auto rounded-md border border-border">
+        <table className="crb-grid crb-lines w-full border-collapse text-left" aria-label="Billing lines">
+          <thead>
+            <tr className="repair-brand-fill">
+              <th>Line</th>
+              <th>Record format</th>
+              <th>Location / position</th>
+              <th>Job code</th>
+              <th>Condition</th>
+              <th>Qualifier</th>
+              <th>Why made</th>
+              <th>Responsibility</th>
+              <th>Qty</th>
+              <th>Labor hrs</th>
+              <th className="text-right">Labor</th>
+              <th className="text-right">Material</th>
+              <th className="text-right">Total</th>
+              <th>Audit</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((line) => {
+              const lineFindings = findings.filter((finding) => finding.target_id === line.id);
+              const primary = lineFindings.find((finding) => finding.scope === "LINE") ?? lineFindings[0] ?? null;
+              const findingText = lineFindings.map((finding) => finding.message).join("\n");
+              const material = signedMaterialCents(line.material_cents, line.material_sign);
+              const total = Number(line.labor_cents) + material;
+              const expanded = openFindings.has(line.id);
+              const narrative = narrativesOf(line);
+              const codes = line.decoded;
+              return (
+                <Fragment key={line.id}>
+                  <tr>
+                    <td>{line.line_number?.trim() || (line.sort_order != null ? String(line.sort_order) : "—")}</td>
+                    <td>
+                      <RepairCode kind="record_format" code={recordFormatLabel(line.record_format)} face={codes?.record_format} />
+                    </td>
+                    <td>
+                      <RepairCode kind="location" code={line.location_on_car} face={codes?.location} />
+                    </td>
+                    <td>
+                      <RepairCode kind="job" code={line.applied_job_code} qualifier={line.applied_qualifier} face={codes?.job} />
+                    </td>
+                    <td>
+                      <RepairCode kind="condition" code={line.condition_code} face={codes?.condition} />
+                    </td>
+                    <td>
+                      <RepairCode kind="qualifier" code={line.applied_job_code} qualifier={line.applied_qualifier ?? ""} face={codes?.qualifier} />
+                    </td>
+                    <td>
+                      <RepairCode kind="why_made" code={line.why_made} face={codes?.why_made} />
+                    </td>
+                    <td>
+                      <RepairCode kind="responsibility" code={line.responsibility} face={codes?.responsibility} />
+                    </td>
+                    <td>{qtyLabel(line.quantity)}</td>
+                    <td>{laborHoursLabel(Number(line.labor_cents), line.parsed)}</td>
+                    <td className="text-right">{crbMoney(Number(line.labor_cents))}</td>
+                    <td className="text-right">{crbMoney(material)}</td>
+                    <td className="text-right">{crbMoney(total)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className={repairUi.btnSecondary}
+                        aria-expanded={expanded}
+                        title={findingText || "No line findings."}
+                        onClick={() => {
+                          setOpenFindings((cur) => {
+                            const next = new Set(cur);
+                            if (next.has(line.id)) next.delete(line.id);
+                            else next.add(line.id);
+                            return next;
+                          });
+                        }}
+                      >
+                        {lineFindings.length === 0 ? (
+                          <CrbChip tone="ok">Clear</CrbChip>
+                        ) : lineFindings.map((finding) => (
+                          <CrbChip key={finding.id} tone={finding.invalid ? "info" : toneForStatus(finding.severity || finding.status)}>
+                            {finding.invalid ? "INVALID" : finding.severity || finding.status}
+                          </CrbChip>
+                        ))}
+                      </button>
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        <button type="button" className={repairUi.btnSecondary} onClick={() => onReject(line.id)}>Reject</button>
+                        <button type="button" className={repairUi.btnSecondary} onClick={() => onOverride(line.id, primary)}>Override</button>
+                      </div>
                     </td>
                   </tr>
-                ) : null}
-                {lineExtras ? (
-                  <tr>
-                    <td colSpan={13}>{lineExtras(line)}</td>
+                  <tr className="crb-line-narrative">
+                    <td colSpan={LINE_COLUMNS}>
+                      <p>Narrative: {narrative.wheel || "—"}</p>
+                      <p>Non-wheel narrative: {narrative.nonWheel || "—"}</p>
+                    </td>
                   </tr>
-                ) : null}
-              </Fragment>
-            );
-          })}
-          {lines.length === 0 ? (
-            <tr>
-              <td colSpan={13}>No billing lines.</td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
+                  {expanded ? (
+                    <tr className="crb-line-findings">
+                      <td colSpan={LINE_COLUMNS}>
+                        {lineFindings.length === 0 ? <p>No line findings.</p> : lineFindings.map((finding) => (
+                          <p key={finding.id}>
+                            <CrbChip tone={finding.invalid ? "info" : toneForStatus(finding.severity || "WARN")}>
+                              {finding.invalid ? "INVALID" : finding.severity || "WARN"}
+                            </CrbChip>{" "}
+                            {finding.rule_code} v{finding.rule_version} {finding.rule_ref ? `(${finding.rule_ref})` : ""} — {finding.message} {finding.status}
+                            <button type="button" className={`${repairUi.btnSecondary} ml-2`} onClick={() => onOverride(line.id, finding)}>
+                              Override
+                            </button>
+                          </p>
+                        ))}
+                      </td>
+                    </tr>
+                  ) : null}
+                  {lineExtras ? (
+                    <tr>
+                      <td colSpan={LINE_COLUMNS}>{lineExtras(line)}</td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+            {lines.length === 0 ? (
+              <tr>
+                <td colSpan={LINE_COLUMNS}>No billing lines.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -66,7 +66,7 @@ const NAV: NavItem[] = [
     items: [
       {
         href: "/repair/crb",
-        label: "Invoice Worklist",
+        label: "CRB Staging",
         match: (p) => p.startsWith("/repair/crb"),
       },
     ],

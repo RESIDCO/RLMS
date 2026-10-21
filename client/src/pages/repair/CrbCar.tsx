@@ -9,7 +9,7 @@ import RepairOwnerShell from "./RepairOwnerShell";
 import { RepairBreadcrumbs, shopAa } from "./RepairNavChrome";
 import { repairUi } from "./repairTokens";
 import { CrbBillingLines, type CrbBillingLine } from "./CrbGrid";
-import { CrbChip, crbJson, toneForStatus } from "./CrbUi";
+import { CrbChip, crbJson, toneForStatus, useCrbTitle } from "./CrbUi";
 
 type Finding = {
   id: string;
@@ -69,6 +69,8 @@ export default function CrbCar() {
   const [modal, setModal] = useState<Modal>(null);
   const [reason, setReason] = useState("");
   const [pencilValue, setPencilValue] = useState("");
+  const carHeading = car ? `Car ${car.car_initial} ${car.car_number}` : "Car";
+  useCrbTitle(`CRB Staging › ${carHeading}`);
 
   const load = useCallback(async () => {
     if (!carId) return;
@@ -199,13 +201,13 @@ export default function CrbCar() {
       <div className={`${shopAa.page} p-3 space-y-3 max-w-[1100px]`}>
         <RepairBreadcrumbs
           items={[
-            { label: "Worklist", href: "/repair/crb" },
-            { label: `${car.billing_party} ${car.invoice_number}`, href: `/repair/crb/invoice/${car.invoice_id}` },
-            { label: `${car.car_initial} ${car.car_number}` },
+            { label: "CRB Staging", href: "/repair/crb" },
+            { label: `Invoice ${car.billing_party} ${car.invoice_number}`, href: `/repair/crb/invoice/${car.invoice_id}` },
+            { label: carHeading },
           ]}
         />
         <div className="flex flex-wrap gap-2 items-center">
-          <h1 className="text-xl font-semibold">{car.car_initial} {car.car_number}</h1>
+          <h1 className="text-xl font-semibold">{carHeading}</h1>
           <CrbChip tone={toneForStatus(car.status)}>{car.status}</CrbChip>
           {(car.flags ?? []).map((flag) => <CrbChip key={flag} tone={flag.includes("NOT_OWNED") ? "stop" : "warn"}>{flag}</CrbChip>)}
         </div>

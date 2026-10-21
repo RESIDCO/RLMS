@@ -35,6 +35,7 @@ import {
   type RuleVersion,
 } from "../server/crb/rules";
 import { uploadCrbFile } from "../server/crb/ingest";
+import { lookupRefCode } from "../services/ref-lookup";
 import {
   cloneAuditRule,
   createOverride,
@@ -328,6 +329,19 @@ function drillDownChecks() {
       onOverride: (lineId: string, finding: null) => void;
     }) => React.ReactElement;
   };
+  const { formatCodeTip, repairCodeText } = require("../../../client/src/pages/repair/CodeHover.tsx") as {
+    formatCodeTip: (code: string, found: boolean, description: string) => string;
+    repairCodeText: (code: string | null | undefined, face: { found: boolean; description: string } | null | undefined) => string;
+  };
+  if (formatCodeTip("1001", true, "DEMO job description") !== "1001 – DEMO job description") {
+    bad("estimate tip", "decoded description");
+  }
+  if (formatCodeTip("ZZZZ", false, "Not in reference table") !== "ZZZZ – not in reference table") {
+    bad("estimate tip", "not in reference table");
+  }
+  if (repairCodeText("ZZZZ", { found: false, description: "Not in reference table" }) !== "ZZZZ – unknown code") {
+    bad("unknown code");
+  }
   const html = renderToStaticMarkup(
     createElement(CrbBillingLines, {
       lines: [
@@ -338,6 +352,7 @@ function drillDownChecks() {
           record_format: "1",
           applied_job_code: "1001",
           applied_qualifier: "001",
+          condition_code: "9",
           why_made: "01",
           location_on_car: "A1",
           quantity: "0004",
@@ -346,7 +361,20 @@ function drillDownChecks() {
           material_sign: "D",
           responsibility: "1",
           status: "PENDING",
-          parsed: { labor_rate: "10000" },
+          parsed: {
+            labor_rate: "10000",
+            narrative: "WHEEL NARRATIVE",
+            narrative_non_wheel: "NONWHEEL NARRATIVE",
+          },
+          decoded: {
+            job: { found: true, description: "DEMO job description" },
+            qualifier: { found: false, description: "Not in reference table" },
+            why_made: { found: true, description: "DEMO why made" },
+            condition: { found: false, description: "Not in reference table" },
+            location: { found: true, description: "DEMO location" },
+            responsibility: { found: true, description: "DEMO responsibility" },
+            record_format: { found: true, description: "Detail billing line" },
+          },
         },
       ],
       findings: [
@@ -373,9 +401,10 @@ function drillDownChecks() {
     "Job code",
     "Why made",
     "Location / position",
+    "Condition",
+    "Qualifier",
     "Qty",
     "Labor hrs",
-    "Labor",
     "Material",
     "Total",
     "Responsibility",
@@ -383,18 +412,62 @@ function drillDownChecks() {
     "Reject",
     "Override",
     "DEMO finding text for the line",
+    "DEMO job description",
+    "DEMO why made",
+    "DEMO location",
+    "DEMO responsibility",
+    "Detail billing line",
+    "unknown code",
+    "not in reference table",
+    "Narrative: WHEEL NARRATIVE",
+    "Non-wheel narrative: NONWHEEL NARRATIVE",
     "crb-lines",
+    "repair-brand-fill",
     ">4<",
     ">3<",
   ]) {
     if (!html.includes(label)) bad("line drill-down render", label);
+  }
+  const headerOrder = [
+    ">Line<",
+    ">Record format<",
+    ">Location / position<",
+    ">Job code<",
+    ">Condition<",
+    ">Qualifier<",
+    ">Why made<",
+    ">Responsibility<",
+    ">Qty<",
+    ">Labor hrs<",
+    ">Labor<",
+    ">Material<",
+    ">Total<",
+  ];
+  let headerAt = -1;
+  for (const header of headerOrder) {
+    const next = html.indexOf(header, headerAt + 1);
+    if (next < 0) bad("line column order", header);
+    headerAt = next;
   }
   const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
   const grid = readFileSync(join(root, "client/src/pages/repair/CrbGrid.tsx"), "utf8");
   const home = readFileSync(join(root, "client/src/pages/repair/CrbHome.tsx"), "utf8");
   const invoice = readFileSync(join(root, "client/src/pages/repair/CrbInvoice.tsx"), "utf8");
   const car = readFileSync(join(root, "client/src/pages/repair/CrbCar.tsx"), "utf8");
+  const nav = readFileSync(join(root, "client/src/pages/repair/RepairModuleNav.tsx"), "utf8");
+  const estimate = readFileSync(join(root, "client/src/pages/repair/EstimateDataFile.tsx"), "utf8");
   const seed = readFileSync(join(root, "modules/repair/dev/seed-crb-demo.ts"), "utf8");
+  if (!grid.includes('from "./CodeHover"') || !estimate.includes('from "./CodeHover"')) {
+    bad("shared CodeHover", "CRB and estimate review");
+  }
+  for (const src of [home, invoice, car, nav]) {
+    if (!src.includes("CRB Staging")) bad("CRB Staging label", "missing");
+    if (src.includes("Invoice Worklist")) bad("CRB Staging label", "Invoice Worklist remains");
+  }
+  if (!nav.includes('label: "Invoices"') || !nav.includes('href: "/repair/invoices"')) bad("shop invoices nav");
+  if (!home.includes('useCrbTitle("CRB Staging")')) bad("document title", "CRB Staging");
+  if (!invoice.includes("CRB Staging › ${invoiceHeading}")) bad("document title", "CRB Staging › Invoice");
+  if (!car.includes("CRB Staging › ${carHeading}")) bad("document title", "CRB Staging › Car");
   for (const label of ["Open BRC", "Expand all", "Collapse all", "scope: \"LINE\"", "/lines/"]) {
     if (!grid.includes(label)) bad("line drill-down wiring", label);
   }
@@ -403,7 +476,7 @@ function drillDownChecks() {
   }
   if (!car.includes("CrbBillingLines")) bad("car card lines grid");
   if (!seed.includes("[8, 7, 6, 5, 4, 3, 8, 6]")) bad("demo line counts", "expected cars with 3 to 8 lines");
-  ok("billing-line drill-down renders on the worklist, invoice, and car card");
+  ok("billing-line drill-down renders decoded descriptions, tooltips, and CRB Staging titles");
 }
 
 function pureChecks() {
@@ -838,6 +911,20 @@ async function dbChecks() {
   );
   if (Number(missing[0]?.n ?? 0) < 1) bad("crb without biller");
   ok("biller recon codes are the messages the loader writes");
+
+  const knownFormat = await lookupRefCode({ kind: "record_format", code: "1" });
+  if (!knownFormat.found || knownFormat.description !== "Detail billing line") {
+    bad("record format lookup", knownFormat.description);
+  }
+  const unknownFormat = await lookupRefCode({ kind: "record_format", code: "7" });
+  if (unknownFormat.found || unknownFormat.description !== "Not in reference table") {
+    bad("unknown record format", unknownFormat.description);
+  }
+  const unknownJob = await lookupRefCode({ kind: "job", code: "ZZZZ" });
+  if (unknownJob.found || unknownJob.description !== "Not in reference table") {
+    bad("unknown job code", unknownJob.description);
+  }
+  ok("reference lookup decodes record format and reports an unknown code");
 }
 
 async function main() {

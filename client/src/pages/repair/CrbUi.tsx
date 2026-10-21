@@ -1,7 +1,7 @@
 /**
  * Shared CRB review widgets. Colors come from --repair-* chip classes.
  */
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 export function crbMoney(cents: number | null | undefined): string {
   const n = Number(cents ?? 0);
@@ -49,6 +49,17 @@ export function toneForStatus(status: string): ChipTone {
     return "warn";
   }
   return "info";
+}
+
+/** Document title for CRB Staging pages. Restores the previous title on leave. */
+export function useCrbTitle(title: string) {
+  useEffect(() => {
+    const previous = document.title;
+    document.title = title;
+    return () => {
+      document.title = previous;
+    };
+  }, [title]);
 }
 
 export async function crbJson<T>(res: Response): Promise<T> {

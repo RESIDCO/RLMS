@@ -31,7 +31,11 @@ export function assertCrbClientTypecheck(): void {
   for (const route of ["/repair/crb/invoice/:id/car/:carId", "/repair/crb/invoice/:id", "/repair/crb"]) {
     if (!app.includes(route)) bad("route", route);
   }
-  if (!nav.includes('href: "/repair/crb"') || !nav.includes("Accounts Payable")) bad("nav", "Accounts Payable worklist");
+  if (!nav.includes('href: "/repair/crb"') || !nav.includes("Accounts Payable") || !nav.includes("CRB Staging")) {
+    bad("nav", "Accounts Payable CRB Staging");
+  }
+  if (nav.includes("Invoice Worklist")) bad("nav", "CRB Staging");
+  if (!nav.includes('label: "Invoices"')) bad("nav", "shop Invoices");
   if (!home.includes("Mark reviewed") || home.includes("bulk approve")) bad("bulk", "mark reviewed only");
   if (!home.includes("Hard stops only") || !home.includes("Enter car numbers") || !home.includes("Nearest deadline")) {
     bad("worklist", "dense grid labels");
@@ -44,7 +48,17 @@ export function assertCrbClientTypecheck(): void {
   if (!home.includes("Expand all") || !home.includes("Collapse all") || !home.includes("CrbCarTable")) bad("worklist expand");
   if (!invoice.includes("CrbCarTable")) bad("invoice grid");
   if (!car.includes("CrbBillingLines")) bad("car grid");
-  if (!car.includes("Worklist")) bad("crumbs", "Worklist");
+  for (const src of [home, invoice, car]) {
+    if (!src.includes("CRB Staging")) bad("title", "CRB Staging");
+    if (src.includes("Invoice Worklist") || src.includes('"Worklist"')) bad("title", "CRB Staging");
+  }
+  if (!home.includes('useCrbTitle("CRB Staging")')) bad("document title", "CRB Staging");
+  if (!invoice.includes("CRB Staging › ${invoiceHeading}") || !invoice.includes("`Invoice ${invoice.billing_party}")) {
+    bad("document title", "CRB Staging › Invoice");
+  }
+  if (!car.includes("CRB Staging › ${carHeading}") || !car.includes("`Car ${car.car_initial}")) {
+    bad("document title", "CRB Staging › Car");
+  }
   if (!invoice.includes("Return unpaid") || !invoice.includes("Approve with exceptions")) bad("invoice actions");
   if (!invoice.includes("Mark filed manually")) bad("filed");
   for (const key of ["J", "K", "Approve (A)", "Reject (R)", "Override (O)", "Help (?)"]) {
@@ -76,6 +90,7 @@ export function assertCrbClientTypecheck(): void {
     "CrbCar.tsx",
     "CrbUi.tsx",
     "CrbGrid.tsx",
+    "CodeHover.tsx",
     "AuditRulesPanel.tsx",
     "seed-crb-demo.ts",
     "smoke-crb.ts",

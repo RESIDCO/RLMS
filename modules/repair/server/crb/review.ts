@@ -2,6 +2,7 @@
  * CRB review actions: decisions, overrides, approval, pool, and rule admin.
  */
 import { DEFAULT_TENANT_ID, q } from "../../db";
+import { lookupRefCode, type RefLookupKind } from "../../services/ref-lookup";
 import { flagOrphanBillerHeaders, logCrb, reauditInvoice, refreshErrorPanel } from "./ingest";
 import { selectRuleVersion, type Severity } from "./rules";
 
@@ -568,6 +569,54 @@ export async function getCrbInvoice(id: string): Promise<Record<string, unknown>
   return { ...rows[0], cars, packages, findings };
 }
 
+type CodeFace = { found: boolean; description: string };
+
+async function codeFace(kind: RefLookupKind, code: string, qualifier?: string | null): Promise<CodeFace> {
+  const hit = await lookupRefCode({ kind, code: code.trim(), qualifier });
+  return {
+    found: hit.found,
+    description: hit.found ? hit.description : "Not in reference table",
+  };
+}
+
+async function withDecodedCodes(lines: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+  const cache = new Map<string, Promise<CodeFace>>();
+  function load(kind: RefLookupKind, code: string, qualifier?: string | null): Promise<CodeFace> {
+    const key = `${kind}|${code.trim()}|${qualifier ?? ""}`;
+    const pending = cache.get(key);
+    if (pending) return pending;
+    const next = codeFace(kind, code, qualifier);
+    cache.set(key, next);
+    return next;
+  }
+  const decoded = await Promise.all(lines.map(async (line) => {
+    const job = String(line.applied_job_code ?? "");
+    const qualifier = String(line.applied_qualifier ?? "");
+    const [jobFace, qualifierFace, whyMade, condition, location, responsibility, recordFormat] = await Promise.all([
+      load("job", job),
+      load("qualifier", job, qualifier),
+      load("why_made", String(line.why_made ?? "")),
+      load("condition", String(line.condition_code ?? "")),
+      load("location", String(line.location_on_car ?? "")),
+      load("responsibility", String(line.responsibility ?? "")),
+      load("record_format", String(line.record_format ?? "")),
+    ]);
+    return {
+      ...line,
+      decoded: {
+        job: jobFace,
+        qualifier: qualifierFace,
+        why_made: whyMade,
+        condition,
+        location,
+        responsibility,
+        record_format: recordFormat,
+      },
+    };
+  }));
+  return decoded;
+}
+
 export async function getCrbCar(carId: string): Promise<Record<string, unknown> | null> {
   const { rows } = await q(
     `SELECT c.*, i.invoice_number, i.billing_party, i.billed_party, i.account_date, i.currency,
@@ -603,7 +652,7 @@ export async function getCrbCar(carId: string): Promise<Record<string, unknown> 
   const idx = neighbors.findIndex((n) => n.id === carId);
   return {
     ...rows[0],
-    lines,
+    lines: await withDecodedCodes(lines),
     findings,
     prevCarId: idx > 0 ? neighbors[idx - 1].id : null,
     nextCarId: idx >= 0 && idx < neighbors.length - 1 ? neighbors[idx + 1].id : null,

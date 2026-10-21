@@ -5,6 +5,7 @@ import { olPath } from "@/lib/browse-nav";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
+import { AwaitingPasteCars } from "@/components/AwaitingPasteCars";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,6 +23,7 @@ import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
+import { matchPastedCarsOnList, type AwaitingPasteMatch } from "@shared/kpi-paste-cars";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { mergeColOrder } from "@/lib/grid-columns";
@@ -33,13 +35,16 @@ import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { collectPages } from "@/lib/copy-cars";
 import { FormerlyBadge } from "@/components/FormerlyBadge";
 import { LineageCarLink } from "@/components/LineageCarLink";
-import { overlayLifecycle } from "@shared/programs";
+import { overlayLifecycle, parseCarPasteList } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { KpiCarSheet } from "@/pages/KpiCarSheet";
 
 type Row = {
   railcar_id: number;
   car: string;
+  reporting_marks?: string | null;
+  car_initial?: string | null;
+  car_number?: string | null;
   entity: string | null;
   status_tag: string | null;
   derived_status: string | null;
@@ -85,6 +90,49 @@ function kpiCheckClass(selected = false) {
     ? "bg-muted/40 group-hover/kpirow:bg-muted/40"
     : "bg-background group-hover/kpirow:bg-muted/20";
   return `sticky left-0 z-10 ${fill}`;
+}
+
+function kpiRowSortValue(row: Row, col: (typeof KPI_SORT_COLS)[number]): string {
+  switch (col) {
+    case "car":
+      return row.car ?? "";
+    case "entity":
+      return row.entity ?? "";
+    case "status_tag":
+      return row.status_tag ?? "";
+    case "derived_status":
+      return row.derived_status ?? "";
+    case "current_lease":
+      return row.current_lease ?? "";
+    case "lessee":
+      return row.lessee ?? "";
+    case "legal_owner":
+      return row.legal_owner ?? "";
+    case "buyer":
+      return row.buyer ?? "";
+    case "commitment":
+      return row.commitment ?? "";
+    case "rent_start_date":
+      return row.rent_start_date ?? "";
+    case "last_ol":
+      return row.last_ol ?? "";
+    case "reason":
+      return row.reason ?? "";
+    default: {
+      const unreachable: never = col;
+      return unreachable;
+    }
+  }
+}
+
+function compareKpiRows(a: Row, b: Row, col: (typeof KPI_SORT_COLS)[number], dir: string): number {
+  const av = kpiRowSortValue(a, col);
+  const bv = kpiRowSortValue(b, col);
+  const aEmpty = av === "";
+  const bEmpty = bv === "";
+  if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+  const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+  return dir === "desc" ? -cmp : cmp;
 }
 
 const KPI_DEFAULT_COLS = new Set<string>(KPI_SORT_COLS);
@@ -251,7 +299,15 @@ export function KpiCarListPage() {
   const [rentDate, setRentDate] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [qDraft, setQDraft] = useState(q);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteResult, setPasteResult] = useState<AwaitingPasteMatch | null>(null);
+  const [pasteRows, setPasteRows] = useState<Row[] | null>(null);
+  const [pasteBusy, setPasteBusy] = useState(false);
+  const pasteReq = useRef(0);
+  const pasteActiveRef = useRef(false);
+  const bucketRef = useRef(bucket);
   const sheetPushedRef = useRef(false);
+  pasteActiveRef.current = pasteRows != null;
 
   const listPathWithoutCar = useMemo(() => {
     const next = new URLSearchParams(sp);
@@ -262,6 +318,69 @@ export function KpiCarListPage() {
   useEffect(() => {
     setQDraft(q);
   }, [q]);
+
+  useEffect(() => {
+    const prev = bucketRef.current;
+    bucketRef.current = bucket;
+    if (prev === bucket || prev !== "awaiting_rent_start") return;
+    if (pasteActiveRef.current) {
+      setSelected(new Set());
+      setSelectAllMatching(false);
+      setPreview(null);
+    }
+    pasteReq.current += 1;
+    setPasteBusy(false);
+    setPasteText("");
+    setPasteResult(null);
+    setPasteRows(null);
+  }, [bucket]);
+
+  function clearPaste() {
+    pasteReq.current += 1;
+    setPasteBusy(false);
+    const hadFilter = pasteResult != null || pasteRows != null;
+    setPasteText("");
+    setPasteResult(null);
+    setPasteRows(null);
+    if (!hadFilter) return;
+    setSelected(new Set());
+    setSelectAllMatching(false);
+    setPreview(null);
+  }
+
+  async function applyPaste() {
+    if (bucket !== "awaiting_rent_start") return;
+    const text = pasteText;
+    if (!parseCarPasteList(text).length) return;
+    const req = ++pasteReq.current;
+    setPasteBusy(true);
+    try {
+      const all = await collectPages(async (pageNumber, size) => {
+        const params = new URLSearchParams();
+        params.set("bucket", "awaiting_rent_start");
+        params.set("sort", sort);
+        params.set("dir", dir);
+        params.set("page", String(pageNumber));
+        params.set("page_size", String(size));
+        const body = await apiGet<{ rows?: Row[]; total?: number }>(`/api/kpi/cars?${params.toString()}`);
+        return { rows: body.rows ?? [], total: Number(body.total ?? 0) };
+      }, 500);
+      if (req !== pasteReq.current) return;
+      const match = matchPastedCarsOnList(text, all);
+      const ids = new Set(match.matchedIds);
+      setPasteResult(match);
+      setPasteRows(all.filter((row) => ids.has(row.railcar_id)));
+      setSelected(ids);
+      setSelectAllMatching(false);
+      setPreview(null);
+    } catch (e) {
+      if (req !== pasteReq.current) return;
+      const description = e instanceof Error ? e.message : "Could not match cars";
+      toast({ title: "Paste failed", description, variant: "destructive" });
+    } finally {
+      if (req === pasteReq.current) setPasteBusy(false);
+    }
+  }
 
   useLayoutEffect(() => {
     if (carId) return;
@@ -348,6 +467,9 @@ export function KpiCarListPage() {
       setPreview(null);
       setSelected(new Set());
       setSelectAllMatching(false);
+      setPasteText("");
+      setPasteResult(null);
+      setPasteRows(null);
       qc.invalidateQueries({ queryKey: ["/api/kpi/cars"] });
       qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
       void invalidateFleetQueries(qc);
@@ -360,10 +482,21 @@ export function KpiCarListPage() {
     else setParams({ sort: col, dir: "asc" }, false);
   };
 
+  const sortCol = (KPI_SORT_COLS as readonly string[]).includes(sort)
+    ? (sort as (typeof KPI_SORT_COLS)[number])
+    : "car";
+  const displayRows = useMemo(() => {
+    if (!pasteRows) return rows;
+    return [...pasteRows].sort((a, b) => compareKpiRows(a, b, sortCol, dir));
+  }, [pasteRows, rows, sortCol, dir]);
+  const viewTotal = pasteRows ? pasteRows.length : total;
+
   const groupedRows = useMemo(() => {
-    if (!group) return [{ key: "", count: rows.length, rows }];
+    const source = displayRows;
+    const groupCounts = pasteRows ? [] : groups;
+    if (!group) return [{ key: "", count: source.length, rows: source }];
     const map = new Map<string, Row[]>();
-    for (const r of rows) {
+    for (const r of source) {
       const key =
         group === "lease" ? r.current_lease ?? "—" :
         group === "lessee" ? r.lessee ?? "—" :
@@ -372,13 +505,13 @@ export function KpiCarListPage() {
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
-    const counts = new Map(groups.map((g) => [g.key, g.count]));
+    const counts = new Map(groupCounts.map((g) => [g.key, g.count]));
     return Array.from(map.entries()).map(([key, rs]) => ({
       key,
       count: counts.get(key) ?? rs.length,
       rows: rs,
     }));
-  }, [rows, group, groups]);
+  }, [displayRows, pasteRows, group, groups]);
 
   const colPrefs = useColumnPrefs("kpi_cars", KPI_DEFAULT_COLS);
   const kpiCols = useMemo(() => {
@@ -405,24 +538,25 @@ export function KpiCarListPage() {
     }, pageSize);
   }
 
-  const pageIds = rows.map((r) => r.railcar_id);
+  const pageIds = displayRows.map((r) => r.railcar_id);
+  const copySelected = pasteRows ? selected : (selectAllMatching ? null : selected);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
 
   return (
     <div>
       <PageHeader
         title={title}
-        subtitle={`${total.toLocaleString()} cars`}
+        subtitle={pasteRows ? `${pasteRows.length.toLocaleString()} matched` : `${total.toLocaleString()} cars`}
         actions={
           <div className="flex flex-wrap gap-2">
             <CopyCarsButton
-              rows={rows}
-              selectedIds={selectAllMatching ? null : selected}
+              rows={displayRows}
+              selectedIds={copySelected}
               idOf={(row) => row.railcar_id}
               lineOf={(row) => row.car}
-              totalCount={total}
-              loadAll={loadAllKpiRows}
-              disabled={isLoading || total === 0}
+              totalCount={pasteRows ? displayRows.length : total}
+              loadAll={pasteRows ? undefined : loadAllKpiRows}
+              disabled={(pasteRows ? displayRows.length === 0 : isLoading || total === 0)}
             />
             <Button variant="outline" size="sm" onClick={() => downloadXlsx(exportHref("csv"), `RLMS_${bucket}.csv`)}>
               Export CSV
@@ -488,10 +622,37 @@ export function KpiCarListPage() {
           <Button size="sm" onClick={() => setParams({ q: qDraft })}>Apply filters</Button>
         </div>
 
+        {bucket === "awaiting_rent_start" ? (
+          <AwaitingPasteCars
+            text={pasteText}
+            onTextChange={setPasteText}
+            busy={pasteBusy}
+            applied={pasteResult != null}
+            matchedCount={pasteResult?.matchedIds.length ?? 0}
+            selectedCount={selected.size}
+            unmatched={pasteResult?.unmatched ?? []}
+            onApply={() => void applyPaste()}
+            onClear={clearPaste}
+          />
+        ) : null}
+
         {canEdit && bucket !== "leased_off_rent" && (
           <div className="flex flex-wrap gap-2 items-end border border-border rounded-md p-3">
-            <div className="text-sm">{selectAllMatching ? `All ${total} matching` : `${selected.size} selected`}</div>
-            <Button size="sm" variant="outline" onClick={() => setSelectAllMatching(true)}>Select all {total} matching</Button>
+            <div className="text-sm">{!pasteRows && selectAllMatching ? `All ${total} matching` : `${selected.size} selected`}</div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (pasteRows) {
+                  setSelected(new Set(pasteRows.map((row) => row.railcar_id)));
+                  setSelectAllMatching(false);
+                  return;
+                }
+                setSelectAllMatching(true);
+              }}
+            >
+              Select all {viewTotal} matching
+            </Button>
             <Select value={bulk ?? "none"} onValueChange={(v) => { setBulk(v === "none" ? null : (v as any)); setPreview(null); }}>
               <SelectTrigger className="w-48"><SelectValue placeholder="Bulk action" /></SelectTrigger>
               <SelectContent>
@@ -579,7 +740,7 @@ export function KpiCarListPage() {
             Retag preview (tagged Leased, off rent). Apply only after sign-off — this page does not write tags.
           </div>
         )}
-        {isLoading ? (
+        {isLoading && !pasteRows ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : (
           <div className="overflow-x-auto">
@@ -607,13 +768,13 @@ export function KpiCarListPage() {
                         {col === "car" ? (
                           <CopyCarsButton
                             appearance="header"
-                            rows={rows}
-                            selectedIds={selectAllMatching ? null : selected}
+                            rows={displayRows}
+                            selectedIds={copySelected}
                             idOf={(row) => row.railcar_id}
                             lineOf={(row) => row.car}
-                            totalCount={total}
-                            loadAll={loadAllKpiRows}
-                            disabled={isLoading || total === 0}
+                            totalCount={pasteRows ? displayRows.length : total}
+                            loadAll={pasteRows ? undefined : loadAllKpiRows}
+                            disabled={pasteRows ? displayRows.length === 0 : isLoading || total === 0}
                           />
                         ) : null}
                         <ColumnHelp listKey="kpi_cars" colKey={col} />
@@ -687,15 +848,21 @@ export function KpiCarListPage() {
             </table>
           </div>
         )}
-        <div className="flex items-center gap-3 pb-8 text-sm">
-          <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setParams({ page: String(page - 1) }, false)}>
-            Prev
-          </Button>
-          <span>Page {page} of {pages}</span>
-          <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setParams({ page: String(page + 1) }, false)}>
-            Next
-          </Button>
-        </div>
+        {pasteRows ? (
+          <div className="pb-8 text-sm text-muted-foreground">
+            Showing {pasteRows.length.toLocaleString()} matched {pasteRows.length === 1 ? "car" : "cars"}
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 pb-8 text-sm">
+            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setParams({ page: String(page - 1) }, false)}>
+              Prev
+            </Button>
+            <span>Page {page} of {pages}</span>
+            <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setParams({ page: String(page + 1) }, false)}>
+              Next
+            </Button>
+          </div>
+        )}
       </div>
       <KpiCarSheet
         carId={carId}

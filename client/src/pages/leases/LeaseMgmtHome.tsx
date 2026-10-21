@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
@@ -61,6 +61,42 @@ function issueLabel(kind: string) {
   }
 }
 
+/** Display labels only. CSV export still uses the API column keys. */
+const ISSUE_COLUMN_LABELS: Record<string, string> = {
+  railcar_id: "Railcar ID",
+  car: "Car",
+  car_lessee: "Car lessee",
+  rider_lessee: "Rider lessee",
+  rider_name: "Rider",
+  rider_id: "Rider ID",
+  master_lease_id: "Master lease ID",
+  sublessee: "Sublessee",
+  ea_code: "EA code",
+  fleet_status: "Fleet status",
+  monthly_rent_per_car: "Monthly rent",
+  lease_end_date: "Lease end",
+  exclude_washington_penn: "Exclude Washington Penn",
+  car_says_ol: "Car says OL",
+  lessee_name: "Lessee name",
+  proposed_rider_id: "Proposed rider ID",
+  k: "Name key",
+  lessee: "Lessee",
+  account_id: "Account ID",
+  active_cars: "Active cars",
+  lifecycle_status: "Lifecycle",
+  expiration_date: "Expiration",
+  on_rent_cars: "On-rent cars",
+  car_rent: "Car rent",
+  rider_rent: "Rider rent",
+};
+
+function issueColumnLabel(key: string): string {
+  const known = ISSUE_COLUMN_LABELS[key];
+  if (known) return known;
+  const words = key.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export default function LeaseMgmtHome() {
   const [, setLocation] = useLocation();
   const [tab, setTab] = useState<"lessees" | "issues">("lessees");
@@ -72,6 +108,13 @@ export default function LeaseMgmtHome() {
   const [page, setPage] = useState(1);
   const [pasteQ, setPasteQ] = useState<string | null>(null);
   const pageSize = 50;
+  // Lessees fills the viewport and scrolls inside its grid. Data issues stacks
+  // in document flow so the app pane scrolls and sections start under the tabs.
+  const viewportLock = tab !== "issues";
+
+  useEffect(() => {
+    document.querySelector<HTMLElement>("[data-app-scroll]")?.scrollTo(0, 0);
+  }, [tab]);
 
   const search = pasteQ || q;
   const qs = new URLSearchParams();
@@ -92,7 +135,13 @@ export default function LeaseMgmtHome() {
     queryKey: ["/api/lease-mgmt/am-options"],
     queryFn: () => apiGet("/api/lease-mgmt/am-options"),
   });
-  const { data: issues } = useQuery<Record<string, { count: number; rows: any[] }>>({
+  const {
+    data: issues,
+    isLoading: issuesLoading,
+    isError: issuesError,
+    error: issuesErrorObj,
+    refetch: refetchIssues,
+  } = useQuery<Record<string, { count: number; rows: any[] }>>({
     queryKey: ["/api/lease-mgmt/issues"],
     queryFn: () => apiGet("/api/lease-mgmt/issues"),
     enabled: tab === "issues",
@@ -113,7 +162,7 @@ export default function LeaseMgmtHome() {
   ]), [kpis]);
 
   return (
-    <div className="h-full min-h-0 flex flex-col overflow-hidden">
+    <div className={viewportLock ? "h-full min-h-0 flex flex-col overflow-hidden" : "flex flex-col"}>
       <PageHeader
         title="Lease Management"
         subtitle="Lessee → OL/EA → cars. Lessees with no assigned cars are hidden by default."
@@ -131,7 +180,9 @@ export default function LeaseMgmtHome() {
           </div>
         }
       />
-      <div className="px-4 sm:px-8 py-4 flex-1 min-h-0 flex flex-col gap-4 overflow-hidden">
+      <div className={viewportLock
+        ? "px-4 sm:px-8 py-4 flex-1 min-h-0 flex flex-col gap-4 overflow-hidden"
+        : "px-4 sm:px-8 py-4 flex flex-col gap-4"}>
         {isError ? (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-red-400">
             Couldn't load lessees — {(error as Error)?.message || "request failed"}.{" "}
@@ -154,7 +205,7 @@ export default function LeaseMgmtHome() {
           ))}
         </div>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "lessees" | "issues")} className="flex-1 min-h-0 flex flex-col">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "lessees" | "issues")} className={viewportLock ? "flex-1 min-h-0 flex flex-col" : "flex flex-col"}>
           <TabsList>
             <TabsTrigger value="lessees">Lessees</TabsTrigger>
             <TabsTrigger value="issues">Data issues</TabsTrigger>
@@ -231,38 +282,56 @@ export default function LeaseMgmtHome() {
               <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></Button>
             </div>
           </TabsContent>
-          <TabsContent value="issues" className="mt-3 flex-1 min-h-0 overflow-auto">
-            <div className="space-y-6">
-              {Object.entries(issues ?? {}).filter(([k]) => k !== "duplicate_rows").map(([kind, pack]) => (
-                <div key={kind} className="border rounded-md">
-                  <div className="flex flex-wrap gap-2 items-center justify-between px-3 py-2 border-b bg-muted/30">
-                    <div className="text-sm font-medium">{issueLabel(kind)} · {pack.count.toLocaleString()}{kind === "duplicates" ? ` groups / ${(issues as any).duplicate_rows ?? pack.rows.length} rows` : ""}</div>
-                    <Button size="sm" variant="outline" onClick={() => downloadXlsx(`/api/lease-mgmt/issues/${kind}.csv`, `${kind}.csv`)}>
-                      <Download className="h-4 w-4" /> CSV
-                    </Button>
-                  </div>
-                  <div className="max-h-64 overflow-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-left text-muted-foreground">
-                          {pack.rows[0] ? Object.keys(pack.rows[0]).slice(0, 8).map((h) => <th key={h} className="px-2 py-1">{h}</th>) : <th className="px-2 py-1">None</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pack.rows.slice(0, 40).map((row, i) => (
-                          <tr key={i} className="border-t">
-                            {Object.keys(pack.rows[0] ?? {}).slice(0, 8).map((h) => (
-                              <td key={h} className={cn("px-2 py-1", h.includes("lessee") ? "" : "font-mono-num")}>{String(row[h] ?? "")}</td>
+          <TabsContent value="issues" className="mt-3">
+            {issuesError ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-red-400">
+                Couldn't load data issues — {(issuesErrorObj as Error)?.message || "request failed"}.{" "}
+                <button type="button" className="underline text-foreground" onClick={() => refetchIssues()}>
+                  Retry
+                </button>
+              </div>
+            ) : issuesLoading && !issues ? (
+              <div className="text-sm text-muted-foreground">Loading…</div>
+            ) : (
+              <div className="space-y-6">
+                {Object.entries(issues ?? {}).filter(([k]) => k !== "duplicate_rows").map(([kind, pack]) => {
+                  const columns = pack.rows[0] ? Object.keys(pack.rows[0]).slice(0, 8) : [];
+                  return (
+                    <div key={kind} className="border rounded-md">
+                      <div className="flex flex-wrap gap-2 items-center justify-between px-3 py-2 border-b bg-muted/30">
+                        <div className="text-sm font-medium">{issueLabel(kind)} · {pack.count.toLocaleString()}{kind === "duplicates" ? ` groups / ${(issues as any).duplicate_rows ?? pack.rows.length} rows` : ""}</div>
+                        <Button size="sm" variant="outline" onClick={() => downloadXlsx(`/api/lease-mgmt/issues/${kind}.csv`, `${kind}.csv`)}>
+                          <Download className="h-4 w-4" /> CSV
+                        </Button>
+                      </div>
+                      <div className="max-h-[400px] overflow-auto">
+                        <table className="w-full text-sm">
+                          <thead className="sticky top-0 z-10 bg-card border-b">
+                            <tr className="text-left text-xs text-muted-foreground">
+                              {columns.length
+                                ? columns.map((h) => (
+                                  <th key={h} className="px-3 py-2 font-medium whitespace-nowrap sticky top-0 bg-card">{issueColumnLabel(h)}</th>
+                                ))
+                                : <th className="px-3 py-2 font-medium">None</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pack.rows.slice(0, 40).map((row, i) => (
+                              <tr key={i} className="border-b hover:bg-muted/40">
+                                {columns.map((h) => (
+                                  <td key={h} className={cn("px-3 py-2 whitespace-nowrap", h.includes("lessee") ? "" : "font-mono-num")}>{String(row[h] ?? "")}</td>
+                                ))}
+                              </tr>
                             ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {pack.rows.length > 40 ? <div className="px-2 py-2 text-muted-foreground">Showing 40 of {pack.rows.length}. Export CSV for the full list.</div> : null}
-                  </div>
-                </div>
-              ))}
-            </div>
+                          </tbody>
+                        </table>
+                      </div>
+                      {pack.rows.length > 40 ? <div className="px-3 py-2 text-xs text-muted-foreground border-t">Showing 40 of {pack.rows.length}. Export CSV for the full list.</div> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

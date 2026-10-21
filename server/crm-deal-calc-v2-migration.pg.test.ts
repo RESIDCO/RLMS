@@ -257,12 +257,23 @@ try {
   ok(psql("select has_function_privilege('service_role', 'public.rlms_undo_calc_create_opp(uuid,uuid,text)', 'execute')") === "t", "service_role can execute the wrapper");
   ok(psql("select prosecdef::text from pg_proc where proname = 'rlms_undo_calc_create_opp'") === "true", "wrapper is security definer");
   const createSig = "public.rlms_create_opp_from_calc(text,uuid,uuid,jsonb,jsonb,bigint,jsonb)";
+  const liveCreateMd5 = "4f82a1df36678f828ea814c8d622266f";
+  const guardedCreateMd5 = "563be990e2a57cc71c98ae90d7a20248";
+  ok(psql(`select md5(pg_get_functiondef('${createSig}'::regprocedure))`) === liveCreateMd5, "live create md5 matches the v2 body");
   ok(psql(`select has_function_privilege('anon', '${createSig}', 'execute')`) === "f", "anon cannot execute create-opportunity");
   ok(psql(`select has_function_privilege('authenticated', '${createSig}', 'execute')`) === "f", "authenticated cannot execute create-opportunity");
   ok(psql(`select has_function_privilege('public', '${createSig}', 'execute')`) === "f", "public cannot execute create-opportunity");
   ok(psql(`select has_function_privilege('service_role', '${createSig}', 'execute')`) === "t", "service_role can execute create-opportunity");
   ok(psql("select prosecdef::text from pg_proc where proname = 'rlms_create_opp_from_calc'") === "true", "create-opportunity is security definer");
   ok(psql("select proconfig::text from pg_proc where proname = 'rlms_create_opp_from_calc'").includes("search_path=public, pg_temp"), "create-opportunity search_path is public, pg_temp");
+  psqlFile(join(repo, "migrations/20261124_crm_deal_calc_create_guard.sql"));
+  ok(psql(`select md5(pg_get_functiondef('${createSig}'::regprocedure))`) === guardedCreateMd5, "guard replaces the create function at the measured md5");
+  const guardedFrozen = md5s();
+  ok(guardedFrozen.apply === POST.apply && guardedFrozen.undo === POST.undo && guardedFrozen.referenced === POST.referenced && guardedFrozen.fk === POST.fk, "create guard leaves the frozen functions unchanged");
+  ok(psql(`select has_function_privilege('anon', '${createSig}', 'execute')`) === "f", "anon still cannot execute the guarded create");
+  ok(psql(`select has_function_privilege('authenticated', '${createSig}', 'execute')`) === "f", "authenticated still cannot execute the guarded create");
+  ok(psql(`select has_function_privilege('public', '${createSig}', 'execute')`) === "f", "public still cannot execute the guarded create");
+  ok(psql(`select has_function_privilege('service_role', '${createSig}', 'execute')`) === "t", "service_role can execute the guarded create");
 
   const opp = psql("insert into opportunities (account_id, type, stage, flavor, offering_name) values (1, 'purchase', 'proposal', 'portfolio_bid', 'Linked') returning id");
   const line = psql(`insert into opportunity_lines (opportunity_id, seller_deal_ref, car_count) values (${opp}, '1', 4) returning id`);
@@ -517,13 +528,13 @@ try {
     create trigger trg_rlms_test_fail_log before insert on public.activity_log
       for each row execute function public.rlms_test_fail_after();
   `);
-  function createCall(marker: string, scenarioId: string | null, withLine: boolean): string {
+  function createCall(marker: string, scenarioId: string | null, withLine: boolean, core = "gen_random_uuid()", calc = "gen_random_uuid()"): string {
     const line = withLine
       ? `jsonb_build_object('seller_deal_ref', '1', 'car_count', 2, 'notes', 'Created from the deal calculator')`
       : "null";
     const sid = scenarioId ?? "null";
     return `public.rlms_create_opp_from_calc(
-      'tester', gen_random_uuid(), gen_random_uuid(),
+      'tester', ${core}, ${calc},
       jsonb_build_object('account_id', 1, 'type', 'purchase', 'stage', 'identified', 'source', 'manual', 'offering_name', '${marker}', 'car_count', 2, 'created_by', 'tester'),
       ${line},
       ${sid},
@@ -586,11 +597,53 @@ try {
     drop sequence public.rlms_test_writes;
   `);
 
+  function rowCounts(): string {
+    return psql("select (select count(*) from opportunities)::text || ',' || (select count(*) from opportunity_lines)::text || ',' || (select count(*) from deal_calc_scenarios)::text || ',' || (select count(*) from activity_log)::text");
+  }
+  function uuidArg(id: string): string {
+    return `'${id}'::uuid`;
+  }
+  const keptCounts = rowCounts();
+  const reuseBoth = psqlFails(`select ${createCall("Reuse both", null, true, uuidArg(String(created.core_group)), uuidArg(String(created.calc_group)))}`);
+  ok(/change group already has activity/.test(reuseBoth), "reusing both group ids is refused");
+  ok(rowCounts() === keptCounts, "reusing both group ids writes nothing");
+  const freshCalc = psql("select gen_random_uuid()");
+  const reuseCore = psqlFails(`select ${createCall("Reuse core", null, true, uuidArg(String(created.core_group)), uuidArg(freshCalc))}`);
+  ok(/change group already has activity/.test(reuseCore), "reusing only the core group is refused");
+  ok(psql(`select count(*) from activity_log where change_group = '${freshCalc}'`) === "0", "a refused core reuse leaves the fresh calc group empty");
+  ok(rowCounts() === keptCounts, "reusing only the core group writes nothing");
+  const freshCore = psql("select gen_random_uuid()");
+  const reuseCalc = psqlFails(`select ${createCall("Reuse calc", null, false, uuidArg(freshCore), uuidArg(String(created.calc_group)))}`);
+  ok(/change group already has activity/.test(reuseCalc), "reusing only the calc group is refused");
+  ok(psql(`select count(*) from activity_log where change_group = '${freshCore}'`) === "0", "a refused calc reuse leaves the fresh core group empty");
+  ok(rowCounts() === keptCounts, "reusing only the calc group writes nothing");
+  const seededCore = psql("select gen_random_uuid()");
+  const seededCalc = psql("select gen_random_uuid()");
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, before, after, undoable) values ('opportunity', ${created.opportunity_id}, 'create_opportunity', 'tester', '{"op":"insert"}'::jsonb, '${seededCore}', 'opportunities', ${created.opportunity_id}, '{}'::jsonb, '{"stage":"identified"}'::jsonb, true)`);
+  const seededCounts = rowCounts();
+  const seededCoreFail = psqlFails(`select ${createCall("Seeded core", null, true, uuidArg(seededCore), uuidArg(seededCalc))}`);
+  ok(/change group already has activity/.test(seededCoreFail), "a pre-seeded core group is refused");
+  ok(rowCounts() === seededCounts, "a pre-seeded core group writes nothing");
+  ok(psql(`select count(*) from activity_log where change_group = '${seededCalc}'`) === "0", "a pre-seeded core group leaves the calc group empty");
+  const seededCalcOnly = psql("select gen_random_uuid()");
+  const otherCore = psql("select gen_random_uuid()");
+  psql(`insert into activity_log (entity_type, entity_id, action, actor, detail, change_group, table_name, row_pk, before, after, undoable) values ('deal_calc_scenario', ${created.scenario?.id}, 'create_deal_calc_scenario', 'tester', '{"op":"insert"}'::jsonb, '${seededCalcOnly}', 'deal_calc_scenarios', ${created.scenario?.id}, '{}'::jsonb, '{"name":"seed"}'::jsonb, true)`);
+  const calcSeedCounts = rowCounts();
+  const seededCalcFail = psqlFails(`select ${createCall("Seeded calc", null, false, uuidArg(otherCore), uuidArg(seededCalcOnly))}`);
+  ok(/change group already has activity/.test(seededCalcFail), "a pre-seeded calc group is refused");
+  ok(rowCounts() === calcSeedCounts, "a pre-seeded calc group writes nothing");
+  ok(psql(`select count(*) from opportunities where offering_name = 'Seeded calc'`) === "0", "a pre-seeded calc group leaves no opportunity");
+
   const loose = psql("insert into deal_calc_scenarios (opportunity_id, name, deal_type, method, calc_version, inputs, results) values (null, 'Stay', 'fleet_purchase', 'cash_flow', 'v2', '{}'::jsonb, '{}'::jsonb) returning id");
   const refused = psqlFileFails(join(repo, "migrations/20261123_crm_deal_calc_v2_down.sql"));
   ok(/deal_calc_scenarios have no opportunity/.test(refused), `down refuses null opportunities (${refused.split("\n").find((line) => line.includes("opportunity")) ?? refused.slice(0, 180)})`);
   ok(psql(`select count(*) from deal_calc_scenarios where id = ${loose}`) === "1", "the refused down deletes nothing");
   psql("delete from deal_calc_scenarios where opportunity_id is null");
+  psqlFile(join(repo, "migrations/20261124_crm_deal_calc_create_guard_down.sql"));
+  ok(psql(`select md5(pg_get_functiondef('${createSig}'::regprocedure))`) === liveCreateMd5, "create guard down restores the live create md5");
+  const restoredGuard = md5s();
+  ok(restoredGuard.apply === POST.apply && restoredGuard.undo === POST.undo && restoredGuard.referenced === POST.referenced && restoredGuard.fk === POST.fk, "create guard down leaves the frozen functions unchanged");
+  ok(psql(`select has_function_privilege('anon', '${createSig}', 'execute')`) === "f" && psql(`select has_function_privilege('public', '${createSig}', 'execute')`) === "f" && psql(`select has_function_privilege('service_role', '${createSig}', 'execute')`) === "t", "create guard down keeps execute on service_role only");
   psqlFile(join(repo, "migrations/20261123_crm_deal_calc_v2_down.sql"));
   const restored = md5s();
   ok(restored.apply === POST.apply && restored.undo === POST.undo && restored.referenced === POST.referenced && restored.fk === POST.fk, "down leaves the frozen functions unchanged");

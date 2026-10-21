@@ -15,6 +15,7 @@ import {
   calculatedScenario,
   inputsIgnoringClientResults,
   parseApplyPriceChoice,
+  presentCreateFromCalc,
   presentScenarioList,
   presentStandaloneScenarioList,
   priceForWhich,
@@ -718,7 +719,7 @@ async function resolveAccount(body: Record<string, unknown>): Promise<{ accountI
   return { accountId: Number(matches[0].account_id), companyId: Number(matches[0].id) };
 }
 
-export async function createOpportunityFromCalc(body: Record<string, unknown>, actor: string) {
+export async function createOpportunityFromCalc(body: Record<string, unknown>, actor: string, canSeeNumbers: boolean) {
   const account = await resolveAccount(body);
   const existingId = positiveInt(body.scenario_id);
   const existing = existingId ? await loadScenarioById(existingId) : null;
@@ -785,15 +786,18 @@ export async function createOpportunityFromCalc(body: Record<string, unknown>, a
     calc_group?: string;
   };
   if (!saved.scenario || saved.opportunity_id == null) throw httpError(500, "Create opportunity did not finish");
-  return {
-    opportunity: saved.opportunity ?? null,
-    opportunity_id: Number(saved.opportunity_id),
-    line_id: saved.line_id == null ? null : Number(saved.line_id),
-    scenario: saved.scenario,
-    change_group: saved.change_group ?? calcGroup,
-    core_group: saved.core_group ?? coreGroup,
-    calc_group: saved.calc_group ?? calcGroup,
-  };
+  return presentCreateFromCalc(
+    {
+      opportunity: saved.opportunity ?? null,
+      opportunity_id: Number(saved.opportunity_id),
+      line_id: saved.line_id == null ? null : Number(saved.line_id),
+      scenario: saved.scenario,
+      change_group: saved.change_group ?? calcGroup,
+      core_group: saved.core_group ?? coreGroup,
+      calc_group: saved.calc_group ?? calcGroup,
+    },
+    canSeeNumbers,
+  );
 }
 
 export function isDealCalcOnlyGroup(rows: Array<{ table_name: string | null }>): boolean {

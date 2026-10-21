@@ -180,7 +180,7 @@ export function registerCrmDealCalcRoutes(app: Express) {
       const user = await requireWrite(req, res);
       if (!user) return;
       const body = { ...(req.body ?? {}), scenario_id: Number(req.params.sid) } as Record<string, unknown>;
-      const saved = await createOpportunityFromCalc(body, user);
+      const saved = await createOpportunityFromCalc(body, user, canSeeNumbers(req));
       res.status(201).json(saved);
     } catch (err) {
       sendError(res, err);
@@ -191,7 +191,7 @@ export function registerCrmDealCalcRoutes(app: Express) {
     try {
       const user = await requireWrite(req, res);
       if (!user) return;
-      const saved = await createOpportunityFromCalc((req.body ?? {}) as Record<string, unknown>, user);
+      const saved = await createOpportunityFromCalc((req.body ?? {}) as Record<string, unknown>, user, canSeeNumbers(req));
       res.status(201).json(saved);
     } catch (err) {
       sendError(res, err);

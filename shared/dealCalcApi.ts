@@ -155,6 +155,15 @@ export function presentStandaloneScenarioList<T extends Record<string, unknown>>
   return { numbersHidden: true, scenarios: rows.map((row) => stripScenarioPrices(row)) };
 }
 
+/** Keep the create-opportunity ids. Hide scenario prices when the caller cannot see numbers. */
+export function presentCreateFromCalc<T extends { scenario: Record<string, unknown> }>(
+  saved: T,
+  canSeeNumbers: boolean,
+): T {
+  if (canSeeNumbers) return saved;
+  return { ...saved, scenario: stripScenarioPrices(saved.scenario) };
+}
+
 export function scenarioWriteRefusal(input: {
   opportunityStage: string | null;
   opportunityOutcome: string | null;

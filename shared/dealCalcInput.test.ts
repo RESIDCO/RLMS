@@ -4,7 +4,7 @@
 import { blurDecimalText, commitDecimalText, isCompleteNumber } from "./dealCalcInput";
 import { clearAllDealCalcDrafts, draftIsNewer, draftStorageKey, readDraft, writeDraft } from "./dealCalcDraft";
 import { directHalfUndoRefusal, linkedUndoBlockedByFiles, routeUndoGroup } from "./dealCalcUndo";
-import { presentStandaloneScenarioList, scenarioWriteRefusal, stripScenarioPrices } from "./dealCalcApi";
+import { presentCreateFromCalc, presentStandaloneScenarioList, scenarioWriteRefusal, stripScenarioPrices } from "./dealCalcApi";
 
 let passed = 0;
 let failed = 0;
@@ -82,6 +82,43 @@ const inputs = stripped.inputs as { testPricePerCar: { value: unknown }; newCarC
 ok(inputs.testPricePerCar.value == null && inputs.sell.endValuePerCar.value == null, "test price and end value are stripped");
 ok(Object.keys(inputs.newCarCostByClass).length === 0, "new-car costs by class are stripped");
 ok(presentStandaloneScenarioList([{ max_bid_per_car: 1 }], false).numbersHidden, "the standalone list hides numbers");
+const created = {
+  opportunity_id: 7,
+  line_id: 3,
+  change_group: "calc",
+  core_group: "core",
+  calc_group: "calc",
+  scenario: {
+    id: 11,
+    opportunity_id: 7,
+    name: "Kept",
+    max_bid_per_car: 10,
+    wayne_bid_per_car: 9,
+    irr: 0.12,
+    npv: 4,
+    target_irr: 0.1,
+    stretch_irr: 0.14,
+    results: { cash: 1 },
+    inputs: {
+      testPricePerCar: { value: 5, source: "user" },
+      newCarCostPerCar: { value: 100, source: "user" },
+      oecPerCar: { value: 80, source: "user" },
+      newCarCostByClass: { boxcar: 90 },
+      sell: { endValuePerCar: { value: 40, source: "user" } },
+    },
+  },
+};
+const hidden = presentCreateFromCalc(created, false);
+const hiddenScenario = hidden.scenario as typeof created.scenario;
+ok(hidden.opportunity_id === 7 && hidden.line_id === 3 && hidden.change_group === "calc", "a hidden create keeps the opportunity and group ids");
+ok(hiddenScenario.id === 11 && hiddenScenario.opportunity_id === 7 && hiddenScenario.name === "Kept", "a hidden create keeps the scenario identity");
+ok(hiddenScenario.max_bid_per_car == null && hiddenScenario.wayne_bid_per_car == null && hiddenScenario.irr == null && hiddenScenario.npv == null, "a hidden create strips bids, IRR, and NPV");
+ok(hiddenScenario.results == null && hiddenScenario.target_irr == null && hiddenScenario.stretch_irr == null, "a hidden create strips results and target rates");
+ok(hiddenScenario.inputs.testPricePerCar.value == null && hiddenScenario.inputs.newCarCostPerCar.value == null && hiddenScenario.inputs.oecPerCar.value == null, "a hidden create strips test price, new-car cost, and OEC");
+ok(Object.keys(hiddenScenario.inputs.newCarCostByClass).length === 0 && hiddenScenario.inputs.sell.endValuePerCar.value == null, "a hidden create strips class costs and end value");
+ok(created.scenario.max_bid_per_car === 10, "stripping a create response leaves the saved row unchanged");
+const shown = presentCreateFromCalc(created, true);
+ok(shown.scenario.max_bid_per_car === 10 && shown.scenario.results != null && shown === created, "a visible create returns the scenario prices");
 ok(scenarioWriteRefusal({ opportunityStage: "won", opportunityOutcome: null, lineOutcome: null })?.status === 409, "a closed opportunity is refused");
 ok(scenarioWriteRefusal({ opportunityStage: "proposal", opportunityOutcome: null, lineOutcome: "won" })?.message === "Line already has an outcome", "a decided line is refused");
 

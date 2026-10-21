@@ -17,6 +17,7 @@ import {
 } from "@shared/undo";
 import { assertLineInsertUndoHasNoOutsideFiles } from "./crm-bid-attachments";
 import { isDealCalcOnlyGroup } from "./crm-deal-calc";
+import { directHalfUndoRefusal, routeUndoGroup } from "@shared/dealCalcUndo";
 
 function asRows(data: unknown): UndoLogRow[] {
   return ((data ?? []) as any[]).map((r) => ({
@@ -162,6 +163,11 @@ export function attachmentStoragePathsRemovedOnUndo(rows: Array<{
     .filter(Boolean);
 }
 
+/** Generic undo of one half of a calc-create pair. The HTTP undo uses the wrapper instead. */
+export function linkedGroupDirectUndoStatus(): { status: 409; error: "linked_group" } {
+  return directHalfUndoRefusal();
+}
+
 export async function applyUndo(group: string, actor: string) {
   const preview = await previewUndo(group, actor);
   if (!preview.ok) {
@@ -171,6 +177,32 @@ export async function applyUndo(group: string, actor: string) {
     throw err;
   }
   const rowsBefore = await loadChangeGroup(group);
+  const route = routeUndoGroup(rowsBefore);
+  if (route.kind === "wrapper") {
+    const otherGroup = route.calcGroup === group ? route.coreGroup : route.calcGroup;
+    const otherPreview = await previewUndo(otherGroup, actor);
+    if (!otherPreview.ok) {
+      const err: any = new Error("Changed since — undo refused");
+      err.status = 409;
+      err.conflicts = otherPreview.conflicts;
+      throw err;
+    }
+    const { data, error } = await supabaseAdmin.rpc("rlms_undo_calc_create_opp", {
+      p_calc: route.calcGroup,
+      p_core: route.coreGroup,
+      p_actor: actor,
+    });
+    if (error) throw error;
+    const result = (data ?? {}) as Record<string, unknown>;
+    if (result.ok === false) {
+      const status = Number(result.status) || 400;
+      const err: any = new Error(String(result.message ?? result.error ?? "undo failed"));
+      err.status = status;
+      err.conflicts = result.conflicts;
+      throw err;
+    }
+    return { ...result, preview, otherPreview };
+  }
   const rpcName = isDealCalcOnlyGroup(rowsBefore) ? "rlms_undo_deal_calc_group" : "rlms_undo_change_group";
   const { data, error } = await supabaseAdmin.rpc(rpcName, {
     p_group: group,

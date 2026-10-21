@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { clearAllDealCalcDrafts } from "@shared/dealCalcDraft";
 import { supabase } from "./supabase";
 
 export type Role = "admin" | "editor" | "viewer" | null;
@@ -168,6 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    if (typeof localStorage !== "undefined") clearAllDealCalcDrafts(localStorage);
     await supabase.auth.signOut();
     sessionStorage.removeItem(NEEDS_PW_KEY);
     setSession(null);

@@ -3,7 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { companyDefaultInputs } from "@shared/dealCalc";
+import { companyDefaultInputs, normalizeInputs } from "@shared/dealCalc";
 import {
   applyPriceRefusal,
   calculatedScenario,
@@ -126,7 +126,7 @@ inputs.sell.endValuePerCar = { value: 60000, source: "user" };
 inputs.method = { value: "both", source: "user" };
 const body = { inputs, results: { irr: 9, verdict: "pass" } };
 const computed = calculatedScenario(inputsIgnoringClientResults(body));
-ok(computed.columns.calc_version === "dc-1.0.0", "server stores calc version");
+ok(computed.columns.calc_version === "v2", "server stores calc version v2");
 ok(computed.columns.irr !== 9, "server ignores client results");
 ok(priceForWhich(computed.result, "wayne") != null, "wayne price comes from the recompute");
 ok(!serverSrc.includes("body.results") && !serverSrc.includes("clientResults"), "server source does not read client results");
@@ -164,7 +164,30 @@ const undoFn = migration.slice(migration.indexOf("create function public.rlms_un
 const logLock = undoFn.indexOf("order by a.id\n    for update");
 ok(logLock >= 0 && logLock < undoFn.indexOf("'already_undone'"), "activity_log rows are locked before the already_undone re-check");
 ok(migration.includes("public.set_updated_at()"), "migration requires set_updated_at");
-ok(migration.includes(JSON.stringify(companyDefaultInputs())), "seed JSON matches companyDefaultInputs()");
+const seedStart = migration.indexOf(`'{"dealType"`);
+const seedEnd = migration.indexOf(`'::jsonb`, seedStart);
+ok(seedStart > 0 && seedEnd > seedStart, "p1 seed JSON is present");
+const seeded = normalizeInputs(JSON.parse(migration.slice(seedStart + 1, seedEnd)));
+ok(seeded.usefulLifeYears.value === 50 && seeded.targetIrr.value === companyDefaultInputs().targetIrr.value, "p1 seed normalizes onto the company defaults");
+ok(!migration.includes("newCarCostByClass"), "p1 seed is not rewritten with v2 costs");
+const v2 = readFileSync(resolve(root, "migrations/20261123_crm_deal_calc_v2.sql"), "utf8");
+const v2down = readFileSync(resolve(root, "migrations/20261123_crm_deal_calc_v2_down.sql"), "utf8");
+ok(v2.includes("6d0fa2812a066a2242a893267fd72347"), "v2 records the p1 deal-calc undo md5");
+ok(v2.includes("79ff0afc077af1b807f4d4399698e514"), "v2 records the new deal-calc undo md5");
+ok(v2.includes("66be7d422ec47e8c711f83c8ca001c79") && v2.includes("fda2979bbd2d37e82c936b0abcdf8927"), "v2 guards the frozen md5s");
+ok(v2.includes("deal_calc_scenarios_line_needs_opp") && v2.includes("deal_calc_scenarios_pin_needs_opp"), "v2 adds the null-opportunity checks");
+ok(v2.includes("rlms_undo_calc_create_opp") && v2.includes("revoke all on function public.rlms_undo_calc_create_opp(uuid, uuid, text) from public, anon, authenticated"), "wrapper execute is revoked from public roles");
+ok(!v2.includes("rlms_apply_jsonb_patch(") || v2.includes("md5(pg_get_functiondef('public.rlms_apply_jsonb_patch'"), "v2 does not replace rlms_apply_jsonb_patch");
+ok(!v2.includes("create or replace function public.rlms_undo_change_group"), "v2 does not replace the frozen undo");
+ok(v2down.includes("have no opportunity; link or delete them first"), "down refuses null opportunities with a count");
+ok(v2down.includes("create or replace function public.rlms_undo_deal_calc_group"), "down recreates the p1 deal-calc undo");
+ok(routeSrc.includes('"/api/deal-calc/scenarios"') && /\/api\/deal-calc\/scenarios", async[\s\S]*?requireWrite/.test(routeSrc), "standalone list is requireWrite");
+ok(routeSrc.includes('"/api/deal-calc/scenarios/:sid/link"') && routeSrc.includes('"/api/deal-calc/scenarios/:sid/unlink"'), "link and unlink routes exist");
+ok(routeSrc.includes("create-opportunity") && routeSrc.includes("requireWrite"), "create opportunity from calc is requireWrite");
+ok(undoSrc.includes("rlms_undo_calc_create_opp") && undoSrc.includes("previewUndo(otherGroup"), "undo previews both groups and calls the wrapper");
+ok(undoSrc.includes("linkedGroupDirectUndoStatus"), "a direct half undo is a 409");
+ok(serverSrc.includes("scenarioWriteRefusal") && serverSrc.includes("An unlinked scenario cannot be pinned"), "link uses the closed-line guard and unlinked pin is 400");
+ok(!serverSrc.includes("master_leases") && !v2.includes("master_leases"), "deal calc v2 does not touch lease tables");
 ok(down.includes("down refused"), "down refuses when data exists");
 ok(down.includes("drop function if exists public.rlms_undo_deal_calc_group(uuid, text)"), "down drops the deal-calc undo function");
 ok(down.includes("66be7d422ec47e8c711f83c8ca001c79"), "down re-checks the md5 guard");

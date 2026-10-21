@@ -100,6 +100,75 @@ export function calculatedScenario(inputs: unknown): {
   return { inputs: normalized, result, columns };
 }
 
+const STRIPPED_ROW_KEYS = [
+  "max_bid_per_car",
+  "wayne_bid_per_car",
+  "irr",
+  "npv",
+  "target_irr",
+  "stretch_irr",
+  "results",
+] as const;
+
+function blankMoney(value: unknown): unknown {
+  if (value == null || typeof value !== "object") return null;
+  return null;
+}
+
+/** Drop prices, bids, test price, result money, and new-car cost / OEC. */
+export function stripScenarioPrices<T extends Record<string, unknown>>(row: T): T {
+  const out: Record<string, unknown> = { ...row };
+  for (const key of STRIPPED_ROW_KEYS) {
+    if (key in out) out[key] = blankMoney(out[key]);
+  }
+  if (out.inputs && typeof out.inputs === "object") {
+    const inputs = structuredClone(out.inputs) as Record<string, unknown>;
+    if (inputs.testPricePerCar && typeof inputs.testPricePerCar === "object") {
+      inputs.testPricePerCar = { ...(inputs.testPricePerCar as object), value: null };
+    }
+    if (inputs.newCarCostPerCar && typeof inputs.newCarCostPerCar === "object") {
+      inputs.newCarCostPerCar = { ...(inputs.newCarCostPerCar as object), value: null };
+    }
+    if (inputs.oecPerCar && typeof inputs.oecPerCar === "object") {
+      inputs.oecPerCar = { ...(inputs.oecPerCar as object), value: null };
+    }
+    inputs.newCarCostByClass = {};
+    const sell = inputs.sell;
+    if (sell && typeof sell === "object") {
+      const sellRow = { ...(sell as Record<string, unknown>) };
+      if (sellRow.endValuePerCar && typeof sellRow.endValuePerCar === "object") {
+        sellRow.endValuePerCar = { ...(sellRow.endValuePerCar as object), value: null };
+      }
+      inputs.sell = sellRow;
+    }
+    out.inputs = inputs;
+  }
+  if (out.results && typeof out.results === "object") out.results = null;
+  return out as T;
+}
+
+export function presentStandaloneScenarioList<T extends Record<string, unknown>>(
+  rows: T[],
+  canSeeNumbers: boolean,
+): { numbersHidden: boolean; scenarios: T[] } {
+  if (canSeeNumbers) return { numbersHidden: false, scenarios: rows };
+  return { numbersHidden: true, scenarios: rows.map((row) => stripScenarioPrices(row)) };
+}
+
+export function scenarioWriteRefusal(input: {
+  opportunityStage: string | null;
+  opportunityOutcome: string | null;
+  lineOutcome: string | null;
+  lineDeleted?: boolean;
+}): { status: number; message: string } | null {
+  if (input.lineDeleted) return { status: 409, message: "Line is deleted" };
+  if (input.lineOutcome != null) return { status: 409, message: "Line already has an outcome" };
+  if (opportunityIsClosed(input.opportunityStage, input.opportunityOutcome)) {
+    return { status: 409, message: "Opportunity is closed" };
+  }
+  return null;
+}
+
 export function presentScenarioList<T extends Record<string, unknown>>(
   rows: T[],
   canSeeNumbers: boolean,

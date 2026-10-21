@@ -1,14 +1,61 @@
 /**
- * Deal calculator P1 (calc version dc-1.0.0).
+ * Deal calculator v2.
  * Pure and deterministic. The browser and the server both call dealCalc
  * so a saved scenario matches the live what-if.
  *
  * Wayne's leveraged bid follows the BFLX workbook: debt is the PV of net
  * rent in advance, equity is the PV of residual, and the unlevered IRR is
  * monthly IRR × 12 on acquisition cost (not the bid) at the first rent date.
+ *
+ * v2 adds straight-line value, a 50-year AAR cap on every car, and a scrap
+ * floor. Old scenarios that never pick a basis or enter a cost keep the
+ * typed end value, so their IRR and max bid do not move.
  */
 
-export const CALC_VERSION = "dc-1.0.0";
+import {
+  AAR_CAP_YEARS,
+  DEFAULT_DISMANTLE_HAUL_PER_CAR,
+  DEFAULT_SCRAP_PER_GROSS_TON,
+  STORAGE_DAYS_PER_MONTH,
+  ageYears,
+  aarLimitDate,
+  clampUsefulLife,
+  inferCarTypeClass,
+  isCarTypeClass,
+  isDepreciationBasis,
+  isTankClass,
+  resolveDepreciationBasis,
+  scrapFloorPerCar,
+  valueAtAge,
+  type CarTypeClass,
+  type DepreciationBasis,
+} from "./dealCalcValue";
+
+export {
+  AAR_CAP_YEARS,
+  CAR_TYPE_CLASSES,
+  DEFAULT_DISMANTLE_HAUL_PER_CAR,
+  DEFAULT_SCRAP_PER_GROSS_TON,
+  DEPRECIATION_BASES,
+  GROSS_TON_LB,
+  STORAGE_DAYS_PER_MONTH,
+  USEFUL_LIFE_BY_CLASS,
+  ageYears,
+  aarLimitDate,
+  clampUsefulLife,
+  classLabel,
+  formatValueOrDash,
+  inferCarTypeClass,
+  isTankClass,
+  lifeDefaultForClass,
+  resolveDepreciationBasis,
+  scrapFloorPerCar,
+  straightLineValue,
+  valueAtAge,
+} from "./dealCalcValue";
+export type { CarTypeClass, DepreciationBasis } from "./dealCalcValue";
+
+export const CALC_VERSION = "v2";
 
 export const DEAL_TYPES = [
   "portfolio_bid",
@@ -46,6 +93,19 @@ export type DealCalcInputs = {
   carType: Sourced<string | null>;
   aarCode: Sourced<string | null>;
   avgBuildYear: Sourced<number | null>;
+  /** Month/year the cars were built. Falls back to January of avg build year. */
+  buildDate: Sourced<string | null>;
+  carTypeClass: Sourced<CarTypeClass | null>;
+  depreciationBasis: Sourced<DepreciationBasis | null>;
+  newCarCostPerCar: Sourced<number | null>;
+  oecPerCar: Sourced<number | null>;
+  tareLb: Sourced<number | null>;
+  scrapPerGrossTon: Sourced<number>;
+  dismantleHaulPerCar: Sourced<number>;
+  /** Kept when the class is not a tank. Left out of the floor until it is. */
+  tankPreScrapCleaningPerCar: Sourced<number | null>;
+  /** Per-type new-car costs from the assumption set. Not a scenario basis by itself. */
+  newCarCostByClass: Partial<Record<CarTypeClass, number>>;
   monthlyRent: Sourced<number>;
   leaseExpiry: Sourced<string | null>;
   lesseeRating: Sourced<string | null>;
@@ -64,7 +124,11 @@ export type DealCalcInputs = {
     rentPct: Sourced<number>;
     termMonths: Sourced<number>;
     remarketingPerCar: Sourced<number>;
+    /** Legacy monthly storage. Kept so old scenarios round-trip exactly. */
     storagePerCarMonth: Sourced<number>;
+    storagePerCarDay: Sourced<number>;
+    /** Shop work between leases. Default 0, so remarketing stays commercial. */
+    makeReadyPerCar: Sourced<number>;
     endValuePerCar: Sourced<number | null>;
   };
   maintPcpm: Sourced<number>;
@@ -157,6 +221,38 @@ export type DealCalcResult = {
   monthlyCashFlows: number[];
   cashFlowStart: string;
   sensitivity: Sensitivity;
+  valuation: DealValuation;
+};
+
+export type DealValuation = {
+  basis: DepreciationBasis | null;
+  basisBadge: string | null;
+  carTypeClass: CarTypeClass;
+  isTank: boolean;
+  lifeYears: number;
+  lifeClamped: boolean;
+  tareLb: number | null;
+  scrapFloor: number | null;
+  ageAtClose: number | null;
+  valueAtClose: number | null;
+  ageAtExpiry: number | null;
+  valueAtExpiry: number | null;
+  valueChange: number | null;
+  aarLimitYear: number | null;
+  yearsLeftAtExpiry: number | null;
+  pastAarAtExpiry: boolean;
+  reletRunsPastLimit: boolean;
+  forcedSell: boolean;
+  endValueSource: "typed" | "sl" | "scrap_floor" | "blank";
+  portfolio: {
+    cars: number;
+    valueAtPurchase: number | null;
+    valueAtExpiry: number | null;
+    avgValueAtPurchase: number | null;
+    avgValueAtExpiry: number | null;
+    totalDecline: number | null;
+    priceToValue: number | null;
+  };
 };
 
 export type Ymd = { y: number; m: number; d: number };
@@ -187,6 +283,16 @@ export function companyDefaultInputs(): DealCalcInputs {
     carType: sourced<string | null>(null),
     aarCode: sourced<string | null>(null),
     avgBuildYear: sourced<number | null>(null),
+    buildDate: sourced<string | null>(null),
+    carTypeClass: sourced<CarTypeClass | null>(null),
+    depreciationBasis: sourced<DepreciationBasis | null>(null),
+    newCarCostPerCar: sourced<number | null>(null),
+    oecPerCar: sourced<number | null>(null),
+    tareLb: sourced<number | null>(null),
+    scrapPerGrossTon: sourced(DEFAULT_SCRAP_PER_GROSS_TON),
+    dismantleHaulPerCar: sourced(DEFAULT_DISMANTLE_HAUL_PER_CAR),
+    tankPreScrapCleaningPerCar: sourced<number | null>(null),
+    newCarCostByClass: {},
     monthlyRent: sourced(0),
     leaseExpiry: sourced<string | null>(null),
     lesseeRating: sourced<string | null>(null),
@@ -206,6 +312,8 @@ export function companyDefaultInputs(): DealCalcInputs {
       termMonths: sourced(36),
       remarketingPerCar: sourced(2500),
       storagePerCarMonth: sourced(0),
+      storagePerCarDay: sourced(0),
+      makeReadyPerCar: sourced(0),
       endValuePerCar: sourced<number | null>(null),
     },
     maintPcpm: sourced(0),
@@ -455,6 +563,45 @@ function textOrNull(value: unknown, fallback: string | null): string | null {
   return text ? text : null;
 }
 
+function readCostByClass(value: unknown): Partial<Record<CarTypeClass, number>> {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Partial<Record<CarTypeClass, number>> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!isCarTypeClass(key)) continue;
+    const parsed = num(raw, Number.NaN);
+    if (Number.isFinite(parsed)) out[key] = parsed;
+  }
+  return out;
+}
+
+/**
+ * Old scenarios store storagePerCarMonth only. Day = month / 30.4, unrounded.
+ * The month is kept and the engine uses it directly, so IRR does not move.
+ * A new day with no month becomes month = day × 30.4.
+ */
+function readStorage(
+  relet: Record<string, unknown>,
+  base: DealCalcInputs,
+): Pick<DealCalcInputs["relet"], "storagePerCarMonth" | "storagePerCarDay"> {
+  const hasMonth = "storagePerCarMonth" in relet && relet.storagePerCarMonth != null;
+  const hasDay = "storagePerCarDay" in relet && relet.storagePerCarDay != null;
+  const month = readSourced(hasMonth ? relet.storagePerCarMonth : undefined, (value) => num(value, 0), base.relet.storagePerCarMonth);
+  if (hasMonth && !hasDay) {
+    return {
+      storagePerCarMonth: month,
+      storagePerCarDay: { value: month.value / STORAGE_DAYS_PER_MONTH, source: month.source },
+    };
+  }
+  const day = readSourced(hasDay ? relet.storagePerCarDay : undefined, (value) => num(value, 0), base.relet.storagePerCarDay);
+  if (!hasMonth) {
+    return {
+      storagePerCarDay: day,
+      storagePerCarMonth: { value: day.value * STORAGE_DAYS_PER_MONTH, source: day.source },
+    };
+  }
+  return { storagePerCarMonth: month, storagePerCarDay: day };
+}
+
 function events(value: unknown): RegEvent[] {
   if (!Array.isArray(value)) return [];
   const out: RegEvent[] = [];
@@ -488,6 +635,16 @@ export function normalizeInputs(raw: unknown): DealCalcInputs {
       const parsed = numOrNull(value, null);
       return parsed == null ? null : Math.trunc(parsed);
     }, base.avgBuildYear),
+    buildDate: readSourced(body.buildDate, (value) => textOrNull(value, null), base.buildDate),
+    carTypeClass: readSourced(body.carTypeClass, (value) => (isCarTypeClass(value) ? value : null), base.carTypeClass),
+    depreciationBasis: readSourced(body.depreciationBasis, (value) => (isDepreciationBasis(value) ? value : null), base.depreciationBasis),
+    newCarCostPerCar: readSourced(body.newCarCostPerCar, (value) => numOrNull(value, null), base.newCarCostPerCar),
+    oecPerCar: readSourced(body.oecPerCar, (value) => numOrNull(value, null), base.oecPerCar),
+    tareLb: readSourced(body.tareLb, (value) => numOrNull(value, null), base.tareLb),
+    scrapPerGrossTon: readSourced(body.scrapPerGrossTon, (value) => num(value, DEFAULT_SCRAP_PER_GROSS_TON), base.scrapPerGrossTon),
+    dismantleHaulPerCar: readSourced(body.dismantleHaulPerCar, (value) => num(value, DEFAULT_DISMANTLE_HAUL_PER_CAR), base.dismantleHaulPerCar),
+    tankPreScrapCleaningPerCar: readSourced(body.tankPreScrapCleaningPerCar, (value) => numOrNull(value, null), base.tankPreScrapCleaningPerCar),
+    newCarCostByClass: readCostByClass(body.newCarCostByClass),
     monthlyRent: readSourced(body.monthlyRent, (value) => num(value, base.monthlyRent.value), base.monthlyRent),
     leaseExpiry: readSourced(body.leaseExpiry, (value) => textOrNull(value, null), base.leaseExpiry),
     lesseeRating: readSourced(body.lesseeRating, (value) => textOrNull(value, null), base.lesseeRating),
@@ -506,7 +663,8 @@ export function normalizeInputs(raw: unknown): DealCalcInputs {
       rentPct: readSourced(relet.rentPct, (value) => num(value, 0.9), base.relet.rentPct),
       termMonths: readSourced(relet.termMonths, (value) => Math.max(0, num(value, 36)), base.relet.termMonths),
       remarketingPerCar: readSourced(relet.remarketingPerCar, (value) => num(value, 2500), base.relet.remarketingPerCar),
-      storagePerCarMonth: readSourced(relet.storagePerCarMonth, (value) => num(value, 0), base.relet.storagePerCarMonth),
+      ...readStorage(relet, base),
+      makeReadyPerCar: readSourced(relet.makeReadyPerCar, (value) => num(value, 0), base.relet.makeReadyPerCar),
       endValuePerCar: readSourced(relet.endValuePerCar, (value) => numOrNull(value, null), base.relet.endValuePerCar),
     },
     maintPcpm: readSourced(body.maintPcpm, (value) => num(value, 0), base.maintPcpm),
@@ -541,6 +699,17 @@ type Flat = {
   n: number;
   carCount: number;
   buildYear: number | null;
+  build: Ymd | null;
+  life: number;
+  lifeClamped: boolean;
+  carClass: CarTypeClass;
+  isTank: boolean;
+  depreciationActive: boolean;
+  basis: DepreciationBasis | null;
+  basisBadge: string | null;
+  basisCost: number | null;
+  tareLb: number | null;
+  floor: number | null;
   monthlyRent: number;
   usefulLifeYears: number;
   makeReadyPerCar: number;
@@ -555,6 +724,7 @@ type Flat = {
   reletTerm: number;
   remarketing: number;
   storage: number;
+  reletMakeReady: number;
   reletEnd: number | null;
   maint: number;
   maintGrowth: number;
@@ -584,6 +754,22 @@ function flatten(inputs: DealCalcInputs, todayIso?: string): Flat {
   const n = leaseEnd ? days360Us(firstRent, leaseEnd) / 30 : 0;
   const sellEnd = inputs.sell.endValuePerCar.value;
   const reletEnd = inputs.relet.endValuePerCar.value ?? sellEnd;
+  const carClass = inputs.carTypeClass.value ?? inferCarTypeClass(inputs.carType.value, inputs.aarCode.value);
+  const life = clampUsefulLife(inputs.usefulLifeYears.value);
+  const basis = resolveDepreciationBasis({
+    explicit: inputs.depreciationBasis.value,
+    newCarCost: inputs.newCarCostPerCar.value,
+    newCarCostSource: inputs.newCarCostPerCar.source,
+    oec: inputs.oecPerCar.value,
+  });
+  const tank = isTankClass(carClass);
+  const floor = scrapFloorPerCar({
+    tareLb: inputs.tareLb.value,
+    scrapPerGrossTon: inputs.scrapPerGrossTon.value,
+    dismantleHaulPerCar: inputs.dismantleHaulPerCar.value,
+    tankCleaningPerCar: inputs.tankPreScrapCleaningPerCar.value,
+    isTank: tank,
+  });
   return {
     dealType: inputs.dealType.value,
     method: inputs.method.value,
@@ -594,6 +780,17 @@ function flatten(inputs: DealCalcInputs, todayIso?: string): Flat {
     n,
     carCount: inputs.carCount.value,
     buildYear: inputs.avgBuildYear.value,
+    build: buildMoment(inputs),
+    life: life.life,
+    lifeClamped: life.clamped,
+    carClass,
+    isTank: tank,
+    depreciationActive: basis.active,
+    basis: basis.basis,
+    basisBadge: basis.badge,
+    basisCost: basis.cost,
+    tareLb: inputs.tareLb.value,
+    floor,
     monthlyRent: inputs.monthlyRent.value,
     usefulLifeYears: inputs.usefulLifeYears.value,
     makeReadyPerCar: inputs.makeReadyPerCar.value,
@@ -608,6 +805,7 @@ function flatten(inputs: DealCalcInputs, todayIso?: string): Flat {
     reletTerm: inputs.relet.termMonths.value,
     remarketing: inputs.relet.remarketingPerCar.value,
     storage: inputs.relet.storagePerCarMonth.value,
+    reletMakeReady: inputs.relet.makeReadyPerCar.value,
     reletEnd,
     maint: inputs.maintPcpm.value,
     maintGrowth: inputs.maintGrowthPct.value,
@@ -629,6 +827,20 @@ function flatten(inputs: DealCalcInputs, todayIso?: string): Flat {
   };
 }
 
+function buildMoment(inputs: DealCalcInputs): Ymd | null {
+  const text = inputs.buildDate.value;
+  const month = text ? /^(\d{4})-(\d{2})$/.exec(text) : null;
+  if (month) return { y: Number(month[1]), m: Number(month[2]), d: 1 };
+  const parsed = parseYmd(text);
+  if (parsed) return parsed;
+  if (inputs.avgBuildYear.value != null) return { y: inputs.avgBuildYear.value, m: 1, d: 1 };
+  return null;
+}
+
+function monthsBetween(start: Ymd, end: Ymd): number {
+  return (end.y - start.y) * 12 + (end.m - start.m);
+}
+
 function rentPayments(flat: Flat): number {
   if (!flat.leaseEnd) return 0;
   let count = 0;
@@ -641,10 +853,75 @@ function rentPayments(flat: Flat): number {
   return count;
 }
 
-function exitValue(flat: Flat, on: Ymd, typed: number | null): number {
-  const age = flat.buildYear == null ? null : on.y - flat.buildYear;
-  if (age != null && age >= flat.usefulLifeYears) return flat.scrap;
-  return typed ?? 0;
+function exitProceeds(flat: Flat, on: Ymd, typed: number | null, forceScrap: boolean): number {
+  const age = ageYears(flat.build, on);
+  const pastCap = age != null && age >= AAR_CAP_YEARS;
+  if (forceScrap || pastCap) return flat.floor ?? 0;
+  if (typed != null) return typed;
+  if (!flat.depreciationActive) return 0;
+  return valueAtAge({
+    age,
+    lifeYears: flat.life,
+    cost: flat.basisCost,
+    floor: flat.floor,
+    depreciationActive: true,
+  }) ?? 0;
+}
+
+type AarHold = {
+  plan: PostLeasePlan;
+  reletTerm: number;
+  forceScrap: boolean;
+  pastAarAtExpiry: boolean;
+  reletRunsPastLimit: boolean;
+  forcedSell: boolean;
+  notices: string[];
+};
+
+/** Re-let that crosses the 50-year cap is cut, or forced to sell when the cap is already past at expiry. */
+function adjustForAar(flat: Flat, plan: PostLeasePlan): AarHold {
+  const none: AarHold = {
+    plan,
+    reletTerm: flat.reletTerm,
+    forceScrap: false,
+    pastAarAtExpiry: false,
+    reletRunsPastLimit: false,
+    forcedSell: false,
+    notices: [],
+  };
+  if (!flat.build || !flat.expiry) return none;
+  const limit = aarLimitDate(flat.build);
+  if (!limit) return none;
+  const pastExpiry = compareYmd(flat.expiry, limit) >= 0;
+  if (plan !== "relet") {
+    return { ...none, pastAarAtExpiry: pastExpiry, notices: pastExpiry ? ["past AAR limit at expiry"] : [] };
+  }
+  if (pastExpiry) {
+    return {
+      plan: "sell",
+      reletTerm: 0,
+      forceScrap: true,
+      pastAarAtExpiry: true,
+      reletRunsPastLimit: false,
+      forcedSell: true,
+      notices: ["past AAR limit at expiry"],
+    };
+  }
+  const rents = rentPayments(flat);
+  const idle = Math.max(0, Math.round(flat.idleMonths));
+  const natural = addMonths(flat.firstRent, rents + idle + Math.max(0, Math.round(flat.reletTerm)));
+  if (compareYmd(natural, limit) <= 0) return none;
+  const start = rents + idle;
+  const limitIndex = Math.max(start, monthsBetween(flat.firstRent, limit));
+  return {
+    plan: "relet",
+    reletTerm: Math.max(0, limitIndex - start),
+    forceScrap: true,
+    pastAarAtExpiry: false,
+    reletRunsPastLimit: true,
+    forcedSell: false,
+    notices: ["re-let runs past limit"],
+  };
 }
 
 type Operating = {
@@ -652,10 +929,13 @@ type Operating = {
   exitIndex: number;
   exitAmount: number;
   lifeReached: boolean;
+  hold: AarHold;
 };
 
 /** Per-car operating flows. Index 0 is the first rent date. Price is not included. */
 function operatingFlows(flat: Flat, plan: PostLeasePlan): Operating {
+  const hold = adjustForAar(flat, plan);
+  const usePlan = hold.plan;
   const rents = rentPayments(flat);
   const flows: number[] = [];
   const push = (index: number, amount: number) => {
@@ -675,12 +955,12 @@ function operatingFlows(flat: Flat, plan: PostLeasePlan): Operating {
   }
   let exitIndex = rents;
   let typed = flat.sellEnd;
-  if (plan === "relet") {
+  if (usePlan === "relet") {
     const idle = Math.max(0, Math.round(flat.idleMonths));
     for (let i = 0; i < idle; i += 1) push(rents + i, -flat.storage);
     const start = rents + idle;
-    push(start, -flat.remarketing);
-    const term = Math.max(0, Math.round(flat.reletTerm));
+    push(start, -(flat.remarketing + flat.reletMakeReady));
+    const term = Math.max(0, Math.round(hold.reletTerm));
     for (let t = 1; t <= term; t += 1) {
       const year = Math.floor((t - 1) / 12);
       const rent = flat.monthlyRent * flat.reletRentPct * Math.pow(1 + flat.rentEscalatorPct, year) * flat.utilizationPct * (1 - flat.creditLossPct);
@@ -692,14 +972,16 @@ function operatingFlows(flat: Flat, plan: PostLeasePlan): Operating {
     typed = flat.reletEnd ?? flat.sellEnd;
   }
   const exitDate = addMonths(flat.firstRent, exitIndex);
-  const amount = flat.leaseEnd || plan === "relet" ? exitValue(flat, exitDate, typed) : 0;
+  const amount = flat.leaseEnd || usePlan === "relet" ? exitProceeds(flat, exitDate, typed, hold.forceScrap) : 0;
   if (amount !== 0) push(exitIndex, amount);
-  const age = flat.buildYear == null ? null : exitDate.y - flat.buildYear;
+  const age = ageYears(flat.build, exitDate);
+  const lifeReached = (age != null && age >= flat.life) || (flat.buildYear != null && exitDate.y - flat.buildYear >= flat.usefulLifeYears);
   return {
     flows,
     exitIndex,
     exitAmount: amount,
-    lifeReached: age != null && age >= flat.usefulLifeYears,
+    lifeReached,
+    hold,
   };
 }
 
@@ -934,6 +1216,10 @@ function evaluate(flat: Flat): Core {
     flags.push("Maintenance is more than 25% of rent.");
   }
   if (operating.lifeReached) flags.push("Cars reach useful life before the hold ends.");
+  if (flat.lifeClamped) flags.push("Useful life is above the 50-year AAR cap and was clamped to 50.");
+  for (const notice of operating.hold.notices) {
+    if (!flags.includes(notice)) flags.push(notice);
+  }
   if (flat.n > 0 && flat.n < 12) flags.push("Remaining term is under 12 months.");
   const share = cash.residualShare;
   if (share != null && share > 0.5 && flat.n > 0 && flat.n < 36) {
@@ -980,7 +1266,66 @@ function evaluate(flat: Flat): Core {
     priceBasis,
     monthlyCashFlows: flows,
     cashFlowStart: formatYmd(flat.firstRent),
+    valuation: valuationOf(flat, operating, priceUsed),
     operating,
+  };
+}
+
+function valuationOf(flat: Flat, operating: Operating, priceUsed: number | null): DealValuation {
+  const at = (on: Ymd | null) => {
+    if (!on) return { age: null as number | null, value: null as number | null };
+    const age = ageYears(flat.build, on);
+    return {
+      age,
+      value: valueAtAge({
+        age,
+        lifeYears: flat.life,
+        cost: flat.basisCost,
+        floor: flat.floor,
+        depreciationActive: flat.depreciationActive,
+      }),
+    };
+  };
+  const close = at(flat.close);
+  const expiry = at(flat.expiry);
+  const cars = flat.carCount;
+  const scale = (value: number | null) => (value == null || !(cars > 0) ? null : value * cars);
+  const typed = flat.postLeasePlan === "relet" ? flat.reletEnd : flat.sellEnd;
+  const past = operating.hold.pastAarAtExpiry || (expiry.age != null && expiry.age >= AAR_CAP_YEARS);
+  let endValueSource: DealValuation["endValueSource"] = "blank";
+  if (operating.hold.forceScrap || past) endValueSource = "scrap_floor";
+  else if (typed != null) endValueSource = "typed";
+  else if (flat.depreciationActive && expiry.value != null) endValueSource = "sl";
+  const limit = aarLimitDate(flat.build);
+  return {
+    basis: flat.depreciationActive ? flat.basis : null,
+    basisBadge: flat.depreciationActive ? flat.basisBadge : null,
+    carTypeClass: flat.carClass,
+    isTank: flat.isTank,
+    lifeYears: flat.life,
+    lifeClamped: flat.lifeClamped,
+    tareLb: flat.tareLb,
+    scrapFloor: flat.floor,
+    ageAtClose: close.age,
+    valueAtClose: close.value,
+    ageAtExpiry: expiry.age,
+    valueAtExpiry: expiry.value,
+    valueChange: close.value != null && expiry.value != null ? expiry.value - close.value : null,
+    aarLimitYear: limit ? limit.y : null,
+    yearsLeftAtExpiry: expiry.age == null ? null : Math.max(0, flat.life - expiry.age),
+    pastAarAtExpiry: past,
+    reletRunsPastLimit: operating.hold.reletRunsPastLimit,
+    forcedSell: operating.hold.forcedSell,
+    endValueSource,
+    portfolio: {
+      cars,
+      valueAtPurchase: scale(close.value),
+      valueAtExpiry: scale(expiry.value),
+      avgValueAtPurchase: close.value,
+      avgValueAtExpiry: expiry.value,
+      totalDecline: close.value != null && expiry.value != null && cars > 0 ? (close.value - expiry.value) * cars : null,
+      priceToValue: priceUsed != null && close.value != null && close.value !== 0 ? priceUsed / close.value : null,
+    },
   };
 }
 
@@ -1256,6 +1601,26 @@ export function buildInputsFromLine(args: {
   const price = line.final_price_per_car ?? line.prelim_price_per_car;
   if (price != null) inputs.testPricePerCar = sourced(price, "line");
   return inputs;
+}
+
+/**
+ * Copy per-type new-car costs from an assumption set onto a new scenario.
+ * Saved scenarios are not passed through this, so a later edit to the default
+ * set does not change them.
+ */
+export function applyAssumptionSetCosts(
+  inputs: DealCalcInputs,
+  costs: Partial<Record<CarTypeClass, number>>,
+): DealCalcInputs {
+  const next = structuredClone(normalizeInputs(inputs));
+  next.newCarCostByClass = { ...costs };
+  const carClass = next.carTypeClass.value ?? inferCarTypeClass(next.carType.value, next.aarCode.value);
+  const cost = costs[carClass];
+  if (cost != null && next.newCarCostPerCar.value == null) {
+    next.newCarCostPerCar = { value: cost, source: "company" };
+    if (next.carTypeClass.value == null) next.carTypeClass = { value: carClass, source: "company" };
+  }
+  return next;
 }
 
 export function resetInput<K extends keyof DealCalcInputs>(current: DealCalcInputs, baseline: DealCalcInputs, key: K): DealCalcInputs {

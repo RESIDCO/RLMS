@@ -321,6 +321,27 @@
 .repair-row-alt { background-color: var(--repair-row-alt); }
 .repair-page-bg { background-color: var(--repair-bg); color: var(--repair-text); }
 
+.repair-owner-ui :focus-visible {
+  outline: 2px solid var(--repair-focus);
+  outline-offset: 2px;
+}
+.repair-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--repair-border-strong);
+  background-color: var(--repair-surface);
+  color: var(--repair-text);
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.repair-chip-ok { background-color: var(--repair-row-alt); color: var(--repair-text); }
+.repair-chip-warn { background-color: var(--repair-badge-bg); color: var(--repair-badge-text); }
+.repair-chip-stop { background-color: var(--repair-brand); color: var(--repair-btn-primary-text); }
+.repair-chip-info { background-color: var(--repair-panel-muted); color: var(--repair-text); }
+
 .repair-owner-ui label,
 .repair-owner-ui legend,
 .repair-owner-ui dt,

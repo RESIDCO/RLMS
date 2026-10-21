@@ -13,7 +13,9 @@ export type RefLookupKind =
   | "condition"
   | "responsibility"
   | "car_part"
-  | "category";
+  | "category"
+  | "detail_source"
+  | "facility_type";
 
 export type RefLookupHit = {
   kind: RefLookupKind;
@@ -534,15 +536,78 @@ export async function lookupRefCode(opts: {
         },
       ]);
     }
-    default:
+    case "detail_source":
+      return staticCode(opts.kind, code, DETAIL_SOURCE_LABELS);
+    case "facility_type":
+      return staticCode(opts.kind, code, FACILITY_TYPE_LABELS);
+    default: {
+      const _exhaustive: never = opts.kind;
       return {
-        kind: opts.kind,
+        kind: _exhaustive,
         code,
         found: false,
         description: NOT_FOUND,
         fromTable: "none",
       };
+    }
   }
+}
+
+const DETAIL_SOURCE_LABELS: Record<string, string> = {
+  BR: "Billing repair",
+  GB: "Billing repair, group",
+  DC: "Defect card",
+  DM: "Defect card material",
+  DE: "Defect card exception",
+  MA: "Maintenance advisory",
+  JI: "Joint inspection",
+  JD: "Joint inspection defect",
+  RE: "Rebuttal",
+  JR: "Joint inspection rebuttal",
+  DR: "Defect card rebuttal",
+  CB: "Counter billing / credit",
+  OT: "Other",
+  SH: "Shop",
+  ZZ: "Invoice total",
+  EE: "Electronic exception",
+  RS: "Resubmit",
+  RJ: "Return unpaid",
+  EZ: "Exception summary",
+};
+
+const FACILITY_TYPE_LABELS: Record<string, string> = {
+  RT: "Repair track",
+  BS: "Back shop",
+  CS: "Contract shop",
+  LS: "Line of road shop",
+  MC: "Mobile / contract",
+};
+
+function staticCode(
+  kind: RefLookupKind,
+  code: string,
+  labels: Record<string, string>,
+): RefLookupHit {
+  const key = code.trim().toUpperCase();
+  const description = labels[key];
+  if (!description) {
+    return {
+      kind,
+      code,
+      found: false,
+      description: NOT_FOUND,
+      fromTable: "none",
+    };
+  }
+  return {
+    kind,
+    code: key,
+    found: true,
+    description,
+    source: "field-note",
+    fromTable: "public-field-notes",
+    active: true,
+  };
 }
 
 export async function getRefDataCounts(tenantId = DEFAULT_TENANT_ID) {

@@ -899,6 +899,7 @@ async function main() {
     "component_id_rules",
     "job_code_prices",
     "missed_pod_reasons",
+    "audit_rules",
   ];
   if (tabs.length !== expectedRefTabs.length) {
     bad("ref tabs", `expected ${expectedRefTabs.length} got ${tabs.length}`);

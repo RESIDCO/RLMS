@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
+import AuditRulesPanel from "./AuditRulesPanel";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { WorkspaceBanner } from "./WorkspaceTitle";
 import { useRepairTheme } from "./repairTheme";
@@ -74,6 +75,12 @@ function RefDataBody() {
   }, []);
 
   const loadRows = useCallback(async () => {
+    if (tableKey === "audit_rules") {
+      setLoading(false);
+      setRows([]);
+      setError("");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -349,6 +356,10 @@ function RefDataBody() {
           </div>
         ) : null}
 
+        {tableKey === "audit_rules" ? (
+          <AuditRulesPanel />
+        ) : (
+        <>
         <div className={`border rounded-md p-3 space-y-2 ${panel}`}>
           <div className="flex flex-wrap gap-2 items-end">
             <div className="flex-1 min-w-[12rem]">
@@ -613,6 +624,8 @@ function RefDataBody() {
             </ul>
           </div>
         ) : null}
+        </>
+        )}
       </div>
     </div>
   );

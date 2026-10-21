@@ -76,6 +76,8 @@ export const LOCAL_MIGRATE_SQL_FILES = [
   "modules/repair/migrations/20261016_repair_owner_ui_h_invoice.sql",
   "modules/repair/migrations/20261016_repair_owner_ui_h_invoice_r2.sql",
   "modules/repair/migrations/20261016_repair_owner_ui_h_invoice_r3.sql",
+  "modules/repair/migrations/20261021_repair_owner_ui_i_crb.sql",
+  "modules/repair/migrations/20261021_repair_owner_ui_i_crb_r2.sql",
 ] as const;
 
 /**

@@ -337,13 +337,31 @@ async function recordChange(opts: {
 }
 
 export function listRefTableMeta() {
-  return REF_TABLES.map((t) => ({
-    key: t.key,
-    label: t.label,
-    table: t.table,
-    naturalKey: t.naturalKey,
-    columns: t.columns,
-  }));
+  return [
+    ...REF_TABLES.map((t) => ({
+      key: t.key,
+      label: t.label,
+      table: t.table,
+      naturalKey: t.naturalKey,
+      columns: t.columns,
+    })),
+    {
+      key: "audit_rules",
+      label: "Audit Rules",
+      table: "repair.audit_rules",
+      naturalKey: ["code", "version"],
+      columns: [
+        "code",
+        "name",
+        "severity",
+        "enabled",
+        "version",
+        "effective_from",
+        "effective_to",
+        "params",
+      ],
+    },
+  ];
 }
 
 export async function listRefRows(opts: {

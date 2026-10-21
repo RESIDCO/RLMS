@@ -333,6 +333,7 @@ import { getEmailProvider } from "./providers/email";
 import { getInboundEmailProvider } from "./providers/inbound-email";
 import { getStorageProvider } from "./providers/storage";
 import { DEFAULT_TENANT_ID, q } from "./db";
+import { registerCrbRoutes } from "./server/crb/http";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -4342,7 +4343,9 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
       | "condition"
       | "responsibility"
       | "car_part"
-      | "category";
+      | "category"
+      | "detail_source"
+      | "facility_type";
     const hit = await lookupRefCode({
       kind,
       code: String(req.query.code ?? ""),
@@ -5141,4 +5144,6 @@ export function registerRepairAuthedRoutes(app: Express, deps: RepairRouteDeps =
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json(result);
   });
+
+  registerCrbRoutes(app);
 }

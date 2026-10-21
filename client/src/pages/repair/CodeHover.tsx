@@ -14,7 +14,9 @@ export type CodeHoverKind =
   | "qualifier"
   | "removed_qualifier"
   | "car_part"
-  | "category";
+  | "category"
+  | "detail_source"
+  | "facility_type";
 
 function formatTip(code: string, found: boolean, description: string): string {
   const c = (code || "").trim() || "—";

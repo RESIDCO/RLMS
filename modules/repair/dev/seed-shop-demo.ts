@@ -36,6 +36,7 @@ import { enterPodErd } from "../services/pod";
 import { parseAarFile, serializeLine } from "../services/aar-parser";
 import { migrateLocal } from "./migrate-local";
 import { seedInvoiceExamples } from "./seed-invoice-examples";
+import { seedCrbDemo } from "./seed-crb-demo";
 import { approveOwnerInvoice } from "../services/invoice-review";
 import { createMultiCarInvoice } from "../services/multi-car-invoice";
 import {
@@ -1298,6 +1299,9 @@ async function main() {
     }
     ok("assert DEMO 100005 single event + invoice re-pointed");
   }
+
+  await seedCrbDemo();
+  ok("§I CRB demo seeded");
 
   console.log("=== repair:seed-shop-demo PASS ===");
   console.log(`Shop mark: ${DEMO_SHOP_MARK}`);

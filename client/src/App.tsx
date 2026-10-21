@@ -55,6 +55,9 @@ import ShopPortal from "@/pages/repair/ShopPortal";
 import ShopBoDetail from "@/pages/repair/ShopBoDetail";
 import ShopEstimateDetail from "@/pages/repair/ShopEstimateDetail";
 import InvoiceQueue from "@/pages/repair/InvoiceQueue";
+import CrbHome from "@/pages/repair/CrbHome";
+import CrbInvoice from "@/pages/repair/CrbInvoice";
+import CrbCar from "@/pages/repair/CrbCar";
 import InvoiceReview from "@/pages/repair/InvoiceReview";
 import PaymentBatches from "@/pages/repair/PaymentBatches";
 import AccountingMonths from "@/pages/repair/AccountingMonths";
@@ -145,6 +148,9 @@ function AppRouter() {
       <Route path="/repair/outbound-dispos" component={RepairComingSoon} />
       <Route path="/repair/invoices/:id" component={InvoiceReview} />
       <Route path="/repair/invoices" component={InvoiceQueue} />
+      <Route path="/repair/crb/invoice/:id/car/:carId" component={CrbCar} />
+      <Route path="/repair/crb/invoice/:id" component={CrbInvoice} />
+      <Route path="/repair/crb" component={CrbHome} />
       <Route path="/repair/payments" component={PaymentBatches} />
       <Route path="/repair/months" component={AccountingMonths} />
       <Route path="/repair/shop/multi-car-invoice" component={ShopMultiCarInvoice} />

@@ -3,7 +3,7 @@
  * Dense master rows, car children, line grandchildren.
  * Bulk action is mark reviewed only. Approval stays on the car or invoice.
  */
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { RepairBreadcrumbs } from "./RepairNavChrome";
@@ -93,6 +93,8 @@ export default function CrbHome() {
   const [carDraft, setCarDraft] = useState("");
   const [carQuery, setCarQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expandSignal, setExpandSignal] = useState(0);
+  const listGen = useRef(0);
 
   const tokens = crbCarTokens(carQuery);
 
@@ -182,6 +184,21 @@ export default function CrbHome() {
     });
   }
 
+  async function expandAllInvoices() {
+    const gen = ++listGen.current;
+    const ids = invoices.map((inv) => inv.id);
+    await Promise.all(ids.map((id) => refreshInvoice(id)));
+    if (gen !== listGen.current) return;
+    setOpen(new Set(ids));
+    setExpandSignal((n) => n + 1);
+  }
+
+  function collapseAllInvoices() {
+    listGen.current += 1;
+    setOpen(new Set());
+    setExpandSignal(0);
+  }
+
   async function toggleInvoice(id: string) {
     const next = new Set(open);
     if (next.has(id)) {
@@ -266,6 +283,14 @@ export default function CrbHome() {
 
         <div className="crb-worklist">
           <div className="overflow-x-auto">
+            <div className="flex flex-wrap gap-2 mb-2">
+              <button type="button" className={repairUi.btnSecondary} aria-label="Expand all invoices" onClick={() => void expandAllInvoices().catch((err) => setError(err instanceof Error ? err.message : "Expand failed"))}>
+                Expand all
+              </button>
+              <button type="button" className={repairUi.btnSecondary} aria-label="Collapse all invoices" onClick={collapseAllInvoices}>
+                Collapse all
+              </button>
+            </div>
             <table className="crb-grid">
               <thead>
                 <tr>
@@ -321,6 +346,7 @@ export default function CrbHome() {
                                 invoiceId={inv.id}
                                 cars={detail.cars}
                                 tokens={tokens}
+                                expandSignal={expandSignal}
                                 onChanged={async () => {
                                   await load();
                                   await refreshInvoice(inv.id);

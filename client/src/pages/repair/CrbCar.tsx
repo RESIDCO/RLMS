@@ -8,8 +8,8 @@ import { Link, useLocation, useRoute } from "wouter";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { RepairBreadcrumbs, shopAa } from "./RepairNavChrome";
 import { repairUi } from "./repairTokens";
-import { CodeHover } from "./CodeHover";
-import { CrbChip, crbJson, crbMoney, toneForStatus } from "./CrbUi";
+import { CrbBillingLines, type CrbBillingLine } from "./CrbGrid";
+import { CrbChip, crbJson, toneForStatus } from "./CrbUi";
 
 type Finding = {
   id: string;
@@ -24,24 +24,11 @@ type Finding = {
   amount_in_question_cents: number;
   invalid: boolean;
 };
-type Line = {
-  id: string;
-  line_number: string | null;
+type Line = CrbBillingLine & {
   detail_source: string | null;
-  applied_job_code: string | null;
-  applied_qualifier: string | null;
-  why_made: string | null;
-  location_on_car: string | null;
   condition_code: string | null;
-  responsibility: string | null;
   facility_type: string | null;
-  labor_cents: number;
-  material_cents: number;
-  narrative: string | null;
-  status: string;
   bucket_hint: string | null;
-  raw_line?: string | null;
-  proposed_corrections: Record<string, { value?: string; reason?: string }> | null;
 };
 type Car = {
   id: string;
@@ -207,8 +194,6 @@ export default function CrbCar() {
     );
   }
 
-  const findingsFor = (lineId: string) => car.findings.filter((f) => f.target_id === lineId || (f.scope === "CAR" && f.target_id === car.id));
-
   return (
     <RepairOwnerShell>
       <div className={`${shopAa.page} p-3 space-y-3 max-w-[1100px]`}>
@@ -260,23 +245,24 @@ export default function CrbCar() {
           </button>
         </div>
 
-        {car.lines.map((line) => (
-          <article key={line.id} className={`${repairUi.panel} p-3 space-y-1`}>
-            <div className="flex flex-wrap gap-2 items-center">
-              <strong>Line {line.line_number}</strong>
-              <CrbChip tone="info">{line.detail_source}</CrbChip>
-              <CodeHover kind="detail_source" code={line.detail_source}><span className={repairUi.link}>{line.detail_source}</span></CodeHover>
-              <CodeHover kind="job" code={line.applied_job_code}><span>Job {line.applied_job_code}</span></CodeHover>
-              <CodeHover kind="qualifier" code={line.applied_job_code} qualifier={line.applied_qualifier}><span>Qual {line.applied_qualifier}</span></CodeHover>
-              <CodeHover kind="why_made" code={line.why_made}><span>WM {line.why_made}</span></CodeHover>
-              <CodeHover kind="location" code={line.location_on_car}><span>Loc {line.location_on_car}</span></CodeHover>
-              <CodeHover kind="condition" code={line.condition_code}><span>Cond {line.condition_code}</span></CodeHover>
-              <CodeHover kind="responsibility" code={line.responsibility}><span>Resp {line.responsibility}</span></CodeHover>
-              <CodeHover kind="facility_type" code={line.facility_type}><span>Fac {line.facility_type}</span></CodeHover>
-              <span>{crbMoney(Number(line.labor_cents) + Number(line.material_cents))}</span>
-              <CrbChip tone={toneForStatus(line.status)}>{line.status}</CrbChip>
+        <CrbBillingLines
+          lines={car.lines}
+          findings={car.findings}
+          onReject={(lineId) => {
+            setReason("");
+            setModal({ kind: "reject-line", lineId });
+          }}
+          onOverride={(lineId, finding) => {
+            setReason("");
+            setModal({ kind: "override", scope: "LINE", targetId: lineId, finding });
+          }}
+          lineExtras={(line) => (
+            <div className="space-y-1">
+              {line.narrative ? <p>{line.narrative}</p> : null}
               {line.bucket_hint ? <CrbChip tone="info">{line.bucket_hint}</CrbChip> : null}
-              <button type="button" className={repairUi.btnSecondary} onClick={() => { setReason(""); setModal({ kind: "reject-line", lineId: line.id }); }}>Reject line</button>
+              {line.proposed_corrections && Object.keys(line.proposed_corrections).length > 0 ? (
+                <p className={shopAa.muted}>Proposed: {JSON.stringify(line.proposed_corrections)}</p>
+              ) : null}
               <button
                 type="button"
                 className={repairUi.btnSecondary}
@@ -289,32 +275,10 @@ export default function CrbCar() {
               >
                 Pencil
               </button>
+              {rawOn && line.raw_line ? <pre className="whitespace-pre-wrap break-all text-xs">{line.raw_line}</pre> : null}
             </div>
-            <p>{line.narrative}</p>
-            {line.proposed_corrections && Object.keys(line.proposed_corrections).length > 0 ? (
-              <p className={shopAa.muted}>Proposed: {JSON.stringify(line.proposed_corrections)}</p>
-            ) : null}
-            {findingsFor(line.id).map((finding) => (
-              <p key={finding.id}>
-                <CrbChip tone={finding.invalid ? "info" : toneForStatus(finding.severity || "WARN")}>
-                  {finding.invalid ? "INVALID" : finding.severity || "WARN"}
-                </CrbChip>{" "}
-                {finding.rule_code} v{finding.rule_version} {finding.rule_ref ? `(${finding.rule_ref})` : ""} — {finding.message} {finding.status}
-                <button
-                  type="button"
-                  className={`${repairUi.btnSecondary} ml-2`}
-                  onClick={() => {
-                    setReason("");
-                    setModal({ kind: "override", scope: "LINE", targetId: line.id, finding });
-                  }}
-                >
-                  Override
-                </button>
-              </p>
-            ))}
-            {rawOn && line.raw_line ? <pre className="whitespace-pre-wrap break-all text-xs">{line.raw_line}</pre> : null}
-          </article>
-        ))}
+          )}
+        />
 
         <p><Link className={repairUi.link} href={`/repair/crb/invoice/${car.invoice_id}`}>Back to invoice</Link></p>
 

@@ -536,7 +536,7 @@ export async function getCrbInvoice(id: string): Promise<Record<string, unknown>
   if (!rows[0]) return null;
   const { rows: cars } = await q(
     `SELECT id, car_initial, car_number, kind, status, lessee_name, owned_on_repair_date,
-            line_count, total_cents, flags, lease_id, repair_date,
+            line_count, labor_cents, material_cents, total_cents, flags, lease_id, repair_date,
             (
               SELECT COUNT(*)::int
               FROM repair.audit_findings f
@@ -579,7 +579,7 @@ export async function getCrbCar(carId: string): Promise<Record<string, unknown> 
   );
   if (!rows[0]) return null;
   const { rows: lines } = await q(
-    `SELECT l.*, r.raw_line
+    `SELECT l.*, r.raw_line, r.record_format
      FROM repair.crb_lines l
      LEFT JOIN repair.crb_records r ON r.id = l.record_id
      WHERE l.car_id = $1

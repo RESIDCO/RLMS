@@ -2,10 +2,14 @@
  * §I CRB staging smoke. Local Postgres only.
  * Run: npm run repair:smoke-crb
  */
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { createRequire } from "module";
 import { crc32 } from "node:zlib";
-import { resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import React, { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { CrbBillingLine } from "../../../client/src/pages/repair/CrbGrid";
 import { DEFAULT_TENANT_ID, q } from "../db";
 import { migrateLocal } from "./migrate-local";
 import {
@@ -302,7 +306,108 @@ async function openMonth(): Promise<string> {
   return created[0].id;
 }
 
+function drillDownChecks() {
+  (globalThis as { React?: typeof React }).React = React;
+  const require = createRequire(import.meta.url);
+  const { CrbBillingLines } = require("../../../client/src/pages/repair/CrbGrid.tsx") as {
+    CrbBillingLines: (props: {
+      lines: CrbBillingLine[];
+      findings: Array<{
+        id: string;
+        rule_code: string;
+        rule_version: number;
+        rule_ref: string | null;
+        severity: string | null;
+        scope: string;
+        target_id: string;
+        message: string;
+        status: string;
+        invalid: boolean;
+      }>;
+      onReject: (lineId: string) => void;
+      onOverride: (lineId: string, finding: null) => void;
+    }) => React.ReactElement;
+  };
+  const html = renderToStaticMarkup(
+    createElement(CrbBillingLines, {
+      lines: [
+        {
+          id: "line-1",
+          line_number: "7",
+          sort_order: 7,
+          record_format: "1",
+          applied_job_code: "1001",
+          applied_qualifier: "001",
+          why_made: "01",
+          location_on_car: "A1",
+          quantity: "0004",
+          labor_cents: 30000,
+          material_cents: 5000,
+          material_sign: "D",
+          responsibility: "1",
+          status: "PENDING",
+          parsed: { labor_rate: "10000" },
+        },
+      ],
+      findings: [
+        {
+          id: "f1",
+          rule_code: "DEMO_RULE",
+          rule_version: 1,
+          rule_ref: "OM 112.H.3",
+          severity: "WARN",
+          scope: "LINE",
+          target_id: "line-1",
+          message: "DEMO finding text for the line",
+          status: "OPEN",
+          invalid: false,
+        },
+      ],
+      onReject: () => undefined,
+      onOverride: () => undefined,
+    }),
+  );
+  for (const label of [
+    "Billing lines",
+    "Record format",
+    "Job code",
+    "Why made",
+    "Location / position",
+    "Qty",
+    "Labor hrs",
+    "Labor",
+    "Material",
+    "Total",
+    "Responsibility",
+    "Audit",
+    "Reject",
+    "Override",
+    "DEMO finding text for the line",
+    "crb-lines",
+    ">4<",
+    ">3<",
+  ]) {
+    if (!html.includes(label)) bad("line drill-down render", label);
+  }
+  const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const grid = readFileSync(join(root, "client/src/pages/repair/CrbGrid.tsx"), "utf8");
+  const home = readFileSync(join(root, "client/src/pages/repair/CrbHome.tsx"), "utf8");
+  const invoice = readFileSync(join(root, "client/src/pages/repair/CrbInvoice.tsx"), "utf8");
+  const car = readFileSync(join(root, "client/src/pages/repair/CrbCar.tsx"), "utf8");
+  const seed = readFileSync(join(root, "modules/repair/dev/seed-crb-demo.ts"), "utf8");
+  for (const label of ["Open BRC", "Expand all", "Collapse all", "scope: \"LINE\"", "/lines/"]) {
+    if (!grid.includes(label)) bad("line drill-down wiring", label);
+  }
+  if (!home.includes("CrbCarTable") || !home.includes("Expand all") || !invoice.includes("CrbCarTable")) {
+    bad("line drill-down parents");
+  }
+  if (!car.includes("CrbBillingLines")) bad("car card lines grid");
+  if (!seed.includes("[8, 7, 6, 5, 4, 3, 8, 6]")) bad("demo line counts", "expected cars with 3 to 8 lines");
+  ok("billing-line drill-down renders on the worklist, invoice, and car card");
+}
+
 function pureChecks() {
+  drillDownChecks();
   const layout = assertLayouts();
   if (layout.length) bad("layouts", layout.join("; "));
   ok("column spec contiguous and each format sums to 500");

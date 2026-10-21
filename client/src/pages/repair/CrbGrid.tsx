@@ -1,8 +1,8 @@
 /**
- * Expandable car rows with line grandchildren.
+ * Invoice > car > billing-line drill-down.
  * Approve, override, and reject call the same r1 endpoints and reason rule.
  */
-import { Fragment, useState } from "react";
+import React, { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { CodeHover } from "./CodeHover";
 import { repairUi } from "./repairTokens";
@@ -22,12 +22,14 @@ export type CrbGridCar = {
   lessee_name: string | null;
   owned_on_repair_date: boolean | null;
   line_count: number;
+  labor_cents?: number;
+  material_cents?: number;
   total_cents: number;
   finding_count?: number;
   flags?: string[] | null;
 };
 
-type GridFinding = {
+export type CrbBillingFinding = {
   id: string;
   rule_code: string;
   rule_version: number;
@@ -40,29 +42,41 @@ type GridFinding = {
   invalid: boolean;
 };
 
-type GridLine = {
+export type CrbBillingLine = {
   id: string;
   line_number: string | null;
+  sort_order?: number | null;
+  record_format?: string | null;
   applied_job_code: string | null;
-  applied_qualifier: string | null;
-  location_on_car: string | null;
+  applied_qualifier?: string | null;
   why_made: string | null;
-  responsibility: string | null;
+  location_on_car: string | null;
+  quantity?: string | null;
   labor_cents: number;
   material_cents: number;
+  material_sign?: string | null;
+  responsibility: string | null;
   status: string;
+  parsed?: Record<string, unknown> | null;
+  narrative?: string | null;
+  bucket_hint?: string | null;
+  raw_line?: string | null;
+  proposed_corrections?: Record<string, { value?: string; reason?: string }> | null;
 };
 
 type LoadedCar = {
-  lines: GridLine[];
-  findings: GridFinding[];
+  lines: CrbBillingLine[];
+  findings: CrbBillingFinding[];
 };
 
 type Modal =
   | { kind: "reject"; carId: string }
-  | { kind: "override"; carId: string; finding: GridFinding | null };
+  | { kind: "override"; carId: string; finding: CrbBillingFinding | null }
+  | { kind: "reject-line"; carId: string; lineId: string }
+  | { kind: "override-line"; carId: string; lineId: string; finding: CrbBillingFinding | null };
 
 const REASON_MIN = 8;
+const CAR_COLUMNS = 10;
 
 function ownedLabel(car: CrbGridCar): { text: string; tone: "ok" | "stop" | "info" } {
   const notOwned = car.owned_on_repair_date === false || (car.flags ?? []).some((flag) => flag.includes("NOT_OWNED"));
@@ -71,16 +85,194 @@ function ownedLabel(car: CrbGridCar): { text: string; tone: "ok" | "stop" | "inf
   return { text: "Owned", tone: "ok" };
 }
 
+function qtyLabel(raw: string | null | undefined): string {
+  const text = String(raw ?? "").trim();
+  if (!text) return "—";
+  const n = Number(text);
+  return Number.isFinite(n) ? String(n) : text;
+}
+
+function laborHoursLabel(laborCents: number, parsed: unknown): string {
+  const fields = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  const rate = Number(String(fields.labor_rate ?? "").trim() || "0");
+  if (!Number.isFinite(rate) || rate <= 0) return "—";
+  const hours = Number(laborCents) / rate;
+  return hours.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+function signedMaterialCents(cents: number, sign: string | null | undefined): number {
+  const mag = Math.abs(Number(cents) || 0);
+  return String(sign ?? "").trim().toUpperCase() === "C" ? -mag : mag;
+}
+
+function recordFormatLabel(value: string | null | undefined): string {
+  const text = String(value ?? "").trim();
+  return text || "1";
+}
+
+function modalTitle(modal: Modal): string {
+  switch (modal.kind) {
+    case "reject":
+      return "Reject car";
+    case "override":
+      return `Override ${modal.finding?.rule_code ?? "car"} v${modal.finding?.rule_version ?? ""}`;
+    case "reject-line":
+      return "Reject billing line";
+    case "override-line":
+      return `Override ${modal.finding?.rule_code ?? "line"} v${modal.finding?.rule_version ?? ""}`;
+    default: {
+      const neverModal: never = modal;
+      return `Unhandled action ${String(neverModal)}`;
+    }
+  }
+}
+
+export function CrbBillingLines<F extends CrbBillingFinding>({
+  lines,
+  findings,
+  onReject,
+  onOverride,
+  lineExtras,
+}: {
+  lines: CrbBillingLine[];
+  findings: F[];
+  onReject: (lineId: string) => void;
+  onOverride: (lineId: string, finding: F | null) => void;
+  lineExtras?: (line: CrbBillingLine) => ReactNode;
+}) {
+  const [openFindings, setOpenFindings] = useState<Set<string>>(new Set());
+  return (
+    <div className="crb-lines-wrap">
+      <h3 className="font-semibold">Billing lines ({lines.length})</h3>
+      <table className="crb-grid crb-lines" aria-label="Billing lines">
+        <thead>
+          <tr>
+            <th>Line</th>
+            <th>Record format</th>
+            <th>Job code</th>
+            <th>Why made</th>
+            <th>Location / position</th>
+            <th>Qty</th>
+            <th>Labor hrs</th>
+            <th>Labor</th>
+            <th>Material</th>
+            <th>Total</th>
+            <th>Responsibility</th>
+            <th>Audit</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((line) => {
+            const lineFindings = findings.filter((finding) => finding.target_id === line.id);
+            const primary = lineFindings.find((finding) => finding.scope === "LINE") ?? lineFindings[0] ?? null;
+            const findingText = lineFindings.map((finding) => finding.message).join("\n");
+            const material = signedMaterialCents(line.material_cents, line.material_sign);
+            const total = Number(line.labor_cents) + material;
+            const expanded = openFindings.has(line.id);
+            return (
+              <Fragment key={line.id}>
+                <tr>
+                  <td>{line.line_number?.trim() || (line.sort_order != null ? String(line.sort_order) : "—")}</td>
+                  <td>{recordFormatLabel(line.record_format)}</td>
+                  <td>
+                    <CodeHover kind="job" code={line.applied_job_code}><span>{line.applied_job_code || "—"}</span></CodeHover>
+                    {line.applied_qualifier ? (
+                      <>
+                        {" "}
+                        <CodeHover kind="qualifier" code={line.applied_job_code} qualifier={line.applied_qualifier}>
+                          <span>{line.applied_qualifier}</span>
+                        </CodeHover>
+                      </>
+                    ) : null}
+                  </td>
+                  <td><CodeHover kind="why_made" code={line.why_made}><span>{line.why_made || "—"}</span></CodeHover></td>
+                  <td><CodeHover kind="location" code={line.location_on_car}><span>{line.location_on_car || "—"}</span></CodeHover></td>
+                  <td>{qtyLabel(line.quantity)}</td>
+                  <td>{laborHoursLabel(Number(line.labor_cents), line.parsed)}</td>
+                  <td>{crbMoney(Number(line.labor_cents))}</td>
+                  <td>{crbMoney(material)}</td>
+                  <td>{crbMoney(total)}</td>
+                  <td><CodeHover kind="responsibility" code={line.responsibility}><span>{line.responsibility || "—"}</span></CodeHover></td>
+                  <td>
+                    <button
+                      type="button"
+                      className={repairUi.btnSecondary}
+                      aria-expanded={expanded}
+                      title={findingText || "No line findings."}
+                      onClick={() => {
+                        setOpenFindings((cur) => {
+                          const next = new Set(cur);
+                          if (next.has(line.id)) next.delete(line.id);
+                          else next.add(line.id);
+                          return next;
+                        });
+                      }}
+                    >
+                      {lineFindings.length === 0 ? (
+                        <CrbChip tone="ok">Clear</CrbChip>
+                      ) : lineFindings.map((finding) => (
+                        <CrbChip key={finding.id} tone={finding.invalid ? "info" : toneForStatus(finding.severity || finding.status)}>
+                          {finding.invalid ? "INVALID" : finding.severity || finding.status}
+                        </CrbChip>
+                      ))}
+                    </button>
+                  </td>
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" className={repairUi.btnSecondary} onClick={() => onReject(line.id)}>Reject</button>
+                      <button type="button" className={repairUi.btnSecondary} onClick={() => onOverride(line.id, primary)}>Override</button>
+                    </div>
+                  </td>
+                </tr>
+                {expanded ? (
+                  <tr className="crb-line-findings">
+                    <td colSpan={13}>
+                      {lineFindings.length === 0 ? <p>No line findings.</p> : lineFindings.map((finding) => (
+                        <p key={finding.id}>
+                          <CrbChip tone={finding.invalid ? "info" : toneForStatus(finding.severity || "WARN")}>
+                            {finding.invalid ? "INVALID" : finding.severity || "WARN"}
+                          </CrbChip>{" "}
+                          {finding.rule_code} v{finding.rule_version} {finding.rule_ref ? `(${finding.rule_ref})` : ""} — {finding.message} {finding.status}
+                          <button type="button" className={`${repairUi.btnSecondary} ml-2`} onClick={() => onOverride(line.id, finding)}>
+                            Override
+                          </button>
+                        </p>
+                      ))}
+                    </td>
+                  </tr>
+                ) : null}
+                {lineExtras ? (
+                  <tr>
+                    <td colSpan={13}>{lineExtras(line)}</td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
+          {lines.length === 0 ? (
+            <tr>
+              <td colSpan={13}>No billing lines.</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function CrbCarTable({
   invoiceId,
   cars,
   tokens,
   onChanged,
+  expandSignal = 0,
 }: {
   invoiceId: string;
   cars: CrbGridCar[];
   tokens: string[];
   onChanged: () => Promise<void> | void;
+  expandSignal?: number;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState<Record<string, LoadedCar>>({});
@@ -88,6 +280,18 @@ export function CrbCarTable({
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
+  const expandSeen = useRef(0);
+  const expandGen = useRef(0);
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+
+  async function loadCar(carId: string) {
+    const res = await fetch(`/api/repair/crb/cars/${carId}`);
+    const json = await crbJson<{ lines: CrbBillingLine[]; findings: CrbBillingFinding[] }>(res);
+    const next = { lines: json.lines ?? [], findings: json.findings ?? [] };
+    setLoaded((cur) => ({ ...cur, [carId]: next }));
+    return next;
+  }
 
   async function toggle(carId: string) {
     setError("");
@@ -99,17 +303,36 @@ export function CrbCarTable({
     }
     next.add(carId);
     setOpen(next);
-    if (!loaded[carId]) await loadCar(carId);
+    if (!loadedRef.current[carId]) await loadCar(carId);
   }
 
-  async function loadCar(carId: string) {
-    const res = await fetch(`/api/repair/crb/cars/${carId}`);
-    const json = await crbJson<{ lines: GridLine[]; findings: GridFinding[] }>(res);
-    setLoaded((cur) => ({
-      ...cur,
-      [carId]: { lines: json.lines ?? [], findings: json.findings ?? [] },
-    }));
+  async function expandAll() {
+    const gen = ++expandGen.current;
+    setError("");
+    const ids = cars.map((car) => car.id);
+    setOpen(new Set(ids));
+    await Promise.all(ids.filter((id) => !loadedRef.current[id]).map((id) => loadCar(id)));
+    if (gen !== expandGen.current) return;
   }
+
+  function collapseAll() {
+    expandGen.current += 1;
+    setOpen(new Set());
+  }
+
+  useEffect(() => {
+    if (!expandSignal) {
+      if (expandSeen.current !== 0) {
+        expandSeen.current = 0;
+        expandGen.current += 1;
+        setOpen(new Set());
+      }
+      return;
+    }
+    if (expandSignal === expandSeen.current) return;
+    expandSeen.current = expandSignal;
+    void expandAll().catch((err) => setError(err instanceof Error ? err.message : "Expand failed"));
+  }, [expandSignal]);
 
   async function approve(carId: string) {
     setError("");
@@ -127,33 +350,64 @@ export function CrbCarTable({
   async function submitModal() {
     if (!modal) return;
     setError("");
+    const carId = modal.carId;
     try {
-      if (modal.kind === "reject") {
-        const res = await fetch(`/api/repair/crb/cars/${modal.carId}/decide`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ decision: "REJECTED", reason }),
-        });
-        await crbJson(res);
-        setMsg("Car rejected");
-      } else if (modal.kind === "override") {
-        const res = await fetch("/api/repair/crb/overrides", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            scope: "CAR",
-            targetId: modal.carId,
-            findingId: modal.finding?.id ?? null,
-            reason,
-          }),
-        });
-        await crbJson(res);
-        setMsg("Override recorded");
-      } else {
-        const neverModal: never = modal;
-        throw new Error(`Unhandled action ${String(neverModal)}`);
+      switch (modal.kind) {
+        case "reject": {
+          const res = await fetch(`/api/repair/crb/cars/${modal.carId}/decide`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ decision: "REJECTED", reason }),
+          });
+          await crbJson(res);
+          setMsg("Car rejected");
+          break;
+        }
+        case "override": {
+          const res = await fetch("/api/repair/crb/overrides", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              scope: "CAR",
+              targetId: modal.carId,
+              findingId: modal.finding?.id ?? null,
+              reason,
+            }),
+          });
+          await crbJson(res);
+          setMsg("Override recorded");
+          break;
+        }
+        case "reject-line": {
+          const res = await fetch(`/api/repair/crb/lines/${modal.lineId}/reject`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason }),
+          });
+          await crbJson(res);
+          setMsg("Line rejected");
+          break;
+        }
+        case "override-line": {
+          const res = await fetch("/api/repair/crb/overrides", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              scope: "LINE",
+              targetId: modal.lineId,
+              findingId: modal.finding?.id ?? null,
+              reason,
+            }),
+          });
+          await crbJson(res);
+          setMsg("Override recorded");
+          break;
+        }
+        default: {
+          const neverModal: never = modal;
+          throw new Error(`Unhandled action ${String(neverModal)}`);
+        }
       }
-      const carId = modal.carId;
       setModal(null);
       setReason("");
       if (open.has(carId)) await loadCar(carId);
@@ -164,12 +418,10 @@ export function CrbCarTable({
   }
 
   async function openOverride(car: CrbGridCar) {
-    let findings = loaded[car.id]?.findings;
+    let findings = loadedRef.current[car.id]?.findings;
     if (!findings) {
-      const res = await fetch(`/api/repair/crb/cars/${car.id}`);
-      const json = await crbJson<{ lines: GridLine[]; findings: GridFinding[] }>(res);
-      findings = json.findings ?? [];
-      setLoaded((cur) => ({ ...cur, [car.id]: { lines: json.lines ?? [], findings } }));
+      const loadedCar = await loadCar(car.id);
+      findings = loadedCar.findings;
     }
     const finding = findings.find((row) => row.scope === "CAR" && row.target_id === car.id) ?? findings[0] ?? null;
     setReason("");
@@ -180,6 +432,14 @@ export function CrbCarTable({
     <div className="space-y-2">
       {error ? <div className={`${repairUi.badge} repair-chip-stop`}>{error}</div> : null}
       {msg ? <div className={repairUi.badge}>{msg}</div> : null}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={repairUi.btnSecondary} aria-label="Expand all billing lines" onClick={() => void expandAll().catch((err) => setError(err instanceof Error ? err.message : "Expand failed"))}>
+          Expand all
+        </button>
+        <button type="button" className={repairUi.btnSecondary} aria-label="Collapse all billing lines" onClick={collapseAll}>
+          Collapse all
+        </button>
+      </div>
       <table className="crb-grid crb-grid-nested">
         <thead>
           <tr>
@@ -187,8 +447,10 @@ export function CrbCarTable({
             <th>Lessee</th>
             <th>Owned</th>
             <th>Lines</th>
-            <th>$</th>
-            <th>Findings</th>
+            <th>Labor</th>
+            <th>Material</th>
+            <th>Total</th>
+            <th>Flagged</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
@@ -199,20 +461,24 @@ export function CrbCarTable({
             const match = crbCarListed(car.car_initial, car.car_number, tokens);
             const detail = loaded[car.id];
             const expanded = open.has(car.id);
+            const href = `/repair/crb/invoice/${invoiceId}/car/${car.id}`;
             return (
               <Fragment key={car.id}>
                 <tr className={match ? "crb-match" : undefined}>
                   <td>
-                    <button type="button" className={repairUi.btnSecondary} aria-expanded={expanded} onClick={() => void toggle(car.id).catch((err) => setError(err instanceof Error ? err.message : "Load failed"))}>
+                    <button type="button" className={repairUi.btnSecondary} aria-expanded={expanded} aria-label={`Show billing lines for ${car.car_initial} ${car.car_number}`} onClick={() => void toggle(car.id).catch((err) => setError(err instanceof Error ? err.message : "Load failed"))}>
                       {expanded ? "Hide lines" : "Show lines"}
                     </button>{" "}
-                    <Link className={repairUi.link} href={`/repair/crb/invoice/${invoiceId}/car/${car.id}`}>
+                    <Link className={repairUi.link} href={href}>
                       {car.car_initial} {car.car_number}
-                    </Link>
+                    </Link>{" "}
+                    <Link className={repairUi.btnSecondary} href={href}>Open BRC</Link>
                   </td>
                   <td>{car.lessee_name || "None"}</td>
                   <td><CrbChip tone={owned.tone}>{owned.text}</CrbChip></td>
-                  <td>{car.line_count}</td>
+                  <td>{Number(car.line_count)}</td>
+                  <td>{crbMoney(Number(car.labor_cents ?? 0))}</td>
+                  <td>{crbMoney(Number(car.material_cents ?? 0))}</td>
                   <td>{crbMoney(Number(car.total_cents))}</td>
                   <td>{Number(car.finding_count ?? 0)}</td>
                   <td><CrbChip tone={toneForStatus(car.status)}>{car.status}</CrbChip></td>
@@ -230,37 +496,29 @@ export function CrbCarTable({
                     </div>
                   </td>
                 </tr>
-                {expanded && detail ? detail.lines.map((line) => {
-                  const findings = detail.findings.filter((finding) => finding.target_id === line.id);
-                  return (
-                    <tr key={line.id}>
-                      <td colSpan={8}>
-                        <div className="flex flex-wrap gap-2 items-center">
-                          <span>Line {line.line_number || "—"}</span>
-                          <CodeHover kind="job" code={line.applied_job_code}><span>Job {line.applied_job_code || "—"}</span></CodeHover>
-                          <CodeHover kind="qualifier" code={line.applied_job_code} qualifier={line.applied_qualifier}><span>Qual {line.applied_qualifier || "—"}</span></CodeHover>
-                          <CodeHover kind="location" code={line.location_on_car}><span>Loc {line.location_on_car || "—"}</span></CodeHover>
-                          <CodeHover kind="why_made" code={line.why_made}><span>WM {line.why_made || "—"}</span></CodeHover>
-                          <CodeHover kind="responsibility" code={line.responsibility}><span>Resp {line.responsibility || "—"}</span></CodeHover>
-                          <span>Labor {crbMoney(Number(line.labor_cents))}</span>
-                          <span>Material {crbMoney(Number(line.material_cents))}</span>
-                          <CrbChip tone={toneForStatus(line.status)}>{line.status}</CrbChip>
-                        </div>
-                        {findings.length === 0 ? <p>No line findings.</p> : findings.map((finding) => (
-                          <p key={finding.id}>
-                            <CrbChip tone={finding.invalid ? "info" : toneForStatus(finding.severity || "WARN")}>
-                              {finding.invalid ? "INVALID" : finding.severity || "WARN"}
-                            </CrbChip>{" "}
-                            {finding.rule_code} v{finding.rule_version} {finding.rule_ref ? `(${finding.rule_ref})` : ""} — {finding.message} {finding.status}
-                          </p>
-                        ))}
-                      </td>
-                    </tr>
-                  );
-                }) : null}
+                {expanded && detail ? (
+                  <tr>
+                    <td colSpan={CAR_COLUMNS}>
+                      <CrbBillingLines
+                        lines={detail.lines}
+                        findings={detail.findings}
+                        onReject={(lineId) => {
+                          setReason("");
+                          setError("");
+                          setModal({ kind: "reject-line", carId: car.id, lineId });
+                        }}
+                        onOverride={(lineId, finding) => {
+                          setReason("");
+                          setError("");
+                          setModal({ kind: "override-line", carId: car.id, lineId, finding });
+                        }}
+                      />
+                    </td>
+                  </tr>
+                ) : null}
                 {expanded && !detail ? (
                   <tr>
-                    <td colSpan={8}>Loading lines…</td>
+                    <td colSpan={CAR_COLUMNS}>Loading billing lines…</td>
                   </tr>
                 ) : null}
               </Fragment>
@@ -270,12 +528,8 @@ export function CrbCarTable({
       </table>
       {modal ? (
         <div className={`${repairUi.panel} p-3 space-y-2`} role="dialog" aria-label="Reason">
-          <h3 className="font-semibold">
-            {modal.kind === "override"
-              ? `Override ${modal.finding?.rule_code ?? "car"} v${modal.finding?.rule_version ?? ""}`
-              : "Reject car"}
-          </h3>
-          {modal.kind === "override" && modal.finding ? (
+          <h3 className="font-semibold">{modalTitle(modal)}</h3>
+          {(modal.kind === "override" || modal.kind === "override-line") && modal.finding ? (
             <p>{modal.finding.rule_ref ? `${modal.finding.rule_ref} — ` : ""}{modal.finding.message}</p>
           ) : null}
           <label>

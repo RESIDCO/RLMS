@@ -35,6 +35,8 @@ type CarRow = {
   lessee_name: string | null;
   owned_on_repair_date: boolean | null;
   total_cents: number;
+  labor_cents?: number;
+  material_cents?: number;
   line_count: number;
   finding_count?: number;
 };

@@ -38,6 +38,7 @@ type Spec = {
   load?: string;
   repairingInvoice?: string;
   rate?: number;
+  qty?: number;
   resubmitted?: string;
   lineNo: number;
 };
@@ -74,7 +75,7 @@ function lineRecord(s: Spec): string {
     repairing_party_invoice: s.repairingInvoice ?? "",
     facility_type: "RT",
     location_on_car: s.loc ?? "A1",
-    quantity: 1,
+    quantity: s.qty ?? 1,
     condition_code: "1",
     applied_job_code: s.job ?? "1001",
     applied_qualifier: s.qual ?? "001",
@@ -96,11 +97,12 @@ function lineRecord(s: Spec): string {
   });
 }
 
-function fill(billing: string, invoice: string, cars: Array<{ car: string; num: string }>, perCar: number, labor: number, startLine: number, overrides?: (index: number, carIndex: number) => Partial<Spec>): Spec[] {
+function fill(billing: string, invoice: string, cars: Array<{ car: string; num: string }>, perCar: number | readonly number[], labor: number, startLine: number, overrides?: (index: number, carIndex: number) => Partial<Spec>): Spec[] {
   const out: Spec[] = [];
   let n = startLine;
   cars.forEach((car, carIndex) => {
-    for (let i = 0; i < perCar; i++) {
+    const count = typeof perCar === "number" ? perCar : (perCar[carIndex] ?? 0);
+    for (let i = 0; i < count; i++) {
       const base: Spec = {
         billing,
         invoice,
@@ -165,9 +167,16 @@ async function shopHit(): Promise<ShopHit | null> {
 function buildLines(hit: ShopHit | null): Spec[] {
   const lines: Spec[] = [];
   lines.push(
-    ...fill("DMRA", "INV-DEMO-BAL", cars(100010, 8), 4, 2500, 1, (i, carIndex) => {
+    ...fill("DMRA", "INV-DEMO-BAL", cars(100010, 8), [8, 7, 6, 5, 4, 3, 8, 6], 2500, 1, (i, carIndex) => {
+      const varied: Partial<Spec> = {
+        loc: i === 0 ? "A1" : `B${i}`,
+        qty: (i % 4) + 1,
+        rate: 2500,
+        job: i === 0 ? "1001" : String(1200 + i),
+      };
       if (hit && carIndex === 0 && i === 0) {
         return {
+          ...varied,
           car: hit.car,
           num: hit.num,
           job: hit.job,
@@ -175,12 +184,13 @@ function buildLines(hit: ShopHit | null): Spec[] {
           loc: hit.loc || "A1",
           repair: hit.repair,
           repairingInvoice: hit.invoiceNo,
+          qty: 1,
         };
       }
       if (!hit && carIndex === 0 && i === 0) {
-        return { job: "1001", qual: "001", loc: "A1", repair: "260510" };
+        return { ...varied, job: "1001", qual: "001", loc: "A1", repair: "260510", qty: 1 };
       }
-      return {};
+      return varied;
     }),
   );
   lines.push(...fill("DMRB", "INV-DEMO-OOB", cars(100018, 5), 3, 3000, 100));

@@ -407,6 +407,24 @@
   margin: 0.25rem 0 0.5rem 1.25rem;
   width: calc(100% - 1.25rem);
 }
+.repair-owner-ui .crb-lines-wrap {
+  overflow-x: auto;
+  margin: 0.25rem 0 0.5rem 0.75rem;
+  color: var(--repair-text);
+}
+.repair-owner-ui .crb-lines {
+  background: var(--repair-surface);
+  color: var(--repair-text);
+}
+.repair-owner-ui .crb-lines th,
+.repair-owner-ui .crb-lines td {
+  white-space: nowrap;
+}
+.repair-owner-ui .crb-line-findings td {
+  white-space: normal;
+  background: var(--repair-panel-muted);
+  color: var(--repair-text);
+}
 .repair-owner-ui .crb-field-strip {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));

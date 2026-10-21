@@ -22,6 +22,7 @@ export function assertCrbClientTypecheck(): void {
   const home = readFileSync(join(ROOT, "client/src/pages/repair/CrbHome.tsx"), "utf8");
   const invoice = readFileSync(join(ROOT, "client/src/pages/repair/CrbInvoice.tsx"), "utf8");
   const car = readFileSync(join(ROOT, "client/src/pages/repair/CrbCar.tsx"), "utf8");
+  const grid = readFileSync(join(ROOT, "client/src/pages/repair/CrbGrid.tsx"), "utf8");
   const rules = readFileSync(join(ROOT, "client/src/pages/repair/AuditRulesPanel.tsx"), "utf8");
   const nav = readFileSync(join(ROOT, "client/src/pages/repair/RepairModuleNav.tsx"), "utf8");
   const css = readFileSync(join(ROOT, "client/src/index.css"), "utf8");
@@ -36,6 +37,13 @@ export function assertCrbClientTypecheck(): void {
     bad("worklist", "dense grid labels");
   }
   if (!invoice.includes("crb-field-strip")) bad("invoice", "header strip");
+  for (const label of ["Billing lines", "Record format", "Job code", "Why made", "Location / position", "Labor hrs", "Responsibility", "Open BRC", "Expand all", "Collapse all", "scope: \"LINE\""]) {
+    if (!grid.includes(label)) bad("drill-down", label);
+  }
+  if (!grid.includes("/lines/") || !grid.includes("/reject")) bad("line reject");
+  if (!home.includes("Expand all") || !home.includes("Collapse all") || !home.includes("CrbCarTable")) bad("worklist expand");
+  if (!invoice.includes("CrbCarTable")) bad("invoice grid");
+  if (!car.includes("CrbBillingLines")) bad("car grid");
   if (!car.includes("Worklist")) bad("crumbs", "Worklist");
   if (!invoice.includes("Return unpaid") || !invoice.includes("Approve with exceptions")) bad("invoice actions");
   if (!invoice.includes("Mark filed manually")) bad("filed");
@@ -45,7 +53,7 @@ export function assertCrbClientTypecheck(): void {
   if (!car.includes("next-car") || !car.includes("Raw 500-byte") || !car.includes("proposed")) bad("car tools");
   if (!rules.includes("Clone new version") || !rules.includes("Standing exceptions")) bad("rules tab");
   if (!css.includes(".repair-chip-stop") || !css.includes(":focus-visible")) bad("chips");
-  for (const src of [home, invoice, car, rules]) {
+  for (const src of [home, invoice, car, rules, grid]) {
     if (/#[0-9a-fA-F]{3,8}\b/.test(src)) bad("hex", "CRB page has a hard-coded color");
     if (src.includes("text-slate-400") || src.includes("text-slate-500")) bad("pale");
   }

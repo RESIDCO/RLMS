@@ -15,6 +15,12 @@ export function currentChangeActor(): string | null {
   return als.getStore()?.actor ?? null;
 }
 
+/** Run fn inside an already-chosen change group. Nested groups are refused. */
+export async function withExplicitChangeGroup<T>(group: string, actor: string, fn: () => Promise<T>): Promise<T> {
+  if (als.getStore()) throw new Error("change group already open");
+  return als.run({ group, actor }, fn);
+}
+
 /** One uuid per save / bulk apply. Nested calls reuse the outer group. */
 export async function withChangeGroup<T>(actor: string, fn: (group: string) => Promise<T>): Promise<T> {
   const existing = als.getStore();

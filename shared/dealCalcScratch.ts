@@ -74,6 +74,18 @@ export function dealCalcExportSheets(name: string, result: DealCalcResult): { su
     [`${LEGACY_BID_MODEL_LABEL} IRR`, result.wayne?.irr ?? null],
   ];
   for (const reason of result.reasons) summary.push(["Reason", reason]);
+  summary.push(["Value at purchase vs at lease expiry", ""]);
+  summary.push(["Value basis", result.valuation.basisBadge]);
+  summary.push(["Value at purchase / car", result.valuation.valueAtClose]);
+  summary.push(["Value at lease expiry / car", result.valuation.valueAtExpiry]);
+  summary.push(["Value change / car", result.valuation.valueChange]);
+  summary.push(["Scrap floor / car", result.valuation.scrapFloor]);
+  summary.push(["AAR limit year", result.valuation.aarLimitYear]);
+  summary.push(["Years of life left at expiry", result.valuation.yearsLeftAtExpiry]);
+  summary.push(["Portfolio value at purchase", result.valuation.portfolio.valueAtPurchase]);
+  summary.push(["Portfolio value at expiry", result.valuation.portfolio.valueAtExpiry]);
+  summary.push(["Portfolio value decline", result.valuation.portfolio.totalDecline]);
+  summary.push(["Price / value at purchase", result.valuation.portfolio.priceToValue]);
   const cashFlow: SheetRows = [["Month", "Date", "Cash flow / car"]];
   const start = parseYmd(result.cashFlowStart);
   result.monthlyCashFlows.forEach((flow, index) => {

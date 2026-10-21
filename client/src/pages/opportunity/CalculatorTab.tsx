@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "wouter";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,27 +10,42 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth } from "@/lib/AuthContext";
 import { downloadDealCalcExcel } from "@/lib/dealCalcExcel";
+import { downloadDealCalcPdf } from "@/lib/dealCalcPdf";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { offerUndoToast } from "@/lib/undo";
 import { useToast } from "@/hooks/use-toast";
 import {
   CALC_METHODS,
+  CAR_TYPE_CLASSES,
   DEAL_TYPES,
+  DEPRECIATION_BASES,
+  STORAGE_DAYS_PER_MONTH,
   addMonths,
   buildInputsFromLine,
+  classLabel,
   companyDefaultInputs,
   dealCalc,
+  formatValueOrDash,
   formatYmd,
+  inferCarTypeClass,
+  isTankClass,
+  lifeDefaultForClass,
+  normalizeInputs,
   parseYmd,
   resetInput,
   type CalcMethod,
+  type CarTypeClass,
   type DealCalcInputs,
   type DealCalcResult,
   type DealType,
+  type DepreciationBasis,
   type PostLeasePlan,
   type Sourced,
 } from "@shared/dealCalc";
+import { blurDecimalText, commitDecimalText, formatScaled } from "@shared/dealCalcInput";
+import { clearDraft, draftIsNewer, draftStorageKey, readDraft, writeDraft, type DealCalcDraft } from "@shared/dealCalcDraft";
 import { applyPriceWhichLabel, calcMethodLabel, LEGACY_BID_MODEL_LABEL, pinnedBidFigure, usePriceDisabledReason } from "@shared/dealCalcApi";
 import { applyWhatIf, saveScenarioPayload, scratchInputs } from "@shared/dealCalcScratch";
 import { DEAL_CALC_TOOLTIPS, type DealCalcTooltipKey } from "@shared/dealCalcTooltips";
@@ -53,6 +68,8 @@ type ScenarioRow = {
   npv?: number | null;
   inputs?: DealCalcInputs;
   notes?: string | null;
+  updated_at?: string | null;
+  opportunity_id?: number | null;
 };
 
 type ScenarioList = { numbersHidden: boolean; scenarios: ScenarioRow[] };
@@ -67,6 +84,8 @@ type Props = {
   focusLineId?: number | null;
   /** No opportunity. The run stays in the browser until Save to opportunity. */
   scratch?: boolean;
+  /** Saved standalone scenario to load. */
+  scenarioId?: number | null;
   /** Offline render for the screenshot fixture. Skips the API. */
   preview?: { inputs: DealCalcInputs; viewer?: boolean; scenarios?: ScenarioRow[] };
 };
@@ -75,8 +94,11 @@ export function scenarioQueryKey(opportunityId: number) {
   return ["/api/opportunities", opportunityId, "scenarios"] as const;
 }
 
-export default function CalculatorTab({ opportunityId, opportunity, lines = [], canWrite, focusLineId, scratch = false, preview }: Props) {
+export default function CalculatorTab({ opportunityId, opportunity, lines = [], canWrite, focusLineId, scratch = false, scenarioId = null, preview }: Props) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const urlScenarioLoaded = useRef(false);
+  const [, navigate] = useLocation();
   const qc = useQueryClient();
   const scenarios = useQuery({
     queryKey: scenarioQueryKey(opportunityId),
@@ -103,6 +125,15 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
   const [saveOppId, setSaveOppId] = useState<number | null>(null);
   const [saveLineId, setSaveLineId] = useState<number | null>(null);
   const [savedHref, setSavedHref] = useState<string | null>(null);
+  const [draftBanner, setDraftBanner] = useState<DealCalcDraft<DealCalcInputs> | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createAccount, setCreateAccount] = useState("");
+  const [createCompany, setCreateCompany] = useState("");
+  const [createSource, setCreateSource] = useState("manual");
+  const [createOwner, setCreateOwner] = useState("");
+  const [createLine, setCreateLine] = useState(true);
 
   const selected = rows.find((row) => row.id === selectedId) ?? null;
   const line = lines.find((item) => item.id === (selected?.opportunity_line_id ?? seedLine ?? focusLineId)) ?? null;
@@ -160,8 +191,40 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
     setDirty(false);
   }
 
-  const inputs = draft ?? selected?.inputs ?? baseline;
+  const rawInputs = draft ?? selected?.inputs ?? baseline;
+  const inputs = useMemo(() => normalizeInputs(rawInputs), [rawInputs]);
   const result = useMemo(() => dealCalc(inputs), [inputs]);
+  const draftKey = draftStorageKey(user?.id ?? "anonymous", scratch ? (selectedId ?? scenarioId ?? "scratch") : (selectedId ?? "scratch"));
+
+  useEffect(() => {
+    if (preview || !dirty) return;
+    const handle = window.setTimeout(() => {
+      writeDraft(window.localStorage, draftKey, { inputs, name, notes, savedAt: new Date().toISOString() });
+    }, 1000);
+    return () => window.clearTimeout(handle);
+  }, [dirty, draftKey, inputs, name, notes, preview]);
+
+  useEffect(() => {
+    if (preview) return;
+    const found = readDraft<DealCalcInputs>(window.localStorage, draftKey);
+    const savedAt = selected?.updated_at ?? null;
+    if (found && draftIsNewer(found.savedAt, selected ? savedAt : null)) setDraftBanner(found);
+    else setDraftBanner(null);
+  }, [draftKey, preview, selected]);
+
+  useEffect(() => {
+    if (urlScenarioLoaded.current || scratch || preview || rows.length === 0) return;
+    const sid = Number(new URLSearchParams(window.location.search).get("scenario"));
+    if (!sid) return;
+    const row = rows.find((item) => item.id === sid);
+    if (!row) return;
+    urlScenarioLoaded.current = true;
+    setSelectedId(row.id);
+    setDraft(row.inputs ? normalizeInputs(row.inputs) : null);
+    setName(row.name);
+    setNotes(row.notes ?? "");
+    setDirty(false);
+  }, [preview, rows, scratch]);
 
   function edit(next: DealCalcInputs) {
     setDraft(next);
@@ -183,6 +246,8 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
     },
     onSuccess: (saved) => {
       offerUndoToast(saved);
+      clearDraft(window.localStorage, draftKey);
+      setDraftBanner(null);
       setSelectedId(saved.scenario.id);
       setDirty(false);
       void qc.invalidateQueries({ queryKey: scenarioQueryKey(opportunityId) });
@@ -236,13 +301,111 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
   const openOpps = useQuery({
     queryKey: ["/api/opportunities", "scratch-open"],
     queryFn: () => apiGet<OpportunityRow[]>("/api/opportunities?open=1"),
-    enabled: scratch && saveOpen && !preview,
+    enabled: scratch && (saveOpen || linkOpen) && !preview,
   });
   const oppLines = useQuery({
     queryKey: ["/api/opportunities", saveOppId, "lines"],
     queryFn: () => apiGet<PickerLine[]>(`/api/opportunities/${saveOppId}/lines`),
-    enabled: scratch && saveOpen && !preview && saveOppId != null,
+    enabled: scratch && (saveOpen || linkOpen) && !preview && saveOppId != null,
   });
+  const loadedStandalone = useQuery({
+    queryKey: ["/api/deal-calc/scenarios", scenarioId],
+    queryFn: () => apiGet<{ scenario: ScenarioRow & { inputs: DealCalcInputs } }>(`/api/deal-calc/scenarios/${scenarioId}`),
+    enabled: scratch && !preview && scenarioId != null,
+  });
+  useEffect(() => {
+    const row = loadedStandalone.data?.scenario;
+    if (!row) return;
+    setSelectedId(row.id);
+    setDraft(normalizeInputs(row.inputs));
+    setName(row.name);
+    setNotes(row.notes ?? "");
+    setDirty(false);
+  }, [loadedStandalone.data]);
+
+  const saveStandalone = useMutation({
+    mutationFn: async () => {
+      if (!name.trim()) throw new Error("Name is required");
+      const payload = { name: name.trim(), notes, inputs };
+      const res = selectedId
+        ? await apiRequest("PATCH", `/api/deal-calc/scenarios/${selectedId}`, payload)
+        : await apiRequest("POST", "/api/deal-calc/scenarios", payload);
+      return res.json() as Promise<{ scenario: ScenarioRow; change_group?: string }>;
+    },
+    onSuccess: (saved) => {
+      offerUndoToast(saved);
+      clearDraft(window.localStorage, draftStorageKey(user?.id ?? "anonymous", saved.scenario.id));
+      clearDraft(window.localStorage, draftKey);
+      setDraftBanner(null);
+      setSelectedId(saved.scenario.id);
+      setDirty(false);
+      void qc.invalidateQueries({ queryKey: ["/api/deal-calc/scenarios"] });
+    },
+    onError: (err: Error) => toast({ title: "Could not save scenario", description: err.message, variant: "destructive" }),
+  });
+
+  const unlink = useMutation({
+    mutationFn: async () => {
+      if (!selectedId) throw new Error("Save the scenario first");
+      const res = await apiRequest("POST", `/api/deal-calc/scenarios/${selectedId}/unlink`, {});
+      return res.json() as Promise<{ scenario: ScenarioRow; change_group?: string }>;
+    },
+    onSuccess: (saved) => {
+      offerUndoToast(saved);
+      setDirty(false);
+      void qc.invalidateQueries({ queryKey: ["/api/deal-calc/scenarios"] });
+    },
+    onError: (err: Error) => toast({ title: "Could not unlink", description: err.message, variant: "destructive" }),
+  });
+
+  const linkExisting = useMutation({
+    mutationFn: async () => {
+      if (!selectedId || !saveOppId) throw new Error("Save the scenario, then pick an opportunity");
+      const res = await apiRequest("POST", `/api/deal-calc/scenarios/${selectedId}/link`, {
+        opportunity_id: saveOppId,
+        opportunity_line_id: saveLineId,
+      });
+      return res.json() as Promise<{ scenario: ScenarioRow; change_group?: string }>;
+    },
+    onSuccess: (saved) => {
+      offerUndoToast(saved);
+      setLinkOpen(false);
+      setDirty(false);
+      if (saveOppId) navigate(`/opportunities/${saveOppId}?tab=calculator&scenario=${saved.scenario.id}`);
+    },
+    onError: (err: Error) => toast({ title: "Could not link", description: err.message, variant: "destructive" }),
+  });
+
+  const createOpp = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        name: createName.trim() || name.trim(),
+        deal_type: inputs.dealType.value,
+        account_id: createAccount.trim() ? Number(createAccount) : null,
+        company_name: createCompany.trim() || null,
+        source: createSource,
+        owner: createOwner.trim() || null,
+        include_line: createLine,
+        notes,
+        inputs,
+        scenario_id: selectedId,
+      };
+      const path = selectedId
+        ? `/api/deal-calc/scenarios/${selectedId}/create-opportunity`
+        : "/api/deal-calc/create-opportunity";
+      const res = await apiRequest("POST", path, payload);
+      return res.json() as Promise<{ opportunity_id: number; scenario: ScenarioRow; change_group?: string }>;
+    },
+    onSuccess: (saved) => {
+      offerUndoToast(saved);
+      clearDraft(window.localStorage, draftKey);
+      setCreateOpen(false);
+      setDirty(false);
+      navigate(`/opportunities/${saved.opportunity_id}?tab=calculator&scenario=${saved.scenario.id}`);
+    },
+    onError: (err: Error) => toast({ title: "Could not create the opportunity", description: err.message, variant: "destructive" }),
+  });
+
   const attach = useMutation({
     mutationFn: async () => {
       if (!saveOppId) throw new Error("Pick an opportunity");
@@ -253,6 +416,8 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
     onSuccess: (saved) => {
       offerUndoToast(saved);
       setDirty(false);
+      clearDraft(window.localStorage, draftKey);
+      setDraftBanner(null);
       setSavedHref(saveOppId ? `/opportunities/${saveOppId}?tab=calculator` : null);
       toast({ title: "Saved to the opportunity" });
       if (saveOppId) void qc.invalidateQueries({ queryKey: scenarioQueryKey(saveOppId) });
@@ -306,22 +471,47 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
         <Button type="button" size="sm" variant="outline" onClick={() => { setSelectedId(null); setDraft(structuredClone(baseline)); setName("Scenario"); setDirty(true); }}>New</Button>
         <Button type="button" size="sm" variant="outline" onClick={() => { setSelectedId(null); setDraft(structuredClone(inputs)); setName(`Copy of ${name}`); setDirty(true); }}>Duplicate</Button>
         {scratch ? (
-          <Button type="button" size="sm" data-testid="save-to-opportunity" onClick={() => setSaveOpen(true)}>Save to opportunity</Button>
+          <>
+            <Button type="button" size="sm" disabled={saveStandalone.isPending} onClick={() => saveStandalone.mutate()}>Save</Button>
+            <Button type="button" size="sm" data-testid="save-to-opportunity" onClick={() => setSaveOpen(true)}>Save to opportunity</Button>
+            <Button type="button" size="sm" variant="outline" disabled={!selectedId} onClick={() => { setSaveOppId(null); setLinkOpen(true); }}>Link to opportunity…</Button>
+            <Button type="button" size="sm" variant="outline" disabled={selected?.opportunity_id == null || unlink.isPending} onClick={() => unlink.mutate()}>Unlink</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => { setCreateName(name); setCreateOpen(true); }}>Create opportunity from this calc</Button>
+          </>
         ) : (
           <Button type="button" size="sm" disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>
         )}
         {scratch ? (
-          <Button type="button" size="sm" variant="outline" data-testid="download-excel" onClick={() => downloadDealCalcExcel(name, result)}>Download Excel</Button>
+          <>
+            <Button type="button" size="sm" variant="outline" data-testid="download-excel" onClick={() => downloadDealCalcExcel(name, result)}>Download Excel</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => downloadDealCalcPdf(name, result)}>Download PDF</Button>
+          </>
         ) : (
           <>
             <Button type="button" size="sm" variant="outline" disabled={!selectedId || remove.isPending} onClick={() => remove.mutate()}>Delete</Button>
-            <Button type="button" size="sm" variant="outline" disabled={!selectedId || pin.isPending} onClick={() => pin.mutate()}>{selected?.is_pinned ? "Pinned" : "Pin"}</Button>
+            <Button type="button" size="sm" variant="outline" disabled={!selectedId || pin.isPending || selected?.opportunity_id == null} title={selected?.opportunity_id == null ? "An unlinked scenario cannot be pinned" : undefined} onClick={() => pin.mutate()}>{selected?.is_pinned ? "Pinned" : "Pin"}</Button>
           </>
         )}
         <MethodSwitch value={inputs.method.value} onChange={(method) => edit({ ...inputs, method: { value: method, source: "user" } })} />
-        {scratch ? <span className="text-xs text-muted-foreground" data-testid="scratch-note">Scratch. Nothing is stored until you save to an opportunity.</span> : null}
-        {!scratch && dirty ? <span className="text-xs text-amber-600">Unsaved changes</span> : null}
+        {scratch ? <span className="text-xs text-muted-foreground" data-testid="scratch-note">A draft stays on this computer until you save.</span> : null}
+        {dirty ? <span className="text-xs text-amber-600">Unsaved changes</span> : null}
       </div>
+      {draftBanner ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm" data-testid="draft-banner">
+          <span>Unsaved changes are stored on this computer.</span>
+          <Button type="button" size="sm" onClick={() => {
+            setDraft(normalizeInputs(draftBanner.inputs));
+            setName(draftBanner.name);
+            setNotes(draftBanner.notes);
+            setDirty(true);
+            setDraftBanner(null);
+          }}>Restore unsaved changes</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => {
+            clearDraft(window.localStorage, draftKey);
+            setDraftBanner(null);
+          }}>Discard</Button>
+        </div>
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
         <div className="space-y-4">
           <Group title="Deal & timing">
@@ -331,10 +521,45 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
           </Group>
           <Group title="Cars">
             <NumField label="Cars" tip="carCount" sourced={inputs.carCount} onChange={(value) => edit({ ...inputs, carCount: { value: value ?? 0, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "carCount"))} />
-            <TextField label="Car type" tip="carType" sourced={inputs.carType} onChange={(value) => edit({ ...inputs, carType: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "carType"))} />
-            <TextField label="AAR" tip="aarCode" sourced={inputs.aarCode} onChange={(value) => edit({ ...inputs, aarCode: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "aarCode"))} />
+            <TextField label="Car type" tip="carType" sourced={inputs.carType} onChange={(value) => edit(withClass({ ...inputs, carType: { value, source: "user" } }))} onReset={() => edit(resetInput(inputs, baseline, "carType"))} />
+            <TextField label="AAR" tip="aarCode" sourced={inputs.aarCode} onChange={(value) => edit(withClass({ ...inputs, aarCode: { value, source: "user" } }))} onReset={() => edit(resetInput(inputs, baseline, "aarCode"))} />
             <NumField label="Avg build year" tip="avgBuildYear" sourced={inputs.avgBuildYear} onChange={(value) => edit({ ...inputs, avgBuildYear: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "avgBuildYear"))} />
+            <label className="text-xs space-y-1">
+              <FieldLabel label="Build month" tip="buildDate" source={inputs.buildDate.source} onReset={() => edit(resetInput(inputs, baseline, "buildDate"))} />
+              <Input className="h-8" type="month" value={(inputs.buildDate.value ?? "").slice(0, 7)} onChange={(event) => edit({ ...inputs, buildDate: { value: event.target.value || null, source: "user" } })} />
+            </label>
+            <label className="text-xs space-y-1">
+              <FieldLabel label="Car type class" tip="carTypeClass" source={inputs.carTypeClass.source} onReset={() => edit(resetInput(inputs, baseline, "carTypeClass"))} />
+              <select className="h-8 w-full rounded-md border bg-background px-2" value={inputs.carTypeClass.value ?? ""} onChange={(event) => {
+                if (!event.target.value) return;
+                const carClass = event.target.value as CarTypeClass;
+                const next = { ...inputs, carTypeClass: { value: carClass, source: "user" as const } };
+                if (inputs.usefulLifeYears.source !== "user") next.usefulLifeYears = { value: lifeDefaultForClass(carClass), source: "company" };
+                edit(next);
+              }}>
+                <option value="">Not set</option>
+                {CAR_TYPE_CLASSES.map((carClass) => <option key={carClass} value={carClass}>{classLabel(carClass)}</option>)}
+              </select>
+            </label>
             <NumField label="Useful life (years)" tip="usefulLifeYears" sourced={inputs.usefulLifeYears} onChange={(value) => edit({ ...inputs, usefulLifeYears: { value: value ?? 50, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "usefulLifeYears"))} />
+            {inputs.usefulLifeYears.value > 50 ? <p className="text-xs text-amber-700 sm:col-span-2">Useful life is above the 50-year AAR cap and was clamped to 50.</p> : null}
+          </Group>
+          <Group title="Value">
+            <label className="text-xs space-y-1">
+              <FieldLabel label="Depreciation basis" tip="depreciationBasis" source={inputs.depreciationBasis.source} onReset={() => edit(resetInput(inputs, baseline, "depreciationBasis"))} />
+              <select className="h-8 w-full rounded-md border bg-background px-2" value={inputs.depreciationBasis.value ?? ""} onChange={(event) => edit({ ...inputs, depreciationBasis: { value: event.target.value ? event.target.value as DepreciationBasis : null, source: "user" } })}>
+                <option value="">Unset</option>
+                {DEPRECIATION_BASES.map((basis) => <option key={basis} value={basis}>{basis === "replacement" ? "Replacement" : "Historical OEC"}</option>)}
+              </select>
+            </label>
+            <NumField label="New-car cost / car" tip="newCarCostPerCar" allowNull sourced={inputs.newCarCostPerCar} onChange={(value) => edit({ ...inputs, newCarCostPerCar: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "newCarCostPerCar"))} />
+            <NumField label="OEC / car" tip="oecPerCar" allowNull sourced={inputs.oecPerCar} onChange={(value) => edit({ ...inputs, oecPerCar: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "oecPerCar"))} />
+            <NumField label="Tare (lb)" tip="tareLb" allowNull sourced={inputs.tareLb} onChange={(value) => edit({ ...inputs, tareLb: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "tareLb"))} />
+            <NumField label="Scrap $ / gross ton (2,240 lb)" tip="scrapPerGrossTon" sourced={inputs.scrapPerGrossTon} onChange={(value) => edit({ ...inputs, scrapPerGrossTon: { value: value ?? 0, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "scrapPerGrossTon"))} />
+            <NumField label="Dismantle + haul / car (per Residco repair billing, 2026)" tip="dismantleHaulPerCar" sourced={inputs.dismantleHaulPerCar} onChange={(value) => edit({ ...inputs, dismantleHaulPerCar: { value: value ?? 0, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "dismantleHaulPerCar"))} />
+            {isTankClass(inputs.carTypeClass.value) ? (
+              <NumField label="Pre-scrap cleaning / car" tip="tankPreScrapCleaningPerCar" allowNull sourced={inputs.tankPreScrapCleaningPerCar} onChange={(value) => edit({ ...inputs, tankPreScrapCleaningPerCar: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "tankPreScrapCleaningPerCar"))} />
+            ) : null}
           </Group>
           <Group title="Lease">
             <NumField label="Rent / car / month" tip="monthlyRent" sourced={inputs.monthlyRent} onChange={(value) => edit({ ...inputs, monthlyRent: { value: value ?? 0, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "monthlyRent"))} />
@@ -351,17 +576,21 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
             </RadioGroup>
             {inputs.postLeasePlan.value === "sell" ? (
               <>
-                <NumField label="End value / car" tip="endValuePerCar" sourced={inputs.sell.endValuePerCar} onChange={(value) => edit({ ...inputs, sell: { ...inputs.sell, endValuePerCar: { value, source: "user" } } })} onReset={() => edit({ ...inputs, sell: { ...inputs.sell, endValuePerCar: baseline.sell.endValuePerCar } })} />
+                <NumField label="End value / car" tip="endValuePerCar" allowNull sourced={inputs.sell.endValuePerCar} onChange={(value) => edit({ ...inputs, sell: { ...inputs.sell, endValuePerCar: { value, source: "user" } } })} onReset={() => edit({ ...inputs, sell: { ...inputs.sell, endValuePerCar: baseline.sell.endValuePerCar } })} />
                 <NumField label="Scrap / car" tip="scrapPerCar" sourced={inputs.sell.scrapPerCar} onChange={(value) => edit({ ...inputs, sell: { ...inputs.sell, scrapPerCar: { value: value ?? 0, source: "user" } } })} onReset={() => edit({ ...inputs, sell: { ...inputs.sell, scrapPerCar: baseline.sell.scrapPerCar } })} />
               </>
             ) : (
               <>
-                <NumField label="Idle months" tip="idleMonths" sourced={inputs.relet.idleMonths} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, idleMonths: { value: value ?? 0, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, idleMonths: baseline.relet.idleMonths } })} />
+                <NumField label="Downtime (months at zero rent)" tip="idleMonths" sourced={inputs.relet.idleMonths} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, idleMonths: { value: value ?? 0, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, idleMonths: baseline.relet.idleMonths } })} />
+                <NumField label="Storage / car / day" tip="storagePerCarDay" sourced={inputs.relet.storagePerCarDay} onChange={(value) => {
+                  const day = value ?? 0;
+                  edit({ ...inputs, relet: { ...inputs.relet, storagePerCarDay: { value: day, source: "user" }, storagePerCarMonth: { value: day * STORAGE_DAYS_PER_MONTH, source: "user" } } });
+                }} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, storagePerCarDay: baseline.relet.storagePerCarDay, storagePerCarMonth: baseline.relet.storagePerCarMonth } })} />
                 <PctField label="Re-let rent" tip="reletRentPct" sourced={inputs.relet.rentPct} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, rentPct: { value, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, rentPct: baseline.relet.rentPct } })} />
                 <NumField label="Re-let term (months)" tip="reletTermMonths" sourced={inputs.relet.termMonths} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, termMonths: { value: value ?? 0, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, termMonths: baseline.relet.termMonths } })} />
                 <NumField label="Remarketing / car" tip="remarketingPerCar" sourced={inputs.relet.remarketingPerCar} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, remarketingPerCar: { value: value ?? 0, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, remarketingPerCar: baseline.relet.remarketingPerCar } })} />
-                <NumField label="Storage / car / month" tip="storagePerCarMonth" sourced={inputs.relet.storagePerCarMonth} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, storagePerCarMonth: { value: value ?? 0, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, storagePerCarMonth: baseline.relet.storagePerCarMonth } })} />
-                <NumField label="End value after re-let" tip="reletEndValuePerCar" sourced={inputs.relet.endValuePerCar} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, endValuePerCar: { value, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, endValuePerCar: baseline.relet.endValuePerCar } })} />
+                <NumField label="Re-let make-ready / car" tip="reletMakeReadyPerCar" sourced={inputs.relet.makeReadyPerCar} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, makeReadyPerCar: { value: value ?? 0, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, makeReadyPerCar: baseline.relet.makeReadyPerCar } })} />
+                <NumField label="End value after re-let" tip="reletEndValuePerCar" allowNull sourced={inputs.relet.endValuePerCar} onChange={(value) => edit({ ...inputs, relet: { ...inputs.relet, endValuePerCar: { value, source: "user" } } })} onReset={() => edit({ ...inputs, relet: { ...inputs.relet, endValuePerCar: baseline.relet.endValuePerCar } })} />
               </>
             )}
           </Group>
@@ -384,7 +613,7 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
             <PctField label="Debt closing cost" tip="debtClosePct" sourced={inputs.wayne.debtClosePct} onChange={(value) => edit({ ...inputs, wayne: { ...inputs.wayne, debtClosePct: { value, source: "user" } } })} onReset={() => edit({ ...inputs, wayne: { ...inputs.wayne, debtClosePct: baseline.wayne.debtClosePct } })} />
             <PctField label="Transaction cost" tip="txnCostPct" sourced={inputs.wayne.txnCostPct} onChange={(value) => edit({ ...inputs, wayne: { ...inputs.wayne, txnCostPct: { value, source: "user" } } })} onReset={() => edit({ ...inputs, wayne: { ...inputs.wayne, txnCostPct: baseline.wayne.txnCostPct } })} />
             <PctField label="Leverage target" tip="leverageTarget" sourced={inputs.wayne.leverageTarget} onChange={(value) => edit({ ...inputs, wayne: { ...inputs.wayne, leverageTarget: { value, source: "user" } } })} onReset={() => edit({ ...inputs, wayne: { ...inputs.wayne, leverageTarget: baseline.wayne.leverageTarget } })} />
-            <NumField label="Price to test" tip="testPricePerCar" sourced={inputs.testPricePerCar} onChange={(value) => edit({ ...inputs, testPricePerCar: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "testPricePerCar"))} />
+            <NumField label="Price to test" tip="testPricePerCar" allowNull sourced={inputs.testPricePerCar} onChange={(value) => edit({ ...inputs, testPricePerCar: { value, source: "user" } })} onReset={() => edit(resetInput(inputs, baseline, "testPricePerCar"))} />
           </Group>
           <label className="block text-xs space-y-1">
             <span className="text-muted-foreground">Notes</span>
@@ -489,8 +718,73 @@ export default function CalculatorTab({ opportunityId, opportunity, lines = [], 
           </DialogContent>
         </Dialog>
       ) : null}
+      {scratch ? (
+        <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Link to opportunity</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">Linking clears any pin. A closed opportunity or a decided line is refused.</p>
+            <div className="space-y-3 text-sm">
+              <label className="block space-y-1">
+                <span className="text-muted-foreground">Opportunity</span>
+                <select className="block h-9 w-full rounded-md border bg-background px-2" aria-label="Link opportunity" value={saveOppId ?? ""} onChange={(event) => { setSaveOppId(event.target.value ? Number(event.target.value) : null); setSaveLineId(null); }}>
+                  <option value="">Select an opportunity</option>
+                  {(openOpps.data ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>{row.offering_name || row.account_name || `Opportunity ${row.id}`}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-muted-foreground">Bid line (optional)</span>
+                <select className="block h-9 w-full rounded-md border bg-background px-2" aria-label="Link line" value={saveLineId ?? ""} onChange={(event) => setSaveLineId(event.target.value ? Number(event.target.value) : null)}>
+                  <option value="">No line</option>
+                  {(oppLines.data ?? []).map((row) => (
+                    <option key={row.id} value={row.id}>{row.seller_deal_ref || `Line ${row.id}`}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <DialogFooter>
+              <Button type="button" disabled={!saveOppId || !selectedId || linkExisting.isPending} onClick={() => linkExisting.mutate()}>Link</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      {scratch ? (
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Create opportunity from this calc</DialogTitle></DialogHeader>
+            <div className="space-y-3 text-sm">
+              <label className="block space-y-1"><span className="text-muted-foreground">Name</span><Input value={createName} onChange={(event) => setCreateName(event.target.value)} /></label>
+              <p className="text-muted-foreground">Type: {inputs.dealType.value === "portfolio_bid" ? "Portfolio bid" : inputs.dealType.value === "sale_leaseback" ? "Sale-leaseback" : "Purchase"}</p>
+              <label className="block space-y-1"><span className="text-muted-foreground">Account id (optional)</span><Input value={createAccount} onChange={(event) => setCreateAccount(event.target.value)} /></label>
+              <label className="block space-y-1"><span className="text-muted-foreground">Company name (optional, must already exist)</span><Input value={createCompany} onChange={(event) => setCreateCompany(event.target.value)} /></label>
+              <label className="block space-y-1">
+                <span className="text-muted-foreground">Source</span>
+                <select className="block h-9 w-full rounded-md border bg-background px-2" value={createSource} onChange={(event) => setCreateSource(event.target.value)}>
+                  {["manual", "auto_expiry", "trinity", "handoff", "umler"].map((source) => <option key={source} value={source}>{source}</option>)}
+                </select>
+              </label>
+              <label className="block space-y-1"><span className="text-muted-foreground">Bid lead (optional)</span><Input value={createOwner} onChange={(event) => setCreateOwner(event.target.value)} /></label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={createLine} onChange={(event) => setCreateLine(event.target.checked)} /> Add a deal line</label>
+            </div>
+            <DialogFooter>
+              <Button type="button" disabled={createOpp.isPending || !(createName.trim() || name.trim())} onClick={() => createOpp.mutate()}>Create</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
+}
+
+function withClass(next: DealCalcInputs): DealCalcInputs {
+  if (next.carTypeClass.source === "user") return next;
+  const inferred = inferCarTypeClass(next.carType.value, next.aarCode.value);
+  const updated: DealCalcInputs = { ...next, carTypeClass: { value: inferred, source: "line" } };
+  if (updated.usefulLifeYears.source !== "user") {
+    updated.usefulLifeYears = { value: lifeDefaultForClass(inferred), source: "company" };
+  }
+  return updated;
 }
 
 function MethodSwitch({ value, onChange }: { value: CalcMethod; onChange: (method: CalcMethod) => void }) {
@@ -536,22 +830,68 @@ function FieldLabel({ label, tip, source, onReset }: { label: string; tip: DealC
   );
 }
 
-function NumField({ label, tip, sourced, onChange, onReset }: { label: string; tip: DealCalcTooltipKey; sourced: Sourced<number | null>; onChange: (value: number | null) => void; onReset: () => void }) {
+function DecimalField({
+  label,
+  tip,
+  sourced,
+  scale,
+  allowNull,
+  onChange,
+  onReset,
+}: {
+  label: string;
+  tip: DealCalcTooltipKey;
+  sourced: Sourced<number | null> | Sourced<number>;
+  scale: number;
+  allowNull: boolean;
+  onChange: (value: number | null) => void;
+  onReset: () => void;
+}) {
+  const committed = sourced.value ?? null;
+  const [text, setText] = useState(() => formatScaled(committed, scale));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(formatScaled(committed, scale));
+  }, [committed, focused, scale]);
   return (
     <label className="text-xs space-y-1">
-      <FieldLabel label={label} tip={tip} source={sourced.source} onReset={onReset} />
-      <Input className="h-8" inputMode="decimal" value={sourced.value ?? ""} onChange={(event) => onChange(event.target.value.trim() === "" ? null : Number(event.target.value))} />
+      <FieldLabel label={label} tip={tip} source={sourced.source} onReset={() => { setFocused(false); onReset(); }} />
+      <Input
+        className="h-8"
+        inputMode="decimal"
+        value={text}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          const next = blurDecimalText({ text, committed, scale, allowNull });
+          setText(next.text);
+          if (next.commit) onChange(next.value);
+        }}
+        onChange={(event) => {
+          const next = commitDecimalText(event.target.value, scale);
+          setText(next.text);
+          if (next.commit) onChange(next.value);
+        }}
+      />
     </label>
   );
 }
 
+function NumField({ label, tip, sourced, onChange, onReset, allowNull = false }: { label: string; tip: DealCalcTooltipKey; sourced: Sourced<number | null> | Sourced<number>; onChange: (value: number | null) => void; onReset: () => void; allowNull?: boolean }) {
+  return <DecimalField label={label} tip={tip} sourced={sourced} scale={1} allowNull={allowNull} onChange={onChange} onReset={onReset} />;
+}
+
 function PctField({ label, tip, sourced, onChange, onReset }: { label: string; tip: DealCalcTooltipKey; sourced: Sourced<number>; onChange: (value: number) => void; onReset: () => void }) {
-  const shown = Number.isFinite(sourced.value) ? String(Math.round(sourced.value * 10000) / 100) : "";
   return (
-    <label className="text-xs space-y-1">
-      <FieldLabel label={`${label} %`} tip={tip} source={sourced.source} onReset={onReset} />
-      <Input className="h-8" inputMode="decimal" value={shown} onChange={(event) => onChange((Number(event.target.value) || 0) / 100)} />
-    </label>
+    <DecimalField
+      label={`${label} %`}
+      tip={tip}
+      sourced={sourced}
+      scale={100}
+      allowNull={false}
+      onChange={(value) => { if (value != null) onChange(value); }}
+      onReset={onReset}
+    />
   );
 }
 
@@ -607,6 +947,24 @@ function Results({ result, showWayne, showCash }: { result: DealCalcResult; show
         {result.reasons.map((reason) => <li key={reason}>{reason}</li>)}
         {result.flags.map((flag) => <li key={flag}>{flag}</li>)}
       </ul>
+      <div className="space-y-1 text-sm" data-testid="value-at-purchase">
+        <h3 className="text-sm font-semibold flex items-center gap-1">Value at purchase vs at lease expiry <Tip tip="basisBadge" /></h3>
+        <p className="text-xs text-muted-foreground">{result.valuation.basisBadge ?? "—"}{result.valuation.endValueSource === "sl" ? " · end value SL" : ""}</p>
+        <dl className="text-sm">
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Age at purchase</dt><dd>{result.valuation.ageAtClose == null ? "—" : `${result.valuation.ageAtClose.toFixed(1)} yr`}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground flex items-center gap-1">Value at purchase <Tip tip="valueAtPurchase" /></dt><dd className="font-mono-num">{formatValueOrDash(result.valuation.valueAtClose)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Age at expiry</dt><dd>{result.valuation.ageAtExpiry == null ? "—" : `${result.valuation.ageAtExpiry.toFixed(1)} yr`}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground flex items-center gap-1">Value at expiry <Tip tip="valueAtExpiry" /></dt><dd className="font-mono-num">{formatValueOrDash(result.valuation.valueAtExpiry)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Change</dt><dd className="font-mono-num">{formatValueOrDash(result.valuation.valueChange)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground flex items-center gap-1">Scrap floor <Tip tip="scrapFloor" /></dt><dd className="font-mono-num">{formatValueOrDash(result.valuation.scrapFloor)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground flex items-center gap-1">AAR limit year <Tip tip="aarLimit" /></dt><dd>{result.valuation.aarLimitYear ?? "—"}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Years left at expiry</dt><dd>{result.valuation.yearsLeftAtExpiry == null ? "—" : result.valuation.yearsLeftAtExpiry.toFixed(1)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Portfolio value at purchase</dt><dd className="font-mono-num">{formatValueOrDash(result.valuation.portfolio.valueAtPurchase)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Portfolio value at expiry</dt><dd className="font-mono-num">{formatValueOrDash(result.valuation.portfolio.valueAtExpiry)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Total decline</dt><dd className="font-mono-num">{formatValueOrDash(result.valuation.portfolio.totalDecline)}</dd></div>
+          <div className="flex justify-between gap-2 border-b py-1"><dt className="text-muted-foreground">Price / value at purchase</dt><dd className="font-mono-num">{result.valuation.portfolio.priceToValue == null ? "—" : result.valuation.portfolio.priceToValue.toFixed(2)}</dd></div>
+        </dl>
+      </div>
       <div className={`grid gap-3 ${showWayne && showCash ? "grid-cols-2" : "grid-cols-1"}`}>
         {showCash ? <MetricColumn title="Cash flow" rows={[
           ["Max bid", money(result.cash.maxBidPerCar), "maxBid"],

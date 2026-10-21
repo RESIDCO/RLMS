@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import OpportunityDialog from "@/components/crm/OpportunityDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiGet, apiRequest } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
+import ScenarioLibrary from "@/pages/opportunity/ScenarioLibrary";
 import { parseHashSearch, useHashSearch } from "@/lib/hash-location";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -37,6 +38,7 @@ type WatchPayload = {
 
 export default function OpportunitiesPage() {
   const canWrite = useCanEdit();
+  const [, navigate] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [owner, setOwner] = useState("");
@@ -135,7 +137,11 @@ export default function OpportunitiesPage() {
         <TabsList>
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
           <TabsTrigger value="bids">Bids</TabsTrigger>
+          <TabsTrigger value="scenarios">Calculator scenarios</TabsTrigger>
         </TabsList>
+        <TabsContent value="scenarios">
+          <ScenarioLibrary canWrite={canWrite} onOpen={(id) => navigate(`/opportunities/calculator?scenario=${id}`)} />
+        </TabsContent>
         <TabsContent value="bids" className="space-y-4">
           <div className="flex flex-wrap gap-2">
             {canWrite ? (

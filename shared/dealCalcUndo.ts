@@ -13,7 +13,7 @@
 
 export type ScenarioSlot = {
   id: number;
-  opportunityId: number;
+  opportunityId: number | null;
   lineId: number | null;
   isPinned: boolean;
   deletedAt: string | null;
@@ -23,12 +23,12 @@ export type ScenarioPatch = {
   activityId: number;
   rowId: number;
   op: "insert" | "update";
-  before: { isPinned?: boolean; deletedAt?: string | null };
-  after: { isPinned?: boolean; deletedAt?: string | null };
+  before: { isPinned?: boolean; deletedAt?: string | null; opportunityId?: number | null; lineId?: number | null };
+  after: { isPinned?: boolean; deletedAt?: string | null; opportunityId?: number | null; lineId?: number | null };
 };
 
 function slotKey(row: Pick<ScenarioSlot, "opportunityId" | "lineId">): string {
-  return `${row.opportunityId}:${row.lineId ?? 0}`;
+  return `${row.opportunityId ?? "none"}:${row.lineId ?? 0}`;
 }
 
 function livePin(rows: ScenarioSlot[], row: ScenarioSlot): ScenarioSlot | undefined {
@@ -48,7 +48,10 @@ export function applyScenarioUndo(rows: ScenarioSlot[], patches: ScenarioPatch[]
     const row = next.find((item) => item.id === patch.rowId);
     if (!row) continue;
     if (patch.before.deletedAt !== undefined) row.deletedAt = patch.before.deletedAt;
-    if (patch.before.isPinned !== undefined) {
+    if (patch.before.opportunityId !== undefined) row.opportunityId = patch.before.opportunityId;
+    if (patch.before.lineId !== undefined) row.lineId = patch.before.lineId;
+    if (row.opportunityId == null) row.isPinned = false;
+    if (patch.before.isPinned !== undefined && row.opportunityId != null) {
       const wantsPin = patch.before.isPinned === true;
       if (wantsPin && livePin(next, row)) row.isPinned = false;
       else row.isPinned = patch.before.isPinned;
@@ -91,6 +94,7 @@ export function planPin(rows: ScenarioSlot[], targetId: number, activityId: numb
   const target = rows.find((row) => row.id === targetId);
   if (!target) throw new Error("scenario not found");
   if (target.deletedAt) throw new Error("deleted scenario cannot be pinned");
+  if (target.opportunityId == null) throw new Error("An unlinked scenario cannot be pinned");
   const current = rows.find((row) => row.id !== target.id && !row.deletedAt && row.isPinned && slotKey(row) === slotKey(target));
   const patches: ScenarioPatch[] = [];
   let nextActivity = activityId;
@@ -114,4 +118,52 @@ export function planPin(rows: ScenarioSlot[], targetId: number, activityId: numb
     });
   }
   return patches;
+}
+
+export const CALC_CREATE_OPP_LINK = "calc_create_opp";
+
+export type UndoLogSlice = {
+  change_group?: string | null;
+  table_name?: string | null;
+  detail?: { link_kind?: unknown; linked_group?: unknown; op?: unknown } | null;
+};
+
+export type UndoRoute =
+  | { kind: "wrapper"; calcGroup: string; coreGroup: string }
+  | { kind: "deal_calc" }
+  | { kind: "generic" };
+
+/** A linked half is never undone by the generic or deal-calc RPC. */
+export function directHalfUndoRefusal(): { status: 409; error: "linked_group" } {
+  return { status: 409, error: "linked_group" };
+}
+
+function linkOf(row: UndoLogSlice): { kind: string; other: string } | null {
+  const kind = row.detail?.link_kind;
+  const other = row.detail?.linked_group;
+  if (kind !== CALC_CREATE_OPP_LINK || typeof other !== "string" || !other) return null;
+  return { kind, other };
+}
+
+/**
+ * Groups stamped calc_create_opp go to the wrapper with both ids.
+ * Calling the generic undo on one half is a 409, via directHalfUndoRefusal.
+ */
+export function routeUndoGroup(rows: UndoLogSlice[]): UndoRoute {
+  const linked = rows.map(linkOf).find((item) => item != null);
+  if (linked) {
+    const requested = rows.find((row) => linkOf(row))?.change_group ?? "";
+    const calcGroup = rows.some((row) => row.table_name === "deal_calc_scenarios") ? requested : linked.other;
+    const coreGroup = calcGroup === requested ? linked.other : requested;
+    return { kind: "wrapper", calcGroup, coreGroup };
+  }
+  if (rows.length > 0 && rows.every((row) => row.table_name === "deal_calc_scenarios" || row.table_name === "deal_calc_assumption_sets")) {
+    return { kind: "deal_calc" };
+  }
+  return { kind: "generic" };
+}
+
+export function linkedUndoBlockedByFiles(attachmentIds: number[], inGroupIds: number[]): boolean {
+  const inside = new Set(inGroupIds);
+  return attachmentIds.some((id) => !inside.has(id));
 }

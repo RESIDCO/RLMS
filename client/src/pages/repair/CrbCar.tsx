@@ -214,9 +214,8 @@ export default function CrbCar() {
       <div className={`${shopAa.page} p-3 space-y-3 max-w-[1100px]`}>
         <RepairBreadcrumbs
           items={[
-            { label: "Repair", href: "/repair" },
-            { label: "CRB", href: "/repair/crb" },
-            { label: car.invoice_number, href: `/repair/crb/invoice/${car.invoice_id}` },
+            { label: "Worklist", href: "/repair/crb" },
+            { label: `${car.billing_party} ${car.invoice_number}`, href: `/repair/crb/invoice/${car.invoice_id}` },
             { label: `${car.car_initial} ${car.car_number}` },
           ]}
         />

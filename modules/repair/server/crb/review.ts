@@ -465,6 +465,7 @@ export async function listCrbInvoices(filters: {
   minCents?: number | null;
   maxCents?: number | null;
   dueSoon?: boolean;
+  carNumbers?: string[];
 }): Promise<Record<string, unknown>[]> {
   const where = ["i.tenant_id = $1", "f.version_status = 'ACTIVE'"];
   const params: unknown[] = [TENANT];
@@ -478,6 +479,20 @@ export async function listCrbInvoices(filters: {
   if (filters.status) add("i.status = ?", filters.status);
   if (filters.minCents != null) add("i.grand_total_cents >= ?", filters.minCents);
   if (filters.maxCents != null) add("i.grand_total_cents <= ?", filters.maxCents);
+  const carTokens = (filters.carNumbers ?? []).map((token) => token.trim().toUpperCase()).filter(Boolean);
+  if (carTokens.length) {
+    params.push(carTokens);
+    const tokenParam = `$${params.length}`;
+    where.push(`EXISTS (
+      SELECT 1 FROM repair.crb_cars c
+      WHERE c.invoice_id = i.id
+        AND (
+          upper(btrim(c.car_number)) = ANY(${tokenParam}::text[])
+          OR upper(btrim(c.car_initial) || btrim(c.car_number)) = ANY(${tokenParam}::text[])
+          OR upper(btrim(c.car_initial) || ' ' || btrim(c.car_number)) = ANY(${tokenParam}::text[])
+        )
+    )`);
+  }
   const { rows } = await q<Record<string, unknown>>(
     `SELECT i.id, i.invoice_number, i.billing_party, i.billed_party, i.account_date, i.status,
             i.grand_total_cents, i.car_count, i.control_ok, i.error_panel, i.receipt_date,
@@ -521,7 +536,16 @@ export async function getCrbInvoice(id: string): Promise<Record<string, unknown>
   if (!rows[0]) return null;
   const { rows: cars } = await q(
     `SELECT id, car_initial, car_number, kind, status, lessee_name, owned_on_repair_date,
-            line_count, total_cents, flags, lease_id, repair_date
+            line_count, total_cents, flags, lease_id, repair_date,
+            (
+              SELECT COUNT(*)::int
+              FROM repair.audit_findings f
+              WHERE f.invoice_id = repair.crb_cars.invoice_id
+                AND (
+                  f.target_id = repair.crb_cars.id
+                  OR f.target_id IN (SELECT l.id FROM repair.crb_lines l WHERE l.car_id = repair.crb_cars.id)
+                )
+            ) AS finding_count
      FROM repair.crb_cars WHERE invoice_id = $1
      ORDER BY car_number, car_initial`,
     [id],

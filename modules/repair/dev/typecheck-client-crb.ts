@@ -30,8 +30,13 @@ export function assertCrbClientTypecheck(): void {
   for (const route of ["/repair/crb/invoice/:id/car/:carId", "/repair/crb/invoice/:id", "/repair/crb"]) {
     if (!app.includes(route)) bad("route", route);
   }
-  if (!nav.includes('href: "/repair/crb"')) bad("nav", "CRB link");
+  if (!nav.includes('href: "/repair/crb"') || !nav.includes("Accounts Payable")) bad("nav", "Accounts Payable worklist");
   if (!home.includes("Mark reviewed") || home.includes("bulk approve")) bad("bulk", "mark reviewed only");
+  if (!home.includes("Hard stops only") || !home.includes("Enter car numbers") || !home.includes("Nearest deadline")) {
+    bad("worklist", "dense grid labels");
+  }
+  if (!invoice.includes("crb-field-strip")) bad("invoice", "header strip");
+  if (!car.includes("Worklist")) bad("crumbs", "Worklist");
   if (!invoice.includes("Return unpaid") || !invoice.includes("Approve with exceptions")) bad("invoice actions");
   if (!invoice.includes("Mark filed manually")) bad("filed");
   for (const key of ["J", "K", "Approve (A)", "Reject (R)", "Override (O)", "Help (?)"]) {
@@ -62,6 +67,7 @@ export function assertCrbClientTypecheck(): void {
     "CrbInvoice.tsx",
     "CrbCar.tsx",
     "CrbUi.tsx",
+    "CrbGrid.tsx",
     "AuditRulesPanel.tsx",
     "seed-crb-demo.ts",
     "smoke-crb.ts",

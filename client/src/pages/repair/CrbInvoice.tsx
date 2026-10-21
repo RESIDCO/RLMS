@@ -2,10 +2,11 @@
  * §I CRB invoice master. `#/repair/crb/invoice/:id`
  */
 import { useCallback, useEffect, useState } from "react";
-import { Link, useRoute } from "wouter";
+import { useRoute } from "wouter";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { RepairBreadcrumbs, shopAa } from "./RepairNavChrome";
 import { repairUi } from "./repairTokens";
+import { CrbCarTable } from "./CrbGrid";
 import { CrbChip, crbJson, crbMoney, crbPct, toneForStatus, type ChipTone } from "./CrbUi";
 
 type Countdown = { key: string; label: string; tone: ChipTone; text: string };
@@ -32,8 +33,16 @@ type CarRow = {
   status: string;
   flags: string[] | null;
   lessee_name: string | null;
+  owned_on_repair_date: boolean | null;
   total_cents: number;
   line_count: number;
+  finding_count?: number;
+};
+type Subtotal = {
+  detailSource: string;
+  count: number;
+  laborCents: number;
+  materialCents: number;
 };
 type Finding = {
   id: string;
@@ -58,6 +67,7 @@ type Invoice = {
   receipt_date: string | null;
   currency: string | null;
   error_panel: Panel | null;
+  detail_subtotals: Subtotal[] | null;
   cars: CarRow[];
   findings: Finding[];
   packages: Pkg[];
@@ -151,12 +161,11 @@ export default function CrbInvoice() {
 
   return (
     <RepairOwnerShell>
-      <div className={`${shopAa.page} p-3 space-y-3 max-w-[1100px]`}>
+      <div className={`${shopAa.page} p-3 space-y-3`}>
         <RepairBreadcrumbs
           items={[
-            { label: "Repair", href: "/repair" },
-            { label: "CRB", href: "/repair/crb" },
-            { label: invoice.invoice_number },
+            { label: "Worklist", href: "/repair/crb" },
+            { label: `${invoice.billing_party} ${invoice.invoice_number}` },
           ]}
         />
         <h1 className="text-xl font-semibold">
@@ -165,71 +174,78 @@ export default function CrbInvoice() {
         {error ? <div className={`${repairUi.badge} repair-chip-stop`}>{error}</div> : null}
         {msg ? <div className={repairUi.badge}>{msg}</div> : null}
 
-        <section className={`${repairUi.panel} p-3 space-y-2`}>
-          <div className="flex flex-wrap gap-2 items-center">
-            <CrbChip tone={toneForStatus(invoice.status)}>{invoice.status}</CrbChip>
-            <CrbChip tone={invoice.control_ok ? "ok" : "stop"}>{invoice.control_ok ? "In balance" : "Out of balance"}</CrbChip>
-            <span className={shopAa.muted}>Account {invoice.account_date} · receipt {invoice.receipt_date ?? "unset"} · {crbMoney(Number(invoice.grand_total_cents))}</span>
+        <dl className="crb-field-strip">
+          <div><dt>Billing party</dt><dd>{invoice.billing_party}</dd></div>
+          <div><dt>Invoice no</dt><dd>{invoice.invoice_number}</dd></div>
+          <div><dt>Billed party</dt><dd>{invoice.billed_party}</dd></div>
+          <div><dt>Acct month</dt><dd>{invoice.account_date}</dd></div>
+          <div><dt>Currency</dt><dd>{invoice.currency || "—"}</dd></div>
+          <div><dt>Receipt</dt><dd>{invoice.receipt_date ?? "unset"}</dd></div>
+          <div><dt>Total</dt><dd>{crbMoney(Number(invoice.grand_total_cents))}</dd></div>
+          <div><dt>Status</dt><dd><CrbChip tone={toneForStatus(invoice.status)}>{invoice.status}</CrbChip></dd></div>
+          <div>
+            <dt>Control check</dt>
+            <dd><CrbChip tone={invoice.control_ok ? "ok" : "stop"}>{invoice.control_ok ? "In balance" : "Out of balance"}</CrbChip></dd>
           </div>
-          <h2 className="font-semibold">Error percent</h2>
+          <div>
+            <dt>Biller match</dt>
+            <dd>
+              {invoice.biller_total_cents != null
+                ? `${crbMoney(Number(invoice.biller_total_cents))} · ${invoice.biller_car_count} cars`
+                : "No biller invoice header matched."}
+            </dd>
+          </div>
+          <div>
+            <dt>Error %</dt>
+            <dd>
+              {panel ? `${panel.na ? "N/A" : crbPct(panel.pct ?? null)} of ${crbMoney(panel.totalCents)} · net ${crbMoney(panel.netCents)} · limit ${panel.limitPct ?? "n/a"}%` : "Panel not calculated yet."}
+            </dd>
+          </div>
+          <div>
+            <dt>Suggested action</dt>
+            <dd>
+              <CrbChip tone={panel?.exceeds || panel?.improperlyRendered ? "stop" : "ok"}>{panel?.suggestedLabel || "Not calculated"}</CrbChip>
+              {panel?.headerOrLine ? <span> Choose header-level or line-level return.</span> : null}
+            </dd>
+          </div>
+          <div className="crb-field-wide">
+            <dt>Subtotals</dt>
+            <dd>
+              {(invoice.detail_subtotals ?? []).length === 0 ? "None" : (invoice.detail_subtotals ?? []).map((row) => (
+                <span key={row.detailSource} className="mr-3">
+                  {row.detailSource}: {row.count} lines, labor {crbMoney(row.laborCents)}, material {crbMoney(row.materialCents)}
+                </span>
+              ))}
+            </dd>
+          </div>
+          <div className="crb-field-wide">
+            <dt>Countdowns</dt>
+            <dd className="flex flex-wrap gap-2">
+              {(panel?.countdowns ?? []).length === 0 ? "None" : (panel?.countdowns ?? []).map((item) => (
+                <CrbChip key={item.key} tone={item.tone}>{item.text}</CrbChip>
+              ))}
+            </dd>
+          </div>
           {panel ? (
-            <div className="space-y-1">
-              <p>
-                {panel.na ? "N/A" : crbPct(panel.pct ?? null)} of {crbMoney(panel.totalCents)} · net {crbMoney(panel.netCents)} · limit {panel.limitPct ?? "n/a"}%
-              </p>
-              <p>
-                <CrbChip tone={panel.exceeds || panel.improperlyRendered ? "stop" : "ok"}>
-                  {panel.suggestedLabel}
-                </CrbChip>
-                {panel.headerOrLine ? <span className={shopAa.muted}> Choose header-level or line-level return.</span> : null}
-              </p>
-              <p className={shopAa.muted}>
+            <div className="crb-field-wide">
+              <dt>Minimum</dt>
+              <dd>
                 Aggregate {crbMoney(panel.aggregateCents)} vs minimum {crbMoney(panel.minAggregateCents)}
                 {panel.belowMinimum ? " · below minimum" : " · meets minimum or exempt"}.
                 Exempt: {(panel.exemptTypesPresent ?? []).join(", ") || "none"}.
-              </p>
-              <ul className="flex flex-wrap gap-2">
-                {(panel.countdowns ?? []).map((item) => (
-                  <li key={item.key}><CrbChip tone={item.tone}>{item.text}</CrbChip></li>
-                ))}
-              </ul>
+              </dd>
             </div>
-          ) : <p className={shopAa.muted}>Panel not calculated yet.</p>}
-          {invoice.biller_total_cents != null ? (
-            <p className={shopAa.muted}>Biller header {crbMoney(Number(invoice.biller_total_cents))} · {invoice.biller_car_count} cars</p>
-          ) : <p className={shopAa.muted}>No biller invoice header matched.</p>}
-        </section>
+          ) : null}
+        </dl>
 
-        <section className={`${repairUi.panel} p-3 space-y-2`}>
+        <section className="space-y-2">
           <h2 className="font-semibold">Cars ({invoice.cars.length})</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="text-left">Car</th>
-                <th className="text-left">Lessee</th>
-                <th className="text-left">Lines</th>
-                <th className="text-left">Total</th>
-                <th className="text-left">Flags</th>
-                <th className="text-left">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.cars.map((car) => (
-                <tr key={car.id} className="border-t border-[var(--repair-border)]">
-                  <td>
-                    <Link className={repairUi.link} href={`/repair/crb/invoice/${invoice.id}/car/${car.id}`}>
-                      {car.car_initial} {car.car_number}
-                    </Link>
-                  </td>
-                  <td>{car.lessee_name || "—"}</td>
-                  <td>{car.line_count}</td>
-                  <td>{crbMoney(Number(car.total_cents))}</td>
-                  <td>{(car.flags ?? []).join(", ")}</td>
-                  <td><CrbChip tone={toneForStatus(car.status)}>{car.status}</CrbChip></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <CrbCarTable
+            invoiceId={invoice.id}
+            cars={invoice.cars}
+            tokens={[]}
+            onChanged={() => load()}
+          />
         </section>
 
         <section className={`${repairUi.panel} p-3 space-y-2`}>

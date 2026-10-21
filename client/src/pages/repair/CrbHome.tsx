@@ -1,14 +1,16 @@
 /**
- * §I CRB file + invoice queue. `#/repair/crb`
- * Bulk action is mark reviewed only. Approval stays on the invoice.
+ * §I r2 Invoice Worklist. `#/repair/crb`
+ * Dense master rows, car children, line grandchildren.
+ * Bulk action is mark reviewed only. Approval stays on the car or invoice.
  */
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
 import RepairOwnerShell from "./RepairOwnerShell";
 import { RepairBreadcrumbs } from "./RepairNavChrome";
 import { repairUi } from "./repairTokens";
 import { shopAa } from "./RepairNavChrome";
-import { CrbChip, crbJson, crbMoney, toneForStatus } from "./CrbUi";
+import { CrbCarTable, type CrbGridCar } from "./CrbGrid";
+import { CrbChip, crbCarTokens, crbJson, crbMoney, crbPct, toneForStatus, type ChipTone } from "./CrbUi";
 
 type FileRow = {
   id: string;
@@ -17,8 +19,6 @@ type FileRow = {
   version_status: string;
   account_months: string[] | null;
   billed_party: string | null;
-  uploaded_at: string;
-  record_counts: Record<string, number> | null;
 };
 
 type UnmatchedHeader = {
@@ -27,8 +27,13 @@ type UnmatchedHeader = {
   invoice_number: string;
   account_month: string;
   total_cents: number | null;
-  car_count: number | null;
-  message: string;
+};
+
+type Countdown = { key: string; label: string; daysLeft: number | null; tone: ChipTone; text: string };
+type Panel = {
+  pct?: number | null;
+  suggestedLabel?: string;
+  countdowns?: Countdown[];
 };
 
 type InvoiceRow = {
@@ -39,20 +44,40 @@ type InvoiceRow = {
   account_date: string;
   status: string;
   grand_total_cents: number;
-  car_count: number;
   cars_decided: number;
   cars_total: number;
   hard_stops: number;
-  exceptions: number;
   control_ok: boolean;
   reviewed: boolean;
+  error_panel: Panel | null;
+};
+
+type InvoiceDetail = {
+  id: string;
+  cars: CrbGridCar[];
 };
 
 const STATUSES = ["", "PENDING", "IN_REVIEW", "READY", "APPROVED", "RETURN_UNPAID", "APPROVED_WITH_EXCEPTIONS"];
 
+function nearestDeadline(panel: Panel | null): string {
+  const dated = (panel?.countdowns ?? []).filter((item) => item.daysLeft != null);
+  if (!dated.length) return "None";
+  dated.sort((a, b) => Number(a.daysLeft) - Number(b.daysLeft));
+  return `${dated[0].daysLeft}d · ${dated[0].label}`;
+}
+
+function suggestedTone(label: string | undefined): ChipTone {
+  if (!label) return "info";
+  if (label.startsWith("Return unpaid")) return "stop";
+  if (label.startsWith("N/A")) return "info";
+  return "ok";
+}
+
 export default function CrbHome() {
   const [files, setFiles] = useState<FileRow[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [details, setDetails] = useState<Record<string, InvoiceDetail>>({});
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const [unmatched, setUnmatched] = useState<UnmatchedHeader[]>([]);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -65,7 +90,11 @@ export default function CrbHome() {
   const [dueSoon, setDueSoon] = useState(false);
   const [minCents, setMinCents] = useState("");
   const [maxCents, setMaxCents] = useState("");
+  const [carDraft, setCarDraft] = useState("");
+  const [carQuery, setCarQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const tokens = crbCarTokens(carQuery);
 
   const load = useCallback(async () => {
     setError("");
@@ -79,6 +108,8 @@ export default function CrbHome() {
     if (dueSoon) qs.set("dueSoon", "1");
     if (minCents.trim()) qs.set("minCents", minCents.trim());
     if (maxCents.trim()) qs.set("maxCents", maxCents.trim());
+    const carTokens = crbCarTokens(carQuery);
+    if (carTokens.length) qs.set("cars", carTokens.join(","));
     const [fileRes, invRes] = await Promise.all([
       fetch("/api/repair/crb/files"),
       fetch(`/api/repair/crb/invoices?${qs}`),
@@ -88,11 +119,34 @@ export default function CrbHome() {
     setFiles(fileJson.files ?? []);
     setInvoices(invJson.invoices ?? []);
     setUnmatched(invJson.unmatchedHeaders ?? []);
-  }, [biller, billedParty, accountMonth, status, hasExceptions, hardStops, dueSoon, minCents, maxCents]);
+  }, [biller, billedParty, accountMonth, status, hasExceptions, hardStops, dueSoon, minCents, maxCents, carQuery]);
 
   useEffect(() => {
     void load().catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
   }, [load]);
+
+  const refreshInvoice = useCallback(async (id: string) => {
+    const res = await fetch(`/api/repair/crb/invoices/${id}`);
+    const json = await crbJson<InvoiceDetail>(res);
+    setDetails((cur) => ({ ...cur, [id]: json }));
+  }, []);
+
+  useEffect(() => {
+    if (!tokens.length) return;
+    let cancelled = false;
+    const ids = invoices.map((inv) => inv.id);
+    setOpen(new Set(ids));
+    void Promise.all(ids.map(async (id) => {
+      const res = await fetch(`/api/repair/crb/invoices/${id}`);
+      const json = await crbJson<InvoiceDetail>(res);
+      if (!cancelled) setDetails((cur) => ({ ...cur, [id]: json }));
+    })).catch((e) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : "Car search failed");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [carQuery, invoices]);
 
   async function upload(file: File) {
     setError("");
@@ -119,7 +173,7 @@ export default function CrbHome() {
     await load();
   }
 
-  function toggle(id: string) {
+  function toggleSelected(id: string) {
     setSelected((cur) => {
       const next = new Set(cur);
       if (next.has(id)) next.delete(id);
@@ -128,42 +182,55 @@ export default function CrbHome() {
     });
   }
 
+  async function toggleInvoice(id: string) {
+    const next = new Set(open);
+    if (next.has(id)) {
+      next.delete(id);
+      setOpen(next);
+      return;
+    }
+    next.add(id);
+    setOpen(next);
+    if (!details[id]) await refreshInvoice(id);
+  }
+
   return (
     <RepairOwnerShell>
-      <div className={`${shopAa.page} p-3 space-y-3 max-w-[1200px]`}>
-        <RepairBreadcrumbs items={[{ label: "Repair", href: "/repair" }, { label: "CRB" }]} />
-        <h1 className="text-xl font-semibold">CRB staging</h1>
-        <p className={shopAa.muted}>Upload a 500-byte DX (.txt, .dat, or a .zip with one text file). Re-uploading the same bytes is a no-op.</p>
+      <div className={`${shopAa.page} p-3 space-y-3`}>
+        <RepairBreadcrumbs items={[{ label: "Worklist" }]} />
+        <h1 className="text-xl font-semibold">Invoice Worklist</h1>
         {error ? <div className={`${repairUi.badge} repair-chip-stop`}>{error}</div> : null}
         {msg ? <div className={repairUi.badge}>{msg}</div> : null}
 
         <section className={`${repairUi.panel} p-3 space-y-2`}>
-          <h2 className="font-semibold">Files</h2>
-          <label className={shopAa.label}>
-            Upload DX
-            <input
-              className={repairUi.input}
-              type="file"
-              accept=".txt,.dat,.zip,text/plain"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void upload(file).catch((err) => setError(err instanceof Error ? err.message : "Upload failed"));
-              }}
-            />
-          </label>
-          <table className="w-full text-sm">
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className={shopAa.label}>
+              Upload DX
+              <input
+                className={repairUi.input}
+                type="file"
+                accept=".txt,.dat,.zip,text/plain"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void upload(file).catch((err) => setError(err instanceof Error ? err.message : "Upload failed"));
+                }}
+              />
+            </label>
+            <p className={shopAa.muted}>Same bytes are a no-op. {files.length} file{files.length === 1 ? "" : "s"}.</p>
+          </div>
+          <table className="crb-grid">
             <thead>
               <tr>
-                <th className="text-left">File</th>
-                <th className="text-left">Billed</th>
-                <th className="text-left">Months</th>
-                <th className="text-left">Control</th>
-                <th className="text-left">Version</th>
+                <th>File</th>
+                <th>Billed</th>
+                <th>Months</th>
+                <th>Control</th>
+                <th>Version</th>
               </tr>
             </thead>
             <tbody>
               {files.map((file) => (
-                <tr key={file.id} className="border-t border-[var(--repair-border)]">
+                <tr key={file.id}>
                   <td>{file.file_name}</td>
                   <td>{file.billed_party}</td>
                   <td>{(file.account_months ?? []).join(", ")}</td>
@@ -171,80 +238,139 @@ export default function CrbHome() {
                   <td>{file.version_status}</td>
                 </tr>
               ))}
-              {files.length === 0 ? <tr><td colSpan={5} className={shopAa.muted}>No files yet.</td></tr> : null}
+              {files.length === 0 ? <tr><td colSpan={5}>No files yet.</td></tr> : null}
             </tbody>
           </table>
         </section>
 
-        <section className={`${repairUi.panel} p-3 space-y-2`}>
-          <h2 className="font-semibold">Invoices</h2>
-          <div className="flex flex-wrap gap-2 items-end">
-            <label><span className={shopAa.label}>Biller</span><input className={repairUi.input} value={biller} onChange={(e) => setBiller(e.target.value)} /></label>
-            <label><span className={shopAa.label}>Billed party</span><input className={repairUi.input} value={billedParty} onChange={(e) => setBilledParty(e.target.value)} /></label>
-            <label><span className={shopAa.label}>Account month</span><input className={repairUi.input} value={accountMonth} onChange={(e) => setAccountMonth(e.target.value)} placeholder="YYMM" /></label>
-            <label>
-              <span className={shopAa.label}>Status</span>
-              <select className={repairUi.select} value={status} onChange={(e) => setStatus(e.target.value)}>
-                {STATUSES.map((item) => <option key={item || "all"} value={item}>{item || "All"}</option>)}
-              </select>
-            </label>
-            <label><span className={shopAa.label}>Min cents</span><input className={repairUi.input} value={minCents} onChange={(e) => setMinCents(e.target.value)} /></label>
-            <label><span className={shopAa.label}>Max cents</span><input className={repairUi.input} value={maxCents} onChange={(e) => setMaxCents(e.target.value)} /></label>
-            <label className="flex items-center gap-1"><input className={repairUi.checkbox} type="checkbox" checked={hasExceptions} onChange={(e) => setHasExceptions(e.target.checked)} /> Exceptions</label>
-            <label className="flex items-center gap-1"><input className={repairUi.checkbox} type="checkbox" checked={hardStops} onChange={(e) => setHardStops(e.target.checked)} /> Hard stops</label>
-            <label className="flex items-center gap-1"><input className={repairUi.checkbox} type="checkbox" checked={dueSoon} onChange={(e) => setDueSoon(e.target.checked)} /> Due soon</label>
-            <button type="button" className={repairUi.btnSecondary} onClick={() => void load()}>Refresh</button>
-          </div>
+        <div className="crb-filter">
+          <label>Biller<input className={repairUi.input} value={biller} onChange={(e) => setBiller(e.target.value)} /></label>
+          <label>Billed party<input className={repairUi.input} value={billedParty} onChange={(e) => setBilledParty(e.target.value)} /></label>
+          <label>Account month<input className={repairUi.input} value={accountMonth} onChange={(e) => setAccountMonth(e.target.value)} placeholder="YYMM" /></label>
+          <label>
+            Status
+            <select className={repairUi.select} value={status} onChange={(e) => setStatus(e.target.value)}>
+              {STATUSES.map((item) => <option key={item || "all"} value={item}>{item || "All"}</option>)}
+            </select>
+          </label>
+          <label>Min cents<input className={repairUi.input} value={minCents} onChange={(e) => setMinCents(e.target.value)} /></label>
+          <label>Max cents<input className={repairUi.input} value={maxCents} onChange={(e) => setMaxCents(e.target.value)} /></label>
+          <label className="crb-check"><input className={repairUi.checkbox} type="checkbox" checked={hasExceptions} onChange={(e) => setHasExceptions(e.target.checked)} /> Exceptions</label>
+          <label className="crb-check"><input className={repairUi.checkbox} type="checkbox" checked={hardStops} onChange={(e) => setHardStops(e.target.checked)} /> Hard stops only</label>
+          <label className="crb-check"><input className={repairUi.checkbox} type="checkbox" checked={dueSoon} onChange={(e) => setDueSoon(e.target.checked)} /> Due soon</label>
+          <button type="button" className={repairUi.btnSecondary} onClick={() => void load()}>Refresh</button>
           <button type="button" className={repairUi.btnPrimary} disabled={selected.size === 0} onClick={() => void markReviewed()}>
             Mark reviewed
           </button>
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th />
-                <th className="text-left">Invoice</th>
-                <th className="text-left">Biller</th>
-                <th className="text-left">Month</th>
-                <th className="text-left">Total</th>
-                <th className="text-left">Progress</th>
-                <th className="text-left">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((inv) => (
-                <tr key={inv.id} className="border-t border-[var(--repair-border)]">
-                  <td>
-                    <input className={repairUi.checkbox} type="checkbox" checked={selected.has(inv.id)} onChange={() => toggle(inv.id)} aria-label={`Select ${inv.invoice_number}`} />
-                  </td>
-                  <td><Link className={repairUi.link} href={`/repair/crb/invoice/${inv.id}`}>{inv.invoice_number}</Link></td>
-                  <td>{inv.billing_party}</td>
-                  <td>{inv.account_date}</td>
-                  <td>{crbMoney(Number(inv.grand_total_cents))}</td>
-                  <td>{Number(inv.cars_decided)}/{Number(inv.cars_total)} cars{Number(inv.hard_stops) > 0 ? ` · ${inv.hard_stops} hard stops` : ""}</td>
-                  <td>
-                    <CrbChip tone={toneForStatus(inv.control_ok ? inv.status : "OUT_OF_BALANCE")}>{inv.status}</CrbChip>
-                    {inv.reviewed ? <span className={shopAa.muted}> reviewed</span> : null}
-                  </td>
+        </div>
+
+        <div className="crb-worklist">
+          <div className="overflow-x-auto">
+            <table className="crb-grid">
+              <thead>
+                <tr>
+                  <th />
+                  <th />
+                  <th>Billing party</th>
+                  <th>Invoice no</th>
+                  <th>Acct month</th>
+                  <th>Cars reviewed</th>
+                  <th>Total</th>
+                  <th>Error %</th>
+                  <th>Suggested action</th>
+                  <th>Nearest deadline</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-              {invoices.length === 0 ? <tr><td colSpan={7} className={shopAa.muted}>No invoices match.</td></tr> : null}
-            </tbody>
-          </table>
-          {unmatched.length > 0 ? (
-            <div className="space-y-1">
-              <h3 className="font-semibold">Biller headers without a CRB invoice</h3>
-              <ul className="space-y-1">
-                {unmatched.map((header) => (
-                  <li key={header.id} className="flex flex-wrap items-center gap-2">
-                    <CrbChip tone="warn">BILLER_INVOICE_WITHOUT_CRB</CrbChip>
-                    <span>{header.billing_party} {header.invoice_number} {header.account_month}</span>
-                    <span className={shopAa.muted}>{header.total_cents == null ? "" : crbMoney(Number(header.total_cents))}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </section>
+              </thead>
+              <tbody>
+                {invoices.map((inv) => {
+                  const expanded = open.has(inv.id);
+                  const detail = details[inv.id];
+                  const panel = inv.error_panel;
+                  return (
+                    <Fragment key={inv.id}>
+                      <tr>
+                        <td>
+                          <input className={repairUi.checkbox} type="checkbox" checked={selected.has(inv.id)} onChange={() => toggleSelected(inv.id)} aria-label={`Select ${inv.invoice_number}`} />
+                        </td>
+                        <td>
+                          <button type="button" className={repairUi.btnSecondary} aria-expanded={expanded} onClick={() => void toggleInvoice(inv.id).catch((err) => setError(err instanceof Error ? err.message : "Load failed"))}>
+                            {expanded ? "Hide cars" : "Show cars"}
+                          </button>
+                        </td>
+                        <td>{inv.billing_party}</td>
+                        <td><Link className={repairUi.link} href={`/repair/crb/invoice/${inv.id}`}>{inv.invoice_number}</Link></td>
+                        <td>{inv.account_date}</td>
+                        <td>{Number(inv.cars_decided)}/{Number(inv.cars_total)}</td>
+                        <td>{crbMoney(Number(inv.grand_total_cents))}</td>
+                        <td>{crbPct(panel?.pct ?? null)}</td>
+                        <td><CrbChip tone={suggestedTone(panel?.suggestedLabel)}>{panel?.suggestedLabel || "Not calculated"}</CrbChip></td>
+                        <td>{nearestDeadline(panel)}</td>
+                        <td>
+                          <CrbChip tone={toneForStatus(inv.control_ok ? inv.status : "OUT_OF_BALANCE")}>{inv.status}</CrbChip>
+                          {inv.reviewed ? <span> reviewed</span> : null}
+                          {Number(inv.hard_stops) > 0 ? <span> · {inv.hard_stops} hard stops</span> : null}
+                        </td>
+                      </tr>
+                      {expanded ? (
+                        <tr>
+                          <td />
+                          <td colSpan={10}>
+                            {detail ? (
+                              <CrbCarTable
+                                invoiceId={inv.id}
+                                cars={detail.cars}
+                                tokens={tokens}
+                                onChanged={async () => {
+                                  await load();
+                                  await refreshInvoice(inv.id);
+                                }}
+                              />
+                            ) : <p>Loading cars…</p>}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+                {invoices.length === 0 ? <tr><td colSpan={11}>No invoices match.</td></tr> : null}
+              </tbody>
+            </table>
+            {unmatched.length > 0 ? (
+              <div className="space-y-1 mt-3">
+                <h2 className="font-semibold">Biller headers without a CRB invoice</h2>
+                <ul className="space-y-1">
+                  {unmatched.map((header) => (
+                    <li key={header.id} className="flex flex-wrap items-center gap-2">
+                      <CrbChip tone="warn">BILLER_INVOICE_WITHOUT_CRB</CrbChip>
+                      <span>{header.billing_party} {header.invoice_number} {header.account_month}</span>
+                      <span>{header.total_cents == null ? "" : crbMoney(Number(header.total_cents))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+          <aside className="crb-side" aria-label="Enter car numbers">
+            <h2 className="font-semibold">Enter car numbers</h2>
+            <p>Paste a list to find those cars across invoices.</p>
+            <textarea
+              className={repairUi.textarea}
+              rows={10}
+              value={carDraft}
+              onChange={(e) => setCarDraft(e.target.value)}
+              aria-label="Enter car numbers"
+              placeholder={"100010\nDEMO 100098"}
+            />
+            <button type="button" className={repairUi.btnPrimary} onClick={() => setCarQuery(carDraft)}>
+              Search
+            </button>
+            <button type="button" className={repairUi.btnSecondary} onClick={() => { setCarDraft(""); setCarQuery(""); }}>
+              Clear
+            </button>
+            {tokens.length ? <p>{invoices.length} invoice{invoices.length === 1 ? " includes" : "s include"} the list.</p> : null}
+          </aside>
+        </div>
       </div>
     </RepairOwnerShell>
   );

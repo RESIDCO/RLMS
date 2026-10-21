@@ -60,10 +60,16 @@ const NAV: NavItem[] = [
     match: (p) => p.startsWith("/repair/invoices"),
   },
   {
-    kind: "link",
-    href: "/repair/crb",
-    label: "CRB",
+    kind: "menu",
+    label: "Accounts Payable",
     match: (p) => p.startsWith("/repair/crb"),
+    items: [
+      {
+        href: "/repair/crb",
+        label: "Invoice Worklist",
+        match: (p) => p.startsWith("/repair/crb"),
+      },
+    ],
   },
   {
     kind: "link",

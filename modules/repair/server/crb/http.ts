@@ -104,6 +104,7 @@ export function registerCrbRoutes(app: Express): void {
       minCents: num(q.minCents),
       maxCents: num(q.maxCents),
       dueSoon: q.dueSoon === "1",
+      carNumbers: q.cars ? String(q.cars).split(/[\s,;]+/).filter(Boolean) : undefined,
     });
     const unmatchedHeaders = await listUnmatchedBillerHeaders();
     res.json({ invoices, unmatchedHeaders });

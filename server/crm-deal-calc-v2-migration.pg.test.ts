@@ -150,9 +150,16 @@ try {
     create table public.opportunities (
       id bigserial primary key,
       account_id bigint not null,
+      company_id bigint null,
       type text not null,
       stage text not null default 'identified',
+      source text null default 'manual',
+      owner text null,
+      car_type text null,
+      car_count int null,
       expected_close date,
+      notes text null,
+      created_by text null,
       loss_reason text,
       constraint opportunities_type_check check (type in ('renewal','relet','new_business','expansion','purchase','sale','sale_leaseback')),
       constraint opportunities_stage_check check (stage in ('identified','qualified','priced','in_review','proposal','docs','won','lost')),
@@ -249,6 +256,13 @@ try {
   ok(psql("select has_function_privilege('public', 'public.rlms_undo_calc_create_opp(uuid,uuid,text)', 'execute')") === "f", "public cannot execute the wrapper");
   ok(psql("select has_function_privilege('service_role', 'public.rlms_undo_calc_create_opp(uuid,uuid,text)', 'execute')") === "t", "service_role can execute the wrapper");
   ok(psql("select prosecdef::text from pg_proc where proname = 'rlms_undo_calc_create_opp'") === "true", "wrapper is security definer");
+  const createSig = "public.rlms_create_opp_from_calc(text,uuid,uuid,jsonb,jsonb,bigint,jsonb)";
+  ok(psql(`select has_function_privilege('anon', '${createSig}', 'execute')`) === "f", "anon cannot execute create-opportunity");
+  ok(psql(`select has_function_privilege('authenticated', '${createSig}', 'execute')`) === "f", "authenticated cannot execute create-opportunity");
+  ok(psql(`select has_function_privilege('public', '${createSig}', 'execute')`) === "f", "public cannot execute create-opportunity");
+  ok(psql(`select has_function_privilege('service_role', '${createSig}', 'execute')`) === "t", "service_role can execute create-opportunity");
+  ok(psql("select prosecdef::text from pg_proc where proname = 'rlms_create_opp_from_calc'") === "true", "create-opportunity is security definer");
+  ok(psql("select proconfig::text from pg_proc where proname = 'rlms_create_opp_from_calc'").includes("search_path=public, pg_temp"), "create-opportunity search_path is public, pg_temp");
 
   const opp = psql("insert into opportunities (account_id, type, stage, flavor, offering_name) values (1, 'purchase', 'proposal', 'portfolio_bid', 'Linked') returning id");
   const line = psql(`insert into opportunity_lines (opportunity_id, seller_deal_ref, car_count) values (${opp}, '1', 4) returning id`);
@@ -366,12 +380,89 @@ try {
   ok(psql(`select count(*) from activity_log where change_group = '${direct.core}' and undone_at is not null`) === "0", "the failed generic undo does not mark group C undone");
 
   const filed = pair("Filed", null);
-  psql("alter table public.attachments drop constraint attachments_entity_type_check");
-  psql("alter table public.attachments add constraint attachments_entity_type_check check (entity_type = any (array['master_lease','rider','railcar','account','company','company_contact','opportunity']::text[]))");
   const fileId = psql(`insert into attachments (entity_type, entity_id, opportunity_line_id, file_name, source_module) values ('opportunity', ${filed.createdOpp}, ${filed.createdLine}, 'bid.pdf', 'manual') returning id`);
-  const blocked = psql(`select exists (select 1 from attachments f where f.id = ${fileId} and f.opportunity_line_id = ${filed.createdLine} and not exists (select 1 from activity_log a where a.change_group = '${filed.core}' and a.table_name = 'attachments' and a.row_pk = f.id))`);
-  ok(blocked === "t", "a file on the created line is outside the group");
-  ok(psql(`select count(*) from activity_log where change_group = '${filed.calc}' and undone_at is not null`) === "0", "the file check refuses before anything is undone");
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:9";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.local-test-only";
+  const undoMod = await import("./undo.ts");
+  const supabaseMod = await import("./supabase.ts");
+  let undoRpcCalls = 0;
+  const quote = (value: unknown): string => {
+    if (value == null) return "null";
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (Array.isArray(value)) return `(${value.map(quote).join(",")})`;
+    return `'${String(value).replace(/'/g, "''")}'`;
+  };
+  const from = (table: string) => {
+    const allowed = new Set(["activity_log", "attachments", "opportunities", "opportunity_lines", "deal_calc_scenarios"]);
+    if (!allowed.has(table)) throw new Error(`unexpected table ${table}`);
+    const state: { columns: string; filters: string[]; order: string; single: boolean } = {
+      columns: "*",
+      filters: [],
+      order: "",
+      single: false,
+    };
+    const runQuery = () => {
+      const where = state.filters.length ? ` where ${state.filters.join(" and ")}` : "";
+      const sql = `select coalesce(json_agg(row_to_json(t)), '[]'::json)::text from (select ${state.columns} from public.${table}${where}${state.order}) t`;
+      const raw = psql(sql);
+      const rows = JSON.parse(raw) as Array<Record<string, unknown>>;
+      return { data: state.single ? rows[0] ?? null : rows, error: null };
+    };
+    const builder = {
+      select(columns: string) {
+        state.columns = columns;
+        return builder;
+      },
+      eq(column: string, value: unknown) {
+        state.filters.push(`${column} = ${quote(value)}`);
+        return builder;
+      },
+      in(column: string, values: unknown[]) {
+        state.filters.push(values.length ? `${column} in ${quote(values)}` : "false");
+        return builder;
+      },
+      order(column: string, opts?: { ascending?: boolean }) {
+        state.order = ` order by ${column} ${opts?.ascending === false ? "desc" : "asc"}`;
+        return builder;
+      },
+      maybeSingle() {
+        state.single = true;
+        return Promise.resolve(runQuery());
+      },
+      then(onFulfilled: (value: { data: unknown; error: null }) => unknown, onRejected?: (err: unknown) => unknown) {
+        return Promise.resolve(runQuery()).then(onFulfilled, onRejected);
+      },
+    };
+    return builder;
+  };
+  (supabaseMod.supabaseAdmin as { from: typeof from; rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }> }).from = from;
+  (supabaseMod.supabaseAdmin as { rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }> }).rpc = async (name, args) => {
+    if (name === "rlms_referenced_outside_group") {
+      const raw = psql(`select public.rlms_referenced_outside_group(${quote(args.p_table)}, ${quote(args.p_id)}::bigint, ${quote(args.p_group)}::uuid)`);
+      return { data: raw === "t" || raw === "true", error: null };
+    }
+    if (name === "rlms_undo_calc_create_opp") {
+      undoRpcCalls += 1;
+      return { data: null, error: { message: "wrapper must not run when a file blocks undo" } };
+    }
+    return { data: null, error: { message: `unexpected rpc ${name}` } };
+  };
+  for (const groupId of [filed.calc, filed.core]) {
+    let caught: { status?: number; message?: string } | null = null;
+    try {
+      await undoMod.applyUndo(groupId, "tester");
+    } catch (err) {
+      caught = err as { status?: number; message?: string };
+    }
+    ok(caught?.status === 409, `applyUndo from ${groupId === filed.calc ? "the calc group" : "the core group"} is 409 (${caught?.status} ${caught?.message})`);
+    ok(String(caught?.message ?? "").includes("Line has files"), `applyUndo names the attached file (${caught?.message})`);
+  }
+  ok(undoRpcCalls === 0, "the file check returns before the wrapper");
+  ok(psql(`select count(*) from activity_log where change_group in ('${filed.calc}', '${filed.core}') and undone_at is not null`) === "0", "neither group is marked undone");
+  ok(psql(`select count(*) from deal_calc_scenarios where id = ${filed.sid}`) === "1", "the scenario still exists");
+  ok(psql(`select count(*) from opportunities where id = ${filed.createdOpp}`) === "1", "the opportunity still exists");
+  ok(psql(`select count(*) from opportunity_lines where id = ${filed.createdLine}`) === "1", "the line still exists");
+  ok(psql(`select count(*) from attachments where id = ${fileId}`) === "1", "the file still exists");
 
   function bad(label: string, mutate: (core: string, calc: string) => void) {
     const core = psql("select gen_random_uuid()");
@@ -396,6 +487,105 @@ try {
     psql(`update activity_log set actor = 'someone-else' where change_group = '${core}'`);
   });
 
+  psql(`
+    create table public.rlms_test_fail (fail_after int);
+    insert into public.rlms_test_fail values (null);
+    create sequence public.rlms_test_writes;
+    create function public.rlms_test_fail_after() returns trigger
+    language plpgsql as $fn$
+    declare
+      n int;
+      seen int;
+    begin
+      select fail_after into n from public.rlms_test_fail;
+      if n is null then
+        return new;
+      end if;
+      seen := nextval('public.rlms_test_writes');
+      if seen > n then
+        raise exception 'forced failure after step %', n;
+      end if;
+      return new;
+    end
+    $fn$;
+    create trigger trg_rlms_test_fail_opp before insert on public.opportunities
+      for each row execute function public.rlms_test_fail_after();
+    create trigger trg_rlms_test_fail_line before insert on public.opportunity_lines
+      for each row execute function public.rlms_test_fail_after();
+    create trigger trg_rlms_test_fail_scenario before insert or update on public.deal_calc_scenarios
+      for each row execute function public.rlms_test_fail_after();
+    create trigger trg_rlms_test_fail_log before insert on public.activity_log
+      for each row execute function public.rlms_test_fail_after();
+  `);
+  function createCall(marker: string, scenarioId: string | null, withLine: boolean): string {
+    const line = withLine
+      ? `jsonb_build_object('seller_deal_ref', '1', 'car_count', 2, 'notes', 'Created from the deal calculator')`
+      : "null";
+    const sid = scenarioId ?? "null";
+    return `public.rlms_create_opp_from_calc(
+      'tester', gen_random_uuid(), gen_random_uuid(),
+      jsonb_build_object('account_id', 1, 'type', 'purchase', 'stage', 'identified', 'source', 'manual', 'offering_name', '${marker}', 'car_count', 2, 'created_by', 'tester'),
+      ${line},
+      ${sid},
+      jsonb_build_object('name', '${marker}', 'deal_type', 'fleet_purchase', 'method', 'cash_flow', 'post_lease_plan', 'sell', 'calc_version', 'v2', 'inputs', '{}'::jsonb, 'results', '{}'::jsonb, 'created_by', 'tester')
+    )`;
+  }
+  function arm(step: number | null): void {
+    psql(`select setval('public.rlms_test_writes', 1, false)`);
+    psql(`update public.rlms_test_fail set fail_after = ${step == null ? "null" : step}`);
+  }
+  function nothingNamed(marker: string, label: string): void {
+    ok(psql(`select count(*) from opportunities where offering_name = '${marker}'`) === "0", `${label} leaves no opportunity`);
+    ok(psql(`select count(*) from deal_calc_scenarios where name = '${marker}'`) === "0", `${label} leaves no scenario`);
+    ok(psql(`select count(*) from activity_log where coalesce(after->>'offering_name','') = '${marker}' or coalesce(after->>'name','') = '${marker}'`) === "0", `${label} leaves no activity log`);
+  }
+  const shapes: Array<{ label: string; steps: number; line: boolean; existing: boolean }> = [
+    { label: "new scenario with a line", steps: 6, line: true, existing: false },
+    { label: "new scenario without a line", steps: 4, line: false, existing: false },
+    { label: "linked scenario", steps: 6, line: true, existing: true },
+  ];
+  for (const shape of shapes) {
+    for (let step = 0; step < shape.steps; step += 1) {
+      const marker = `Fail ${shape.label} ${step}`;
+      let existingId: string | null = null;
+      arm(null);
+      if (shape.existing) {
+        existingId = psql(`insert into deal_calc_scenarios (opportunity_id, name, deal_type, method, calc_version, inputs, results) values (null, '${marker}', 'fleet_purchase', 'cash_flow', 'v2', '{}'::jsonb, '{}'::jsonb) returning id`);
+      }
+      arm(step);
+      const err = psqlFails(`select ${createCall(marker, existingId, shape.line)}`);
+      ok(/forced failure after step/.test(err), `${shape.label} fails after step ${step}`);
+      if (shape.existing && existingId) {
+        ok(psql(`select opportunity_id is null and name = '${marker}' from deal_calc_scenarios where id = ${existingId}`) === "t", `${shape.label} step ${step} leaves the scenario unlinked`);
+        ok(psql(`select count(*) from opportunities where offering_name = '${marker}'`) === "0", `${shape.label} step ${step} leaves no opportunity`);
+        ok(psql(`select count(*) from activity_log where table_name = 'deal_calc_scenarios' and row_pk = ${existingId} and detail->>'link_kind' = 'calc_create_opp'`) === "0", `${shape.label} step ${step} leaves no scenario log`);
+        psql(`delete from deal_calc_scenarios where id = ${existingId}`);
+      } else {
+        nothingNamed(marker, `${shape.label} step ${step}`);
+      }
+    }
+  }
+  arm(null);
+  const createdRaw = psql(`select ${createCall("Atomic kept", null, true)}::text`);
+  const created = JSON.parse(createdRaw) as { ok?: boolean; opportunity_id?: number; line_id?: number; scenario?: { id?: number }; calc_group?: string; core_group?: string };
+  ok(created.ok === true && created.opportunity_id != null && created.line_id != null && created.scenario?.id != null, "create-opportunity commits the opportunity, line, and scenario");
+  ok(psql(`select count(*) from activity_log where change_group = '${created.core_group}' and detail->>'link_kind' = 'calc_create_opp' and detail->>'linked_group' = '${created.calc_group}'`) === "2", "the core group logs the opportunity and the line");
+  ok(psql(`select count(*) from activity_log where change_group = '${created.calc_group}' and detail->>'op' = 'insert' and detail->>'linked_group' = '${created.core_group}'`) === "1", "the calc group logs the new scenario");
+  const linkedId = psql("insert into deal_calc_scenarios (opportunity_id, name, deal_type, method, calc_version, inputs, results) values (null, 'Atomic link', 'fleet_purchase', 'cash_flow', 'v2', '{}'::jsonb, '{}'::jsonb) returning id");
+  const linkedRaw = psql(`select ${createCall("Atomic link", linkedId, false)}::text`);
+  const linkedSaved = JSON.parse(linkedRaw) as { scenario?: { id?: number; opportunity_id?: number }; calc_group?: string };
+  ok(Number(linkedSaved.scenario?.id) === Number(linkedId) && linkedSaved.scenario?.opportunity_id != null, "create-opportunity links an existing scenario");
+  ok(psql(`select detail->>'op' from activity_log where change_group = '${linkedSaved.calc_group}'`) === "update", "linking an existing scenario is an update");
+  psql(`
+    drop trigger trg_rlms_test_fail_opp on public.opportunities;
+    drop trigger trg_rlms_test_fail_line on public.opportunity_lines;
+    drop trigger trg_rlms_test_fail_scenario on public.deal_calc_scenarios;
+    drop trigger trg_rlms_test_fail_log on public.activity_log;
+    drop function public.rlms_test_fail_after();
+    drop table public.rlms_test_fail;
+    drop sequence public.rlms_test_writes;
+  `);
+
   const loose = psql("insert into deal_calc_scenarios (opportunity_id, name, deal_type, method, calc_version, inputs, results) values (null, 'Stay', 'fleet_purchase', 'cash_flow', 'v2', '{}'::jsonb, '{}'::jsonb) returning id");
   const refused = psqlFileFails(join(repo, "migrations/20261123_crm_deal_calc_v2_down.sql"));
   ok(/deal_calc_scenarios have no opportunity/.test(refused), `down refuses null opportunities (${refused.split("\n").find((line) => line.includes("opportunity")) ?? refused.slice(0, 180)})`);
@@ -406,6 +596,7 @@ try {
   ok(restored.apply === POST.apply && restored.undo === POST.undo && restored.referenced === POST.referenced && restored.fk === POST.fk, "down leaves the frozen functions unchanged");
   ok(psql("select md5(pg_get_functiondef('public.rlms_undo_deal_calc_group'::regproc))") === p1Undo, "down restores the p1 deal-calc undo md5");
   ok(psql("select to_regprocedure('public.rlms_undo_calc_create_opp(uuid,uuid,text)')") === "", "down drops the wrapper");
+  ok(psql("select to_regprocedure('public.rlms_create_opp_from_calc(text,uuid,uuid,jsonb,jsonb,bigint,jsonb)')") === "", "down drops the create function");
   ok(psql("select count(*) from pg_constraint where conname in ('deal_calc_scenarios_line_needs_opp', 'deal_calc_scenarios_pin_needs_opp')") === "0", "down drops the v2 checks");
   ok(/not-null|not null/i.test(psqlFails("insert into deal_calc_scenarios (opportunity_id, name, deal_type, method, calc_version, inputs, results) values (null, 'nope', 'fleet_purchase', 'cash_flow', 'v2', '{}'::jsonb, '{}'::jsonb)")), "opportunity_id is not null again");
 } catch (err) {

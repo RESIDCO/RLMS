@@ -32,6 +32,7 @@ do $$ declare m text; n bigint; begin
 end $$;
 
 drop function if exists public.rlms_undo_calc_create_opp(uuid, uuid, text);
+drop function if exists public.rlms_create_opp_from_calc(text, uuid, uuid, jsonb, jsonb, bigint, jsonb);
 
 alter table public.deal_calc_scenarios drop constraint if exists deal_calc_scenarios_line_needs_opp;
 alter table public.deal_calc_scenarios drop constraint if exists deal_calc_scenarios_pin_needs_opp;
@@ -332,6 +333,9 @@ begin
   end if;
   if to_regprocedure('public.rlms_undo_calc_create_opp(uuid,uuid,text)') is not null then
     raise exception 'wrapper function still exists';
+  end if;
+  if to_regprocedure('public.rlms_create_opp_from_calc(text,uuid,uuid,jsonb,jsonb,bigint,jsonb)') is not null then
+    raise exception 'create function still exists';
   end if;
 end $$;
 

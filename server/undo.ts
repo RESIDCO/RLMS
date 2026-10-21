@@ -17,7 +17,7 @@ import {
 } from "@shared/undo";
 import { assertLineInsertUndoHasNoOutsideFiles } from "./crm-bid-attachments";
 import { isDealCalcOnlyGroup } from "./crm-deal-calc";
-import { directHalfUndoRefusal, routeUndoGroup } from "@shared/dealCalcUndo";
+import { routeUndoGroup } from "@shared/dealCalcUndo";
 
 function asRows(data: unknown): UndoLogRow[] {
   return ((data ?? []) as any[]).map((r) => ({
@@ -161,11 +161,6 @@ export function attachmentStoragePathsRemovedOnUndo(rows: Array<{
     .filter((row) => row.table_name === "attachments" && row.detail?.op === "insert")
     .map((row) => String(row.after?.storage_path ?? row.detail?.storage_path ?? ""))
     .filter(Boolean);
-}
-
-/** Generic undo of one half of a calc-create pair. The HTTP undo uses the wrapper instead. */
-export function linkedGroupDirectUndoStatus(): { status: 409; error: "linked_group" } {
-  return directHalfUndoRefusal();
 }
 
 export async function applyUndo(group: string, actor: string) {

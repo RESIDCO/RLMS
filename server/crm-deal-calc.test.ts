@@ -185,7 +185,13 @@ ok(routeSrc.includes('"/api/deal-calc/scenarios"') && /\/api\/deal-calc\/scenari
 ok(routeSrc.includes('"/api/deal-calc/scenarios/:sid/link"') && routeSrc.includes('"/api/deal-calc/scenarios/:sid/unlink"'), "link and unlink routes exist");
 ok(routeSrc.includes("create-opportunity") && routeSrc.includes("requireWrite"), "create opportunity from calc is requireWrite");
 ok(undoSrc.includes("rlms_undo_calc_create_opp") && undoSrc.includes("previewUndo(otherGroup"), "undo previews both groups and calls the wrapper");
-ok(undoSrc.includes("linkedGroupDirectUndoStatus"), "a direct half undo is a 409");
+ok(!undoSrc.includes("linkedGroupDirectUndoStatus"), "the unused direct-half helper is gone");
+ok(serverSrc.includes('.rpc("rlms_create_opp_from_calc"'), "create opportunity from calc is one database call");
+ok(!serverSrc.includes("callUndoChangeGroup") && !serverSrc.includes("callUndoCalcCreateOpp"), "create opportunity does not roll back in JavaScript");
+ok(v2.includes("create or replace function public.rlms_create_opp_from_calc"), "v2 defines the create-opportunity function");
+ok(v2.includes("revoke all on function public.rlms_create_opp_from_calc(text, uuid, uuid, jsonb, jsonb, bigint, jsonb) from public, anon, authenticated"), "create-opportunity execute is revoked from public roles");
+ok(v2.includes("has_function_privilege('public', 'public.rlms_create_opp_from_calc(text,uuid,uuid,jsonb,jsonb,bigint,jsonb)', 'execute')"), "v2 post-checks public cannot execute the create function");
+ok(v2down.includes("drop function if exists public.rlms_create_opp_from_calc(text, uuid, uuid, jsonb, jsonb, bigint, jsonb)"), "down drops the create-opportunity function");
 ok(serverSrc.includes("scenarioWriteRefusal") && serverSrc.includes("An unlinked scenario cannot be pinned"), "link uses the closed-line guard and unlinked pin is 400");
 ok(!serverSrc.includes("master_leases") && !v2.includes("master_leases"), "deal calc v2 does not touch lease tables");
 ok(down.includes("down refused"), "down refuses when data exists");

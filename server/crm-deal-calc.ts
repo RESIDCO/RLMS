@@ -2,8 +2,9 @@
  * Deal calculator persistence.
  * User edits go through withChangeGroupResult + recordChange.
  * Undo of a deal-calc-only change group is rlms_undo_deal_calc_group, one
- * transaction in the database. The four frozen rlms_ undo functions are not
- * called or replaced.
+ * transaction in the database. Creating an opportunity from a calc is
+ * rlms_create_opp_from_calc, one transaction for both linked groups.
+ * The four frozen rlms_ undo functions are not called or replaced.
  */
 
 import { randomUUID } from "node:crypto";
@@ -31,9 +32,8 @@ import {
   type DealType,
   type LineSeed,
 } from "@shared/dealCalc";
-import { CALC_CREATE_OPP_LINK, planPin, planSoftDelete, type ScenarioSlot } from "@shared/dealCalcUndo";
-import { recordChange, withChangeGroupResult, withExplicitChangeGroup } from "./change-log";
-import { callUndoCalcCreateOpp, callUndoChangeGroup } from "./dealCalcUndoRpc";
+import { planPin, planSoftDelete, type ScenarioSlot } from "@shared/dealCalcUndo";
+import { recordChange, withChangeGroupResult } from "./change-log";
 import { CrmHttpError } from "./crm-error";
 import { saveOpportunityLines } from "./crm-bid-lines";
 import { supabaseAdmin } from "./supabase";
@@ -734,132 +734,66 @@ export async function createOpportunityFromCalc(body: Record<string, unknown>, a
   const includeLine = body.include_line !== false;
   const coreGroup = randomUUID();
   const calcGroup = randomUUID();
-  const link = { linked_group: "", link_kind: CALC_CREATE_OPP_LINK };
-  let scenarioWritten = false;
-  try {
-    const core = await withExplicitChangeGroup(coreGroup, actor, async () => {
-      const payload = {
-        account_id: account.accountId,
-        company_id: account.companyId,
-        type: shape.type,
-        flavor: shape.flavor,
-        stage: "identified",
-        source,
-        owner,
-        offering_name: name,
-        car_count: inputs.carCount.value,
+  const opportunity = {
+    account_id: account.accountId,
+    company_id: account.companyId,
+    type: shape.type,
+    flavor: shape.flavor,
+    stage: "identified",
+    source,
+    owner,
+    offering_name: name,
+    car_count: inputs.carCount.value,
+    car_type: inputs.carType.value,
+    expected_close: inputs.closeDate.value,
+    notes: typeof body.notes === "string" ? body.notes : existing?.notes ?? null,
+    created_by: actor,
+  };
+  const line = includeLine
+    ? {
+        seller_deal_ref: "1",
         car_type: inputs.carType.value,
-        expected_close: inputs.closeDate.value,
-        notes: typeof body.notes === "string" ? body.notes : existing?.notes ?? null,
-        created_by: actor,
-      };
-      const { data, error } = await supabaseAdmin.from("opportunities").insert(payload).select("*").single();
-      if (error) throw error;
-      const opportunity = data as Record<string, unknown>;
-      await recordChange({
-        table: "opportunities",
-        pk: Number(opportunity.id),
-        before: {},
-        after: changeCaptureRow(opportunity),
-        action: "create_opportunity",
-        entity_type: "opportunity",
-        entity_id: Number(opportunity.id),
-        actor,
-        detail: { ...link, linked_group: calcGroup },
-      });
-      let line: Record<string, unknown> | null = null;
-      if (includeLine) {
-        const linePayload = {
-          opportunity_id: Number(opportunity.id),
-          seller_deal_ref: "1",
-          car_type: inputs.carType.value,
-          aar_code: inputs.aarCode.value,
-          car_count: inputs.carCount.value ?? 0,
-          avg_build_year: inputs.avgBuildYear.value,
-          lease_rate: inputs.monthlyRent.value,
-          lease_expiry: inputs.leaseExpiry.value,
-          lessee_rating: inputs.lesseeRating.value,
-          notes: "Created from the deal calculator",
-        };
-        const inserted = await supabaseAdmin.from("opportunity_lines").insert(linePayload).select("*").single();
-        if (inserted.error) throw inserted.error;
-        line = inserted.data as Record<string, unknown>;
-        await recordChange({
-          table: "opportunity_lines",
-          pk: Number(line.id),
-          before: {},
-          after: changeCaptureRow(line),
-          action: "create_opportunity_line",
-          entity_type: "opportunity_line",
-          entity_id: Number(line.id),
-          actor,
-          detail: { ...link, linked_group: calcGroup },
-        });
+        aar_code: inputs.aarCode.value,
+        car_count: inputs.carCount.value ?? 0,
+        avg_build_year: inputs.avgBuildYear.value,
+        lease_rate: inputs.monthlyRent.value,
+        lease_expiry: inputs.leaseExpiry.value,
+        lessee_rating: inputs.lesseeRating.value,
+        notes: "Created from the deal calculator",
       }
-      return { opportunity, line };
-    });
-    const scenario = await withExplicitChangeGroup(calcGroup, actor, async () => {
-      const lineId = core.line ? Number(core.line.id) : null;
-      const opportunityId = Number(core.opportunity.id);
-      if (existing) {
-        const { data, error } = await supabaseAdmin
-          .from(SCENARIO_TABLE)
-          .update({ opportunity_id: opportunityId, opportunity_line_id: lineId, is_pinned: false, name })
-          .eq("id", existing.id)
-          .select("*")
-          .single();
-        if (error) throw error;
-        scenarioWritten = true;
-        const row = data as Record<string, unknown>;
-        await recordChange({
-          table: SCENARIO_TABLE,
-          pk: Number(row.id),
-          before: changeCaptureRow(existing),
-          after: changeCaptureRow(row),
-          action: "link_deal_calc_scenario",
-          entity_type: "deal_calc_scenario",
-          entity_id: Number(row.id),
-          actor,
-          detail: { ...link, linked_group: coreGroup, opportunity_id: opportunityId },
-        });
-        return row;
-      }
-      const insert = scenarioInsert(opportunityId, { ...body, name }, actor, inputs, lineId);
-      const { data, error } = await supabaseAdmin.from(SCENARIO_TABLE).insert(insert).select("*").single();
-      if (error) throw error;
-      scenarioWritten = true;
-      const row = data as Record<string, unknown>;
-      await recordChange({
-        table: SCENARIO_TABLE,
-        pk: Number(row.id),
-        before: {},
-        after: changeCaptureRow(row),
-        action: "create_deal_calc_scenario",
-        entity_type: "deal_calc_scenario",
-        entity_id: Number(row.id),
-        actor,
-        detail: { ...link, linked_group: coreGroup, opportunity_id: opportunityId },
-      });
-      scenarioWritten = true;
-      return row;
-    });
-    return {
-      opportunity: core.opportunity,
-      opportunity_id: Number(core.opportunity.id),
-      line_id: core.line ? Number(core.line.id) : null,
-      scenario,
-      change_group: calcGroup,
-      core_group: coreGroup,
-      calc_group: calcGroup,
-    };
-  } catch (err) {
-    if (scenarioWritten) {
-      await callUndoCalcCreateOpp(calcGroup, coreGroup, actor);
-    } else {
-      await callUndoChangeGroup(coreGroup, actor);
-    }
-    throw err;
-  }
+    : null;
+  const scenarioPayload = existing
+    ? { name }
+    : scenarioInsert(null, { ...body, name }, actor, inputs, null);
+  const { data, error } = await supabaseAdmin.rpc("rlms_create_opp_from_calc", {
+    p_actor: actor,
+    p_core_group: coreGroup,
+    p_calc_group: calcGroup,
+    p_opportunity: opportunity,
+    p_line: line,
+    p_scenario_id: existing?.id ?? null,
+    p_scenario: scenarioPayload,
+  });
+  if (error) throw error;
+  const saved = (data ?? {}) as {
+    opportunity?: Record<string, unknown>;
+    opportunity_id?: number;
+    line_id?: number | null;
+    scenario?: Record<string, unknown>;
+    change_group?: string;
+    core_group?: string;
+    calc_group?: string;
+  };
+  if (!saved.scenario || saved.opportunity_id == null) throw httpError(500, "Create opportunity did not finish");
+  return {
+    opportunity: saved.opportunity ?? null,
+    opportunity_id: Number(saved.opportunity_id),
+    line_id: saved.line_id == null ? null : Number(saved.line_id),
+    scenario: saved.scenario,
+    change_group: saved.change_group ?? calcGroup,
+    core_group: saved.core_group ?? coreGroup,
+    calc_group: saved.calc_group ?? calcGroup,
+  };
 }
 
 export function isDealCalcOnlyGroup(rows: Array<{ table_name: string | null }>): boolean {

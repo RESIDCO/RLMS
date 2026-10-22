@@ -1,5 +1,12 @@
 import ExcelJS from "exceljs";
 import { whitelistExportCols } from "@shared/column-views";
+import {
+  CAR_EXPORT_MARK_HEADER,
+  CAR_EXPORT_NUMBER_HEADER,
+  ensureLeadingCarKeys,
+  exportReportingMarkText,
+  stampExcelCarNumber,
+} from "@shared/car-export-identity";
 import { RAILCAR_CSV_COLS } from "@/lib/railcar-csv";
 
 export type SearchExportMeta = {
@@ -35,9 +42,9 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function colsFor(keys: Iterable<string>) {
   const allowed = RAILCAR_CSV_COLS.map((c) => c.key);
-  const picked = whitelistExportCols(allowed, Array.from(keys), allowed);
+  const picked = ensureLeadingCarKeys(whitelistExportCols(allowed, Array.from(keys), allowed));
   const byKey = new Map(RAILCAR_CSV_COLS.map((c) => [c.key, c]));
-  return picked.map((k) => byKey.get(k)).filter((c): c is (typeof RAILCAR_CSV_COLS)[number] => Boolean(c));
+  return picked.map((k) => byKey.get(k as (typeof RAILCAR_CSV_COLS)[number]["key"])).filter((c): c is (typeof RAILCAR_CSV_COLS)[number] => Boolean(c));
 }
 
 export async function downloadSearchXlsx(
@@ -55,7 +62,11 @@ export async function downloadSearchXlsx(
     `Date (ET): ${etNow()}`,
   ]);
   results.addRow(cols.map((c) => c.header));
-  for (const row of rows) results.addRow(cols.map((c) => c.get(row)));
+  const numberIndex = cols.findIndex((col) => col.key === "car_number");
+  for (const row of rows) {
+    const added = results.addRow(cols.map((c) => c.get(row)));
+    if (numberIndex >= 0) stampExcelCarNumber(added.getCell(numberIndex + 1), cols[numberIndex].get(row));
+  }
 
   const summary = wb.addWorksheet("Summary");
   summary.addRow(["Group", "Value", "Count"]);
@@ -69,9 +80,15 @@ export async function downloadSearchXlsx(
   for (const token of meta.notFound) missing.addRow([token]);
 
   const inactive = wb.addWorksheet("Inactive matches");
-  inactive.addRow(["Id", "Marks", "Number", "Status"]);
+  inactive.addRow([CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, "Id", "Status"]);
   for (const row of meta.inactive) {
-    inactive.addRow([row.id ?? "", row.reporting_marks ?? "", row.car_number ?? "", row.status ?? ""]);
+    const added = inactive.addRow([
+      exportReportingMarkText(row.reporting_marks),
+      "",
+      row.id ?? "",
+      row.status ?? "",
+    ]);
+    stampExcelCarNumber(added.getCell(2), row.car_number);
   }
 
   const ambiguous = wb.addWorksheet("Ambiguous");

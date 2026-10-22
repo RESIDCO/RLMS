@@ -9,6 +9,7 @@
  */
 
 import { normalizeStoredCarNumber, splitCarNumber } from "./residco-import";
+import { csvCarNumberField, csvField } from "./car-export-identity";
 
 export const REMARK_BATCH_MAX = 500;
 export const REMARK_CONFIRM = "REMARK";
@@ -497,8 +498,7 @@ export function selectRemarkApply(
 }
 
 function csvCell(value: unknown): string {
-  const s = value == null ? "" : String(value);
-  return `"${s.replace(/"/g, '""')}"`;
+  return csvField(value);
 }
 
 export function remarkPreviewToCsv(rows: RemarkPreviewRow[]): string {
@@ -536,5 +536,9 @@ export function remarkPreviewToCsv(rows: RemarkPreviewRow[]): string {
     row.clash ? `${row.clash.reporting_marks ?? ""} ${row.clash.car_number}`.trim() : "",
     row.message,
   ]);
-  return [header, ...body].map((line) => line.map(csvCell).join(",")).join("\n");
+  const numberIndexes = new Set([3, 5]);
+  return [
+    header.map(csvCell).join(","),
+    ...body.map((line) => line.map((cell, index) => (numberIndexes.has(index) ? csvCarNumberField(cell) : csvCell(cell))).join(",")),
+  ].join("\n");
 }

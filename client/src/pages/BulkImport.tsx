@@ -21,6 +21,7 @@ import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { queryClient, apiRequest, apiUpload } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { looksLikeVcf } from "@shared/vcf-import";
+import { CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, csvCarNumberField, exportReportingMarkText } from "@shared/car-export-identity";
 import { confirmSave } from "@/components/ConfirmActionDialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import AcquisitionImportSection from "./AcquisitionImportSection";
@@ -327,33 +328,23 @@ function downloadErrorReport(rows: PreviewRow[], sourceFileName: string) {
   const problemRows = rows.filter((r) => r.errors.length > 0 || r.warnings.length > 0);
   if (problemRows.length === 0) return;
 
-  const headers = ["Row #", "Reporting Marks", "Car Number", "Issue Type", "Issue Details"];
+  const headers = ["Row #", CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, "Issue Type", "Issue Details"];
   const dataRows: string[][] = [];
 
   for (const row of problemRows) {
+    const mark = row.reporting_marks ? exportReportingMarkText(row.reporting_marks) : "(blank)";
+    const number = row.car_number || "(blank)";
     for (const err of row.errors) {
-      dataRows.push([
-        String(row._row),
-        row.reporting_marks ?? "(blank)",
-        row.car_number || "(blank)",
-        "Error",
-        err,
-      ]);
+      dataRows.push([String(row._row), mark, number, "Error", err]);
     }
     for (const warn of row.warnings) {
-      dataRows.push([
-        String(row._row),
-        row.reporting_marks ?? "(blank)",
-        row.car_number || "(blank)",
-        "Warning",
-        warn,
-      ]);
+      dataRows.push([String(row._row), mark, number, "Warning", warn]);
     }
   }
 
   const csv = [
     headers.map(escCsv).join(","),
-    ...dataRows.map((r) => r.map(escCsv).join(",")),
+    ...dataRows.map((cells) => cells.map((cell, index) => (index === 2 && cell !== "(blank)" ? csvCarNumberField(cell) : escCsv(cell))).join(",")),
   ].join("\n");
 
   const baseName = sourceFileName.replace(/\.[^.]+$/, "");

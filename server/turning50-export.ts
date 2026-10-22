@@ -5,23 +5,14 @@ import { excelSheetName } from "@shared/programs";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { resolveLeaseType } from "@shared/lease-type";
 import { loadTurning50Export, type Turning50ExportCar } from "./browse";
+import {
+  TURNING50_CAR_SHEET_HEADERS,
+  exportCarNumberText,
+  exportReportingMarkText,
+  stampExcelCarNumber,
+} from "@shared/car-export-identity";
 
-const CAR_HEADERS = [
-  "OL",
-  "Marks",
-  "Car Number",
-  "Lease Type",
-  "Entity",
-  "Status",
-  "Type",
-  "Lessee",
-  "Build Year",
-  "NBV",
-  "OAC",
-  "Net Equip. Cost",
-  "Capacity",
-  "Lining",
-] as const;
+const CAR_HEADERS = TURNING50_CAR_SHEET_HEADERS;
 
 function money(v: number | null | undefined): number | string {
   if (v == null) return "";
@@ -30,9 +21,9 @@ function money(v: number | null | undefined): number | string {
 
 function carCells(c: Turning50ExportCar, ol: string, mlaType: string | null): (string | number)[] {
   return [
+    exportReportingMarkText(c.reporting_marks),
+    exportCarNumberText(c.car_number),
     ol,
-    c.reporting_marks ?? "",
-    c.car_number ?? "",
     resolveLeaseType(c.lease_type, mlaType) ?? "",
     c.entity ?? "",
     displayRailcarStatus(displayStatusInputFromRailcar(c as any)),
@@ -55,9 +46,13 @@ function writeCarSheet(
   const sheet = wb.addWorksheet(name);
   sheet.addRow([...CAR_HEADERS]);
   sheet.getRow(1).font = { bold: true };
-  for (const r of rows) sheet.addRow(carCells(r.car, r.ol, r.mlaType));
+  for (const r of rows) {
+    const values = carCells(r.car, r.ol, r.mlaType);
+    const added = sheet.addRow(values);
+    stampExcelCarNumber(added.getCell(2), values[1]);
+  }
   sheet.columns.forEach((col, i) => {
-    col.width = i === 0 || i === 3 || i === 7 ? 20 : 14;
+    col.width = i === 2 || i === 3 || i === 7 ? 20 : 14;
   });
 }
 

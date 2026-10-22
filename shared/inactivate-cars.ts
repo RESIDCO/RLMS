@@ -5,6 +5,13 @@
  */
 
 import { isFrozenRailcar } from "./car-lifecycle-status";
+import {
+  CAR_EXPORT_MARK_HEADER,
+  CAR_EXPORT_NUMBER_HEADER,
+  carIdentityCells,
+  csvCarNumberField,
+  csvField,
+} from "./car-export-identity";
 
 export const INACTIVATE_CONFIRM = "INACTIVATE";
 export const INACTIVATE_BATCH_MAX = 500;
@@ -157,11 +164,13 @@ export function chooseInactivateIds(
 }
 
 export function inactivatePreviewToCsv(rows: InactivatePreviewRow[]): string {
-  const header = ["Car", "Id", "Status", "Active", "Car status", "Assignment", "Rent stop", "Programs", "Commitment", "Check"];
-  const lines = [header.join(",")];
+  const header = [CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, "Id", "Status", "Active", "Car status", "Assignment", "Rent stop", "Programs", "Commitment", "Check"];
+  const lines = [header.map((cell) => csvField(cell)).join(",")];
   for (const row of rows) {
+    const identity = carIdentityCells({ car: row.car });
     const cells = [
-      row.car,
+      identity.mark,
+      identity.number,
       String(row.id),
       row.status,
       row.active == null ? "" : row.active ? "true" : "false",
@@ -172,7 +181,7 @@ export function inactivatePreviewToCsv(rows: InactivatePreviewRow[]): string {
       row.commitment ?? "",
       row.message,
     ];
-    lines.push(cells.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","));
+    lines.push(cells.map((cell, index) => (index === 1 ? csvCarNumberField(cell) : csvField(cell))).join(","));
   }
   return lines.join("\n");
 }

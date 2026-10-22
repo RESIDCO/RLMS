@@ -22,6 +22,13 @@ import { appendNotesInGroup, withNoteReport } from "./append-note";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { annotateKpiDelta } from "./kpi-delta";
 import { formatCarId } from "@shared/residco-import";
+import {
+  CAR_EXPORT_MARK_HEADER,
+  CAR_EXPORT_NUMBER_HEADER,
+  carIdentityCells,
+  csvCarNumberField,
+  csvField,
+} from "@shared/car-export-identity";
 
 const RECOMPUTE_STATUS = process.env.RLMS_RECOMPUTE_FLEET_STATUS === "1";
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
@@ -1578,22 +1585,25 @@ export function registerCommitmentRoutes(
       if (error) throw error;
       const rows = data ?? [];
       if (String(req.query.format ?? "") === "csv") {
-        const headers = ["kind", "id", "car", "entity", "legal_owner", "old_value", "new_value"];
+        const headers = ["kind", "id", CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, "Label", "entity", "legal_owner", "old_value", "new_value"];
         const lines = [
           headers.join(","),
-          ...rows.map((r: any) =>
-            [
+          ...rows.map((r: any) => {
+            const railcar = r.kind === "railcar";
+            const identity = railcar ? carIdentityCells({ ...r, car: formatCarId(r) }) : { mark: "", number: "" };
+            const cells = [
               r.kind,
               r.id,
-              r.kind === "railcar" ? formatCarId(r) : (r.label ?? ""),
+              identity.mark,
+              identity.number,
+              railcar ? "" : (r.label ?? ""),
               r.entity ?? "",
               r.legal_owner ?? "",
               r.old_value ?? "",
               r.new_value ?? "",
-            ]
-              .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
-              .join(","),
-          ),
+            ];
+            return cells.map((cell, index) => (index === 3 ? csvCarNumberField(cell) : csvField(cell))).join(",");
+          }),
         ];
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader("Content-Disposition", 'attachment; filename="preview_occidental_ol1818_unsold.csv"');
@@ -1617,14 +1627,23 @@ export function registerCommitmentRoutes(
       if (error) throw error;
       const rows = data ?? [];
       if (String(req.query.format ?? "") === "csv") {
-        const headers = ["railcar_id", "car", "entity", "legal_owner", "status_tag", "old_value", "new_value"];
+        const headers = [CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, "railcar_id", "entity", "legal_owner", "status_tag", "old_value", "new_value"];
         const lines = [
           headers.join(","),
-          ...rows.map((r: any) =>
-            headers
-              .map((h) => `"${String(h === "car" ? formatCarId(r) : (r[h] ?? "")).replace(/"/g, '""')}"`)
-              .join(","),
-          ),
+          ...rows.map((r: any) => {
+            const identity = carIdentityCells({ ...r, car: formatCarId(r) });
+            const cells = [
+              identity.mark,
+              identity.number,
+              r.railcar_id ?? "",
+              r.entity ?? "",
+              r.legal_owner ?? "",
+              r.status_tag ?? "",
+              r.old_value ?? "",
+              r.new_value ?? "",
+            ];
+            return cells.map((cell, index) => (index === 1 ? csvCarNumberField(cell) : csvField(cell))).join(",");
+          }),
         ];
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader("Content-Disposition", 'attachment; filename="preview_ol2144_rtex_buyer.csv"');

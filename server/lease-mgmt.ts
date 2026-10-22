@@ -1,4 +1,10 @@
 import type { Express, Request, Response } from "express";
+import {
+  csvCarNumberField,
+  csvField,
+  isLeaseIssueCarKind,
+  leadCarExportTable,
+} from "@shared/car-export-identity";
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
@@ -1007,9 +1013,18 @@ export function registerLeaseMgmtRoutes(app: Express, requireWrite: RequireWrite
       const kind = String(req.params.kind) as keyof typeof issueKinds;
       const view = issueKinds[kind];
       if (!view) return res.status(404).json({ message: "Unknown issue kind" });
-      const rows = await fetchAllRows((from, to) => supabaseAdmin.from(view).select("*").range(from, to));
-      const headers = rows[0] ? Object.keys(rows[0] as object) : ["empty"];
-      const lines = [headers.join(","), ...rows.map((r: any) => headers.map((h) => csvEscape(r[h])).join(","))];
+      const rows = await fetchAllRows((from, to) => supabaseAdmin.from(view).select("*").range(from, to)) as Record<string, unknown>[];
+      let lines: string[];
+      if (isLeaseIssueCarKind(kind) && rows[0]) {
+        const table = leadCarExportTable(Object.keys(rows[0]), rows);
+        lines = [
+          table.headers.join(","),
+          ...table.records.map((record) => record.map((cell, index) => (index === 1 ? csvCarNumberField(cell) : csvField(cell))).join(",")),
+        ];
+      } else {
+        const headers = rows[0] ? Object.keys(rows[0]) : ["empty"];
+        lines = [headers.join(","), ...rows.map((row) => headers.map((header) => csvEscape(row[header])).join(","))];
+      }
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="${kind}.csv"`);
       res.send(lines.join("\n") + "\n");

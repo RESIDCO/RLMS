@@ -79,6 +79,7 @@ import type { OlIdentity } from "@shared/ol-identity";
 import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber, formatCarId, normalizeMarkAndNumber, normalizeStoredCarNumber } from "@shared/residco-import";
+import { CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, carIdentityCells, csvCarNumberField } from "@shared/car-export-identity";
 import { carBuildYear, formatBuiltDisplay } from "@shared/build-year";
 import { carLeaseEndDate, formatAssetReportMonth, formatCalendarDate, todayIsoDateOnly } from "@shared/lease-authority";
 import { leaseExpirationSourceLabel } from "@shared/lease-governance";
@@ -2021,23 +2022,26 @@ function SortLabel({
   );
 }
 
-function downloadRentEventsCsv(events: any[], carNumber: string) {
-  const headers = ["Car Number", "Entity", "Event Type", "Event Date", "Reason", "Logged By", "Logged At"];
+function downloadRentEventsCsv(events: any[], car: { reporting_marks?: string | null; car_number?: string | null }) {
+  const identity = carIdentityCells(car);
+  const headers = [CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, "Entity", "Event Type", "Event Date", "Reason", "Logged By", "Logged At"];
   const escape = (v: unknown) => {
     const s = v == null ? "" : String(v);
     return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const rows = events.map((e) => [
-    carNumber,
-    e.railcar?.entity ?? "",
-    e.event_type === "off_rent" ? "Off Rent" : "On Rent",
-    e.event_date,
-    e.reason,
-    e.created_by,
-    new Date(e.created_at).toLocaleString(),
-  ].map(escape).join(","));
+    escape(identity.mark),
+    csvCarNumberField(identity.number),
+    escape(e.railcar?.entity ?? ""),
+    escape(e.event_type === "off_rent" ? "Off Rent" : "On Rent"),
+    escape(e.event_date),
+    escape(e.reason),
+    escape(e.created_by),
+    escape(new Date(e.created_at).toLocaleString()),
+  ].join(","));
   const csv = [headers.map(escape).join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const carNumber = identity.number || "car";
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -2494,7 +2498,7 @@ export function CarDetail({
                 size="sm"
                 variant="ghost"
                 className="h-6 px-2 text-xs"
-                onClick={() => downloadRentEventsCsv(rentEvents, r.car_number)}
+                onClick={() => downloadRentEventsCsv(rentEvents, r)}
               >
                 <Download className="h-3 w-3 mr-1" />Export
               </Button>

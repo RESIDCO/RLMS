@@ -86,7 +86,7 @@ function isCommitmentType(v: unknown): v is CommitmentType {
 async function latestAssignment(railcarId: number) {
   const { data, error } = await supabaseAdmin
     .from("railcar_assignments")
-    .select("id, rider_id, fleet_name, rent_start_date, assigned_at, rider:riders(id, rider_name, lease_status, expiration_date)")
+    .select("id, rider_id, fleet_name, rent_start_date, assigned_at, assignment_status, rider:riders(id, rider_name, lease_status, expiration_date, lifecycle_status)")
     .eq("railcar_id", railcarId)
     .order("id", { ascending: false })
     .limit(1);
@@ -117,6 +117,7 @@ export async function rentStartEnforced(): Promise<boolean> {
 }
 
 function linkInput(car: any, riderName: string | null | undefined, assignment: any, enforced?: boolean) {
+  const rider = Array.isArray(assignment?.rider) ? assignment.rider[0] : assignment?.rider;
   return {
     hasAssignment: Boolean(assignment),
     rider: riderName,
@@ -125,6 +126,8 @@ function linkInput(car: any, riderName: string | null | undefined, assignment: a
     rentStartDate: assignment?.rent_start_date ?? null,
     fleetStatus: car?.fleet_status ?? null,
     rentStartEnforced: enforced,
+    assignmentStatus: assignment?.assignment_status ?? null,
+    riderLifecycleStatus: rider?.lifecycle_status ?? null,
   };
 }
 
@@ -407,7 +410,7 @@ async function classifyMatched(cars: any[]) {
   const { data: assigns } = ids.length
     ? await supabaseAdmin
         .from("railcar_assignments")
-        .select("id, railcar_id, rider_id, fleet_name, rent_start_date, assigned_at, rider:riders(id, rider_name, lease_status)")
+        .select("id, railcar_id, rider_id, fleet_name, rent_start_date, assigned_at, assignment_status, rider:riders(id, rider_name, lease_status, lifecycle_status)")
         .in("railcar_id", ids)
         .order("id", { ascending: false })
     : { data: [] as any[] };

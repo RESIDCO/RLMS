@@ -7,8 +7,20 @@
 -- match an OL name. Rows already off the OL (EA2435 / OL2513 and other inactive
 -- or EA riders) stay out of the operating KPIs.
 -- Does not change public.rlms_is_on_ol. The gate is applied to its has_assignment argument.
--- v_rlms_car_kpi stays granted as it is today. Callers of that view need EXECUTE
--- on this helper, so it is granted to anon, authenticated, and service_role.
+--
+-- Grants: service_role only.
+-- v_rlms_car_kpi is not security_invoker and is owned by postgres, the same role
+-- that creates this helper. A SELECT of that view runs as the owner, who can
+-- execute the helper without a GRANT. The application never reads the view as
+-- anon or authenticated: the server uses the service-role client, and the
+-- browser client is auth-only. Those two roles are not callers, so they are
+-- not granted EXECUTE. A direct call by anon or authenticated is denied.
+--
+-- The view is patched only when pg_get_viewdef (pretty) matches the 2026-10-22
+-- baseline, md5 b1910c6f1b309dcfb500088d4ea5139a. In that definition the text
+-- "a.railcar_id IS NOT NULL" is the has_assignment argument, eight times, and
+-- nowhere else. Any other definition raises instead of being rewritten.
+-- Re-running after the helper is already in the view is a no-op.
 
 CREATE OR REPLACE FUNCTION public.rlms_kpi_has_ol_link(
   has_assignment boolean,
@@ -27,8 +39,8 @@ $$;
 COMMENT ON FUNCTION public.rlms_kpi_has_ol_link(boolean, text, text) IS
   'False when the latest assignment or its rider is ended, so v_rlms_car_kpi.on_ol follows the lease end.';
 
-REVOKE ALL ON FUNCTION public.rlms_kpi_has_ol_link(boolean, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.rlms_kpi_has_ol_link(boolean, text, text) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.rlms_kpi_has_ol_link(boolean, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.rlms_kpi_has_ol_link(boolean, text, text) TO service_role;
 
 DO $$
 DECLARE
@@ -58,15 +70,18 @@ BEGIN
   IF def LIKE '%rlms_kpi_has_ol_link%' THEN
     RETURN;
   END IF;
-
-  IF position('a0.rent_start_set_at' in def) > 0
-     AND position('a0.assignment_status' in def) = 0 THEN
-    def := replace(def, 'a0.rent_start_set_at', 'a0.rent_start_set_at, a0.assignment_status');
+  IF md5(def) IS DISTINCT FROM 'b1910c6f1b309dcfb500088d4ea5139a' THEN
+    RAISE EXCEPTION 'v_rlms_car_kpi does not match the K2 baseline (live md5 %, expected b1910c6f1b309dcfb500088d4ea5139a); refusing to replace it', md5(def);
+  END IF;
+  IF array_length(string_to_array(def, 'a.railcar_id IS NOT NULL'), 1) IS DISTINCT FROM 9 THEN
+    RAISE EXCEPTION 'v_rlms_car_kpi has_assignment predicate is not the K2 baseline of 8';
+  END IF;
+  IF array_length(string_to_array(def, 'a0.rent_start_set_at'), 1) IS DISTINCT FROM 2
+     OR position('a0.assignment_status' in def) > 0 THEN
+    RAISE EXCEPTION 'v_rlms_car_kpi assignment column anchor is not the K2 baseline';
   END IF;
 
-  IF position('a.railcar_id IS NOT NULL' in def) = 0 THEN
-    RAISE EXCEPTION 'v_rlms_car_kpi has no a.railcar_id IS NOT NULL predicate to gate';
-  END IF;
+  def := replace(def, 'a0.rent_start_set_at', 'a0.rent_start_set_at, a0.assignment_status');
 
   patched := replace(
     def,

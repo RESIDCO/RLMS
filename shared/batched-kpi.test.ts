@@ -57,6 +57,18 @@ const base: FleetIssueInput = {
   no_assignment: false,
 };
 ok(fleetIssueCodes(base, today).length === 0, "a clean on-rent car is not an issue");
+ok(
+  fleetIssueCodes({ ...base, stale_commitment: true }, today).includes("stale_commitment"),
+  "stale commitment on an active operating car is an issue",
+);
+ok(
+  !fleetIssueCodes({ ...base, stale_commitment: true, is_op: false }, today).includes("stale_commitment"),
+  "stale commitment on a non-operating car is not an issue",
+);
+ok(
+  !fleetIssueCodes({ ...base, stale_commitment: true, active: false }, today).includes("stale_commitment"),
+  "stale commitment on an inactive car is not an issue",
+);
 ok(!fleetIssueCodes({ ...base, shop_conflict: true }, today).includes("awaiting_rent_start"), "shop conflict is not an issue code");
 ok(!(FLEET_ISSUE_CODES as readonly string[]).includes("shop_conflict"), "shop conflict is not in the issue list");
 
@@ -151,6 +163,11 @@ ok(cars.includes("isIssueListBucket"), "issue lists link back to the issues page
 
 const watch = readFileSync("server/commitment.ts", "utf8");
 ok(watch.includes("leaseEndedWatchStatusExcluded"), "watch list uses the scrap exclusion");
+ok(watch.includes("assignmentStatus: assignment?.assignment_status"), "commitment on-OL check reads assignment status");
+ok(watch.includes("riderLifecycleStatus: rider?.lifecycle_status"), "commitment on-OL check reads rider lifecycle");
+const rentStart = readFileSync("server/rent-start.ts", "utf8");
+ok(rentStart.includes("assignmentStatus: assignment?.assignment_status"), "rent-start on-OL check reads assignment status");
+ok(rentStart.includes("riderLifecycleStatus: rider?.lifecycle_status"), "rent-start on-OL check reads rider lifecycle");
 
 const migrations = [
   "supabase/migrations/20261022180000_watch_exclude_scrapping.sql",
@@ -159,8 +176,31 @@ const migrations = [
 ];
 const sql = migrations.map((path) => readFileSync(path, "utf8")).join("\n");
 ok(sql.includes("coalesce(v.lease_status, '') !~* 'SCRAP'"), "watch SQL excludes SCRAP");
+ok(sql.includes("fe36996c988eb4913630512417f5fe39"), "K1 stores the function baseline");
+ok(sql.includes("does not match the K1 baseline"), "K1 raises when the live function drifted");
 ok(sql.includes("off_lease_pending_remarketing"), "K2 names the ended assignment");
 ok(sql.includes("rlms_kpi_has_ol_link"), "K2 gates the OL link");
+ok(sql.includes("b1910c6f1b309dcfb500088d4ea5139a"), "K2 stores the view baseline");
+ok(sql.includes("does not match the K2 baseline"), "K2 raises when the live view drifted");
+ok(
+  sql.includes("GRANT EXECUTE ON FUNCTION public.rlms_kpi_has_ol_link(boolean, text, text) TO service_role"),
+  "K2 helper grants service_role",
+);
+ok(
+  sql.includes("REVOKE ALL ON FUNCTION public.rlms_kpi_has_ol_link(boolean, text, text) FROM PUBLIC, anon, authenticated"),
+  "K2 helper is revoked from anon and authenticated",
+);
+ok(
+  !/GRANT EXECUTE ON FUNCTION public\.rlms_kpi_has_ol_link\(boolean, text, text\) TO[^;]*\banon\b/.test(sql),
+  "K2 helper is not granted to anon",
+);
+ok(sql.includes("JOIN public.v_rlms_car_kpi v ON v.railcar_id = cc.railcar_id"), "stale commitments join the car KPI");
+ok(
+  /stale_commitment[\s\S]*AND v\.active IS TRUE\s+AND v\.is_op IS TRUE/.test(sql),
+  "stale commitments are limited to active operating cars",
+);
+ok(sql.includes("'awaiting_rent_start'::text"), "awaiting rent start stays in the badge");
+ok(sql.includes("'idle_on_ol'::text"), "idle on OL stays in the badge");
 ok(sql.includes("security_invoker = true"), "new views are security invoker");
 ok(sql.includes("GRANT SELECT ON public.v_rlms_fleet_data_issue_cars TO service_role"), "issue view grants service_role");
 ok(sql.includes("GRANT EXECUTE ON FUNCTION public.rlms_fleet_data_issue_counts() TO service_role"), "count function grants service_role");

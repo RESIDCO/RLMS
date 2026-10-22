@@ -1,7 +1,11 @@
 -- K3: distinct cars behind the Fleet data issues page.
 -- Badge N is count(distinct railcar_id) across every issue, not the sum of the cards.
 -- Shop conflict is not an issue. Stale programs are not cars; only stale commitment cars are.
--- Predicates match shared/fleet-data-issues.ts and the existing KPI card counts.
+-- Predicates match shared/fleet-data-issues.ts.
+-- Stale commitments count only when the car is active and operating (is_op).
+-- On 2026-10-22 that drops the distinct badge from 262 to 254. The stale card
+-- still uses the commitment-row KPI, which is not this distinct-car set.
+-- Awaiting rent start and idle-on-OL stay in the badge.
 -- New views are security invoker and granted to service_role only.
 
 CREATE OR REPLACE VIEW public.v_rlms_fleet_data_issue_cars
@@ -53,12 +57,15 @@ WHERE v.is_op IS TRUE
 UNION ALL
 SELECT cc.railcar_id, 'stale_commitment'::text
 FROM public.car_commitments cc
+JOIN public.v_rlms_car_kpi v ON v.railcar_id = cc.railcar_id
 WHERE cc.cleared_at IS NULL
   AND (
     cc.target_date IS NULL
     OR cc.target_date < current_date
     OR cc.set_at < now() - interval '90 days'
   )
+  AND v.active IS TRUE
+  AND v.is_op IS TRUE
 UNION ALL
 SELECT v.railcar_id, 'going_on_lease_overdue'::text
 FROM public.v_rlms_car_kpi v

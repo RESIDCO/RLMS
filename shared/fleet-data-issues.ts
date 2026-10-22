@@ -78,7 +78,9 @@ export function isLeaseEndConflict(row: FleetIssueInput): boolean {
 
 export function fleetIssueCodes(row: FleetIssueInput, today?: string): FleetIssueCode[] {
   const codes: FleetIssueCode[] = [];
-  if (row.stale_commitment === true) codes.push("stale_commitment");
+  if (row.stale_commitment === true && row.active === true && row.is_op === true) {
+    codes.push("stale_commitment");
+  }
   if (row.is_op === true && row.no_assignment === true) codes.push("no_lease_link");
   if (row.sold_needs_tag === true) codes.push("sold_needs_tag");
   if (row.sale_unclear === true) codes.push("sale_unclear");

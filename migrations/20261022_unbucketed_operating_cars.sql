@@ -7,7 +7,8 @@
 -- Does not replace rlms_fleet_kpis or rlms_fleet_kpis_core, and does not change their counts.
 -- Predicate matches isUnbucketedOperatingCar in shared/kpi-buckets.ts.
 
-CREATE OR REPLACE VIEW public.v_rlms_unbucketed_cars AS
+CREATE OR REPLACE VIEW public.v_rlms_unbucketed_cars
+WITH (security_invoker = true) AS
 SELECT v.*
 FROM public.v_rlms_kpi_car_rows v
 WHERE v.is_op IS TRUE
@@ -44,5 +45,5 @@ WHERE v.is_op IS TRUE
 COMMENT ON VIEW public.v_rlms_unbucketed_cars IS
   'Operating cars in none of on rent, abatement, idle, and unassigned, or in more than one of abatement, idle, and unassigned.';
 
-REVOKE ALL ON public.v_rlms_unbucketed_cars FROM PUBLIC, anon;
-GRANT SELECT ON public.v_rlms_unbucketed_cars TO authenticated, service_role;
+REVOKE ALL ON public.v_rlms_unbucketed_cars FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.v_rlms_unbucketed_cars TO service_role;

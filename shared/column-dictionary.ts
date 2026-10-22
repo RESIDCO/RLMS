@@ -139,6 +139,20 @@ const NAMESPACED: ColumnDictEntry[] = [
   d("program_cars:shop", "Shop / yard", "Shop or yard assigned for this program car.", "program_cars.shop_id → shops", "Link to shops."),
   d("program_cars:commitment", "Commitment", "Open Commitment on this car, if any.", "car_commitments", "Open commitment for the linked railcar."),
   d("program_cars:kpi", "KPI bucket", "Which dashboard KPI list this car currently falls in.", "calculated", "Same KPI rules as the dashboard (off rent, idle, unassigned, sold, etc.)."),
+  d(
+    "program_cars:ops_flag",
+    "Scrap flag",
+    "Ops flag on the linked railcar, including Scrap.",
+    "railcars.ops_flag",
+    "From the linked railcar. Stays in the column picker when every car is blank.",
+  ),
+  d(
+    "program_cars:scrapped_at",
+    "Scrapped date",
+    "Date the linked railcar was scrapped.",
+    "railcars.scrapped_at",
+    "From the linked railcar. Stays in the column picker when every car is blank.",
+  ),
   d("program_cars:car", "Car", "Car in this program.", "program_cars.railcar_id → railcars", "Marks + number of the linked railcar."),
   d("program_cars:complete", "Outcome", "Complete checkbox / outcome date. Counts as Program done.", "program_cars.outcome_reached_at / custom_fields.__complete", "Staff-marked. Same signal as pre-#15 progress done."),
   d(
@@ -200,6 +214,8 @@ export const RENDERED_COLUMNS: Record<string, readonly string[]> = {
     "shop",
     "commitment",
     "kpi",
+    "ops_flag",
+    "scrapped_at",
   ],
   fleet_registry: [
     "marks",

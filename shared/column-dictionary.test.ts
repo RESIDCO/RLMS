@@ -58,6 +58,8 @@ ok(!!getKpiReason("no link"), "reason value: no link");
 ok(!getKpiReason(null), "blank reason has no entry");
 
 ok(!!getColumn("program_cars", "cf:lining_type"), "custom field fallback");
+ok(columnLabel("program_cars", "ops_flag") === "Scrap flag", "program cars scrap flag");
+ok(columnLabel("program_cars", "scrapped_at") === "Scrapped date", "program cars scrapped date");
 ok(columnLabel("programs", "type") === "Type", "programs type is program type");
 ok(columnLabel("fleet_registry", "type") === "Car type", "fleet type is car type");
 ok(COLUMN_DICTIONARY["derived_status"]?.label === "KPI status", "shared derived_status");

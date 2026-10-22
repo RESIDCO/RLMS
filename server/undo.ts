@@ -1,10 +1,12 @@
+import { canonicalRows } from "@shared/canonical-json";
 import { viewUndoNameConflict } from "@shared/saved-views";
 import { supabaseAdmin } from "./supabase";
 import { syncCurrentAssignmentHistoryActive } from "./car-status-history";
 import { clearViewCountCache } from "./saved-views";
+import { fetchCanonicalObject, fetchCanonicalQuery } from "./postgrest-raw";
 import {
   UNDO_WINDOW_HOURS,
-  currentMatchesAfter,
+  changedSinceReason,
   isUndoAllowedTable,
   nonUndoableMessage,
   opOf,
@@ -19,34 +21,35 @@ import { assertLineInsertUndoHasNoOutsideFiles } from "./crm-bid-attachments";
 import { isDealCalcOnlyGroup } from "./crm-deal-calc";
 import { routeUndoGroup } from "@shared/dealCalcUndo";
 
-function asRows(data: unknown): UndoLogRow[] {
-  return ((data ?? []) as any[]).map((r) => ({
-    id: Number(r.id),
-    change_group: r.change_group ?? null,
-    table_name: r.table_name ?? null,
-    row_pk: r.row_pk != null ? Number(r.row_pk) : null,
-    before: r.before && typeof r.before === "object" ? r.before : {},
-    after: r.after && typeof r.after === "object" ? r.after : {},
-    undoable: r.undoable,
-    undone_at: r.undone_at ?? null,
-    actor: r.actor ?? null,
-    action: r.action ?? null,
-    occurred_at: r.occurred_at ?? null,
-    detail: r.detail && typeof r.detail === "object" ? r.detail : {},
-    entity_type: r.entity_type ?? null,
-    entity_id: r.entity_id != null ? Number(r.entity_id) : null,
-    railcar_id: r.railcar_id != null ? Number(r.railcar_id) : null,
-  }));
+const CHANGE_GROUP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function toUndoRow(row: Record<string, unknown>): UndoLogRow {
+  const detail = row.detail && typeof row.detail === "object" && !Array.isArray(row.detail) ? row.detail as Record<string, unknown> : {};
+  const before = row.before && typeof row.before === "object" && !Array.isArray(row.before) ? row.before as Record<string, unknown> : {};
+  const after = row.after && typeof row.after === "object" && !Array.isArray(row.after) ? row.after as Record<string, unknown> : {};
+  return {
+    id: Number(row.id),
+    change_group: row.change_group == null ? null : String(row.change_group),
+    table_name: row.table_name == null ? null : String(row.table_name),
+    row_pk: row.row_pk == null || row.row_pk === "" ? null : Number(row.row_pk),
+    before,
+    after,
+    undoable: typeof row.undoable === "boolean" ? row.undoable : row.undoable == null ? null : row.undoable === "true",
+    undone_at: row.undone_at == null ? null : String(row.undone_at),
+    actor: row.actor == null ? null : String(row.actor),
+    action: row.action == null ? null : String(row.action),
+    occurred_at: row.occurred_at == null ? null : String(row.occurred_at),
+    detail,
+    entity_type: row.entity_type == null ? null : String(row.entity_type),
+    entity_id: row.entity_id == null || row.entity_id === "" ? null : Number(row.entity_id),
+    railcar_id: row.railcar_id == null || row.railcar_id === "" ? null : Number(row.railcar_id),
+  };
 }
 
 export async function loadChangeGroup(group: string): Promise<UndoLogRow[]> {
-  const { data, error } = await supabaseAdmin
-    .from("activity_log")
-    .select("*")
-    .eq("change_group", group)
-    .order("id", { ascending: true });
-  if (error) throw error;
-  return asRows(data);
+  if (!CHANGE_GROUP_UUID.test(group)) return [];
+  const text = await fetchCanonicalQuery("activity_log", `change_group=eq.${group}&select=*&order=id.asc`);
+  return canonicalRows(text).map(toUndoRow);
 }
 
 export async function resolveUndoGroup(body: { change_group?: string; activity_id?: number }): Promise<string | null> {
@@ -64,9 +67,9 @@ export async function resolveUndoGroup(body: { change_group?: string; activity_i
 }
 
 async function fetchCurrent(table: string, pk: number): Promise<Record<string, unknown> | null> {
-  const { data, error } = await supabaseAdmin.from(table).select("*").eq("id", pk).maybeSingle();
-  if (error) throw error;
-  return (data as Record<string, unknown>) ?? null;
+  const raw = await fetchCanonicalObject(table, pk);
+  if (!raw) return null;
+  return canonicalRows(raw)[0] ?? null;
 }
 
 export async function previewUndo(group: string, actor: string) {
@@ -129,12 +132,13 @@ export async function previewUndo(group: string, actor: string) {
       continue;
     }
     const cur = await fetchCurrent(r.table_name, r.row_pk);
-    if (!currentMatchesAfter(cur, r.after)) {
+    const reason = changedSinceReason(cur, r.after);
+    if (reason) {
       conflicts.push({
         activity_id: r.id,
         table_name: r.table_name,
         row_pk: r.row_pk,
-        reason: "changed since",
+        reason,
       });
     }
   }

@@ -84,13 +84,16 @@ import { buildLeaseReport } from "./lease-export";
 import { commitMarkContacts, previewMarkContacts } from "./mark-contacts-import";
 import { directoryFacets, directorySearch, getCompany, listCompanies, listCompanyContacts, createCompany, updateCompany, deleteCompany, getCompanyContact, createCompanyContact, updateCompanyContact, deleteCompanyContact, listContactLeaseLinks, listCompanyLeaseLinks, listLeaseContactLinks, createContactLeaseLink, deleteContactLeaseLink, listContactsForRider, createContactOnRider, promoteLegacyRiderContacts, listAllDirectoryLeasePeople, listDirectoryPeopleForAccount, listLeaseLinkGaps, linkLesseeCompanyToLease, linkUniqueUnmatchedLesseeCompanies, unmatchedLesseeExportCsv } from "./directory";
 import { applyDedupAction, backfillAgentAndFamilyCandidates, listDedupCandidates, dedupSummary } from "./directory-dedup";
+import { canonicalChangePair } from "@shared/canonical-json";
 import { pickRow } from "@shared/change-log";
+import { diffRailcarPatch, preprocessRailcarPatchBody } from "@shared/railcar-patch";
 import { diffProgramPatch } from "@shared/program-patch";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
 import { appendNotesInGroup, normalizeAppendNote, stripNotesField, withNoteReport } from "./append-note";
 import { listLineage } from "./lineage-read";
 import { applyUndo, eligibleUndo, previewUndo, resolveUndoGroup } from "./undo";
-import { recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
+import { recordCanonicalChange, recordChange, recordNonUndoable, withChangeGroupResult } from "./change-log";
+import { fetchCanonicalObject, patchReturning } from "./postgrest-raw";
 import { countActiveCarsByRiderId, countCarsByRiderId } from "./rider-car-counts";
 import {
   applyCarStatusChange,
@@ -2017,25 +2020,26 @@ export async function registerRoutes(
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const id = Number(req.params.id);
+      const rawBody = preprocessRailcarPatchBody(req.body);
       const inactiveReason =
-        typeof req.body?.inactive_change_reason === "string"
-          ? req.body.inactive_change_reason
+        typeof rawBody.inactive_change_reason === "string"
+          ? rawBody.inactive_change_reason
           : null;
-      const parsed = insertRailcarSchema.partial().parse(req.body);
+      const parsed = insertRailcarSchema.partial().parse(rawBody);
       nullifyEmptyDateStrings(parsed as Record<string, unknown>, [...RAILCAR_DATE_KEYS]);
       const flag = parsed.ops_flag;
-      const updateRow: Record<string, unknown> = stripNotesField(omitOpsFlagFields({ ...parsed }));
+      const candidate: Record<string, unknown> = stripNotesField(omitOpsFlagFields({ ...parsed }));
       // Identity changes go through POST /change-number only. Echoing an unchanged
       // (or unpadded) car_number on Edit would fire the pad trigger and collide.
-      delete updateRow.car_number;
-      delete updateRow.reporting_marks;
-      delete updateRow.car_initial;
+      delete candidate.car_number;
+      delete candidate.reporting_marks;
+      delete candidate.car_initial;
 
-      delete updateRow.fleet_status;
-      delete updateRow.fleet_status_source;
+      delete candidate.fleet_status;
+      delete candidate.fleet_status_source;
       if (parsed.fleet_status === "Sold") {
-        updateRow.fleet_status = "Sold";
-        updateRow.fleet_status_source = "manual";
+        candidate.fleet_status = "Sold";
+        candidate.fleet_status_source = "manual";
       }
 
       let priorStatus: string | null | undefined;
@@ -2043,18 +2047,16 @@ export async function registerRoutes(
       let statusEvent: ReturnType<typeof inactiveBoundaryEvent> = null;
 
       // Never let casual PATCH bodies flip fleet membership except via Car Status save.
-      delete updateRow.active;
-      delete updateRow.active_status;
-      delete updateRow.active_source;
+      delete candidate.active;
+      delete candidate.active_status;
+      delete candidate.active_source;
 
-      const { data: priorRow, error: priorErr } = await supabase
-        .from("railcars")
-        .select("*")
-        .eq("id", id)
-        .single();
-      if (priorErr) throw priorErr;
-      priorStatus = priorRow?.status;
-      priorActive = priorRow?.active;
+      const priorRaw = await fetchCanonicalObject("railcars", id);
+      if (!priorRaw) return res.status(404).json({ message: "Railcar not found" });
+      const priorRow = JSON.parse(priorRaw) as Record<string, unknown>;
+      const updateRow = diffRailcarPatch(priorRow, candidate);
+      priorStatus = priorRow.status == null ? null : String(priorRow.status);
+      priorActive = priorRow.active === true ? true : priorRow.active === false ? false : null;
       const frozen = isFrozenRailcar({ active: priorActive, status: priorStatus });
       if (frozen) {
         if (req.authRole !== "admin") {
@@ -2066,7 +2068,7 @@ export async function registerRoutes(
         }
       }
 
-      if (parsed.status !== undefined) {
+      if (parsed.status !== undefined && String(parsed.status ?? "") !== String(priorStatus ?? "")) {
         try {
           assertInactivePatchAllowed({
             currentStatus: priorStatus,
@@ -2092,25 +2094,22 @@ export async function registerRoutes(
         let data = priorRow;
         const patchKeys = Object.keys(updateRow);
         if (patchKeys.length) {
-          const updated = await supabase
-            .from("railcars")
-            .update(updateRow)
-            .eq("id", id)
-            .select()
-            .single();
-          if (updated.error) throw updated.error;
-          data = updated.data;
-          await recordChange({
-            table: "railcars",
-            pk: id,
-            before: pickRow(priorRow, patchKeys),
-            after: pickRow(data, patchKeys),
-            action: "railcar_patch",
-            entity_type: "railcar",
-            entity_id: id,
-            railcar_id: id,
-            actor: writerId,
-          });
+          const updated = await patchReturning("railcars", id, updateRow);
+          data = updated.row;
+          const pair = canonicalChangePair(priorRaw, updated.raw, patchKeys);
+          if (pair) {
+            await recordCanonicalChange({
+              table: "railcars",
+              pk: id,
+              beforeJson: pair.beforeJson,
+              afterJson: pair.afterJson,
+              action: "railcar_patch",
+              entity_type: "railcar",
+              entity_id: id,
+              railcar_id: id,
+              actor: writerId,
+            });
+          }
         }
 
         if (parsed.status !== undefined && updateRow.active !== undefined && priorActive !== updateRow.active) {

@@ -61,7 +61,7 @@ const CAR_SELECT = `
 id, program_id, railcar_id, status, notes, flag_tag, joined_date, exited_date,
 milestone, milestone_at, outcome_reached_at, exit_reason,
 rider_external_id_snapshot, shop_id, scrap_yard_id, repair_cost_total, custom_fields, added_at,
-railcar:railcars(id, car_number, reporting_marks, car_type, status, entity, active, rider_external_id, lessee_name),
+railcar:railcars(id, car_number, reporting_marks, car_type, status, entity, active, rider_external_id, lessee_name, ops_flag, scrapped_at),
 shop:shops(id, name, location),
 scrap_yard:scrap_yards(id, name, location)
 `.replace(/\s+/g, " ").trim();

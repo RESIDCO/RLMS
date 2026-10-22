@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { activityInsertBody, parseCanonical } from "@shared/canonical-json";
 import { buildActivityLogRow, type ActivityEntityType, type ActivityLogInput } from "@shared/change-log";
+import { insertActivityLog } from "./postgrest-raw";
 import { supabaseAdmin } from "./supabase";
 
 type GroupStore = { group: string; actor: string };
@@ -40,6 +42,40 @@ export async function withChangeGroupResult<T extends object>(
 }
 
 export type RecordChangeOpts = ActivityLogInput & { entity_type: ActivityEntityType };
+
+function canonicalKeys(json: string): string[] {
+  const node = parseCanonical(json);
+  if (node.kind !== "obj") return [];
+  return node.fields.map((field) => field.key);
+}
+
+/** Log before/after jsonb exactly as the database encoded it, scale included. */
+export async function recordCanonicalChange(
+  opts: Omit<RecordChangeOpts, "before" | "after"> & { beforeJson: string; afterJson: string },
+): Promise<{ id: number; change_group: string } | null> {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const key of [...canonicalKeys(opts.beforeJson), ...canonicalKeys(opts.afterJson)]) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  if (!keys.length) return null;
+  const group = currentChangeGroup() ?? randomUUID();
+  const actor = currentChangeActor();
+  const occurred_at = new Date().toISOString();
+  const row = buildActivityLogRow(
+    {
+      ...opts,
+      before: Object.fromEntries(keys.map((key) => [key, null])),
+      after: Object.fromEntries(keys.map((key) => [key, true])),
+    },
+    { group, actor, occurred_at },
+  );
+  if (!row) return null;
+  const inserted = await insertActivityLog(activityInsertBody(row, opts.beforeJson, opts.afterJson));
+  return { id: inserted.id, change_group: group };
+}
 
 export async function recordChange(opts: RecordChangeOpts): Promise<{ id: number; change_group: string } | null> {
   const written = await recordChanges([opts]);

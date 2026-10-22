@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /** Run: npx tsx shared/undo.test.ts */
 
-import { currentMatchesAfter, finalizeUndoPreview, isUndoAllowedTable, nonUndoableMessage, opOf, outsideGroupReferences, referencedSinceBlocksUndo, summarizeUndoRows, undoApplyOrder } from "./undo";
+import { changedSinceReason, currentMatchesAfter, finalizeUndoPreview, isUndoAllowedTable, nonUndoableMessage, opOf, outsideGroupReferences, referencedSinceBlocksUndo, summarizeUndoRows, undoApplyOrder } from "./undo";
 
 let passed = 0;
 let failed = 0;
@@ -17,6 +17,9 @@ ok(currentMatchesAfter({ comment_event_note: "a" }, { comment_event_note: "a" })
 ok(!currentMatchesAfter({ comment_event_note: "b" }, { comment_event_note: "a" }), "conflict when current drifted");
 ok(currentMatchesAfter({ active: true }, { active: "true" }), "bool coercion");
 ok(currentMatchesAfter({ d: "2026-10-17T00:00:00" }, { d: "2026-10-17" }), "date prefix");
+ok(!currentMatchesAfter({ nbv: "0.00" }, { nbv: "0" }), "numeric scale 0.00 is not the text 0");
+ok(currentMatchesAfter({ nbv: "0.00" }, { nbv: "0.00" }), "canonical numeric text matches");
+ok(changedSinceReason({ nbv: "0.00" }, { nbv: "0" }) === "changed since (nbv)", "preview names nbv the way undo does");
 ok(
   opOf({ id: 1, change_group: "g", table_name: "railcars", row_pk: 1, before: {}, after: { x: 1 }, detail: { op: "insert" } }) === "insert",
   "insert op",

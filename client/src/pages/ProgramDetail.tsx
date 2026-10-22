@@ -31,6 +31,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, Download, History, Loader2, Plus,
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
+import { OpsFlagBadge } from "@/components/OpsFlagBadge";
 import { ManageColumnsDialog } from "@/components/ManageColumnsDialog";
 import { columnLabel } from "@shared/column-dictionary";
 import { GridColumnTh } from "@/components/GridColumnTh";
@@ -154,6 +155,8 @@ type ProgramCar = {
     entity?: string | null;
     active?: boolean | null;
     status?: string | null;
+    ops_flag?: string | null;
+    scrapped_at?: string | null;
   } | null;
   shop: { id: number; name: string } | null;
   kpi?: { derived_status?: string | null; off_rent?: boolean; on_rent?: boolean } | null;
@@ -233,6 +236,10 @@ function programCarSortValue(c: ProgramCar, key: string): string {
       return `${c.open_commitment?.type ?? ""} ${c.open_commitment?.name ?? ""}`.toLowerCase();
     case "kpi":
       return (c.kpi?.derived_status ?? "").toLowerCase();
+    case "ops_flag":
+      return (c.railcar?.ops_flag ?? "").toLowerCase();
+    case "scrapped_at":
+      return String(c.railcar?.scrapped_at ?? "").slice(0, 10);
     default:
       return "";
   }
@@ -286,7 +293,7 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   return next;
 }
 
-const PD_CORE = ["completion", "active", "keep_open", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi"] as const;
+const PD_CORE = ["completion", "active", "keep_open", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi", "ops_flag", "scrapped_at"] as const;
 const PD_LABELS: Record<string, string> = {
   car: "Car",
   complete: "Outcome",
@@ -300,6 +307,8 @@ const PD_LABELS: Record<string, string> = {
   shop: "Shop / yard",
   commitment: "Commitment",
   kpi: "KPI bucket",
+  ops_flag: "Scrap flag",
+  scrapped_at: "Scrapped date",
 };
 const PD_WIDTHS: Record<string, number> = {
   _select: 36,
@@ -314,6 +323,8 @@ const PD_WIDTHS: Record<string, number> = {
   ol_entry: 110,
   ol_now: 110,
   shop: 160,
+  ops_flag: 120,
+  scrapped_at: 120,
   repair: 90,
   _actions: 120,
 };
@@ -906,6 +917,18 @@ export default function ProgramDetailPage() {
         );
       case "kpi":
         return <td key={key} className="px-2 py-1">{c.kpi?.derived_status ?? "—"}</td>;
+      case "ops_flag":
+        return (
+          <td key={key} className="px-2 py-1">
+            {c.railcar?.ops_flag ? <OpsFlagBadge flag={c.railcar.ops_flag} /> : "—"}
+          </td>
+        );
+      case "scrapped_at":
+        return (
+          <td key={key} className="px-2 py-1 whitespace-nowrap">
+            {formatProgramDate(c.railcar?.scrapped_at) || "—"}
+          </td>
+        );
       case "status":
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">

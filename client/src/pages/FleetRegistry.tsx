@@ -8,6 +8,7 @@ import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { InactiveFleetBadge, fleetActiveLabel, displayRailcarStatus } from "@/components/InactiveFleetBadge";
 import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-status";
+import { railcarFormPatch } from "@shared/railcar-patch";
 import { CommitmentPanel } from "@/pages/CommitmentOps";
 import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
@@ -2792,47 +2793,46 @@ export function RailcarFormDialog({
 
   const save = useMutation({
     mutationFn: async (opts?: { reason?: string | null; statusOnly?: boolean } | null) => {
-      const payload: Record<string, unknown> = opts?.statusOnly ? { status: form.status } : { ...form };
-      if (!opts?.statusOnly) delete payload.notes;
-      Object.assign(payload, appendNoteBody(addNote));
-      if (!car) {
-        const num = normalizeStoredCarNumber(form.car_number);
-        if (!num.ok) throw new Error(num.message);
-        payload.car_number = num.car_number;
-      }
       if (car) {
-        delete payload.car_number;
-        delete payload.reporting_marks;
-        if (opts?.reason) payload.inactive_change_reason = opts.reason;
-        await apiRequest("PATCH", `/api/railcars/${car.id}`, payload);
-      } else {
-        if (assignRiderId.trim()) {
-          const resolved = await resolveRiderLabel(assignRiderId);
-          const ident = await apiGet<OlIdentity>(`/api/riders/${resolved.id}/identity`);
-          const ok = await confirmRiderEntityMismatch(ident.entity, [{
-            id: 0,
-            entity: form.entity || null,
-            label: [form.reporting_marks, form.car_number].filter(Boolean).join(" ") || "new car",
-          }]);
-          if (!ok) {
-            const cancelled = new Error("Assignment cancelled");
-            cancelled.name = "AssignmentCancelled";
-            throw cancelled;
-          }
+        const body: Record<string, unknown> = opts?.statusOnly
+          ? { status: form.status }
+          : railcarFormPatch(car as unknown as Record<string, unknown>, form);
+        if (opts?.reason) body.inactive_change_reason = opts.reason;
+        Object.assign(body, appendNoteBody(addNote));
+        await apiRequest("PATCH", `/api/railcars/${car.id}`, body);
+        return;
+      }
+      const payload: Record<string, unknown> = { ...form };
+      delete payload.notes;
+      Object.assign(payload, appendNoteBody(addNote));
+      const num = normalizeStoredCarNumber(form.car_number);
+      if (!num.ok) throw new Error(num.message);
+      payload.car_number = num.car_number;
+      if (assignRiderId.trim()) {
+        const resolved = await resolveRiderLabel(assignRiderId);
+        const ident = await apiGet<OlIdentity>(`/api/riders/${resolved.id}/identity`);
+        const ok = await confirmRiderEntityMismatch(ident.entity, [{
+          id: 0,
+          entity: form.entity || null,
+          label: [form.reporting_marks, form.car_number].filter(Boolean).join(" ") || "new car",
+        }]);
+        if (!ok) {
+          const cancelled = new Error("Assignment cancelled");
+          cancelled.name = "AssignmentCancelled";
+          throw cancelled;
         }
-        const res = await apiRequest("POST", `/api/railcars`, payload);
-        // If a rider/OL was entered, resolve (match or create) then assign
-        if (assignRiderId.trim()) {
-          const newCar = await res.json();
-          const resolved = await resolveRiderLabel(assignRiderId);
-          await apiRequest("POST", "/api/move", {
-            car_ids: [newCar.id],
-            to_rider_id: resolved.id,
-            new_fleet_name: assignFleetName.trim() || null,
-            reason: assignReason.trim() || "New Assignment",
-            moved_by: "user",
-          });
-        }
+      }
+      const res = await apiRequest("POST", `/api/railcars`, payload);
+      if (assignRiderId.trim()) {
+        const newCar = await res.json();
+        const resolved = await resolveRiderLabel(assignRiderId);
+        await apiRequest("POST", "/api/move", {
+          car_ids: [newCar.id],
+          to_rider_id: resolved.id,
+          new_fleet_name: assignFleetName.trim() || null,
+          reason: assignReason.trim() || "New Assignment",
+          moved_by: "user",
+        });
       }
     },
     onSuccess: () => {

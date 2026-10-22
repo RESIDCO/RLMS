@@ -1,4 +1,4 @@
-import { jsonEqual } from "./change-log";
+import { firstChangedSinceKey } from "./jsonb-match";
 
 export const UNDO_WINDOW_HOURS = 24;
 
@@ -66,28 +66,19 @@ export type UndoConflict = {
   reason: string;
 };
 
-function coerce(v: unknown): unknown {
-  if (v == null) return null;
-  if (typeof v === "string") {
-    const s = v.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-    if (s === "true") return true;
-    if (s === "false") return false;
-    return s;
-  }
-  return v;
-}
-
 export function currentMatchesAfter(
   current: Record<string, unknown> | null | undefined,
   after: Record<string, unknown> | null | undefined,
 ): boolean {
-  if (!after || Object.keys(after).length === 0) return true;
-  const cur = current ?? {};
-  for (const [k, expected] of Object.entries(after)) {
-    if (!jsonEqual(coerce(cur[k]), coerce(expected))) return false;
-  }
-  return true;
+  return firstChangedSinceKey(current, after) == null;
+}
+
+export function changedSinceReason(
+  current: Record<string, unknown> | null | undefined,
+  after: Record<string, unknown> | null | undefined,
+): string | null {
+  const key = firstChangedSinceKey(current, after);
+  return key ? `changed since (${key})` : null;
 }
 
 export function opOf(row: UndoLogRow): "insert" | "update" | "delete" {

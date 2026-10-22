@@ -176,8 +176,9 @@ ok(routes.includes("off_rent_count: Number(sqlKpis.off_rent)"), "dashboard still
 ok(routes.includes("off_rent_main:"), "dashboard still returns the off rent split");
 ok(routes.includes('from("v_rlms_unbucketed_cars")'), "dashboard counts the unbucketed view");
 
-const sql = readFileSync("migrations/20261122_unbucketed_operating_cars.sql", "utf8");
+const sql = readFileSync("migrations/20261022_unbucketed_operating_cars.sql", "utf8");
 ok(sql.includes("CREATE OR REPLACE VIEW public.v_rlms_unbucketed_cars"), "migration creates the view");
+ok(sql.includes("WITH (security_invoker = true)"), "view is security invoker");
 ok(sql.includes("v.is_op IS TRUE"), "view is operating cars only");
 ok(sql.includes("v.off_rent IS FALSE AND v.open_abatement IS FALSE"), "sql on rent");
 ok(sql.includes("v.open_abatement IS TRUE"), "sql abatement");
@@ -190,7 +191,12 @@ ok(
   "sql unassigned seed",
 );
 ok(sql.includes(") = 0") && sql.includes(") > 1"), "sql flags none and overlap");
-ok(/GRANT SELECT ON public\.v_rlms_unbucketed_cars TO authenticated, service_role;/.test(sql), "explicit grant");
+ok(
+  /REVOKE ALL ON public\.v_rlms_unbucketed_cars FROM PUBLIC, anon, authenticated;/.test(sql),
+  "revoke public, anon, and authenticated",
+);
+ok(/GRANT SELECT ON public\.v_rlms_unbucketed_cars TO service_role;/.test(sql), "grant service_role only");
+ok(!/TO authenticated, service_role/.test(sql), "authenticated is not granted");
 ok(!/create\s+or\s+replace\s+function\s+public\.rlms_fleet_kpis/i.test(sql), "does not replace fleet kpis");
 for (const name of [
   "rlms_apply_jsonb_patch",

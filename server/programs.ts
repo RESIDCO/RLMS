@@ -28,7 +28,16 @@ import {
   type ProgramStatus,
 } from "@shared/programs";
 import { whitelistExportCols } from "@shared/column-views";
-import { PROGRAM_CAR_EXPORT_DATE_COLUMNS, selectProgramCarExportColumns } from "@shared/program-export-columns";
+import { PROGRAM_CAR_EXPORT_DATE_COLUMNS } from "@shared/program-export-columns";
+import {
+  CAR_EXPORT_MARK_HEADER,
+  CAR_EXPORT_NUMBER_HEADER,
+  ensureLeadingCarKeys,
+  exportCarNumberText,
+  exportReportingMarkText,
+  finalizeProgramCarExportKeys,
+  stampExcelCarNumber,
+} from "@shared/car-export-identity";
 import { activeFieldDefs, fieldDefsForProgram } from "@shared/manage-columns";
 import { excelMoneyValue, isProgramMoneyField } from "@shared/money";
 import { parseProgramDate } from "@shared/program-dates";
@@ -1026,8 +1035,8 @@ export async function olProgramHistory(ol: string) {
 
 function coreCarColumns() {
   return [
-    { key: "marks", label: "Reporting marks" },
-    { key: "car_number", label: "Car number" },
+    { key: "marks", label: CAR_EXPORT_MARK_HEADER },
+    { key: "car_number", label: CAR_EXPORT_NUMBER_HEADER },
     { key: "completion", label: "Completion" },
     { key: "status", label: "Status" },
     { key: "milestone", label: "Latest milestone" },
@@ -1065,9 +1074,9 @@ function carExportValue(row: any, key: string): string {
   const r = row.railcar ?? {};
   switch (key) {
     case "marks":
-      return r.reporting_marks ?? "";
+      return exportReportingMarkText(r.reporting_marks);
     case "car_number":
-      return r.car_number ?? "";
+      return exportCarNumberText(r.car_number);
     case "status":
       return row.status ?? "";
     case "completion":
@@ -1184,10 +1193,11 @@ export async function buildProgramReport(opts: {
       "program_done_step",
       "program_done_at",
     ];
-    const keys = [...keys0];
+    const keyed = [...keys0];
     for (const k of always) {
-      if (allowed.includes(k) && !keys.includes(k)) keys.push(k);
+      if (allowed.includes(k) && !keyed.includes(k)) keyed.push(k);
     }
+    const keys = ensureLeadingCarKeys(keyed);
     const labelFor = (key: string) => {
       const c = core.find((x) => x.key === key);
       if (c) return c.label;
@@ -1199,15 +1209,16 @@ export async function buildProgramReport(opts: {
     for (const def of usedDefs) {
       if (def.field_type === "date") dateKeys.add(`cf:${def.field_key}`);
     }
-    const exportKeys = selectProgramCarExportColumns(
+    const packedRows = packedByCar.map((packed) => {
+      const row: Record<string, unknown> = {};
+      keys.forEach((key, index) => {
+        row[key] = packed[index]?.value;
+      });
+      return row;
+    });
+    const exportKeys = finalizeProgramCarExportKeys(
       keys,
-      packedByCar.map((packed) => {
-        const row: Record<string, unknown> = {};
-        keys.forEach((key, index) => {
-          row[key] = packed[index]?.value;
-        });
-        return row;
-      }),
+      packedRows,
       opts.onlyColumnsWithData === true,
       dateKeys,
     );
@@ -1220,6 +1231,10 @@ export async function buildProgramReport(opts: {
       exportKeys.forEach((key, index) => {
         const cell = row.getCell(index + 1);
         const source = packed[keyIndex.get(key) ?? -1] ?? { value: "" };
+        if (key === "car_number") {
+          stampExcelCarNumber(cell, source.value);
+          return;
+        }
         cell.value = source.value;
         if (source.numFmt && source.value != null) cell.numFmt = source.numFmt;
       });

@@ -1,5 +1,11 @@
 import type { Express, Request, Response } from "express";
 import { ZodError } from "zod";
+import {
+  COMMITMENT_BACKFILL_HEADERS,
+  commitmentBackfillRecords,
+  csvCarNumberField,
+  csvField,
+} from "@shared/car-export-identity";
 import type { Server } from "http";
 import multer from "multer";
 import { supabase, supabaseAdmin } from "./supabase";
@@ -6060,20 +6066,11 @@ export async function registerRoutes(
       if (!(await requireUser(req, res))) return;
       const preview = await previewCommitmentBackfill();
       if (String(req.query.format ?? "") === "csv") {
-        const headers = [
-          "railcar_id",
-          "reporting_marks",
-          "car_number",
-          "program_id",
-          "program_name",
-          "needs_commitment",
-          "in_multiple_programs",
-          "open_program_count",
-        ];
+        const headers = [...COMMITMENT_BACKFILL_HEADERS];
         const lines = [
           headers.join(","),
-          ...preview.rows.map((r: any) =>
-            headers.map((h) => `"${String(r[h] ?? "").replace(/"/g, '""')}"`).join(","),
+          ...commitmentBackfillRecords(preview.rows as Record<string, unknown>[]).map((record) =>
+            record.map((cell, index) => (index === 1 ? csvCarNumberField(cell) : csvField(cell))).join(","),
           ),
         ];
         res.setHeader("Content-Type", "text/csv; charset=utf-8");

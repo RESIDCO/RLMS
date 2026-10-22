@@ -27,6 +27,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { FLEET_STATUSES, type FleetStatus } from "@shared/fleet-status";
+import { CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, csvCarNumberField, exportReportingMarkText } from "@shared/car-export-identity";
 import { todayIsoDateOnly } from "@shared/lease-authority";
 import {
   ACQUISITION_TEMPLATE_HEADERS,
@@ -120,10 +121,10 @@ function downloadTemplate() {
 }
 
 function downloadSkipped(skipped: AcqSkipped[]) {
-  const header = "Row,Marks,Car Number,Reason";
+  const header = ["Row", CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, "Reason"].join(",");
   const body = skipped
     .map((s) =>
-      [s.row, s.marks, s.car_number, `"${String(s.skip_label ?? s.skip_reason).replace(/"/g, '""')}"`].join(","),
+      [s.row, exportReportingMarkText(s.marks), csvCarNumberField(s.car_number), `"${String(s.skip_label ?? s.skip_reason).replace(/"/g, '""')}"`].join(","),
     )
     .join("\n");
   const blob = new Blob([`${header}\n${body}\n`], { type: "text/csv;charset=utf-8" });

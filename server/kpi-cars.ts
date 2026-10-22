@@ -5,6 +5,14 @@ import { fetchAllRows } from "./fetch-all";
 import { KPI_BUCKETS, KPI_GROUP_COLS, KPI_SORT_COLS, KPI_TITLES, type KpiBucket } from "@shared/kpi-buckets";
 import { whitelistExportCols } from "@shared/column-views";
 import { formatCarId } from "@shared/residco-import";
+import {
+  CAR_EXPORT_NUMBER_HEADER,
+  KPI_EXPORT_DATA_KEYS,
+  buildKpiCarExport,
+  stampExcelCarNumber,
+  csvCarNumberField,
+  csvField,
+} from "@shared/car-export-identity";
 import { loadKpiCarRow } from "./kpi-delta";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachFormerly } from "./prior-marks";
@@ -148,29 +156,11 @@ export async function listKpiCarsPaged(req: Request) {
   };
 }
 
-const EXPORT_HEADERS = [
-  "car",
-  "entity",
-  "status_tag",
-  "derived_status",
-  "current_lease",
-  "lessee",
-  "legal_owner",
-  "buyer",
-  "commitment",
-  "rent_start_date",
-  "last_ol",
-  "reason",
-];
+const EXPORT_HEADERS = ["car", ...KPI_EXPORT_DATA_KEYS];
 
 function fileBase(bucket: string) {
   const d = new Date().toISOString().slice(0, 10);
   return `RLMS_${bucket}_${d}`;
-}
-
-function csvEscape(v: unknown) {
-  const s = v == null ? "" : String(v);
-  return `"${s.replace(/"/g, '""')}"`;
 }
 
 export async function exportKpiCars(req: Request, res: Response) {
@@ -188,14 +178,13 @@ export async function exportKpiCars(req: Request, res: Response) {
     return q.order(opts.sort, { ascending: opts.dir === "asc" }).range(a, b);
   });
   const name = fileBase(opts.bucket);
-  const headers = whitelistExportCols(EXPORT_HEADERS, req.query.cols, EXPORT_HEADERS);
+  const requested = whitelistExportCols(EXPORT_HEADERS, req.query.cols, EXPORT_HEADERS);
+  const table = buildKpiCarExport(rows as any[], requested);
+  const numberCol = table.headers.indexOf(CAR_EXPORT_NUMBER_HEADER);
   if (format === "csv") {
     const lines = [
-      headers.join(","),
-      ...rows.map((r: any) => {
-        const row = withFormattedCar(r);
-        return headers.map((h) => csvEscape(h === "car" ? row.car : r[h])).join(",");
-      }),
+      table.headers.join(","),
+      ...table.records.map((record) => record.map((cell, index) => (index === numberCol ? csvCarNumberField(cell) : csvField(cell))).join(",")),
     ];
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${name}.csv"`);
@@ -204,10 +193,10 @@ export async function exportKpiCars(req: Request, res: Response) {
   }
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(opts.bucket.slice(0, 31));
-  ws.addRow(headers);
-  for (const r of rows) {
-    const row = withFormattedCar(r as any);
-    ws.addRow(headers.map((h) => (h === "car" ? row.car : (r as any)[h]) ?? ""));
+  ws.addRow(table.headers);
+  for (const record of table.records) {
+    const added = ws.addRow(record);
+    if (numberCol >= 0) stampExcelCarNumber(added.getCell(numberCol + 1), record[numberCol]);
   }
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${name}.xlsx"`);

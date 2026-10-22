@@ -4,6 +4,12 @@ import { carBuildYear } from "@shared/build-year";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
 import { excelSheetName } from "@shared/programs";
 import { asOne, resolveLeaseType } from "@shared/lease-type";
+import {
+  LEASE_CAR_SHEET_HEADERS,
+  exportCarNumberText,
+  exportReportingMarkText,
+  stampExcelCarNumber,
+} from "@shared/car-export-identity";
 import { fetchAllRows } from "./fetch-all";
 import { supabaseAdmin } from "./supabase";
 
@@ -34,21 +40,7 @@ type RiderRow = {
   notes: string | null;
 };
 
-const CAR_HEADERS = [
-  "Rider",
-  "Marks",
-  "Car Number",
-  "Lessee",
-  "Rental Status",
-  "Entity",
-  "NBV",
-  "OAC",
-  "Net Equip. Cost",
-  "Capacity",
-  "Lining",
-  "Build Year",
-  "Lease Type",
-] as const;
+const CAR_HEADERS = LEASE_CAR_SHEET_HEADERS;
 
 const EXPORT_CAR_SELECT = `
 id, car_number, reporting_marks, entity, active, status, fleet_status, lease_type,
@@ -72,9 +64,9 @@ function liningOf(c: any): string {
 
 function carRow(c: any, leaseType: string | null | undefined): (string | number)[] {
   return [
+    exportReportingMarkText(c.reporting_marks),
+    exportCarNumberText(c.car_number),
     c.assignment?.rider?.rider_name ?? c.rider_external_id ?? "",
-    c.reporting_marks ?? "",
-    c.car_number ?? "",
     c.assignment?.fleet_name ?? c.lessee_name ?? "",
     displayRailcarStatus(displayStatusInputFromRailcar(c)),
     c.entity ?? "",
@@ -273,10 +265,12 @@ export async function buildLeaseReport(opts: { leaseIds: number[] }): Promise<{ 
     sheet.addRow([...CAR_HEADERS]);
     sheet.getRow(1).font = { bold: true };
     for (const c of carsByLease.get(lease.id) ?? []) {
-      sheet.addRow(carRow(c, lease.lease_type));
+      const values = carRow(c, lease.lease_type);
+      const added = sheet.addRow(values);
+      stampExcelCarNumber(added.getCell(2), values[1]);
     }
     sheet.columns.forEach((col, i) => {
-      col.width = i === 0 || i === 3 ? 22 : i === 12 ? 16 : 14;
+      col.width = i === 2 || i === 3 ? 22 : i === 12 ? 16 : 14;
     });
   }
 

@@ -83,6 +83,7 @@ const adminNav = [
 ];
 
 function isNavActive(href: string, location: string, aliases: string[] = []) {
+  if (location.startsWith("/fleet/data-issues")) return false;
   if (href === "/opportunities" && location.startsWith("/opportunities/calculator")) return false;
   return [href, ...aliases].some(
     (h) =>

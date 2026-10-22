@@ -50,6 +50,36 @@ ok(
   isOffRentLink({ hasAssignment: true, rider: "OL1917", lesseeName: "ADM", rentStartDate: "2026-10-20", asOf: "2026-10-15" }),
   "future rent start stays off rent",
 );
+ok(
+  !isOffRentLink({
+    hasAssignment: true,
+    rider: "OL2222",
+    lesseeName: "ADM",
+    fleetStatus: "Unassigned",
+    rentStartEnforced: false,
+  }),
+  "Unassigned fleet status stays on rent until the assignment is ended",
+);
+ok(
+  isOffRentLink({
+    hasAssignment: true,
+    rider: "OL2222",
+    lesseeName: "ADM",
+    fleetStatus: "Unassigned",
+    assignmentStatus: "off_lease_pending_remarketing",
+    rentStartEnforced: false,
+  }),
+  "ended assignment takes an Unassigned car off rent",
+);
+ok(
+  !isOnOl({ hasAssignment: true, rider: "OL2222", lesseeName: "ADM", riderLifecycleStatus: "closed" }),
+  "closed rider is not an OL link",
+);
+ok(
+  !isOnOl({ hasAssignment: true, rider: "OL2222", lesseeName: "ADM", riderLifecycleStatus: "off_lease_pending_remarketing" }),
+  "off-lease rider is not an OL link",
+);
+ok(isOnOl({ hasAssignment: true, rider: "OL2222", lesseeName: "ADM" }), "null assignment status stays on the OL");
 ok(isOnOl({ hasAssignment: true, rider: "OL2513", lesseeName: "Alpek Polyester (xTrinity)" }), "xTrinity in name is not x-lessee prefix");
 ok(!isOnOl({ hasAssignment: true, rider: "OL1917", lesseeName: "xKBX" }), "x-lessee is not on_ol");
 ok(isOnRentOlRider("OL1917") && !isOnRentOlRider("EA2435"), "OL vs EA");

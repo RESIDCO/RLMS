@@ -57,6 +57,7 @@ import {
   RentStartWatchPage,
 } from "@/pages/CommitmentOps";
 import SaleClassAdmin from "@/pages/SaleClassAdmin";
+import FleetDataIssuesPage from "@/pages/FleetDataIssues";
 
 installFleetQueryRefresh(queryClient);
 
@@ -104,6 +105,7 @@ function AppRouter() {
       <Route path="/browse/turning50/:year/ol/:ol" component={FleetBrowsePage} />
       <Route path="/browse/turning50/:year" component={FleetBrowsePage} />
       <Route path="/cars/:id" component={CarDetailPage} />
+      <Route path="/fleet/data-issues" component={FleetDataIssuesPage} />
       <Route path="/fleet" component={FleetRegistry} />
       <Route path="/railcars/umler-queue" component={UmlerQueue} />
       <Route path="/railcars/remark" component={RemarkCars} />

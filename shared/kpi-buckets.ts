@@ -18,6 +18,8 @@ export const KPI_BUCKETS = [
   "leased_off_rent",
   "rental_abatement",
   "unbucketed",
+  "going_on_lease_overdue",
+  "lease_end_conflict",
 ] as const;
 
 export type KpiBucket = (typeof KPI_BUCKETS)[number];
@@ -42,6 +44,8 @@ export const KPI_TITLES: Record<string, string> = {
   leased_off_rent: "Tagged Leased but off rent",
   rental_abatement: "Rental abatement",
   unbucketed: "Unbucketed cars",
+  going_on_lease_overdue: "Going on lease overdue",
+  lease_end_conflict: "Lease end date conflict",
 };
 
 /** Idle (committed) counts off-rent cars in any of these four states. */
@@ -51,9 +55,14 @@ export const IDLE_COMMITTED_SUBTITLE =
 /** KPI car list source. Unbucketed reads its own view so other buckets stay on v_rlms_kpi_car_rows. */
 export const KPI_CAR_ROWS_VIEW = "v_rlms_kpi_car_rows";
 export const UNBUCKETED_CARS_VIEW = "v_rlms_unbucketed_cars";
+export const GOL_OVERDUE_CARS_VIEW = "v_rlms_kpi_gol_overdue";
+export const LEASE_END_CONFLICT_CARS_VIEW = "v_rlms_kpi_lease_end_conflict";
 
 export function kpiCarRowsSource(bucket: string): string {
-  return bucket === "unbucketed" ? UNBUCKETED_CARS_VIEW : KPI_CAR_ROWS_VIEW;
+  if (bucket === "unbucketed") return UNBUCKETED_CARS_VIEW;
+  if (bucket === "going_on_lease_overdue") return GOL_OVERDUE_CARS_VIEW;
+  if (bucket === "lease_end_conflict") return LEASE_END_CONFLICT_CARS_VIEW;
+  return KPI_CAR_ROWS_VIEW;
 }
 
 export function showUnbucketedWarning(count: number | null | undefined): boolean {

@@ -1,6 +1,10 @@
+import { assignmentStillOnLease } from "./kpi-ol-link";
+
 /**
  * Lease-link Off Rent + derived rental status (Idle / Unassigned / Leased).
- * Must stay in lockstep with public.rlms_is_on_ol / rlms_is_on_rent / rlms_is_off_rent in SQL.
+ * The rider and lessee test stays in lockstep with public.rlms_is_on_ol /
+ * rlms_is_on_rent / rlms_is_off_rent. Ended assignment_status and rider
+ * lifecycle_status are the extra gate in public.rlms_kpi_has_ol_link.
  */
 
 export type LinkInput = {
@@ -13,6 +17,8 @@ export type LinkInput = {
   fleetStatus?: string | null;
   /** Default false until Bruce flips rlms_app_settings.rent_start_enforced. */
   rentStartEnforced?: boolean | null;
+  assignmentStatus?: string | null;
+  riderLifecycleStatus?: string | null;
 };
 
 export const COMMITMENT_TYPES = ["program", "deal", "scrap", "other"] as const;
@@ -38,6 +44,7 @@ export function isoDateOnly(v: string | null | undefined): string | null {
 
 export function isOnOl(input: LinkInput): boolean {
   if (input.hasAssignment === false) return false;
+  if (!assignmentStillOnLease(input.assignmentStatus, input.riderLifecycleStatus)) return false;
   if (!isOnRentOlRider(input.rider)) return false;
   if (isXLesseeText(input.lesseeName) || isXLesseeText(input.assignmentLabel)) return false;
   return true;

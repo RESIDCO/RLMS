@@ -20,7 +20,7 @@ const CAR_SEL =
 async function latestAssignment(railcarId: number) {
   const { data, error } = await supabaseAdmin
     .from("railcar_assignments")
-    .select("id, rider_id, fleet_name, rent_start_date, assigned_at, rider:riders(id, rider_name)")
+    .select("id, rider_id, fleet_name, rent_start_date, assigned_at, assignment_status, rider:riders(id, rider_name, lifecycle_status)")
     .eq("railcar_id", railcarId)
     .order("id", { ascending: false })
     .limit(1);
@@ -31,11 +31,14 @@ async function latestAssignment(railcarId: number) {
 }
 
 function onOlOf(car: any, riderName: string | null | undefined, assignment: any) {
+  const rider = Array.isArray(assignment?.rider) ? assignment.rider[0] : assignment?.rider;
   return isOnOl({
     hasAssignment: Boolean(assignment),
     rider: riderName,
     lesseeName: car?.lessee_name,
     assignmentLabel: car?.assignment_label,
+    assignmentStatus: assignment?.assignment_status ?? null,
+    riderLifecycleStatus: rider?.lifecycle_status ?? null,
   });
 }
 

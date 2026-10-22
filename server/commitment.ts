@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { isFrozenRailcar } from "@shared/car-lifecycle-status";
+import { leaseEndedWatchStatusExcluded } from "@shared/kpi-watch";
 import { supabaseAdmin } from "./supabase";
 import {
   COMMITMENT_TYPES,
@@ -85,7 +86,7 @@ function isCommitmentType(v: unknown): v is CommitmentType {
 async function latestAssignment(railcarId: number) {
   const { data, error } = await supabaseAdmin
     .from("railcar_assignments")
-    .select("id, rider_id, fleet_name, rent_start_date, assigned_at, rider:riders(id, rider_name, lease_status, expiration_date)")
+    .select("id, rider_id, fleet_name, rent_start_date, assigned_at, assignment_status, rider:riders(id, rider_name, lease_status, expiration_date, lifecycle_status)")
     .eq("railcar_id", railcarId)
     .order("id", { ascending: false })
     .limit(1);
@@ -116,6 +117,7 @@ export async function rentStartEnforced(): Promise<boolean> {
 }
 
 function linkInput(car: any, riderName: string | null | undefined, assignment: any, enforced?: boolean) {
+  const rider = Array.isArray(assignment?.rider) ? assignment.rider[0] : assignment?.rider;
   return {
     hasAssignment: Boolean(assignment),
     rider: riderName,
@@ -124,6 +126,8 @@ function linkInput(car: any, riderName: string | null | undefined, assignment: a
     rentStartDate: assignment?.rent_start_date ?? null,
     fleetStatus: car?.fleet_status ?? null,
     rentStartEnforced: enforced,
+    assignmentStatus: assignment?.assignment_status ?? null,
+    riderLifecycleStatus: rider?.lifecycle_status ?? null,
   };
 }
 
@@ -406,7 +410,7 @@ async function classifyMatched(cars: any[]) {
   const { data: assigns } = ids.length
     ? await supabaseAdmin
         .from("railcar_assignments")
-        .select("id, railcar_id, rider_id, fleet_name, rent_start_date, assigned_at, rider:riders(id, rider_name, lease_status)")
+        .select("id, railcar_id, rider_id, fleet_name, rent_start_date, assigned_at, assignment_status, rider:riders(id, rider_name, lease_status, lifecycle_status)")
         .in("railcar_id", ids)
         .order("id", { ascending: false })
     : { data: [] as any[] };
@@ -832,8 +836,7 @@ export async function listWatch() {
   );
   const today = new Date().toISOString().slice(0, 10);
   return (rows ?? []).filter((r) => {
-    const st = String(r.lease_status ?? "").toUpperCase();
-    if (/\bMTM\b|MONTH\s*TO\s*MONTH/.test(st)) return false;
+    if (leaseEndedWatchStatusExcluded(r.lease_status)) return false;
     const exp = String(r.rider_expiration_date ?? "").slice(0, 10);
     const end = String(r.lease_end_date ?? "").slice(0, 10);
     const past = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < today;

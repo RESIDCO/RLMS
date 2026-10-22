@@ -411,7 +411,6 @@ export function KpiCard({
   onClick,
   subtext,
   marker = "icon",
-  links,
 }: {
   label: string;
   value: number | string;
@@ -422,10 +421,9 @@ export function KpiCard({
   subtext?: string;
   /** Timeline-style colored dot for normal metrics; keep icon for true alerts / no-data. */
   marker?: "icon" | "dot";
-  links?: { label: string; testId: string; onClick: () => void }[];
 }) {
   const tone = kpiAccent[accent];
-  const card = (
+  return (
     <button
       type="button"
       className={cn(
@@ -458,25 +456,6 @@ export function KpiCard({
       )}
       <div className={cn("h-[2px] w-full rounded-full mt-auto", tone.bar)} />
     </button>
-  );
-  if (!links?.length) return card;
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      {card}
-      <div className="flex flex-col gap-0.5 px-1">
-        {links.map((link) => (
-          <button
-            key={link.testId}
-            type="button"
-            className="text-left text-[11px] font-medium text-umler-steel hover:underline"
-            data-testid={link.testId}
-            onClick={link.onClick}
-          >
-            {link.label}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -580,13 +559,6 @@ export default function Dashboard() {
                 subtext={IDLE_COMMITTED_SUBTITLE}
                 icon={PauseCircle}
                 onClick={() => navigate(kpiDrillPath("idle"))}
-                links={[
-                  {
-                    label: "Awaiting rent start",
-                    testId: "kpi-idle-awaiting-rent",
-                    onClick: () => navigate(kpiDrillPath("awaiting_rent_start")),
-                  },
-                ]}
               />
               <KpiCard
                 testId="kpi-rental-abatement"

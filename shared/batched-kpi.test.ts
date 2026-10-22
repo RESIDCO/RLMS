@@ -151,7 +151,8 @@ for (const id of [
 }
 ok(!issues.includes('testId="kpi-shop-conflict"'), "shop conflict card is not on the issues page");
 ok(dash.includes('data-testid="fleet-data-issues-badge"'), "dashboard badge");
-ok(dash.includes("kpi-idle-awaiting-rent"), "idle card reaches awaiting rent start");
+ok(!dash.includes("kpi-idle-awaiting-rent"), "dashboard idle card has no awaiting rent start link");
+ok(issues.includes('testId="kpi-awaiting-rent"'), "issues page still opens awaiting rent start");
 ok(issues.includes("NO_LEASE_LINK_SUBTITLE"), "issues page uses the new no-link subtitle");
 ok(issues.includes('testId="kpi-idle-on-ol"'), "idle on OL review is an issue card");
 ok(issues.includes('testId="kpi-gol-overdue"'), "overdue going on lease is an issue card");

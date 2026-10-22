@@ -1,9 +1,8 @@
 import { KPI_TITLES } from "./kpi-buckets";
 
-/** Dashboard KPI drills that open /kpi/cars. Counts are acceptance targets after sale_unclear view fix. */
+/** Dashboard KPI drills that open /kpi/cars. Off Rent is not a tile; its list bucket remains. Counts are acceptance targets after sale_unclear view fix. */
 export const KPI_DRILL_TILES = [
   { testId: "kpi-total-fleet", bucket: "op", expectedCount: 14513 },
-  { testId: "kpi-off-rent", bucket: "off_rent", expectedCount: 295 },
   { testId: "kpi-idle", bucket: "idle", expectedCount: 249 },
   { testId: "kpi-active-assignments", bucket: "on_rent", expectedCount: 14218 },
   { testId: "kpi-unassigned", bucket: "unassigned", expectedCount: 46 },

@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
-import { KPI_BUCKETS, KPI_GROUP_COLS, KPI_SORT_COLS, KPI_TITLES, type KpiBucket } from "@shared/kpi-buckets";
+import { KPI_BUCKETS, KPI_GROUP_COLS, KPI_SORT_COLS, KPI_TITLES, kpiCarRowsSource, type KpiBucket } from "@shared/kpi-buckets";
 import { whitelistExportCols } from "@shared/column-views";
 import { formatCarId } from "@shared/residco-import";
 import {
@@ -28,9 +28,15 @@ function isBucket(v: string): v is KpiBucket {
   return (KPI_BUCKETS as readonly string[]).includes(v);
 }
 
+function fromKpiRows(bucket: string) {
+  return supabaseAdmin.from(kpiCarRowsSource(bucket));
+}
+
 function applyBucket(q: any, bucket: string) {
   if (!isBucket(bucket)) throw Object.assign(new Error("Unknown bucket"), { status: 400 });
   q = q.eq("active", true);
+  // v_rlms_unbucketed_cars is already the stranded set. Search and column filters still apply.
+  if (bucket === "unbucketed") return q;
   if (bucket === "off_rent") return q.eq("is_op", true).eq("off_rent", true);
   if (bucket === "idle") {
     return q
@@ -94,7 +100,7 @@ async function kpiTextOr(search: string): Promise<string> {
 }
 
 function filteredQuery(opts: ReturnType<typeof parseListQuery>, textOr?: string) {
-  let q = supabaseAdmin.from("v_rlms_kpi_car_rows").select(ROW_COLS, { count: "exact" });
+  let q = fromKpiRows(opts.bucket).select(ROW_COLS, { count: "exact" });
   q = applyBucket(q, opts.bucket);
   if (opts.q) {
     const like = `*${opts.q}*`;
@@ -122,7 +128,7 @@ export async function listKpiCarsPaged(req: Request) {
   let groups: { key: string; count: number }[] | undefined;
   if (opts.groupCol) {
     const all = await fetchAllRows((a, b) => {
-      let gq = supabaseAdmin.from("v_rlms_kpi_car_rows").select(opts.groupCol!);
+      let gq = fromKpiRows(opts.bucket).select(opts.groupCol!);
       gq = applyBucket(gq, opts.bucket);
       if (opts.entity) gq = gq.eq("entity", opts.entity);
       if (opts.lease) gq = gq.eq("current_lease", opts.lease);
@@ -168,7 +174,7 @@ export async function exportKpiCars(req: Request, res: Response) {
   const textOr = opts.q ? await kpiTextOr(opts.q) : undefined;
   const format = String(req.query.format ?? "csv").toLowerCase() === "xlsx" ? "xlsx" : "csv";
   const rows = await fetchAllRows((a, b) => {
-    let q = supabaseAdmin.from("v_rlms_kpi_car_rows").select(ROW_COLS);
+    let q = fromKpiRows(opts.bucket).select(ROW_COLS);
     q = applyBucket(q, opts.bucket);
     if (textOr) q = q.or(textOr);
     if (opts.entity) q = q.eq("entity", opts.entity);
@@ -231,7 +237,7 @@ export function registerKpiCarRoutes(app: Express) {
       const opts = parseListQuery(req);
       const textOr = opts.q ? await kpiTextOr(opts.q) : undefined;
       const rows = await fetchAllRows((a, b) => {
-        let q = supabaseAdmin.from("v_rlms_kpi_car_rows").select("railcar_id");
+        let q = fromKpiRows(opts.bucket).select("railcar_id");
         q = applyBucket(q, opts.bucket);
         if (opts.entity) q = q.eq("entity", opts.entity);
         if (opts.lease) q = q.eq("current_lease", opts.lease);

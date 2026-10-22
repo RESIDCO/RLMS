@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { isFrozenRailcar } from "@shared/car-lifecycle-status";
+import { leaseEndedWatchStatusExcluded } from "@shared/kpi-watch";
 import { supabaseAdmin } from "./supabase";
 import {
   COMMITMENT_TYPES,
@@ -832,8 +833,7 @@ export async function listWatch() {
   );
   const today = new Date().toISOString().slice(0, 10);
   return (rows ?? []).filter((r) => {
-    const st = String(r.lease_status ?? "").toUpperCase();
-    if (/\bMTM\b|MONTH\s*TO\s*MONTH/.test(st)) return false;
+    if (leaseEndedWatchStatusExcluded(r.lease_status)) return false;
     const exp = String(r.rider_expiration_date ?? "").slice(0, 10);
     const end = String(r.lease_end_date ?? "").slice(0, 10);
     const past = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < today;

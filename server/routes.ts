@@ -1084,6 +1084,20 @@ export async function registerRoutes(
         console.warn("[dashboard] unbucketed_count unavailable:", e?.message ?? e);
       }
 
+      let fleetDataIssueCars = 0;
+      let goingOnLeaseOverdue = 0;
+      let leaseEndConflict = 0;
+      try {
+        const { data: issueCounts, error: issueErr } = await supabaseAdmin.rpc("rlms_fleet_data_issue_counts");
+        if (issueErr) throw issueErr;
+        const body = (issueCounts ?? {}) as { cars?: number; by_issue?: Record<string, number> };
+        fleetDataIssueCars = Number(body.cars) || 0;
+        goingOnLeaseOverdue = Number(body.by_issue?.going_on_lease_overdue) || 0;
+        leaseEndConflict = Number(body.by_issue?.lease_end_conflict) || 0;
+      } catch (e: any) {
+        console.warn("[dashboard] fleet data issues unavailable:", e?.message ?? e);
+      }
+
       let activeOlCount = sqlKpis ? Number(sqlKpis.riders_count) || 0 : 0;
       let dealsExpiring: { year: number; count: number }[] = Array.isArray(fleetSql?.deals_expiring)
         ? fleetSql.deals_expiring.map((d: any) => ({ year: Number(d.year), count: Number(d.count) || 0 }))
@@ -1241,6 +1255,9 @@ export async function registerRoutes(
               sold_missing_buyer: Number(sqlKpis.sold_missing_buyer) || 0,
               leased_off_rent,
               unbucketed_count,
+              fleet_data_issue_cars: fleetDataIssueCars,
+              going_on_lease_overdue: goingOnLeaseOverdue,
+              lease_end_conflict: leaseEndConflict,
             }
           : {
           total_fleet: railcars.length,
@@ -1275,6 +1292,9 @@ export async function registerRoutes(
           railcars_scanned: Number((scannedCountRes as any)?.count) || allRailcarsRaw.length,
           leased_off_rent,
           unbucketed_count,
+          fleet_data_issue_cars: fleetDataIssueCars,
+          going_on_lease_overdue: goingOnLeaseOverdue,
+          lease_end_conflict: leaseEndConflict,
         },
         detail: {
           all_cars: [],

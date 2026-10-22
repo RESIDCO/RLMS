@@ -166,10 +166,11 @@ const dash = readFileSync("client/src/pages/Dashboard.tsx", "utf8");
 ok(!dash.includes('testId="kpi-off-rent"'), "off rent card removed");
 ok(!dash.includes('kpiDrillPath("off_rent")'), "off rent drill removed");
 ok(dash.includes("IDLE_COMMITTED_SUBTITLE"), "idle card uses the shared subtitle");
-ok(dash.includes('data-testid="kpi-unbucketed"'), "unbucketed chip");
-ok(dash.includes("showUnbucketedWarning"), "chip hidden at zero");
+ok(!dash.includes('testId="kpi-unbucketed"') && !dash.includes('data-testid="kpi-unbucketed"'), "unbucketed chip left the dashboard");
 ok(dash.includes('testId="kpi-idle"') && dash.includes('testId="kpi-rental-abatement"'), "idle and abatement cards remain");
 ok(dash.includes('testId="kpi-unassigned"') && dash.includes('testId="kpi-active-assignments"'), "unassigned and active cards remain");
+const issues = readFileSync("client/src/pages/FleetDataIssues.tsx", "utf8");
+ok(issues.includes('testId="kpi-unbucketed"'), "unbucketed card is on the issues page");
 
 const routes = readFileSync("server/routes.ts", "utf8");
 ok(routes.includes("off_rent_count: Number(sqlKpis.off_rent)"), "dashboard still returns off_rent_count");

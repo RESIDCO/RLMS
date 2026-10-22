@@ -37,6 +37,7 @@ function applyBucket(q: any, bucket: string) {
   q = q.eq("active", true);
   // v_rlms_unbucketed_cars is already the stranded set. Search and column filters still apply.
   if (bucket === "unbucketed") return q;
+  if (bucket === "going_on_lease_overdue" || bucket === "lease_end_conflict") return q;
   if (bucket === "off_rent") return q.eq("is_op", true).eq("off_rent", true);
   if (bucket === "idle") {
     return q

@@ -354,6 +354,9 @@ export function StaleCommitmentsPage() {
     <div>
       <PageHeader title="Stale Commitments" subtitle="Open Commitments with no date, a past date, or older than 90 days — plus programs past target completion. Nothing clears silently." />
       <div className="p-6 space-y-6">
+        <Link href="/fleet/data-issues" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary">
+          Back to Fleet data issues
+        </Link>
         <div className="flex justify-end">
           <CopyCarsButton
             rows={data?.items ?? []}
@@ -440,7 +443,7 @@ export function LeaseEndedWatchPage() {
   const cars = (data?.rows ?? []).map((r: any) => `${r.marks} ${r.car_number}`).join("\n");
   return (
     <div>
-      <PageHeader title="Lease-ended watch" subtitle="Still on an OL whose end date is past, not Month to Month, no EA/xOL move yet." />
+      <PageHeader title="Lease-ended watch" subtitle="Still on an OL whose end date is past, not Month to Month and not a scrap program (SCRAPPING stays on rent)." />
       <div className="p-6 space-y-3">
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => nav(`/returns/bulk?cars=${encodeURIComponent(cars)}`)}>Move to EA x-lessee?</Button>

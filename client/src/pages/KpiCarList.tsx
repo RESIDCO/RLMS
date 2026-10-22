@@ -23,6 +23,7 @@ import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
+import { FLEET_DATA_ISSUES_PATH, isIssueListBucket } from "@shared/fleet-data-issues";
 import { matchPastedCarsOnList, type AwaitingPasteMatch } from "@shared/kpi-paste-cars";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
@@ -225,6 +226,8 @@ export function KpiCarListPage() {
   const sp = useMemo(() => new URLSearchParams(search.replace(/^\?/, "")), [search]);
   const bucket = sp.get("bucket") ?? "off_rent";
   const title = KPI_TITLES[bucket] ?? bucket;
+  const listHome = isIssueListBucket(bucket) ? FLEET_DATA_ISSUES_PATH : "/";
+  const listHomeLabel = isIssueListBucket(bucket) ? "Fleet data issues" : "Dashboard";
   const q = sp.get("q") ?? "";
   const entity = sp.get("entity") ?? "";
   const lease = sp.get("lease") ?? "";
@@ -570,13 +573,13 @@ export function KpiCarListPage() {
       />
       <div className="px-6 pt-3 space-y-3">
         <nav className="text-sm text-muted-foreground flex items-center gap-2">
-          <Link href="/" className="hover:text-primary">Dashboard</Link>
+          <Link href={listHome} className="hover:text-primary">{listHomeLabel}</Link>
           <span>›</span>
           <span className="text-foreground">{title}</span>
         </nav>
-        <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary">
+        <Link href={listHome} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary">
           <ArrowLeft className="h-3.5 w-3.5" />
-          Back to Dashboard
+          Back to {listHomeLabel}
         </Link>
         <div className="flex flex-wrap gap-2 items-end">
           <div>

@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import { formatCalendarDate, parseIsoDateOnly } from "@shared/lease-authority";
 import { leaseStatusLabel } from "@shared/lease-governance";
 import { displayRailcarStatus, displayStatusInputFromRailcar } from "@shared/fleet-status";
+import { IDLE_COMMITTED_SUBTITLE, showUnbucketedWarning, unbucketedWarningLabel } from "@shared/kpi-buckets";
+import { kpiDrillPath } from "@shared/kpi-drill-tiles";
 import {
   Sheet,
   SheetContent,
@@ -34,7 +36,6 @@ import { openAppTab, lesseePath, olPath, entityPath, turning50Path, olKeyFromLab
 import { LineageCarLink } from "@/components/LineageCarLink";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
 import { accountListPath } from "@/lib/account-mgmt-nav";
-import { kpiDrillPath } from "@shared/kpi-drill-tiles";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type CarRow = {
@@ -129,6 +130,7 @@ type DashboardData = {
     sold_tag_suspect?: number;
     sold_missing_buyer?: number;
     leased_off_rent?: number;
+    unbucketed_count?: number;
   };
   detail: {
     all_cars: CarRow[];
@@ -509,6 +511,17 @@ export default function Dashboard() {
             </button>
           </div>
         ) : null}
+        {data && showUnbucketedWarning(data.kpis.unbucketed_count) ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-full border border-umler-signal/40 bg-umler-signal/10 px-3 py-1.5 text-xs font-semibold text-umler-signal hover:bg-umler-signal/15"
+            onClick={() => navigate(kpiDrillPath("unbucketed"))}
+            data-testid="kpi-unbucketed"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {unbucketedWarningLabel(data.kpis.unbucketed_count ?? 0)}
+          </button>
+        ) : null}
         {/* KPIs — Total Fleet = Idle + Abatement + Active Cars + Unassigned; Sold is outside operating fleet */}
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0">
           {isLoading ? (
@@ -530,7 +543,7 @@ export default function Dashboard() {
                 testId="kpi-idle"
                 label="Idle (committed)"
                 value={data.kpis.idle_count ?? 0}
-                subtext="Off rent with a Commitment, or on OL awaiting rent start"
+                subtext={IDLE_COMMITTED_SUBTITLE}
                 icon={PauseCircle}
                 onClick={() => navigate(kpiDrillPath("idle"))}
               />
@@ -601,16 +614,6 @@ export default function Dashboard() {
                 icon={PackageMinus}
                 accent="warning"
                 onClick={() => navigate("/railcars?filter=sold")}
-              />
-              <KpiCard
-                testId="kpi-off-rent"
-                label="Off Rent"
-                value={data.kpis.off_rent_count}
-                subtext={`${data.kpis.off_rent_count.toLocaleString()} confirmed${data.kpis.off_rent_main != null ? ` · Main ${data.kpis.off_rent_main} / Coal ${data.kpis.off_rent_coal ?? 0} / RPS ${data.kpis.off_rent_rps ?? 0}` : ""}`}
-                icon={AlertTriangle}
-                accent={data.kpis.off_rent_count > 0 ? "warning" : "muted"}
-                marker="icon"
-                onClick={() => navigate(kpiDrillPath("off_rent"))}
               />
               <KpiCard
                 testId="kpi-awaiting-rent"

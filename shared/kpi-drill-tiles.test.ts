@@ -27,7 +27,7 @@ for (const tile of KPI_DRILL_TILES) {
 }
 
 ok(KPI_DRILL_TILES.find((t) => t.bucket === "op")?.expectedCount === 14513, "op 14513");
-ok(KPI_DRILL_TILES.find((t) => t.bucket === "off_rent")?.expectedCount === 295, "off_rent 295");
+ok(!KPI_DRILL_TILES.some((t) => t.bucket === "off_rent" || t.testId === "kpi-off-rent"), "off rent card is not a dashboard drill");
 ok(KPI_DRILL_TILES.find((t) => t.bucket === "idle")?.expectedCount === 249, "idle 249");
 ok(KPI_DRILL_TILES.find((t) => t.bucket === "on_rent")?.expectedCount === 14218, "on_rent 14218");
 ok(KPI_DRILL_TILES.find((t) => t.bucket === "unassigned")?.expectedCount === 46, "unassigned 46");

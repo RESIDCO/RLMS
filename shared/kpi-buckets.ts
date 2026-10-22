@@ -17,6 +17,7 @@ export const KPI_BUCKETS = [
   "sold_missing_buyer",
   "leased_off_rent",
   "rental_abatement",
+  "unbucketed",
 ] as const;
 
 export type KpiBucket = (typeof KPI_BUCKETS)[number];
@@ -40,7 +41,28 @@ export const KPI_TITLES: Record<string, string> = {
   sold_missing_buyer: "Sold with blank buyer",
   leased_off_rent: "Tagged Leased but off rent",
   rental_abatement: "Rental abatement",
+  unbucketed: "Unbucketed cars",
 };
+
+/** Idle (committed) counts off-rent cars in any of these four states. */
+export const IDLE_COMMITTED_SUBTITLE =
+  "Off rent with an open Commitment, an open program, a Going on lease label, or awaiting rent start.";
+
+/** KPI car list source. Unbucketed reads its own view so other buckets stay on v_rlms_kpi_car_rows. */
+export const KPI_CAR_ROWS_VIEW = "v_rlms_kpi_car_rows";
+export const UNBUCKETED_CARS_VIEW = "v_rlms_unbucketed_cars";
+
+export function kpiCarRowsSource(bucket: string): string {
+  return bucket === "unbucketed" ? UNBUCKETED_CARS_VIEW : KPI_CAR_ROWS_VIEW;
+}
+
+export function showUnbucketedWarning(count: number | null | undefined): boolean {
+  return typeof count === "number" && Number.isFinite(count) && count > 0;
+}
+
+export function unbucketedWarningLabel(count: number): string {
+  return `Unbucketed cars: ${count.toLocaleString("en-US")}`;
+}
 
 export const KPI_SORT_COLS = [
   "car",
@@ -118,6 +140,52 @@ export type KpiFlagRow = {
   open_abatement?: boolean | null;
 };
 
+/**
+ * Same three-valued OR as rlms_fleet_kpis_core:
+ * true if any flag is true, false only when every flag is false, otherwise null.
+ */
+export function idleCommitmentSeed(r: KpiFlagRow): boolean | null {
+  const parts = [r.has_open_commitment, r.in_open_program, r.going_on_lease, r.awaiting_rent_start];
+  if (parts.some((p) => p === true)) return true;
+  if (parts.every((p) => p === false)) return false;
+  return null;
+}
+
+export type OperatingBucketMembership = {
+  onRent: boolean;
+  abatement: boolean;
+  idle: boolean;
+  unassigned: boolean;
+};
+
+/** Partition of an operating car across the four dashboard buckets. Flags must be exactly true or false. */
+export function operatingBucketMembership(r: KpiFlagRow): OperatingBucketMembership {
+  const op = r.is_op === true;
+  const off = r.off_rent === true;
+  const notOff = r.off_rent === false;
+  const abate = r.open_abatement === true;
+  const notAbate = r.open_abatement === false;
+  const seed = idleCommitmentSeed(r);
+  return {
+    onRent: op && notOff && notAbate,
+    abatement: op && abate,
+    idle: op && off && seed === true,
+    unassigned: op && off && seed === false,
+  };
+}
+
+/**
+ * Operating car in none of on rent, abatement, idle, or unassigned,
+ * or in more than one of the three non-revenue buckets.
+ */
+export function isUnbucketedOperatingCar(r: KpiFlagRow): boolean {
+  if (r.is_op !== true) return false;
+  const m = operatingBucketMembership(r);
+  const nonRevenue = [m.abatement, m.idle, m.unassigned].filter(Boolean).length;
+  const covered = [m.onRent, m.abatement, m.idle, m.unassigned].filter(Boolean).length;
+  return covered === 0 || nonRevenue > 1;
+}
+
 export function kpiBucketsForRow(r: KpiFlagRow): KpiBucket[] {
   if (r.active !== true) return [];
   const out: KpiBucket[] = [];
@@ -144,6 +212,7 @@ export function kpiBucketsForRow(r: KpiFlagRow): KpiBucket[] {
   if (r.sale_unclear) out.push("sale_unclear");
   if (r.sold_tag_suspect) out.push("sold_tag_suspect");
   if (r.sold_missing_buyer) out.push("sold_missing_buyer");
+  if (isUnbucketedOperatingCar(r)) out.push("unbucketed");
   return out;
 }
 

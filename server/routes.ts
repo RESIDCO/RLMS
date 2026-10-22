@@ -1067,6 +1067,17 @@ export async function registerRoutes(
         console.warn("[dashboard] leased_off_rent unavailable:", e?.message ?? e);
       }
 
+      let unbucketed_count = 0;
+      try {
+        const { count, error: unbucketedErr } = await supabaseAdmin
+          .from("v_rlms_unbucketed_cars")
+          .select("railcar_id", { count: "exact", head: true });
+        if (unbucketedErr) throw unbucketedErr;
+        unbucketed_count = count ?? 0;
+      } catch (e: any) {
+        console.warn("[dashboard] unbucketed_count unavailable:", e?.message ?? e);
+      }
+
       let activeOlCount = sqlKpis ? Number(sqlKpis.riders_count) || 0 : 0;
       let dealsExpiring: { year: number; count: number }[] = Array.isArray(fleetSql?.deals_expiring)
         ? fleetSql.deals_expiring.map((d: any) => ({ year: Number(d.year), count: Number(d.count) || 0 }))
@@ -1223,6 +1234,7 @@ export async function registerRoutes(
               sold_tag_suspect: Number(sqlKpis.sold_tag_suspect) || 0,
               sold_missing_buyer: Number(sqlKpis.sold_missing_buyer) || 0,
               leased_off_rent,
+              unbucketed_count,
             }
           : {
           total_fleet: railcars.length,
@@ -1256,6 +1268,7 @@ export async function registerRoutes(
           lease_authority: "asset_report",
           railcars_scanned: Number((scannedCountRes as any)?.count) || allRailcarsRaw.length,
           leased_off_rent,
+          unbucketed_count,
         },
         detail: {
           all_cars: [],

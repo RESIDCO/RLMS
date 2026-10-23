@@ -90,6 +90,7 @@ export function InactivateCarsDialog({
         const res = await apiRequest("POST", "/api/railcars/inactivate/preview", {
           ids,
           close_assignment: closeAssignment,
+          end_date: closeAssignment ? endDate : null,
         });
         const data = (await res.json()) as PreviewResponse;
         if (!cancelled) setPreview(data);
@@ -109,7 +110,7 @@ export function InactivateCarsDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, ids.join(","), closeAssignment, toast]);
+  }, [open, ids.join(","), closeAssignment, endDate, toast]);
 
   const counts = preview?.counts;
   const canApply = Boolean(
@@ -179,7 +180,7 @@ export function InactivateCarsDialog({
         <DialogHeader>
           <DialogTitle>Inactivate {ids.length} car{ids.length === 1 ? "" : "s"}</DialogTitle>
           <DialogDescription>
-            Inactive kills the asset and freezes its data. Open assignment, rent stop, program, and commitment stay in place unless you close the assignment here. Rent events are not changed.
+            Inactive kills the asset and freezes its data. The date below is the assignment end and the inactive-as-of date. An open Off rent stop stays, with its own stop date, and does not block once you close the assignment. Abatement and other stops, open programs, and commitments still block. Rent events are not changed.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -193,7 +194,7 @@ export function InactivateCarsDialog({
           </label>
           {closeAssignment && (
             <div>
-              <Label htmlFor="inactivate-end-date">Assignment end date</Label>
+              <Label htmlFor="inactivate-end-date">Inactive / assignment end date</Label>
               <Input
                 id="inactivate-end-date"
                 type="date"
@@ -202,6 +203,14 @@ export function InactivateCarsDialog({
                 className="mt-1.5 max-w-xs"
                 data-testid="inactivate-end-date"
               />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Stored on the assignment only. An Off rent stop keeps the stop date already recorded. The inactivation date must be on or after that stop date.
+              </p>
+              {preview?.rows.some((row) => row.blockers.includes("inactivation_before_off_rent")) && (
+                <p className="mt-1.5 text-sm text-amber-800" data-testid="inactivate-date-warning">
+                  Inactivation date is before the off-rent date. Those cars stay out of the ready set until the date is on or after the stop date. The stop date is not changed.
+                </p>
+              )}
             </div>
           )}
           {busy === "preview" && <p className="text-sm text-muted-foreground">Checking each car…</p>}

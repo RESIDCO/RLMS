@@ -2,6 +2,14 @@
  * Bulk Inactivate preview. Inactive is the only status that sets active=false.
  * Blockers are shown per car. Apply is ready-only or every row, with a reason
  * and a typed INACTIVATE confirmation. This module does not write.
+ *
+ * Open Off rent stops are the permanent off-rent record. When the assignment
+ * is closed, those stops stay open and their stop dates are not replaced by
+ * the inactivation date. The date entered in the dialog is only the assignment
+ * end / inactive-as-of date. It must be on or after every Off rent stop date.
+ * A car is ready on stops only when every open stop is Off rent. Abatement or
+ * any other stop type blocks, and the preview lists each open stop. Open
+ * programs and commitments still block.
  */
 
 import { isFrozenRailcar } from "./car-lifecycle-status";
@@ -20,8 +28,66 @@ export type InactivateBlockerKind =
   | "already_inactive"
   | "open_assignment"
   | "open_rent_stop"
+  | "inactivation_before_off_rent"
   | "open_program"
   | "open_commitment";
+
+/** Stored car_rent_stops.type for a permanent off-rent record. */
+export const OFF_RENT_STOP_TYPE = "Off rent";
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export type InactivateRentStop = { type: string; stop_date: string };
+
+export function isOffRentStop(type: string): boolean {
+  return type.trim() === OFF_RENT_STOP_TYPE;
+}
+
+/** Every open row. Callers must not keep only the first stop for a car. */
+export function collectOpenRentStops(
+  rows: { railcar_id: number; type: string | null; stop_date: string | null }[],
+): Map<number, InactivateRentStop[]> {
+  const byCar = new Map<number, InactivateRentStop[]>();
+  for (const row of rows) {
+    const id = Number(row.railcar_id);
+    const list = byCar.get(id) ?? [];
+    list.push({
+      type: String(row.type ?? "Rent stop"),
+      stop_date: String(row.stop_date ?? "").slice(0, 10),
+    });
+    byCar.set(id, list);
+  }
+  return byCar;
+}
+
+function orderedRentStops(stops: InactivateRentStop[]): InactivateRentStop[] {
+  return [...stops].sort((a, b) => {
+    const byDate = a.stop_date.localeCompare(b.stop_date);
+    if (byDate !== 0) return byDate;
+    return a.type.localeCompare(b.type);
+  });
+}
+
+/**
+ * Both dates belong in the preview. The stop date is the one already stored.
+ * The end date is the separate inactivation / assignment end date.
+ * A missing end date is named, not treated as the stop date.
+ * An earlier end date warns and is not ready.
+ */
+export function offRentKeptNote(
+  stopDate: string,
+  endDate: string | null | undefined,
+): { note: string; beforeOffRent: boolean } {
+  const stop = String(stopDate ?? "").slice(0, 10);
+  const end = String(endDate ?? "").slice(0, 10);
+  const endLabel = ISO_DATE.test(end) ? end : "not entered";
+  const beforeOffRent = ISO_DATE.test(stop) && ISO_DATE.test(end) && end < stop;
+  const warning = beforeOffRent ? ". Inactivation date is before the off-rent date." : "";
+  return {
+    note: `Off rent since ${stop} (kept) · Inactive/assignment end ${endLabel}${warning}`,
+    beforeOffRent,
+  };
+}
 
 export type InactivateStatus = "ready" | "blocked" | "already_inactive";
 
@@ -39,7 +105,7 @@ export type InactivateFacts = {
   car_status: string | null;
   active: boolean | null;
   assignment: InactivateAssignmentFact | null;
-  rent_stop: { type: string; stop_date: string } | null;
+  rent_stops: InactivateRentStop[];
   programs: string[];
   commitment: { type: string; name: string } | null;
 };
@@ -84,7 +150,7 @@ export function assignmentBlockerMessage(assignment: InactivateAssignmentFact, c
 
 export function classifyInactivateRow(
   fact: InactivateFacts,
-  opts: { closeAssignment: boolean },
+  opts: { closeAssignment: boolean; endDate?: string | null },
 ): InactivatePreviewRow {
   const blockers: InactivateBlockerKind[] = [];
   const notes: string[] = [];
@@ -97,9 +163,23 @@ export function classifyInactivateRow(
     if (!opts.closeAssignment) blockers.push("open_assignment");
     notes.push(assignmentBlockerMessage(fact.assignment, opts.closeAssignment));
   }
-  if (fact.rent_stop) {
-    blockers.push("open_rent_stop");
-    notes.push(`Open rent stop (${fact.rent_stop.type} ${fact.rent_stop.stop_date}). Not closed.`);
+  const stops = orderedRentStops(fact.rent_stops);
+  if (stops.length) {
+    const everyOffRent = stops.every((stop) => isOffRentStop(stop.type));
+    if (opts.closeAssignment && everyOffRent) {
+      let beforeOffRent = false;
+      for (const stop of stops) {
+        const kept = offRentKeptNote(stop.stop_date, opts.endDate);
+        if (kept.beforeOffRent) beforeOffRent = true;
+        notes.push(kept.note);
+      }
+      if (beforeOffRent) blockers.push("inactivation_before_off_rent");
+    } else {
+      blockers.push("open_rent_stop");
+      for (const stop of stops) {
+        notes.push(`Open rent stop (${stop.type} ${stop.stop_date}). Not closed.`);
+      }
+    }
   }
   if (fact.programs.length) {
     blockers.push("open_program");
@@ -122,7 +202,7 @@ export function classifyInactivateRow(
     active: fact.active,
     car_status: fact.car_status,
     assignment: fact.assignment,
-    rent_stop: fact.rent_stop ? `${fact.rent_stop.type} ${fact.rent_stop.stop_date}` : null,
+    rent_stop: stops.length ? stops.map((stop) => `${stop.type} ${stop.stop_date}`).join("; ") : null,
     programs: fact.programs,
     commitment: fact.commitment ? `${fact.commitment.type} ${fact.commitment.name}` : null,
   };
@@ -185,8 +265,6 @@ export function inactivatePreviewToCsv(rows: InactivatePreviewRow[]): string {
   }
   return lines.join("\n");
 }
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function inactivateEndDateError(closeAssignment: boolean, endDate: string | null | undefined): string | null {
   if (!closeAssignment) return null;

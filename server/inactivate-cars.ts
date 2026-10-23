@@ -2,10 +2,12 @@ import {
   INACTIVATE_BATCH_MAX,
   chooseInactivateIds,
   classifyInactivateRow,
+  collectOpenRentStops,
   inactivateEndDateError,
   summarizeInactivate,
   type InactivateFacts,
   type InactivatePreview,
+  type InactivateRentStop,
 } from "@shared/inactivate-cars";
 import { appendNotesInGroup, normalizeAppendNote, withNoteReport } from "./append-note";
 import { withChangeGroupResult } from "./change-log";
@@ -43,7 +45,7 @@ async function loadCars(ids: number[]): Promise<Map<number, CarRow>> {
 
 export async function previewInactivate(
   ids: number[],
-  opts: { closeAssignment: boolean },
+  opts: { closeAssignment: boolean; endDate?: string | null },
 ): Promise<InactivatePreview> {
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
   if (!unique.length) throw httpError(400, "ids required");
@@ -53,7 +55,7 @@ export async function previewInactivate(
   const cars = await loadCars(unique);
 
   const openAssignments = new Map<number, { ol: string | null; label: string | null }>();
-  const rentStops = new Map<number, { type: string; stop_date: string }>();
+  const rentStopRows: { railcar_id: number; type: string | null; stop_date: string | null }[] = [];
   const programs = new Map<number, string[]>();
   const commitments = new Map<number, { type: string; name: string }>();
 
@@ -95,9 +97,11 @@ export async function previewInactivate(
       });
     }
     for (const row of stops.data ?? []) {
-      const id = Number(row.railcar_id);
-      if (rentStops.has(id)) continue;
-      rentStops.set(id, { type: String(row.type ?? "Rent stop"), stop_date: String(row.stop_date ?? "").slice(0, 10) });
+      rentStopRows.push({
+        railcar_id: Number(row.railcar_id),
+        type: row.type == null ? null : String(row.type),
+        stop_date: row.stop_date == null ? null : String(row.stop_date),
+      });
     }
     for (const row of memberships.data ?? []) {
       const id = Number(row.railcar_id);
@@ -138,6 +142,8 @@ export async function previewInactivate(
     }
   }
 
+  const rentStops: Map<number, InactivateRentStop[]> = collectOpenRentStops(rentStopRows);
+
   const facts: InactivateFacts[] = unique.map((id) => {
     const car = cars.get(id);
     const assignment = openAssignments.get(id) ?? null;
@@ -159,7 +165,7 @@ export async function previewInactivate(
             other_active_on_ol: other,
           }
         : null,
-      rent_stop: rentStops.get(id) ?? null,
+      rent_stops: rentStops.get(id) ?? [],
       programs: programs.get(id) ?? [],
       commitment: commitments.get(id) ?? null,
     };
@@ -204,7 +210,10 @@ export async function applyInactivate(opts: {
   if (!reason) throw httpError(400, "A reason is required");
   const dateError = inactivateEndDateError(opts.closeAssignment, opts.endDate);
   if (dateError) throw httpError(400, dateError);
-  const preview = await previewInactivate(opts.ids, { closeAssignment: opts.closeAssignment });
+  const preview = await previewInactivate(opts.ids, {
+    closeAssignment: opts.closeAssignment,
+    endDate: opts.endDate,
+  });
   const selected = chooseInactivateIds(preview, opts.mode);
   if (!selected.ok) throw httpError(400, selected.error);
   let noted: { appended: number[]; skipped: { id: number; status: number; message: string }[]; change_group: string } | null = null;
@@ -219,6 +228,7 @@ export async function applyInactivate(opts: {
     );
   }
   const endDate = opts.closeAssignment ? String(opts.endDate).slice(0, 10) : null;
+  // End date is written only onto assignment_history. Rent stops stay as stored.
   const { data, error } = await supabaseAdmin.rpc("inactivate_railcars", {
     p_ids: selected.ids,
     p_reason: reason,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
-import { Link, useRoute } from "wouter";
+import { useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, downloadXlsx } from "@/lib/queryClient";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
@@ -25,10 +25,15 @@ import AccountCombobox from "@/components/AccountCombobox";
 import { UndoLastChange } from "@/components/UndoLastChange";
 import { AccountDirectoryPeople } from "@/components/AccountDirectoryPeople";
 import { carPathFromProgram, navigateHash, programsPathFromQuery, useHashSearch } from "@/lib/hash-location";
+import { RailcarDetailSheet } from "@/pages/FleetRegistry";
+import {
+  programCarPatchApplyPath,
+  programCarPatchBody,
+  programCarPatchPreviewPath,
+} from "@shared/program-car-section";
 import { LineageCarLink } from "@/components/LineageCarLink";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, ChevronDown, ChevronRight, Download, History, Loader2, Plus, Paperclip, UserMinus } from "lucide-react";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
 import { ColumnPicker } from "@/components/ColumnPicker";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
@@ -391,7 +396,9 @@ export default function ProgramDetailPage() {
     ambiguous: { token: string; reason?: string; matches: { label: string }[] }[];
   } | null>(null);
   const [pastePending, setPastePending] = useState(false);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [sheetLinkId, setSheetLinkId] = useState<number | null>(null);
+  const [sheetPreview, setSheetPreview] = useState<any>(null);
+  const [sheetApplying, setSheetApplying] = useState(false);
   const [headerOpen, setHeaderOpen] = useState(false);
   const [rentOpen, setRentOpen] = useState(false);
   const [manageColsOpen, setManageColsOpen] = useState(false);
@@ -431,10 +438,10 @@ export default function ProgramDetailPage() {
   const { data: trail = [] } = useQuery<
     { id: number; milestone: string; milestone_date: string; note: string | null; actor: string | null }[]
   >({
-    queryKey: ["/api/programs", id, "cars", detailId, "milestones"],
+    queryKey: ["/api/programs", id, "cars", sheetLinkId, "milestones"],
     queryFn: () =>
-      apiRequest("GET", `/api/programs/${id}/cars/${detailId}/milestones`).then((r) => r.json()),
-    enabled: Number.isFinite(id) && detailId != null,
+      apiRequest("GET", `/api/programs/${id}/cars/${sheetLinkId}/milestones`).then((r) => r.json()),
+    enabled: Number.isFinite(id) && sheetLinkId != null,
   });
   const { data: accounts = [] } = useQuery<{ id: number; name: string }[]>({
     queryKey: ["/api/accounts"],
@@ -614,9 +621,9 @@ export default function ProgramDetailPage() {
         qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true }),
         qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true }),
       ]);
-      if (tab === "activity" || historyFor || detailId) {
+      if (tab === "activity" || historyFor || sheetLinkId) {
         await qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] });
-        if (detailId) qc.invalidateQueries({ queryKey: ["/api/programs", id, "cars", detailId, "milestones"] });
+        if (sheetLinkId) qc.invalidateQueries({ queryKey: ["/api/programs", id, "cars", sheetLinkId, "milestones"] });
       }
       void invalidateFleetQueries(qc);
       return applied;
@@ -625,6 +632,60 @@ export default function ProgramDetailPage() {
       setCarSaveError(failure.description);
       toast(failure);
       throw e;
+    }
+  }
+
+  function openProgramCar(linkId: number) {
+    setSheetLinkId(linkId);
+    setSheetPreview(null);
+  }
+
+  async function requestSheetPreview(linkId: number, updates: Record<string, unknown>) {
+    setCarSaveError(null);
+    try {
+      const prev = await apiRequest("POST", programCarPatchPreviewPath(id), programCarPatchBody(linkId, updates)).then((r) => r.json());
+      setSheetPreview(prev);
+    } catch (e: any) {
+      const failure = saveFailureToast(e?.message);
+      setCarSaveError(failure.description);
+      toast(failure);
+    }
+  }
+
+  async function applySheetPreview() {
+    if (!sheetPreview?.preview_token || sheetApplying) return;
+    setSheetApplying(true);
+    setCarSaveError(null);
+    try {
+      const applied = await apiRequest("POST", programCarPatchApplyPath(id), {
+        preview_token: sheetPreview.preview_token,
+      }).then((r) => r.json());
+      const linkIds = Array.isArray(sheetPreview.items)
+        ? sheetPreview.items.map((item: { link_id?: number }) => Number(item.link_id)).filter((n: number) => n > 0)
+        : [];
+      if (!patchApplyMadeNoChanges(applied)) {
+        offerUndoToast(applied);
+        if (linkIds.length) draftSession.clearLinks(linkIds);
+      } else {
+        toast({ title: "No changes" });
+      }
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: carsKey }),
+        qc.invalidateQueries({ queryKey: ["/api/programs", id], exact: true }),
+        qc.invalidateQueries({ queryKey: ["/api/programs"], exact: true }),
+        qc.invalidateQueries({ queryKey: ["/api/programs", id, "activity"] }),
+        qc.invalidateQueries({ queryKey: ["/api/programs", id, "cars", sheetLinkId, "milestones"] }),
+        qc.invalidateQueries({ queryKey: ["/api/railcars"] }),
+        qc.invalidateQueries({ queryKey: ["/api/commitments/car"] }),
+      ]);
+      void invalidateFleetQueries(qc);
+      setSheetPreview(null);
+    } catch (e: any) {
+      const failure = saveFailureToast(e?.message);
+      setCarSaveError(failure.description);
+      toast(failure);
+    } finally {
+      setSheetApplying(false);
     }
   }
 
@@ -811,13 +872,17 @@ export default function ProgramDetailPage() {
           <td key={key} className="px-2 py-1.5 font-mono whitespace-nowrap">
             {c.railcar_id ? (
               <span className="inline-flex items-center gap-2">
-                <Link
-                  href={carPathFromProgram(c.railcar_id, id, programQuery)}
-                  className="hover:underline"
+                <button
+                  type="button"
+                  className="cursor-pointer border-0 bg-transparent p-0 font-mono text-inherit hover:underline"
                   data-testid={`link-program-car-${c.railcar_id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openProgramCar(c.id);
+                  }}
                 >
                   {label}
-                </Link>
+                </button>
                 <LineageCarLink
                   id={c.railcar_id}
                   reportingMarks={c.railcar?.reporting_marks}
@@ -1111,8 +1176,8 @@ export default function ProgramDetailPage() {
     () => visibleCars.filter((c) => selected.has(c.id) && !c.exited_date).map((c) => c.id),
     [visibleCars, selected],
   );
-  const detailCar = draftedCars.find((c) => c.id === detailId) ?? null;
-  const splitListPct = Math.min(90, Math.max(30, Number(colWidths._split_list) || 68));
+  const sheetCar = draftedCars.find((c) => c.id === sheetLinkId) ?? null;
+  const sheetSaved = cars.find((c) => c.id === sheetLinkId) ?? null;
   const showPutOnRent = putOnRentProgramTypes().includes(header?.type as ProgramType);
 
   function selectClick(e: MouseEvent, linkId: number) {
@@ -1623,16 +1688,7 @@ export default function ProgramDetailPage() {
               />
               </div>
             )}
-            <ResizablePanelGroup
-              direction="vertical"
-              className="flex-1 min-h-0"
-              onLayout={(sizes) => {
-                const n = Math.round(sizes[0]);
-                if (Number.isFinite(n) && n !== Number(colWidths._split_list)) setColWidth("_split_list", n);
-              }}
-            >
-            <ResizablePanel defaultSize={splitListPct} minSize={30}>
-            <div className="h-full min-h-0 rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
+            <div className="flex-1 min-h-0 rounded-xl border border-card-border bg-card overflow-hidden flex flex-col">
               <div
                 ref={topScrollRef}
                 className="shrink-0 h-3 overflow-x-auto overflow-y-hidden border-b border-border"
@@ -1667,13 +1723,17 @@ export default function ProgramDetailPage() {
                     return (
                       <tr
                         key={c.id}
-                        onClick={() => setDetailId(c.id)}
+                        onClick={(e) => {
+                          const target = e.target as HTMLElement | null;
+                          if (target?.closest("button, a, input, select, textarea, label")) return;
+                          openProgramCar(c.id);
+                        }}
                         className={cn(
                           "border-t border-border/50 cursor-pointer",
                           exited && "opacity-60",
                           done && !exited && !rowDirty && "bg-muted/20",
                           rowDirty && "border-l-2 border-l-primary bg-primary/5",
-                          detailId === c.id && "bg-primary/10",
+                          sheetLinkId === c.id && "bg-primary/10",
                         )}
                       >
                         {displayKeys.map((k) => pdCell(k, c, label, exited))}
@@ -1687,23 +1747,6 @@ export default function ProgramDetailPage() {
               </table>
               </div>
             </div>
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={Math.max(10, 100 - splitListPct)} minSize={12}>
-              <div className="h-full min-h-0 rounded-xl border border-card-border bg-card overflow-auto p-3">
-                {detailCar ? (
-                  <CarDetailPanel
-                    car={detailCar}
-                    trail={trail}
-                    onOpenDocs={() => setDocsFor(detailCar)}
-                    onOpenHistory={() => setHistoryFor(detailCar)}
-                  />
-                ) : (
-                  <p className="text-xs text-muted-foreground italic">Select a car to see notes, commitment, and milestone trail.</p>
-                )}
-              </div>
-            </ResizablePanel>
-            </ResizablePanelGroup>
           </TabsContent>
           <TabsContent value="milestones" className="mt-2 flex-1 min-h-0 overflow-auto data-[state=inactive]:hidden">
             <p className="text-xs text-muted-foreground mb-2">Suggested for this type. Optional — never enforced.</p>
@@ -1789,6 +1832,40 @@ export default function ProgramDetailPage() {
         }}
       />
 
+      <RailcarDetailSheet
+        carId={sheetCar?.railcar_id ?? null}
+        onClose={() => {
+          setSheetLinkId(null);
+          setSheetPreview(null);
+        }}
+        carPageHref={sheetCar ? carPathFromProgram(sheetCar.railcar_id, id, programQuery) : undefined}
+        programContext={
+          sheetCar && sheetSaved
+            ? {
+                programId: id,
+                saved: sheetSaved,
+                car: sheetCar,
+                canEdit,
+                statusOptions: statusChoices,
+                shops,
+                trail,
+                saving: sheetApplying,
+                onSave: (updates) => requestSheetPreview(sheetCar.id, updates),
+                onOpenHistory: () => setHistoryFor(sheetCar),
+                onOpenFiles: () => setDocsFor(sheetCar),
+              }
+            : null
+        }
+      />
+      <ProgramPreviewDialog
+        open={Boolean(sheetPreview)}
+        title="Program car changes"
+        preview={sheetPreview}
+        pending={sheetApplying}
+        onClose={() => { if (!sheetApplying) setSheetPreview(null); }}
+        onApply={() => { void applySheetPreview(); }}
+      />
+
       <Sheet open={!!docsFor} onOpenChange={(o) => !o && setDocsFor(null)}>
         <SheetContent className="w-full sm:max-w-md overflow-y-auto">
           <SheetHeader>
@@ -1842,67 +1919,6 @@ export default function ProgramDetailPage() {
       </Dialog>
     </div>
     </ProgramCarDraftContext.Provider>
-  );
-}
-
-function CarDetailPanel({
-  car,
-  trail,
-  onOpenDocs,
-  onOpenHistory,
-}: {
-  car: ProgramCar;
-  trail: { id: number; milestone: string; milestone_date: string; note: string | null; actor: string | null }[];
-  onOpenDocs: () => void;
-  onOpenHistory: () => void;
-}) {
-  const label = carLabelOf(car);
-  return (
-    <div className="space-y-3 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <div className="font-medium">{label}</div>
-        <div className="flex gap-1">
-          <Button size="sm" variant="ghost" onClick={onOpenHistory}><History className="h-3.5 w-3.5" /> History</Button>
-          <Button size="sm" variant="ghost" onClick={onOpenDocs}><Paperclip className="h-3.5 w-3.5" /> Files</Button>
-        </div>
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Latest milestone</div>
-        <div>{car.milestone || "—"}{car.milestone_at ? ` · ${formatProgramDate(car.milestone_at)}` : ""}</div>
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trail</div>
-        {trail.length === 0 ? (
-          <p className="text-xs text-muted-foreground italic">No trail rows yet. Saving a milestone keeps each date.</p>
-        ) : (
-          <ol className="space-y-1.5 mt-1">
-            {trail.map((m) => (
-              <li key={m.id} className="text-xs border-l-2 border-primary/40 pl-2">
-                <span className="font-medium">{m.milestone}</span>
-                <span className="text-muted-foreground"> · {formatProgramDate(m.milestone_date)}</span>
-                {m.note ? <div>{m.note}</div> : null}
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Program note</div>
-        <div className="whitespace-pre-wrap text-xs">{car.notes || "—"}</div>
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Commitment</div>
-        <div className="text-xs">
-          {car.open_commitment?.name
-            ? `${car.open_commitment.type ? `${car.open_commitment.type} · ` : ""}${car.open_commitment.name}`
-            : "—"}
-        </div>
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Arrived (program done)</div>
-        <div className="text-xs">{car.outcome_reached_at ? formatProgramDate(car.outcome_reached_at) : "—"}</div>
-      </div>
-    </div>
   );
 }
 

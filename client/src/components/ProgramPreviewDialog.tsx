@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
+import { describeProgramCarUpdates } from "@shared/program-car-section";
 
 export function ProgramPreviewDialog({
   open,
@@ -68,6 +69,22 @@ export function ProgramPreviewDialog({
                 </ul>
               </div>
             ) : null,
+          )}
+          {Array.isArray(preview.items) && preview.items.length > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Field changes</div>
+              <ul className="text-xs max-h-28 overflow-auto border border-border rounded p-2 space-y-1">
+                {preview.items.slice(0, 40).map((item: { link_id?: number; label?: string; updates?: Record<string, unknown> }, i: number) => {
+                  const lines = describeProgramCarUpdates(item?.updates);
+                  return (
+                    <li key={item?.link_id ?? i}>
+                      <span className="font-medium">{item?.label ?? item?.link_id}</span>
+                      {lines.length ? ` — ${lines.join("; ")}` : ""}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           )}
           {Array.isArray(preview.kpi_delta) && preview.kpi_delta.length > 0 && (
             <div>

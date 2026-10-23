@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Redirect, useLocation } from "wouter";
 import { useHashSearch } from "@/lib/hash-location";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -29,12 +30,23 @@ import { Link } from "wouter";
 import { carPath, openAppTab } from "@/lib/browse-nav";
 import { LineageCarLink } from "@/components/LineageCarLink";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 function csvFromFile(file: File): Promise<string> {
   return file.text();
 }
 
-export function CommitmentPanel({ carId }: { carId: number }) {
+export function CommitmentPanel({
+  carId,
+  heading = "Commitment",
+  rentStartCollapsed = false,
+}: {
+  carId: number;
+  /** "Car commitment" when the sheet was opened from a program. */
+  heading?: string;
+  /** Program context keeps the rent-start editor behind an expander. */
+  rentStartCollapsed?: boolean;
+}) {
   const canEdit = useCanEdit();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -117,28 +129,41 @@ export function CommitmentPanel({ carId }: { carId: number }) {
     </div>
   );
 
+  const rentBody = commitVis === "loading" || rentVis == null ? (
+    <p className="text-sm text-muted-foreground">Loading rent start…</p>
+  ) : showRentBox ? (
+    rentEditor
+  ) : (
+    <button
+      type="button"
+      className="text-sm text-primary underline-offset-2 hover:underline"
+      data-testid="link-correct-rent-start"
+      onClick={() => setCorrectRentOpen(true)}
+    >
+      Correct rent start
+    </button>
+  );
+
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-border p-4">
-        {commitVis === "loading" || rentVis == null ? (
-          <p className="text-sm text-muted-foreground">Loading rent start…</p>
-        ) : showRentBox ? (
-          rentEditor
-        ) : (
-          <button
-            type="button"
-            className="text-sm text-primary underline-offset-2 hover:underline"
-            data-testid="link-correct-rent-start"
-            onClick={() => setCorrectRentOpen(true)}
+      {rentStartCollapsed ? (
+        <Collapsible className="rounded-lg border border-border">
+          <CollapsibleTrigger
+            className="flex w-full items-center justify-between px-4 py-3 text-left"
+            data-testid="rent-start-expander"
           >
-            Correct rent start
-          </button>
-        )}
-      </div>
+            <span className="text-sm font-semibold">Rent start</span>
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="px-4 pb-4">{rentBody}</CollapsibleContent>
+        </Collapsible>
+      ) : (
+        <div className="rounded-lg border border-border p-4">{rentBody}</div>
+      )}
 
       {commitVis === "readonly" && open ? (
         <div className="rounded-lg border border-border p-4 text-sm space-y-1" data-testid="commitment-readonly">
-          <div className="font-semibold">Commitment</div>
+          <div className="font-semibold">{heading}</div>
           <div><span className="text-muted-foreground">Type</span> {open.type}</div>
           <div><span className="text-muted-foreground">Name</span> {open.name}</div>
           <div><span className="text-muted-foreground">Target</span> {open.target_date ?? "—"}</div>
@@ -151,7 +176,7 @@ export function CommitmentPanel({ carId }: { carId: number }) {
 
       {commitVis === "form" ? (
         <div className="rounded-lg border border-border p-4 space-y-3" data-testid="commitment-form">
-          <div className="text-sm font-semibold">Commitment</div>
+          <div className="text-sm font-semibold">{heading}</div>
           {implicit ? (
             <div className="text-sm rounded-md border border-border bg-muted/30 px-3 py-2">
               {implicit.name}

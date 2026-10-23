@@ -43,7 +43,7 @@ async function loadCars(ids: number[]): Promise<Map<number, CarRow>> {
 
 export async function previewInactivate(
   ids: number[],
-  opts: { closeAssignment: boolean },
+  opts: { closeAssignment: boolean; endDate?: string | null },
 ): Promise<InactivatePreview> {
   const unique = Array.from(new Set(ids.filter((id) => Number.isFinite(id) && id > 0)));
   if (!unique.length) throw httpError(400, "ids required");
@@ -204,7 +204,10 @@ export async function applyInactivate(opts: {
   if (!reason) throw httpError(400, "A reason is required");
   const dateError = inactivateEndDateError(opts.closeAssignment, opts.endDate);
   if (dateError) throw httpError(400, dateError);
-  const preview = await previewInactivate(opts.ids, { closeAssignment: opts.closeAssignment });
+  const preview = await previewInactivate(opts.ids, {
+    closeAssignment: opts.closeAssignment,
+    endDate: opts.endDate,
+  });
   const selected = chooseInactivateIds(preview, opts.mode);
   if (!selected.ok) throw httpError(400, selected.error);
   let noted: { appended: number[]; skipped: { id: number; status: number; message: string }[]; change_group: string } | null = null;
@@ -219,6 +222,7 @@ export async function applyInactivate(opts: {
     );
   }
   const endDate = opts.closeAssignment ? String(opts.endDate).slice(0, 10) : null;
+  // End date is written only onto assignment_history. Rent stops stay as stored.
   const { data, error } = await supabaseAdmin.rpc("inactivate_railcars", {
     p_ids: selected.ids,
     p_reason: reason,

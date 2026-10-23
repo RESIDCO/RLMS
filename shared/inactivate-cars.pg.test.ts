@@ -132,6 +132,15 @@ try {
       (4, '310004', 'OFOX', 'Scrapped', false, 'Inactive', 'auto', NULL);
     INSERT INTO public.assignment_history (railcar_id, end_date, active, rider_external_id)
     VALUES (1, NULL, true, '1503'), (2, NULL, true, '1503');
+    CREATE TABLE public.car_rent_stops (
+      id bigint PRIMARY KEY,
+      railcar_id bigint NOT NULL,
+      type text NOT NULL,
+      stop_date date NOT NULL,
+      actual_resume_date date
+    );
+    INSERT INTO public.car_rent_stops (id, railcar_id, type, stop_date, actual_resume_date)
+    VALUES (40, 1, 'Off rent', '2026-10-01', NULL);
   `);
   psqlFile(migration);
 
@@ -159,6 +168,15 @@ try {
   ok(psql("SELECT status FROM public.railcars WHERE id = 4") === "Scrapped", "the already-inactive car was not rewritten");
   ok(psql("SELECT end_date::text || ':' || active::text FROM public.assignment_history WHERE railcar_id IN (1, 2) ORDER BY railcar_id") === "2026-10-19:false\n2026-10-19:false", "open assignments received the end date");
   ok(psql("SELECT count(*) FROM public.rent_events") === "1", "rent event row is untouched");
+  ok(
+    psql("SELECT id::text || ':' || type || ':' || stop_date::text || ':' || coalesce(actual_resume_date::text, '') FROM public.car_rent_stops") ===
+      "40:Off rent:2026-10-01:",
+    "off-rent stop date stays 2026-10-01 and the stop stays open",
+  );
+  ok(
+    psql("SELECT end_date::text FROM public.assignment_history WHERE railcar_id = 1") === "2026-10-19",
+    "inactivation date is the assignment end date, not the off-rent stop date",
+  );
   ok(psql(`SELECT count(DISTINCT change_group) FROM public.activity_log WHERE change_group = '${applied.change_group}'`) === "1", "one change group");
   ok(
     psql(`SELECT count(*) FROM public.activity_log WHERE change_group = '${applied.change_group}' AND table_name = 'railcars' AND undoable IS TRUE`) === "2",
@@ -167,6 +185,10 @@ try {
   ok(
     psql(`SELECT count(*) FROM public.activity_log WHERE change_group = '${applied.change_group}' AND table_name = 'assignment_history'`) === "2",
     "each closed assignment is in the same group",
+  );
+  ok(
+    psql(`SELECT count(*) FROM public.activity_log WHERE change_group = '${applied.change_group}' AND table_name = 'car_rent_stops'`) === "0",
+    "the change group does not capture a rent-stop write",
   );
   ok(psql("SELECT count(*) FROM public.car_status_history WHERE event_type = 'marked_inactive' AND reason = 'Destroyed by the railroad'") === "2", "history rows store the reason");
 

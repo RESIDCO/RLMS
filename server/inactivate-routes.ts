@@ -19,7 +19,8 @@ export function registerInactivateRoutes(app: Express) {
       const writerId = await requireWrite(req, res);
       if (!writerId) return;
       const closeAssignment = req.body?.close_assignment === true;
-      const preview = await previewInactivate(idsOf(req.body ?? {}), { closeAssignment });
+      const endDate = typeof req.body?.end_date === "string" ? req.body.end_date : null;
+      const preview = await previewInactivate(idsOf(req.body ?? {}), { closeAssignment, endDate });
       res.json({ ok: true, dry_run: true, ...preview });
     } catch (err) {
       errHandler(res, err);

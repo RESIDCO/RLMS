@@ -1,6 +1,6 @@
 import { changedKeys, jsonEqual, pickRow } from "@shared/change-log";
 import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates";
-import { patchColumns } from "@shared/program-car-patch";
+import { patchColumns, PROGRAM_COMPLETE_CF } from "@shared/program-car-patch";
 import { moneyNumber, parseUsdInput } from "@shared/money";
 
 /** Pending edits for the Program Detail cars grid, keyed by program_cars id. */
@@ -24,13 +24,13 @@ export type SaveCarItem = { link_id: number; updates: Record<string, unknown> };
 
 export type CarSavePlan = {
   items: SaveCarItem[];
-  /** Unique visible cars whose patch would write, after the focused editor is merged. */
+  /** Cars whose patch would write. Includes cars the grid filter is hiding. */
   count: number;
-  /** Meaningful drafts hidden by the cars filter. Not included in `count`. */
-  hidden: number;
-  /** Draft map with no-op patches removed. Hidden edits stay. */
+  /** Draft map with no-op patches removed. */
   retained: CarDraftMap;
 };
+
+export type SaveCountPhase = "confirm" | "saving" | "saved";
 
 export type FlushResult = "queued" | "unchanged" | "invalid";
 
@@ -85,31 +85,160 @@ export function draftDiffers(car: CarBaseline, patch: Record<string, unknown> | 
   return commitmentPending(patch);
 }
 
-export function planCarSave(
+/**
+ * Ids whose draft would change the loaded row. A draft with no loaded row
+ * still counts, so hiding exited cars cannot drop it from Save or the leave guard.
+ */
+export function unsavedDraftIds(
   drafts: CarDraftMap,
-  visibleIds: ReadonlySet<number>,
   baselines: ReadonlyMap<number, CarBaseline>,
-): CarSavePlan {
-  const retained: CarDraftMap = {};
-  const items: SaveCarItem[] = [];
-  let hidden = 0;
+): number[] {
   const ids = Object.keys(drafts)
     .map((id) => Number(id))
     .filter((id) => Number.isFinite(id))
     .sort((a, b) => a - b);
+  const unsaved: number[] = [];
   for (const linkId of ids) {
     const updates = drafts[linkId];
-    if (!updates) continue;
+    if (!updates || Object.keys(updates).length === 0) continue;
     const baseline = baselines.get(linkId);
     if (baseline && !draftDiffers(baseline, updates)) continue;
+    unsaved.push(linkId);
+  }
+  return unsaved;
+}
+
+/** Every differing draft is saved. Visibility is not an input. */
+export function planCarSave(
+  drafts: CarDraftMap,
+  baselines: ReadonlyMap<number, CarBaseline>,
+): CarSavePlan {
+  const retained: CarDraftMap = {};
+  const items: SaveCarItem[] = [];
+  for (const linkId of unsavedDraftIds(drafts, baselines)) {
+    const updates = drafts[linkId];
+    if (!updates) continue;
     retained[linkId] = updates;
-    if (!visibleIds.has(linkId)) {
-      hidden += 1;
-      continue;
-    }
     items.push({ link_id: linkId, updates });
   }
-  return { items, count: items.length, hidden, retained };
+  return { items, count: items.length, retained };
+}
+
+export function saveCarCountLabel(count: number, phase: SaveCountPhase): string {
+  const noun = `${count} car${count === 1 ? "" : "s"}`;
+  switch (phase) {
+    case "confirm":
+      return `Save ${noun}?`;
+    case "saving":
+      return `Saving ${noun}…`;
+    case "saved":
+      return `Saved ${noun}`;
+    default: {
+      const exhaustive: never = phase;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * Dirty rows stay on the grid. Text search, the paste list, and the completion
+ * chips can hide a clean row only.
+ */
+export function programCarStaysVisible(input: {
+  matchesText: boolean;
+  pasteActive: boolean;
+  matchesPaste: boolean;
+  applyLevelFilter: boolean;
+  levelSelected: boolean;
+  dirty: boolean;
+}): boolean {
+  if (input.dirty) return true;
+  if (!input.matchesText) return false;
+  if (input.pasteActive && !input.matchesPaste) return false;
+  if (input.applyLevelFilter && !input.levelSelected) return false;
+  return true;
+}
+
+/** Shown only because of an unsaved edit. A dirty row that also matches the filter is not pinned-only. */
+export function programCarPinnedOnly(input: {
+  matchesText: boolean;
+  pasteActive: boolean;
+  matchesPaste: boolean;
+  applyLevelFilter: boolean;
+  levelSelected: boolean;
+  dirty: boolean;
+}): boolean {
+  if (!input.dirty) return false;
+  return !programCarStaysVisible({ ...input, dirty: false });
+}
+
+export function selectAllShownCarIds(cars: readonly { id: number; exited: boolean; pinnedOnly: boolean }[]): number[] {
+  return cars.filter((car) => !car.exited && !car.pinnedOnly).map((car) => car.id);
+}
+
+function customFieldRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Drop the fields a bulk apply just wrote. Other pending keys on those cars stay.
+ * Bulk Complete is stored on the draft as outcome_reached / __complete, so those
+ * aliases are cleared with `completed`. Cars outside `ids` are left untouched.
+ */
+export function draftsAfterBulkApply(
+  drafts: CarDraftMap,
+  ids: readonly number[],
+  updates: Record<string, unknown>,
+): CarDraftMap {
+  const topKeys = Object.keys(updates).filter((key) => key !== "custom_fields");
+  const customKeys: string[] = [];
+  const appliedCustom = customFieldRecord(updates.custom_fields);
+  if (appliedCustom) {
+    for (const key of Object.keys(appliedCustom)) customKeys.push(key);
+  }
+  if (topKeys.indexOf("completed") >= 0 || topKeys.indexOf("outcome_reached") >= 0) {
+    if (topKeys.indexOf("completed") < 0) topKeys.push("completed");
+    if (topKeys.indexOf("outcome_reached") < 0) topKeys.push("outcome_reached");
+    customKeys.push(PROGRAM_COMPLETE_CF);
+  }
+  let changed = false;
+  const next: CarDraftMap = { ...drafts };
+  for (const id of ids) {
+    const current = next[id];
+    if (!current) continue;
+    const patched: Record<string, unknown> = { ...current };
+    let carChanged = false;
+    for (const key of topKeys) {
+      if (Object.prototype.hasOwnProperty.call(patched, key)) {
+        delete patched[key];
+        carChanged = true;
+      }
+    }
+    if (customKeys.length > 0 && Object.prototype.hasOwnProperty.call(patched, "custom_fields")) {
+      const fields = customFieldRecord(patched.custom_fields);
+      if (fields) {
+        const remaining = { ...fields };
+        let customChanged = false;
+        for (const key of customKeys) {
+          if (Object.prototype.hasOwnProperty.call(remaining, key)) {
+            delete remaining[key];
+            customChanged = true;
+          }
+        }
+        if (customChanged) {
+          carChanged = true;
+          if (Object.keys(remaining).length === 0) delete patched.custom_fields;
+          else patched.custom_fields = remaining;
+        }
+      }
+    }
+    if (!carChanged) continue;
+    changed = true;
+    if (Object.keys(patched).length === 0) delete next[id];
+    else next[id] = patched;
+  }
+  return changed ? next : drafts;
 }
 
 /** Keep every draft unless the server actually stored the patch we sent. */
@@ -159,10 +288,7 @@ export function keptEditsToast(): { title: string; description: string } {
   };
 }
 
-export function emptySaveToast(invalid: boolean, hidden: number): { title: string; description?: string } {
-  if (hidden > 0 && !invalid) {
-    return { title: `${hidden} unsaved car${hidden === 1 ? "" : "s"} hidden by the filter` };
-  }
+export function emptySaveToast(invalid: boolean): { title: string; description?: string } {
   if (invalid) {
     return {
       title: "Couldn't read the value you're editing",

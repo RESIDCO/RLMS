@@ -84,10 +84,17 @@ import {
   moneyPatchValue,
   patchApplyMadeNoChanges,
   planCarSave,
+  draftsAfterBulkApply,
+  programCarPinnedOnly,
+  programCarStaysVisible,
+  saveCarCountLabel,
+  selectAllShownCarIds,
   saveFailureToast,
   textPatchValue,
+  unsavedDraftIds,
 } from "@/lib/program-car-drafts";
 import { ProgramCarDraftContext, useEditorFlush } from "@/lib/program-car-draft-editor";
+import { programCarSectionDiscardConfirmed, programCarSectionHasUnsavedEdits } from "@/components/ProgramCarSection";
 import { programCarMatchesQuery } from "@shared/program-car-filter";
 import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates";
 import { diffProgramPatch } from "@shared/program-patch";
@@ -298,6 +305,36 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   return next;
 }
 
+function carQueryFields(c: ProgramCar) {
+  return {
+    reporting_marks: c.railcar?.reporting_marks,
+    car_number: c.railcar?.car_number,
+    status: c.status,
+    notes: c.notes,
+    milestone: c.milestone,
+    shop: c.shop?.name,
+    commitment: [c.open_commitment?.type, c.open_commitment?.name].filter(Boolean).join(" "),
+    kpi: c.kpi?.derived_status,
+    flag: c.flag_tag,
+    ol: [c.rider_external_id_snapshot, c.railcar?.rider_external_id].filter(Boolean).join(" "),
+    custom: c.custom_fields,
+  };
+}
+
+function carCompletionLevel(c: ProgramCar): CompletionLevel {
+  return c.completion_level ?? deriveCompletionLevel({
+    active: c.railcar?.active,
+    railcar_status: c.railcar?.status,
+    status: c.status,
+    milestone: c.milestone,
+    milestones: c.trail,
+    outcome_reached_at: c.outcome_reached_at,
+    completed: c.completed,
+    exited_date: c.exited_date,
+    keep_open: programCarKeepOpen(c.custom_fields),
+  });
+}
+
 const PD_CORE = ["completion", "active", "keep_open", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi", "ops_flag", "scrapped_at"] as const;
 const PD_LABELS: Record<string, string> = {
   car: "Car",
@@ -404,7 +441,6 @@ export default function ProgramDetailPage() {
   const [manageColsOpen, setManageColsOpen] = useState(false);
   const lastSelectId = useRef<number | null>(null);
   const carsRef = useRef<ProgramCar[]>([]);
-  const visibleIdsRef = useRef<Set<number>>(new Set());
   const leaveDirtyRef = useRef(false);
   const heldHashRef = useRef(typeof window !== "undefined" ? window.location.hash : "");
   const skipHashRef = useRef(false);
@@ -471,12 +507,10 @@ export default function ProgramDetailPage() {
     if (!program || !header) return false;
     return JSON.stringify(header) !== JSON.stringify(headerFrom(program));
   }, [program, header]);
-  const gridDirty = useMemo(
-    () => cars.some((car) => draftDiffers(car, carDrafts[car.id])),
-    [cars, carDrafts],
-  );
   const serverById = useMemo(() => new Map(cars.map((car) => [car.id, car])), [cars]);
-  leaveDirtyRef.current = dirty || gridDirty || editorPending;
+  const unsavedCarIds = useMemo(() => new Set(unsavedDraftIds(carDrafts, serverById)), [carDrafts, serverById]);
+  const gridDirty = unsavedCarIds.size > 0;
+  leaveDirtyRef.current = dirty || gridDirty || editorPending || programCarSectionHasUnsavedEdits();
 
   const patchProgram = useMutation({
     mutationFn: (body: Record<string, unknown>) => apiRequest("PATCH", `/api/programs/${id}`, body).then((r) => r.json()),
@@ -490,12 +524,19 @@ export default function ProgramDetailPage() {
 
   useEffect(() => {
     heldHashRef.current = window.location.hash;
+    const pageHasUnsavedWork = () => {
+      draftSession.flushEditors();
+      const baselines = new Map(carsRef.current.map((car) => [car.id, car]));
+      const draftsDirty = unsavedDraftIds(draftSession.getDrafts(), baselines).length > 0;
+      const editorStillPending = draftSession.getSnapshot().editorPending;
+      return leaveDirtyRef.current || draftsDirty || editorStillPending || programCarSectionHasUnsavedEdits();
+    };
     const onHash = () => {
       if (skipHashRef.current) {
         skipHashRef.current = false;
         return;
       }
-      if (!leaveDirtyRef.current) {
+      if (!pageHasUnsavedWork()) {
         heldHashRef.current = window.location.hash;
         return;
       }
@@ -507,7 +548,7 @@ export default function ProgramDetailPage() {
       window.location.hash = heldHashRef.current;
     };
     const onBefore = (e: BeforeUnloadEvent) => {
-      if (!leaveDirtyRef.current) return;
+      if (!pageHasUnsavedWork()) return;
       e.preventDefault();
       e.returnValue = "";
     };
@@ -517,7 +558,7 @@ export default function ProgramDetailPage() {
       window.removeEventListener("hashchange", onHash);
       window.removeEventListener("beforeunload", onBefore);
     };
-  }, []);
+  }, [draftSession]);
 
   const allDefs = program?.field_defs ?? [];
   const defs = activeFieldDefs(allDefs);
@@ -560,22 +601,14 @@ export default function ProgramDetailPage() {
   );
   const sortedCars = useMemo(() => {
     const filtered = draftedCars.filter((c) =>
-      programCarMatchesQuery(
-        {
-          reporting_marks: c.railcar?.reporting_marks,
-          car_number: c.railcar?.car_number,
-          status: c.status,
-          notes: c.notes,
-          milestone: c.milestone,
-          shop: c.shop?.name,
-          commitment: [c.open_commitment?.type, c.open_commitment?.name].filter(Boolean).join(" "),
-          kpi: c.kpi?.derived_status,
-          flag: c.flag_tag,
-          ol: [c.rider_external_id_snapshot, c.railcar?.rider_external_id].filter(Boolean).join(" "),
-          custom: c.custom_fields,
-        },
-        carFilter,
-      ),
+      programCarStaysVisible({
+        matchesText: programCarMatchesQuery(carQueryFields(c), carFilter),
+        pasteActive: false,
+        matchesPaste: true,
+        applyLevelFilter: false,
+        levelSelected: true,
+        dirty: unsavedCarIds.has(c.id),
+      }),
     );
     const key = sort?.key;
     const dir = sort?.dir === "desc" ? -1 : 1;
@@ -587,7 +620,7 @@ export default function ProgramDetailPage() {
       if (va > vb) return 1 * dir;
       return 0;
     });
-  }, [draftedCars, carFilter, sort]);
+  }, [draftedCars, carFilter, sort, unsavedCarIds]);
   const tableW = tableWidthFor(displayKeys, colWidths, PD_WIDTHS, 120);
   const gridW = Math.max(1100, tableW);
   const topScrollRef = useRef<HTMLDivElement>(null);
@@ -609,7 +642,7 @@ export default function ProgramDetailPage() {
     body: Record<string, unknown>,
   ): Promise<{ updated?: number; commitments_written?: number; no_changes?: boolean; change_group?: string }> {
     setCarSaveError(null);
-    toast({ title: `Saving ${n} car${n === 1 ? "" : "s"}…` });
+    toast({ title: saveCarCountLabel(n, "saving") });
     try {
       const prev = await apiRequest("POST", `/api/programs/${id}/cars/patch/preview`, body).then((r) => r.json());
       const applied = await apiRequest("POST", `/api/programs/${id}/cars/patch/apply`, {
@@ -636,6 +669,7 @@ export default function ProgramDetailPage() {
   }
 
   function openProgramCar(linkId: number) {
+    if (linkId !== sheetLinkId && !programCarSectionDiscardConfirmed(linkId)) return;
     setSheetLinkId(linkId);
     setSheetPreview(null);
   }
@@ -696,14 +730,18 @@ export default function ProgramDetailPage() {
       const flushed = draftSession.flushEditors();
       const plan = planCarSave(
         draftSession.getDrafts(),
-        visibleIdsRef.current,
         new Map(carsRef.current.map((car) => [car.id, car])),
       );
       draftSession.replaceDrafts(plan.retained);
       if (!plan.items.length) {
-        toast(emptySaveToast(flushed.invalid, plan.hidden));
+        toast(emptySaveToast(flushed.invalid));
         return;
       }
+      const confirmed = await confirmSave({
+        title: saveCarCountLabel(plan.count, "confirm"),
+        confirmLabel: "Save",
+      });
+      if (!confirmed) return;
       setSavingCount(plan.count);
       setCarSaving(true);
       const applied = await runPatchApply(plan.count, { items: plan.items });
@@ -714,10 +752,8 @@ export default function ProgramDetailPage() {
       draftSession.commitSave(plan.items, "saved");
       setCarSavedFlash(true);
       window.setTimeout(() => setCarSavedFlash(false), 2500);
-      if (plan.hidden) {
-        toast({ title: `Saved ${plan.count}. ${plan.hidden} hidden car${plan.hidden === 1 ? "" : "s"} still unsaved.` });
-      }
-      if (flushed.invalid) toast(emptySaveToast(true, 0));
+      toast({ title: saveCarCountLabel(plan.count, "saved") });
+      if (flushed.invalid) toast(emptySaveToast(true));
     } catch {
       /* error toast already shown; drafts stay */
     } finally {
@@ -761,6 +797,7 @@ export default function ProgramDetailPage() {
   }
 
   async function runPasteMatch(text: string) {
+    draftSession.flushEditors();
     const t = text.trim();
     if (!t) {
       setPasteMatch(null);
@@ -822,8 +859,8 @@ export default function ProgramDetailPage() {
         {key === "_select" ? (
           <Checkbox
             checked={
-              visibleCars.filter((c) => !c.exited_date).length > 0 &&
-              visibleCars.filter((c) => !c.exited_date).every((c) => selected.has(c.id))
+              selectAllIds.length > 0 &&
+              selectAllIds.every((id) => selected.has(id))
             }
             onCheckedChange={toggleAll}
             aria-label="Select all shown cars"
@@ -892,6 +929,14 @@ export default function ProgramDetailPage() {
             ) : (
               label
             )}
+            {draftDiffers(serverById.get(c.id) ?? c, carDrafts[c.id]) ? (
+              <span
+                className="ml-2 text-[10px] uppercase tracking-wide font-semibold text-umler-amber"
+                data-testid={`unsaved-program-car-${c.id}`}
+              >
+                unsaved
+              </span>
+            ) : null}
             {exited && <div className="text-[10px] text-muted-foreground">Exited {formatProgramDate(c.exited_date)}</div>}
           </td>
         );
@@ -1140,26 +1185,34 @@ export default function ProgramDetailPage() {
   const visibleCars = useMemo(() => {
     const pasteIds = pasteMatch ? new Set(pasteMatch.matched.map((m) => m.link_id)) : null;
     const narrowing = carFilter.trim() !== "" || pasteMatch != null;
-    return sortedCars.filter((c) => {
-      if (pasteIds && !pasteIds.has(c.id)) return false;
-      if (narrowing) return true;
-      const level = c.completion_level ?? deriveCompletionLevel({
-        active: c.railcar?.active,
-        railcar_status: c.railcar?.status,
-        status: c.status,
-        milestone: c.milestone,
-        milestones: c.trail,
-        outcome_reached_at: c.outcome_reached_at,
-        completed: c.completed,
-        exited_date: c.exited_date,
-        keep_open: programCarKeepOpen(c.custom_fields),
-      });
-      if (!levelFilter.has(level)) return false;
-      return true;
-    });
-  }, [sortedCars, pasteMatch, levelFilter, carFilter]);
+    return sortedCars.filter((c) =>
+      programCarStaysVisible({
+        matchesText: programCarMatchesQuery(carQueryFields(c), carFilter),
+        pasteActive: pasteIds != null,
+        matchesPaste: pasteIds ? pasteIds.has(c.id) : true,
+        applyLevelFilter: !narrowing,
+        levelSelected: levelFilter.has(carCompletionLevel(c)),
+        dirty: unsavedCarIds.has(c.id),
+      }),
+    );
+  }, [sortedCars, pasteMatch, levelFilter, carFilter, unsavedCarIds]);
+  const selectAllIds = useMemo(() => {
+    const pasteIds = pasteMatch ? new Set(pasteMatch.matched.map((m) => m.link_id)) : null;
+    const narrowing = carFilter.trim() !== "" || pasteMatch != null;
+    return selectAllShownCarIds(visibleCars.map((car) => ({
+      id: car.id,
+      exited: Boolean(car.exited_date),
+      pinnedOnly: programCarPinnedOnly({
+        matchesText: programCarMatchesQuery(carQueryFields(car), carFilter),
+        pasteActive: pasteIds != null,
+        matchesPaste: pasteIds ? pasteIds.has(car.id) : true,
+        applyLevelFilter: !narrowing,
+        levelSelected: levelFilter.has(carCompletionLevel(car)),
+        dirty: unsavedCarIds.has(car.id),
+      }),
+    })));
+  }, [visibleCars, pasteMatch, carFilter, levelFilter, unsavedCarIds]);
   carsRef.current = cars;
-  visibleIdsRef.current = new Set(visibleCars.map((car) => car.id));
 
   useEffect(() => {
     const ids = new Set(visibleCars.map((car) => car.id));
@@ -1208,7 +1261,7 @@ export default function ProgramDetailPage() {
   }
 
   function toggleAll() {
-    const openIds = visibleCars.filter((c) => !c.exited_date).map((c) => c.id);
+    const openIds = selectAllIds;
     setSelected((prev) => {
       if (openIds.length && openIds.every((id) => prev.has(id))) return new Set();
       return new Set(openIds);
@@ -1478,7 +1531,7 @@ export default function ProgramDetailPage() {
                   {carSaving ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving {savingCount} car{savingCount === 1 ? "" : "s"}…
+                      {saveCarCountLabel(savingCount, "saving")}
                     </>
                   ) : (
                     "Save Changes"
@@ -1500,6 +1553,7 @@ export default function ProgramDetailPage() {
                         on ? "bg-primary/15 border-primary/40 text-foreground" : "bg-muted border-border text-muted-foreground",
                       )}
                       onClick={() => {
+                        draftSession.flushEditors();
                         setLevelFilter((prev) => {
                           const next = new Set(prev);
                           if (next.has(level)) next.delete(level);
@@ -1519,6 +1573,7 @@ export default function ProgramDetailPage() {
                 <Checkbox
                   checked={levelFilter.has("program_done")}
                   onCheckedChange={(v) => {
+                    draftSession.flushEditors();
                     const on = v === true;
                     setShowCompleted(on);
                     setLevelFilter((prev) => {
@@ -1533,7 +1588,7 @@ export default function ProgramDetailPage() {
                 Show program done ({sortedCars.filter((c) => c.completion_level === "program_done").length})
               </label>
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Checkbox checked={includeExited} onCheckedChange={(v) => setIncludeExited(v === true)} />
+                <Checkbox checked={includeExited} onCheckedChange={(v) => { draftSession.flushEditors(); setIncludeExited(v === true); }} />
                 Show exited cars
               </label>
               <Button size="sm" variant="ghost" onClick={() => setMoreFields((v) => !v)}>
@@ -1542,7 +1597,10 @@ export default function ProgramDetailPage() {
               <Input
                 className="h-8 w-52 text-xs"
                 value={carFilter}
-                onChange={(e) => setCarFilter(e.target.value)}
+                onChange={(e) => {
+                  draftSession.flushEditors();
+                  setCarFilter(e.target.value);
+                }}
                 placeholder="Filter cars…"
                 aria-label="Filter program cars"
               />
@@ -1551,6 +1609,7 @@ export default function ProgramDetailPage() {
                 value={pasteText}
                 onChange={(e) => {
                   const v = e.target.value;
+                  draftSession.flushEditors();
                   setPasteText(v);
                   if (!v.trim()) setPasteMatch(null);
                 }}
@@ -1591,7 +1650,7 @@ export default function ProgramDetailPage() {
                   >
                     Select all matched
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setPasteText(""); setPasteMatch(null); }}>
+                  <Button size="sm" variant="ghost" onClick={() => { draftSession.flushEditors(); setPasteText(""); setPasteMatch(null); }}>
                     Clear paste
                   </Button>
                 </>
@@ -1676,7 +1735,7 @@ export default function ProgramDetailPage() {
                       toast({ title: "No changes" });
                       return;
                     }
-                    draftSession.clearLinks(ids);
+                    draftSession.replaceDrafts(draftsAfterBulkApply(draftSession.getDrafts(), ids, updates));
                     setSelected(new Set());
                   } catch {
                     /* toast already shown */
@@ -1835,6 +1894,7 @@ export default function ProgramDetailPage() {
       <RailcarDetailSheet
         carId={sheetCar?.railcar_id ?? null}
         onClose={() => {
+          if (!programCarSectionDiscardConfirmed(null)) return;
           setSheetLinkId(null);
           setSheetPreview(null);
         }}

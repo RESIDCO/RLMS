@@ -45,6 +45,19 @@ const UPDATE_LABELS: Record<string, string> = {
   flag_tag: "Flag",
 };
 
+/**
+ * True when the side panel is holding edits that switching cars, or closing
+ * the sheet, would throw away. The same car does not discard.
+ */
+export function programCarSectionSwitchBlocked(
+  currentCarId: number | null,
+  dirty: boolean,
+  nextCarId: number | null,
+): boolean {
+  if (!dirty || currentCarId == null) return false;
+  return nextCarId !== currentCarId;
+}
+
 /** The program block renders only when a program and its car row are both present. */
 export function programCarSectionVisible(
   context: { programId?: number | null; car?: unknown } | null | undefined,

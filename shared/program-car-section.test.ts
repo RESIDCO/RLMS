@@ -15,6 +15,7 @@ import {
   programCarSectionEdit,
   programCarSectionPatch,
   programCarSectionSavePatch,
+  programCarSectionSwitchBlocked,
   programCarSectionVisible,
   type ProgramCarSectionSource,
   type ProgramCarSectionSource,
@@ -47,6 +48,11 @@ ok(programCarSectionVisible(null) === false, "no context hides the program secti
 ok(programCarSectionVisible({ programId: 0, car: base }) === false, "a missing program id hides the section");
 ok(programCarSectionVisible({ programId: 12, car: null }) === false, "a missing program-car row hides the section");
 ok(programCarSectionVisible({ programId: 12, car: base }) === true, "program id plus a car row shows the section");
+ok(programCarSectionSwitchBlocked(4, true, 9) === true, "a dirty side panel blocks switching cars");
+ok(programCarSectionSwitchBlocked(4, true, 4) === false, "staying on the same car does not discard the form");
+ok(programCarSectionSwitchBlocked(4, false, 9) === false, "a clean side panel can switch cars");
+ok(programCarSectionSwitchBlocked(4, true, null) === true, "closing the panel discards a dirty form");
+ok(programCarSectionSwitchBlocked(null, true, 9) === false, "no open car has nothing to discard");
 
 ok(
   programCarFieldsEditable({ canEdit: true, exited: false, active: true, railcarStatus: "Active/In-Service" }) === true,

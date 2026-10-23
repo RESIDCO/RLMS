@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
 import { History, Paperclip } from "lucide-react";
 import ShopCombobox, { type ShopOption } from "@/components/ShopCombobox";
 import { OpsFlagBadge } from "@/components/OpsFlagBadge";
@@ -13,7 +13,9 @@ import {
   programCarKeepOpenEditable,
   programCarSectionCanSave,
   programCarSectionEdit,
+  programCarSectionPatch,
   programCarSectionSavePatch,
+  programCarSectionSwitchBlocked,
   programCarSectionVersion,
   type ProgramCarSectionEdit,
   type ProgramCarSectionSource,
@@ -136,7 +138,12 @@ function ProgramCarSectionForm({ context }: { context: ProgramCarSheetContext })
   const keepOpenEditable = programCarKeepOpenEditable(gate);
   const canSave = programCarSectionCanSave(gate);
   const patch = programCarSectionSavePatch(saved, edit, gate);
+  const panelDirty = programCarSectionPatch(car, edit) != null;
   const busy = Boolean(context.saving) || savingLocal;
+  useLayoutEffect(() => {
+    rememberProgramCarSectionEdit(car.id, panelDirty);
+    return () => forgetProgramCarSectionEdit(car.id);
+  }, [car.id, panelDirty]);
   const milestoneOptions = Array.from(new Set<string>([...TRAIL_MILESTONES, edit.milestone].filter(Boolean)));
   const level = car.completion_level ?? saved.completion_level ?? null;
   const commitment = car.open_commitment ?? saved.open_commitment;
@@ -336,6 +343,32 @@ function ProgramCarSectionForm({ context }: { context: ProgramCarSheetContext })
       ) : null}
     </section>
   );
+}
+
+type SectionEditGuard = { carId: number; dirty: boolean };
+
+let sectionEditGuard: SectionEditGuard | null = null;
+
+function rememberProgramCarSectionEdit(carId: number, dirty: boolean) {
+  sectionEditGuard = { carId, dirty };
+}
+
+function forgetProgramCarSectionEdit(carId: number) {
+  if (sectionEditGuard?.carId === carId) sectionEditGuard = null;
+}
+
+export function programCarSectionHasUnsavedEdits(): boolean {
+  return sectionEditGuard?.dirty === true;
+}
+
+/** Ask before the keyed form remounts onto another car or unmounts on close. */
+export function programCarSectionDiscardConfirmed(nextCarId: number | null): boolean {
+  const current = sectionEditGuard;
+  if (!current || !programCarSectionSwitchBlocked(current.carId, current.dirty, nextCarId)) return true;
+  const message = nextCarId == null
+    ? "This car has unsaved edits. Discard them?"
+    : "This car has unsaved edits. Discard them and switch cars?";
+  return window.confirm(message);
 }
 
 export function ProgramCarSection({ context }: { context: ProgramCarSheetContext }) {

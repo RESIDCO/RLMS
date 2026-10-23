@@ -46,6 +46,9 @@ import { RiderEntitySelect } from "@/components/RiderEntitySelect";
 import { isRiderEntity } from "@shared/rider-entity";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, queryClient, railcarsQs, asRailcarList, downloadXlsx } from "@/lib/queryClient";
+import { RENT_STOP_COLUMN_KEYS, rentStopPickerColumns, selectionNeedsRentStops, FOCUS_COLUMN_LABELS, type RentStopColumnKey } from "@shared/saved-views";
+import { CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, exportCarNumberText, exportReportingMarkText } from "@shared/car-export-identity";
+import { downloadGridCsv } from "@/lib/grid-csv";
 import { FLEET_STALE_MS, invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { displayLeaseNumber } from "@shared/residco-import";
@@ -826,7 +829,7 @@ export default function LeaseManagement() {
 }
 
 // Optional columns definition for RiderCars (module-level so it's not re-created)
-type RCOptCol = "entity" | "nbv" | "oac" | "oec" | "capacity_cf" | "lining" | "build_year";
+type RCOptCol = "entity" | "nbv" | "oac" | "oec" | "capacity_cf" | "lining" | "build_year" | RentStopColumnKey;
 const RC_OPT_COLS: { key: RCOptCol; label: string }[] = [
   { key: "entity",      label: "Entity" },
   { key: "nbv",         label: "NBV" },
@@ -835,6 +838,7 @@ const RC_OPT_COLS: { key: RCOptCol; label: string }[] = [
   { key: "capacity_cf", label: "Capacity (cf)" },
   { key: "lining",      label: "Lining" },
   { key: "build_year",  label: "Build Year" },
+  ...rentStopPickerColumns(),
 ];
 const LC_DEFAULT_COLS = new Set<string>([]);
 const RC_PINNED = ["marks", "car_number", "lease_type"] as const;
@@ -852,6 +856,7 @@ const RC_LABELS: Record<string, string> = {
   capacity_cf: "Capacity (cf)",
   lining: "Lining",
   build_year: "Build Year",
+  ...Object.fromEntries(RENT_STOP_COLUMN_KEYS.map((key) => [key, FOCUS_COLUMN_LABELS[key]])),
 };
 const RC_WIDTHS: Record<string, number> = {
   marks: 80,
@@ -866,6 +871,12 @@ const RC_WIDTHS: Record<string, number> = {
   capacity_cf: 100,
   lining: 110,
   build_year: 90,
+  open_stop_type: 110,
+  open_stop_since: 110,
+  open_stop_days: 90,
+  open_stop_expected: 120,
+  open_stop_reason: 160,
+  open_stop_note: 180,
 };
 
 function fmtUsdCell(v: unknown) {
@@ -873,6 +884,18 @@ function fmtUsdCell(v: unknown) {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function riderCarCsvCell(key: string, c: any): string {
+  if (key === "marks") return exportReportingMarkText(c.reporting_marks);
+  if (key === "car_number") return exportCarNumberText(c.car_number);
+  if (key === "lessee") return c.assignment?.fleet_name ?? "";
+  if (key === "rental_status") return displayRailcarStatus(displayStatusInputFromRailcar(c));
+  if (key === "lease_type") return c.lease_type ?? "";
+  if (key === "lining") return c.lining_material || c.lining || c.coating || "";
+  if (key === "build_year") return carBuildYear(c) == null ? "" : String(carBuildYear(c));
+  const value = c[key];
+  return value == null ? "" : String(value);
 }
 
 function renderRcTd(key: string, c: any, leaseType: string | null | undefined) {
@@ -917,8 +940,14 @@ function renderRcTd(key: string, c: any, leaseType: string | null | undefined) {
       return <td key={key} className={text}>{c.lining_material || c.lining || c.coating || "—"}</td>;
     case "build_year":
       return <td key={key} className="px-3 py-1.5 font-mono-num text-muted-foreground">{carBuildYear(c) ?? "—"}</td>;
-    default:
+    default: {
+      if ((RENT_STOP_COLUMN_KEYS as readonly string[]).includes(key)) {
+        const value = c[key];
+        const shown = value == null || value === "" ? "—" : String(value);
+        return <td key={key} className={`${text} max-w-[180px] truncate`} title={shown === "—" ? undefined : shown}>{shown}</td>;
+      }
       return <td key={key} className={text}>—</td>;
+    }
   }
 }
 
@@ -967,16 +996,17 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
   const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const [page, setPage] = useState(0);
   const pageSize = 25;
+  const colPrefs = useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
+  const needsStops = selectionNeedsRentStops(colPrefs.visibleCols);
   const { data: cars, isLoading, isError, error, refetch } = useQuery<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>({
-    queryKey: ["/api/riders", riderId, "cars", activeFilter],
+    queryKey: ["/api/riders", riderId, "cars", activeFilter, needsStops ? "stops" : "plain"],
     queryFn: ({ signal }) =>
       apiGet<RailcarWithAssignment[] | { rows?: RailcarWithAssignment[] }>(
-        `/api/riders/${riderId}/cars?active=${encodeURIComponent(activeFilter)}`,
+        `/api/riders/${riderId}/cars?active=${encodeURIComponent(activeFilter)}${needsStops ? "&focus=1" : ""}`,
         { timeoutMs: 45_000, signal },
       ),
     staleTime: FLEET_STALE_MS,
   });
-  const colPrefs = useColumnPrefs("lease_rider_cars", LC_DEFAULT_COLS);
   const {
     visibleCols: visibleColsRaw,
     colOrder,
@@ -1037,6 +1067,26 @@ function RiderCars({ riderId, leaseType }: { riderId: number; leaseType?: string
                 </SelectContent>
               </Select>
               <CopyCarsButton rows={filtered} totalCount={filtered.length} testId={`button-copy-cars-rider-${riderId}`} />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                disabled={filtered.length === 0}
+                onClick={() => {
+                  downloadGridCsv(
+                    `RLMS_rider_${riderId}_cars.csv`,
+                    displayKeys.map((key) => (
+                      key === "marks" ? CAR_EXPORT_MARK_HEADER
+                        : key === "car_number" ? CAR_EXPORT_NUMBER_HEADER
+                          : columnLabel("lease_rider_cars", key, RC_LABELS[key] ?? key)
+                    )),
+                    filtered.map((car) => displayKeys.map((key) => riderCarCsvCell(key, car))),
+                    displayKeys.map((key, index) => (key === "car_number" ? index : -1)).filter((index) => index >= 0),
+                  );
+                }}
+              >
+                CSV
+              </Button>
               <ColumnPicker columns={RC_OPT_COLS} prefs={colPrefs} />
             </div>
           </div>

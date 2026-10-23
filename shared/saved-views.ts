@@ -27,6 +27,7 @@ export const FOCUS_COLUMN_KEYS = [
   "open_stop_days",
   "open_stop_expected",
   "open_stop_reason",
+  "open_stop_note",
   "program_name",
   "program_status",
   "program_milestone",
@@ -80,12 +81,32 @@ export const SEARCH_LAYOUT_KEYS = [
 
 const LAYOUT_KEY_SET = new Set<string>(SEARCH_LAYOUT_KEYS);
 
+/** Rent-stop columns a car grid can turn on without changing a saved layout. */
+export const RENT_STOP_COLUMN_KEYS = [
+  "open_stop_type",
+  "open_stop_since",
+  "open_stop_days",
+  "open_stop_expected",
+  "open_stop_reason",
+  "open_stop_note",
+] as const satisfies readonly FocusColumnKey[];
+
+export type RentStopColumnKey = (typeof RENT_STOP_COLUMN_KEYS)[number];
+
+export function selectionNeedsRentStops(keys: Iterable<string>): boolean {
+  for (const key of Array.from(keys)) {
+    if ((RENT_STOP_COLUMN_KEYS as readonly string[]).includes(key)) return true;
+  }
+  return false;
+}
+
 export const FOCUS_COLUMN_LABELS: Record<FocusColumnKey, string> = {
   open_stop_type: "Rent stop",
   open_stop_since: "Stop since",
   open_stop_days: "Days stopped",
   open_stop_expected: "Expected resume",
   open_stop_reason: "Stop reason",
+  open_stop_note: "Stop note",
   program_name: "Program",
   program_status: "Program status",
   program_milestone: "Milestone",
@@ -96,6 +117,28 @@ export const FOCUS_COLUMN_LABELS: Record<FocusColumnKey, string> = {
   tags: "Tags",
   view_note: "View note",
 };
+
+export function rentStopPickerColumns(): { key: RentStopColumnKey; label: string }[] {
+  return RENT_STOP_COLUMN_KEYS.map((key) => ({ key, label: FOCUS_COLUMN_LABELS[key] }));
+}
+
+export function rentStopExportHeaders(): string[] {
+  return RENT_STOP_COLUMN_KEYS.map((key) => FOCUS_COLUMN_LABELS[key]);
+}
+
+/** Blank stays blank. Days stopped stays a number so a sheet can sum it. */
+export function rentStopExportCells(row: object): (string | number)[] {
+  const record = row as Partial<Record<RentStopColumnKey, unknown>>;
+  return RENT_STOP_COLUMN_KEYS.map((key) => {
+    const value = record[key];
+    if (value == null || value === "") return "";
+    if (key === "open_stop_days") {
+      const days = Number(value);
+      return Number.isFinite(days) ? days : "";
+    }
+    return String(value);
+  });
+}
 
 export type ViewKind = "fixed" | "query";
 export type ViewDensity = "comfortable" | "compact";
@@ -361,6 +404,7 @@ export function focusPresetLayout(filters?: Partial<ViewFilters>): ViewLayout {
       "open_stop_since",
       "open_stop_days",
       "open_stop_reason",
+      "open_stop_note",
       "program_status",
       "program_milestone",
       "latest_note",
@@ -376,6 +420,7 @@ export function focusPresetLayout(filters?: Partial<ViewFilters>): ViewLayout {
       "open_stop_since",
       "open_stop_days",
       "open_stop_reason",
+      "open_stop_note",
       "program_status",
       "program_milestone",
       "latest_note",

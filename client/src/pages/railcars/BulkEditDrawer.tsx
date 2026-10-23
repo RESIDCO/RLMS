@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { navigateHash } from "@/lib/hash-location";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { RENT_STOP_REASON_CHOICES, rentStopReasonFields } from "@shared/rent-stops";
 import { ADD_NOTE_PLACEHOLDER } from "@/components/AddNoteField";
 import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { offerUndoToast } from "@/lib/undo";
@@ -31,6 +33,9 @@ export function BulkEditDrawer({
   const [tag, setTag] = useState("");
   const [stopDate, setStopDate] = useState("");
   const [stopType, setStopType] = useState<"Off rent" | "Abatement">("Off rent");
+  const [stopReason, setStopReason] = useState<string>("other");
+  const [stopDetail, setStopDetail] = useState("");
+  const [stopNote, setStopNote] = useState("");
   const [scrapped, setScrapped] = useState("");
   const [umler, setUmler] = useState("");
   const [buyer, setBuyer] = useState("");
@@ -43,7 +48,17 @@ export function BulkEditDrawer({
     const out: Record<string, unknown>[] = [];
     if (note.trim()) out.push({ op: "add_note", note: note.trim() });
     if (tag.trim()) out.push({ op: "add_tag", value: tag.trim() });
-    if (stopDate) out.push({ op: "rent_stop", type: stopType, stop_date: stopDate, reason: "other", reason_other: "bulk workbench" });
+    if (stopDate) {
+      const fields = rentStopReasonFields({ reason: stopReason, reason_other: stopDetail, note: stopNote });
+      out.push({
+        op: "rent_stop",
+        type: stopType,
+        stop_date: stopDate,
+        reason: fields.reason,
+        reason_other: fields.reason_other,
+        note: fields.note,
+      });
+    }
     if (scrapped) out.push({ op: "set_scrapped_at", value: scrapped });
     if (umler) out.push({ op: "set_umler_status", value: umler });
     if (buyer) out.push({ op: "mark_sold", buyer, effective_date: saleDate || undefined });
@@ -98,12 +113,42 @@ export function BulkEditDrawer({
       <label className="text-xs text-muted-foreground">Tag</label>
       <Input className="mb-2" value={tag} onChange={(e) => setTag(e.target.value)} />
       <div className="flex gap-2 mb-2">
-        <select className="h-8 border rounded px-2 text-xs" value={stopType} onChange={(e) => setStopType(e.target.value as any)}>
+        <select className="h-8 border rounded px-2 text-xs" value={stopType} onChange={(e) => setStopType(e.target.value as "Off rent" | "Abatement")}>
           <option>Off rent</option>
           <option>Abatement</option>
         </select>
         <Input type="date" value={stopDate} onChange={(e) => setStopDate(e.target.value)} />
       </div>
+      <label className="text-xs text-muted-foreground">Rent stop reason</label>
+      <select className="h-8 border rounded px-2 text-xs w-full mb-2" value={stopReason} onChange={(e) => setStopReason(e.target.value)}>
+        {RENT_STOP_REASON_CHOICES.map((item) => (
+          <option key={item} value={item}>{item}</option>
+        ))}
+      </select>
+      <label className="text-xs text-muted-foreground">Rent stop reason detail</label>
+      <Textarea
+        className="mb-2"
+        rows={2}
+        value={stopDetail}
+        onChange={(e) => setStopDetail(e.target.value)}
+        placeholder="For Other, this is the reason. It is not copied into the stop note."
+      />
+      <label className="text-xs text-muted-foreground">Stop note (optional)</label>
+      <Textarea
+        className="mb-2"
+        rows={2}
+        value={stopNote}
+        onChange={(e) => setStopNote(e.target.value)}
+        placeholder="Saved on the rent stop only."
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        className="mb-3"
+        onClick={() => navigateHash("/rent-stops/bulk?action=off_rent")}
+      >
+        Different dates per car…
+      </Button>
       <label className="text-xs text-muted-foreground">Cut-up / scrapped_at</label>
       <Input className="mb-2" type="date" value={scrapped} onChange={(e) => setScrapped(e.target.value)} />
       <label className="text-xs text-muted-foreground">UMLER</label>

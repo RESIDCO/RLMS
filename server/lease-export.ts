@@ -12,6 +12,8 @@ import {
 } from "@shared/car-export-identity";
 import { fetchAllRows } from "./fetch-all";
 import { supabaseAdmin } from "./supabase";
+import { attachOpenStopColumns } from "./focus-columns";
+import { rentStopExportCells, rentStopExportHeaders } from "@shared/saved-views";
 
 type LeaseRow = {
   id: number;
@@ -40,7 +42,7 @@ type RiderRow = {
   notes: string | null;
 };
 
-const CAR_HEADERS = LEASE_CAR_SHEET_HEADERS;
+const CAR_HEADERS = [...LEASE_CAR_SHEET_HEADERS, ...rentStopExportHeaders()];
 
 const EXPORT_CAR_SELECT = `
 id, car_number, reporting_marks, entity, active, status, fleet_status, lease_type,
@@ -77,6 +79,7 @@ function carRow(c: any, leaseType: string | null | undefined): (string | number)
     liningOf(c),
     carBuildYear(c) ?? "",
     resolveLeaseType(c.lease_type, leaseType) ?? "",
+    ...rentStopExportCells(c),
   ];
 }
 
@@ -126,7 +129,7 @@ async function fetchCarsForRiders(riderIds: number[]): Promise<any[]> {
     seen.add(row.id);
     out.push(row);
   }
-  return out;
+  return attachOpenStopColumns(out, (row) => Number(row.id));
 }
 
 function sheetNameForLease(lease: LeaseRow, ridersFor: RiderRow[], usedNames: Set<string>): string {

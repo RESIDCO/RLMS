@@ -35,6 +35,10 @@ import { ColumnHeaderLabel } from "@/components/ColumnHelp";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import { OlDirectoryContacts } from "@/components/OlDirectoryContacts";
 import { LineageCarLink } from "@/components/LineageCarLink";
+import { RENT_STOP_COLUMN_KEYS, rentStopPickerColumns, type RentStopColumnKey } from "@shared/saved-views";
+import { columnLabel } from "@shared/column-dictionary";
+import { downloadGridCsv } from "@/lib/grid-csv";
+import { CAR_EXPORT_MARK_HEADER, CAR_EXPORT_NUMBER_HEADER, exportCarNumberText, exportReportingMarkText } from "@shared/car-export-identity";
 
 type RiderRow = {
   ol: string;
@@ -59,7 +63,7 @@ type CarRow = {
   lessee_name?: string | null;
   rider_external_id?: string | null;
   lease_type?: string | null;
-};
+} & Partial<Record<RentStopColumnKey, string | number | null>>;
 
 type GroupPayload = {
   kind: "lessee" | "entity";
@@ -121,7 +125,8 @@ const BROWSE_CAR_OPT_COLS = [
   { key: "type", label: "Type" },
   { key: "lessee", label: "Lessee" },
   { key: "ol", label: "OL" },
-] as const;
+  ...rentStopPickerColumns(),
+];
 const BROWSE_CAR_DEFAULT_COLS = new Set(["entity", "status", "type"]);
 
 function turning50ExportUrl(year: number, opts?: { ols?: string[]; ids?: number[] }) {
@@ -129,6 +134,19 @@ function turning50ExportUrl(year: number, opts?: { ols?: string[]; ids?: number[
   if (opts?.ols?.length) sp.set("ols", opts.ols.join(","));
   if (opts?.ids?.length) sp.set("ids", opts.ids.join(","));
   return `/api/browse/turning50/export?${sp.toString()}`;
+}
+
+function browseCarCsvCell(key: string, car: CarRow): string {
+  if (key === "marks") return exportReportingMarkText(car.reporting_marks);
+  if (key === "car_number") return exportCarNumberText(car.car_number);
+  if (key === "lease_type") return car.lease_type ?? "";
+  if (key === "entity") return car.entity ?? "";
+  if (key === "status") return displayRailcarStatus(displayStatusInputFromRailcar(car as any));
+  if (key === "type") return car.car_type ?? "";
+  if (key === "lessee") return car.lessee_name ?? "";
+  if (key === "ol") return car.rider_external_id ?? "";
+  const value = car[key as RentStopColumnKey];
+  return value == null ? "" : String(value);
 }
 
 function CarTable({
@@ -156,6 +174,26 @@ function CarTable({
     <div className="space-y-2">
       <div className="flex justify-end gap-2">
         <CopyCarsButton rows={cars} selectedIds={selection?.selected} />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={cars.length === 0}
+          onClick={() => {
+            const keys = ["marks", "car_number", "lease_type", ...BROWSE_CAR_OPT_COLS.filter((col) => show(col.key)).map((col) => col.key)];
+            downloadGridCsv(
+              "RLMS_browse_cars.csv",
+              keys.map((key) => (
+                key === "marks" ? CAR_EXPORT_MARK_HEADER
+                  : key === "car_number" ? CAR_EXPORT_NUMBER_HEADER
+                    : columnLabel("browse_car_list", key, BROWSE_CAR_OPT_COLS.find((col) => col.key === key)?.label ?? key)
+              )),
+              cars.map((car) => keys.map((key) => browseCarCsvCell(key, car))),
+              [keys.indexOf("car_number")].filter((index) => index >= 0),
+            );
+          }}
+        >
+          CSV
+        </Button>
         <ColumnPicker columns={[...BROWSE_CAR_OPT_COLS]} prefs={colPrefs} />
       </div>
       <div className="rounded-xl border border-card-border bg-card overflow-hidden">
@@ -185,6 +223,11 @@ function CarTable({
                 {show("type") && <th className="px-4 py-2.5 text-left font-medium hidden sm:table-cell"><ColumnHeaderLabel listKey="browse_car_list" colKey="type" /></th>}
                 {show("lessee") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="lessee" /></th>}
                 {show("ol") && <th className="px-4 py-2.5 text-left font-medium"><ColumnHeaderLabel listKey="browse_car_list" colKey="ol" /></th>}
+                {RENT_STOP_COLUMN_KEYS.filter((key) => show(key)).map((key) => (
+                  <th key={key} className="px-4 py-2.5 text-left font-medium">
+                    <ColumnHeaderLabel listKey="browse_car_list" colKey={key} />
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -230,6 +273,15 @@ function CarTable({
                   {show("ol") && (
                     <td className="px-4 py-2.5 font-mono">{c.rider_external_id ?? "—"}</td>
                   )}
+                  {RENT_STOP_COLUMN_KEYS.filter((key) => show(key)).map((key) => {
+                    const value = c[key];
+                    const text = value == null || value === "" ? "—" : String(value);
+                    return (
+                      <td key={key} className="px-4 py-2.5 text-muted-foreground max-w-[180px] truncate" title={text === "—" ? undefined : text}>
+                        {text}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RENT_STOP_REASON_CHOICES, rentStopReasonFields } from "@shared/rent-stops";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,8 +17,6 @@ import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { useToast } from "@/hooks/use-toast";
 import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 
-const REASONS = ["quality repair", "goodwill", "damage", "dispute", "other"] as const;
-
 export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: boolean }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -28,7 +28,7 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
   const open = data?.open;
   const hist = data?.history ?? [];
   const [stopDate, setStopDate] = useState(new Date().toISOString().slice(0, 10));
-  const [reason, setReason] = useState<(typeof REASONS)[number]>("quality repair");
+  const [reason, setReason] = useState<string>("quality repair");
   const [resume, setResume] = useState("");
   const [addNote, setAddNote] = useState("");
 
@@ -39,16 +39,29 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
     void invalidateFleetQueries(qc);
   };
 
+  function stopBody() {
+    return {
+      stop_date: stopDate,
+      expected_resume_date: resume || null,
+      ...rentStopReasonFields({ reason, note: addNote }),
+      ...appendNoteBody(addNote),
+    };
+  }
+
   const setAbate = useMutation({
     mutationFn: async () =>
-      (await apiRequest("POST", `/api/rent-stops/car/${carId}/abatement`, {
-        stop_date: stopDate,
-        reason,
-        expected_resume_date: resume || null,
-        ...appendNoteBody(addNote),
-      })).json(),
+      (await apiRequest("POST", `/api/rent-stops/car/${carId}/abatement`, stopBody())).json(),
     onSuccess: () => {
       toast({ title: "Abatement set" });
+      invalidate();
+    },
+    onError: (e: Error) => toast({ title: "Failed", description: e.message, variant: "destructive" }),
+  });
+  const setOff = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("POST", `/api/rent-stops/car/${carId}/off-rent`, stopBody())).json(),
+    onSuccess: () => {
+      toast({ title: "Off rent set" });
       invalidate();
     },
     onError: (e: Error) => toast({ title: "Failed", description: e.message, variant: "destructive" }),
@@ -63,7 +76,10 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
   });
   const convert = useMutation({
     mutationFn: async () =>
-      (await apiRequest("POST", `/api/rent-stops/car/${carId}/convert-off-rent`, { reason, ...appendNoteBody(addNote) })).json(),
+      (await apiRequest("POST", `/api/rent-stops/car/${carId}/convert-off-rent`, {
+        ...rentStopReasonFields({ reason, note: addNote }),
+        ...appendNoteBody(addNote),
+      })).json(),
     onSuccess: () => {
       toast({ title: "Converted to off rent (assignment unchanged)" });
       invalidate();
@@ -80,7 +96,8 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
             Open <span className="font-medium">{open.type}</span> since {open.stop_date}
           </div>
           <div className="text-muted-foreground">
-            {open.reason}
+            {open.reason_other || open.reason}
+            {open.note ? ` · ${open.note}` : ""}
             {open.expected_resume_date ? ` · resume ${open.expected_resume_date}` : " · resume undecided"}
             {open.lease_ref ? ` · ${open.lease_ref}` : ""}
           </div>
@@ -88,12 +105,15 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
             <div className="space-y-2 pt-1">
               <AddNoteField id={`rent-stop-note-${carId}`} value={addNote} onChange={setAddNote} />
               <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => doResume.mutate()}>Resume</Button>
+              <Button size="sm" onClick={() => doResume.mutate()} disabled={doResume.isPending}>Resume</Button>
               {open.type === "Abatement" && (
-                <Button size="sm" variant="outline" onClick={() => convert.mutate()}>
+                <Button size="sm" variant="outline" onClick={() => convert.mutate()} disabled={convert.isPending}>
                   Convert to off rent
                 </Button>
               )}
+              <Button size="sm" variant="ghost" asChild>
+                <Link href="/rent-stops/bulk?action=off_rent">Bulk off rent…</Link>
+              </Button>
               </div>
             </div>
           )}
@@ -106,10 +126,10 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
           <Label>Stop date</Label>
           <Input type="date" value={stopDate} onChange={(e) => setStopDate(e.target.value)} />
           <Label>Reason</Label>
-          <Select value={reason} onValueChange={(v) => setReason(v as (typeof REASONS)[number])}>
+          <Select value={reason} onValueChange={setReason}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {REASONS.map((r) => (
+              {RENT_STOP_REASON_CHOICES.map((r) => (
                 <SelectItem key={r} value={r}>{r}</SelectItem>
               ))}
             </SelectContent>
@@ -117,7 +137,13 @@ export function RentStopsCard({ carId, canEdit }: { carId: number; canEdit: bool
           <Label>Expected resume (optional)</Label>
           <Input type="date" value={resume} onChange={(e) => setResume(e.target.value)} />
           <AddNoteField id={`rent-stop-new-note-${carId}`} value={addNote} onChange={setAddNote} />
-          <Button size="sm" onClick={() => setAbate.mutate()}>Set abatement</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => setAbate.mutate()} disabled={setAbate.isPending} data-testid="button-set-abatement">Set abatement</Button>
+            <Button size="sm" variant="outline" onClick={() => setOff.mutate()} disabled={setOff.isPending} data-testid="button-set-off-rent">Set off rent</Button>
+            <Button size="sm" variant="ghost" asChild>
+              <Link href="/rent-stops/bulk?action=off_rent">Bulk off rent…</Link>
+            </Button>
+          </div>
         </div>
       )}
       {hist.length > 0 && (

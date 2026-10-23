@@ -1,7 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Redirect, useLocation } from "wouter";
 import { useHashSearch } from "@/lib/hash-location";
+import { offerUndoToast } from "@/lib/undo";
+import {
+  OFF_RENT_PASTE_STORAGE_KEY,
+  RENT_STOP_REASON_CHOICES,
+  parseOffRentPaste,
+  rentStopReasonFields,
+} from "@shared/rent-stops";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -554,42 +561,91 @@ export function BulkRentStopsPage() {
   const canEdit = useCanEdit();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const hashSearch = useHashSearch();
+  const openedOffRent = new URLSearchParams(hashSearch).get("action") === "off_rent";
   const [text, setText] = useState("");
-  const [action, setAction] = useState("abatement");
+  const [action, setAction] = useState(openedOffRent ? "off_rent" : "abatement");
   const [stopDate, setStopDate] = useState(new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("quality repair");
+  const [batchNote, setBatchNote] = useState("");
+  const [copyCarNote, setCopyCarNote] = useState(false);
   const [preview, setPreview] = useState<any>(null);
+  useEffect(() => {
+    if (!openedOffRent) return;
+    try {
+      const seeded = sessionStorage.getItem(OFF_RENT_PASTE_STORAGE_KEY);
+      if (!seeded) return;
+      setText(seeded);
+      setAction("off_rent");
+      sessionStorage.removeItem(OFF_RENT_PASTE_STORAGE_KEY);
+    } catch {
+      /* private mode */
+    }
+  }, [openedOffRent]);
   const runPreview = useMutation({
-    mutationFn: async () =>
-      (await apiRequest("POST", "/api/rent-stops/bulk/preview", {
-        text,
+    mutationFn: async () => {
+      const dated = action === "off_rent" ? parseOffRentPaste(text) : [];
+      const fields = rentStopReasonFields({ reason, note: batchNote });
+      const useRows = dated.some((row) => row.stop_date || row.note);
+      return (await apiRequest("POST", "/api/rent-stops/bulk/preview", {
+        ...(useRows ? { rows: dated } : { text }),
         action,
         stop_date: stopDate,
-        reason,
-      })).json(),
+        reason: fields.reason,
+        reason_other: fields.reason_other,
+        note: fields.note,
+      })).json();
+    },
     onSuccess: setPreview,
     onError: (e: Error) => toast({ title: "Preview failed", description: e.message, variant: "destructive" }),
   });
   const apply = useMutation({
     mutationFn: async () =>
-      (await apiRequest("POST", "/api/rent-stops/bulk/apply", { preview_token: preview?.preview_token })).json(),
+      (await apiRequest("POST", "/api/rent-stops/bulk/apply", {
+        preview_token: preview?.preview_token,
+        ...(copyCarNote ? { copy_car_note: true } : {}),
+      })).json(),
     onSuccess: (d) => {
       void invalidateFleetQueries(qc);
-      toast({ title: "Applied", description: `${d.written} rows written` });
+      offerUndoToast(d);
     },
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });
+  const datedMode = action === "off_rent";
+  const kpiMoves = (preview?.kpi_delta ?? []).filter(
+    (row: { before_title?: string; after_title?: string }) => row.before_title !== row.after_title,
+  );
   return (
     <div>
-      <PageHeader title="Bulk rent stops" subtitle="Active cars only. Preview first. Abatement stays on the OL; convert to off rent does not end the assignment." />
+      <PageHeader title="Bulk rent stops" subtitle="Active cars only. Preview first. Off rent and abatement stay on the current assignment. One apply is one undo." />
       <div className="p-6 space-y-4 max-w-4xl">
-        <PasteBox onText={setText} />
+        <div className="space-y-2">
+          <Label htmlFor="off-rent-paste">{datedMode ? "Cars with their own dates" : "Cars"}</Label>
+          <Textarea
+            id="off-rent-paste"
+            rows={8}
+            value={text}
+            data-testid="off-rent-paste"
+            placeholder={datedMode
+              ? "MARK NUMBER, YYYY-MM-DD, note\nTFOX 001000, 2026-09-09\nTFOX 001036, 2026-10-16, uneconomical to repair"
+              : "Paste marks + numbers (TFOX 000644)…"}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <Input type="file" accept=".csv,.txt,.xlsx" onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (file) setText(await csvFromFile(file));
+          }} />
+          {datedMode ? (
+            <p className="text-xs text-muted-foreground">One car per line. Date is optional when the stop date below is set. A third column is that car’s note.</p>
+          ) : null}
+        </div>
         <div className="flex flex-wrap gap-3 items-end">
           <div>
             <Label>Action</Label>
             <Select value={action} onValueChange={setAction}>
               <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="off_rent">Set off rent</SelectItem>
                 <SelectItem value="abatement">Set abatement</SelectItem>
                 <SelectItem value="resume">Resume</SelectItem>
                 <SelectItem value="convert">Convert to off rent</SelectItem>
@@ -597,13 +653,39 @@ export function BulkRentStopsPage() {
             </Select>
           </div>
           <div>
-            <Label>Stop date</Label>
+            <Label>{datedMode ? "Date for rows that omit one" : "Stop date"}</Label>
             <Input type="date" value={stopDate} onChange={(e) => setStopDate(e.target.value)} />
           </div>
           <div>
             <Label>Reason</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+            <Select value={reason} onValueChange={setReason}>
+              <SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {RENT_STOP_REASON_CHOICES.map((item) => (
+                  <SelectItem key={item} value={item}>{item}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+          <div className="min-w-[240px] flex-1">
+            <Label htmlFor="bulk-rent-stop-note">Stop note</Label>
+            <Textarea
+              id="bulk-rent-stop-note"
+              rows={2}
+              value={batchNote}
+              onChange={(e) => setBatchNote(e.target.value)}
+              placeholder="Saved on the rent stop. A date line’s note overrides this for that car."
+            />
+          </div>
+          <label className="text-sm flex items-center gap-2 pb-2">
+            <input
+              type="checkbox"
+              checked={copyCarNote}
+              data-testid="bulk-copy-car-note"
+              onChange={(e) => setCopyCarNote(e.target.checked)}
+            />
+            Also add the stop note on each car
+          </label>
           {canEdit && <Button disabled={runPreview.isPending} onClick={() => runPreview.mutate()}>Preview</Button>}
           {canEdit && preview?.preview_token && (
             <Button disabled={apply.isPending} onClick={() => apply.mutate()}>Apply preview</Button>
@@ -618,11 +700,44 @@ export function BulkRentStopsPage() {
         </div>
         {preview && (
           <div className="text-sm space-y-2">
-            <div>To write {preview.to_write?.length ?? 0} · rejected {preview.rejected?.length ?? 0}</div>
+            <div>To write {preview.to_write?.length ?? 0} · rejected {preview.rejected?.length ?? 0} · warnings {preview.warnings?.length ?? 0}</div>
+            {(preview.kpi_note || (preview.kpi_counts ?? []).length > 0 || kpiMoves.length > 0) && (
+              <div className="text-xs space-y-0.5">
+                <div className="font-medium">Dashboard counts</div>
+                {preview.kpi_note ? <div className="text-muted-foreground">{preview.kpi_note}</div> : null}
+                {(preview.kpi_counts ?? []).map((row: { bucket: string; title: string; delta: number }) => (
+                  <div key={row.bucket}>
+                    {row.title}: {row.delta > 0 ? `+${row.delta}` : row.delta}
+                  </div>
+                ))}
+                {kpiMoves.slice(0, 8).map((row: { railcar_id: number; car?: string; before_title?: string; after_title?: string }) => (
+                  <div key={row.railcar_id} className="text-muted-foreground">
+                    {row.car}: {row.before_title} → {row.after_title}
+                  </div>
+                ))}
+                {kpiMoves.length > 8 ? (
+                  <div className="text-muted-foreground">+{kpiMoves.length - 8} more</div>
+                ) : null}
+              </div>
+            )}
+            {(preview.rejected ?? []).length > 0 && (
+              <ul className="text-xs text-destructive space-y-0.5">
+                {preview.rejected.map((row: { car?: string; id?: number; reason?: string }, index: number) => (
+                  <li key={`${row.car ?? row.id}-${index}`}>{row.car ?? row.id}: {row.reason}</li>
+                ))}
+              </ul>
+            )}
+            {(preview.warnings ?? []).length > 0 && (
+              <ul className="text-xs text-amber-700 space-y-0.5">
+                {preview.warnings.map((row: { car?: string; reason?: string; stop_date?: string }, index: number) => (
+                  <li key={`${row.car}-${index}`}>{row.car}: {row.reason}{row.stop_date ? ` (${row.stop_date})` : ""}</li>
+                ))}
+              </ul>
+            )}
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-muted-foreground">
-                  <th>Car</th><th>OL</th><th>Lessee</th><th>Action</th>
+                  <th>Car</th><th>OL</th><th>Lessee</th><th>Action</th><th>Date</th><th>Reason</th><th>Note</th>
                 </tr>
               </thead>
               <tbody>
@@ -632,6 +747,9 @@ export function BulkRentStopsPage() {
                     <td>{r.ol}</td>
                     <td>{r.lessee}</td>
                     <td>{r.action}</td>
+                    <td>{r.stop_date ?? "—"}</td>
+                    <td>{r.reason_other || r.reason || ""}</td>
+                    <td>{r.note ?? ""}</td>
                   </tr>
                 ))}
               </tbody>

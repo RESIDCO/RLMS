@@ -43,6 +43,8 @@ import { excelMoneyValue, isProgramMoneyField } from "@shared/money";
 import { parseProgramDate } from "@shared/program-dates";
 import { changedKeys, pickRow } from "@shared/change-log";
 import { isFrozenRailcar } from "@shared/car-lifecycle-status";
+import { FOCUS_COLUMN_LABELS, RENT_STOP_COLUMN_KEYS } from "@shared/saved-views";
+import { attachOpenStopColumns } from "./focus-columns";
 import { currentChangeGroup, recordChange } from "./change-log";
 import { FROZEN_CAR_MESSAGE } from "./frozen-cars";
 
@@ -516,7 +518,7 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
     list.push({ milestone: String((m as any).milestone ?? ""), milestone_date: (m as any).milestone_date ?? null });
     trailBy.set(id, list);
   }
-  return rows.map((r) => {
+  const decorated = rows.map((r) => {
     const k = kBy.get(Number(r.railcar_id));
     const openCount = nBy.get(Number(r.railcar_id)) ?? 0;
     const trail = trailBy.get(Number(r.id)) ?? [];
@@ -545,6 +547,7 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
       program_done_step: [...trail].reverse().find((t) => isProgramDoneMilestone(t.milestone))?.milestone ?? null,
     };
   });
+  return attachOpenStopColumns(decorated, (row) => Number(row.railcar_id));
 }
 
 export async function addCarsToProgram(
@@ -1054,6 +1057,7 @@ function coreCarColumns() {
     { key: "ol_current", label: "OL (current)" },
     { key: "shop", label: "Shop" },
     { key: "repair_cost_total", label: "Repair cost total" },
+    ...RENT_STOP_COLUMN_KEYS.map((key) => ({ key, label: FOCUS_COLUMN_LABELS[key] })),
   ] as const;
 }
 
@@ -1111,6 +1115,13 @@ function carExportValue(row: any, key: string): string {
       return row.shop?.name ?? "";
     case "repair_cost_total":
       return row.repair_cost_total != null ? String(row.repair_cost_total) : "";
+    case "open_stop_type":
+    case "open_stop_since":
+    case "open_stop_days":
+    case "open_stop_expected":
+    case "open_stop_reason":
+    case "open_stop_note":
+      return row[key] == null || row[key] === "" ? "" : String(row[key]);
     default:
       return "";
   }

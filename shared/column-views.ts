@@ -8,6 +8,7 @@ export const LIST_KEYS = [
   "browse_car_list",
   "search_results",
   "lease_rider_cars",
+  "account_ol_cars",
 ] as const;
 
 export type ListKey = (typeof LIST_KEYS)[number];

@@ -14,7 +14,7 @@ import { fetchAllRows } from "./fetch-all";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachFormerly } from "./prior-marks";
 import { attachLatestAmNotes } from "./rider-account-comments";
-import { attachFocusColumns } from "./focus-columns";
+import { attachFocusColumns, attachOpenStopColumns } from "./focus-columns";
 
 /** Columns Fleet Registry / pickers actually render — not select(*). */
 export const RAILCAR_LIST_SELECT = `
@@ -1090,7 +1090,7 @@ const RIDER_CAR_FLAT_SELECT = [
 ].join(", ");
 
 /** Two indexed lookups — no PostgREST nested embed (those still seq-scan under load). */
-export async function listCarsAssignedToRider(riderId: number, active: string = "active") {
+export async function listCarsAssignedToRider(riderId: number, active: string = "active", opts?: { focus?: boolean }) {
   const [{ data: assigns, error: aErr }, { data: riderRow, error: rErr }] = await Promise.all([
     supabaseAdmin
       .from("railcar_assignments")
@@ -1135,7 +1135,11 @@ export async function listCarsAssignedToRider(riderId: number, active: string = 
       });
     })
     .filter(Boolean);
-  if (active === "inactive") return rows.filter((r: any) => r.active === false);
-  if (active === "all") return rows;
-  return rows.filter((r: any) => r.active !== false);
+  const visible = active === "inactive"
+    ? rows.filter((r: any) => r.active === false)
+    : active === "all"
+      ? rows
+      : rows.filter((r: any) => r.active !== false);
+  if (!opts?.focus) return visible;
+  return attachOpenStopColumns(visible, (row: { id: number }) => Number(row.id));
 }

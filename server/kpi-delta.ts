@@ -4,6 +4,7 @@ import {
   kpiBucketTitle,
   kpiBucketsForRow,
   primaryKpiBucket,
+  projectRentStopFlags,
   type KpiFlagRow,
 } from "@shared/kpi-buckets";
 
@@ -16,7 +17,9 @@ export type KpiPatch =
   | { kind: "sold"; buyer?: string | null; buyerById?: Map<number, string | null> }
   | { kind: "unsold" }
   | { kind: "buyer" }
-  | { kind: "abatement" };
+  | { kind: "abatement" }
+  | { kind: "off_rent" }
+  | { kind: "convert" };
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -30,10 +33,8 @@ function addDays(iso: string, n: number) {
 
 function applyPatch(row: any, patch: KpiPatch): KpiFlagRow {
   const next: KpiFlagRow = { ...row };
-  if (patch.kind === "abatement") {
-    next.open_abatement = true;
-    next.on_rent = false;
-    return next;
+  if (patch.kind === "abatement" || patch.kind === "off_rent" || patch.kind === "convert") {
+    return projectRentStopFlags(next, patch.kind);
   }
   if (patch.kind === "commitment") {
     next.has_open_commitment = patch.action === "set";

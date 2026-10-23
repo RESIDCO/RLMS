@@ -7,7 +7,6 @@ import { fetchCanonicalObject, fetchCanonicalQuery } from "./postgrest-raw";
 import {
   UNDO_WINDOW_HOURS,
   changedSinceReason,
-  isUndoAllowedTable,
   nonUndoableMessage,
   opOf,
   REFERENCED_SINCE_MESSAGE,
@@ -20,6 +19,15 @@ import {
 import { assertLineInsertUndoHasNoOutsideFiles } from "./crm-bid-attachments";
 import { isDealCalcOnlyGroup } from "./crm-deal-calc";
 import { routeUndoGroup } from "@shared/dealCalcUndo";
+import {
+  REMARK_OUTSIDE_REFS,
+  REMARK_REFERENCED_MESSAGE,
+  firstOutsideRecordId,
+  frozenFkOutsideUnchecked,
+  isRemarkRetireGroup,
+  remarkOutsideUndoMessage,
+  remarkUndoTableAllowed,
+} from "@shared/remark-group";
 
 const CHANGE_GROUP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -104,18 +112,25 @@ export async function previewUndo(group: string, actor: string) {
 
   await assertLineInsertUndoHasNoOutsideFiles(rows, group);
 
+  const outsideMessage = await remarkOutsideUndoMessageForGroup(group, rows);
+  if (outsideMessage) {
+    const err: any = new Error(outsideMessage);
+    err.status = 409;
+    throw err;
+  }
+
   const conflicts: UndoConflict[] = [];
   for (const r of rows) {
     if (!r.table_name || r.row_pk == null) {
       conflicts.push({ activity_id: r.id, table_name: r.table_name, row_pk: r.row_pk, reason: "missing table_name or row_pk" });
       continue;
     }
-    if (!isUndoAllowedTable(r.table_name)) {
+    if (!remarkUndoTableAllowed(r.table_name, rows)) {
       conflicts.push({ activity_id: r.id, table_name: r.table_name, row_pk: r.row_pk, reason: "table not undoable" });
       continue;
     }
     const op = opOf(r);
-    if (op === "insert") {
+    if (op === "insert" && !(isRemarkRetireGroup(rows) && r.table_name === "railcars")) {
       if ((REFERENCED_SINCE_TABLES as readonly string[]).includes(r.table_name)) {
         const { data: outside, error: outsideErr } = await supabaseAdmin.rpc("rlms_referenced_outside_group", {
           p_table: r.table_name,
@@ -153,6 +168,58 @@ export async function previewUndo(group: string, actor: string) {
     conflicts,
     ok: conflicts.length === 0,
   };
+}
+
+/**
+ * Refuse remark undo in preview when a row outside the group still points at
+ * the new car. Calls the frozen reference functions, then reads the child
+ * row when that function does not cover the table.
+ */
+async function remarkOutsideUndoMessageForGroup(group: string, rows: UndoLogRow[]): Promise<string | null> {
+  if (!isRemarkRetireGroup(rows)) return null;
+  const newIds = rows
+    .filter((row) => row.table_name === "railcars" && opOf(row) === "insert" && row.row_pk != null)
+    .map((row) => Number(row.row_pk));
+  for (const id of newIds) {
+    const referenced = await supabaseAdmin.rpc("rlms_referenced_outside_group", {
+      p_table: "railcars",
+      p_id: id,
+      p_group: group,
+    });
+    if (referenced.error) throw referenced.error;
+    if (referenced.data === true) return REMARK_REFERENCED_MESSAGE;
+    for (const spec of REMARK_OUTSIDE_REFS) {
+      const fk = await supabaseAdmin.rpc("rlms_fk_outside_group", {
+        p_table: spec.table,
+        p_column: spec.column,
+        p_id: id,
+        p_group: group,
+      });
+      let mustScan = false;
+      if (fk.error) {
+        if (!frozenFkOutsideUnchecked(String(fk.error.message ?? ""))) throw fk.error;
+        mustScan = true;
+      } else if (fk.data === true) {
+        mustScan = true;
+      }
+      if (!mustScan) continue;
+      const logged = rows
+        .filter((row) => row.table_name === spec.table && row.row_pk != null)
+        .map((row) => Number(row.row_pk));
+      let query = supabaseAdmin.from(spec.table).select("id").eq(spec.column, id);
+      if (spec.table === "attachments") query = query.eq("entity_type", "railcar");
+      if (logged.length) query = query.not("id", "in", `(${logged.join(",")})`);
+      const found = await query.limit(1);
+      if (found.error) throw found.error;
+      const recordId = firstOutsideRecordId(
+        (found.data ?? []).map((row) => Number((row as { id: number }).id)),
+        logged,
+      );
+      if (recordId != null) return remarkOutsideUndoMessage(spec.label, recordId);
+      if (fk.data === true) return remarkOutsideUndoMessage(spec.label, id);
+    }
+  }
+  return null;
 }
 
 /** Storage is removed only when the undone activity is an attachments insert. */
@@ -202,7 +269,11 @@ export async function applyUndo(group: string, actor: string) {
     }
     return { ...result, preview, otherPreview };
   }
-  const rpcName = isDealCalcOnlyGroup(rowsBefore) ? "rlms_undo_deal_calc_group" : "rlms_undo_change_group";
+  const rpcName = isDealCalcOnlyGroup(rowsBefore)
+    ? "rlms_undo_deal_calc_group"
+    : isRemarkRetireGroup(rowsBefore)
+      ? "rlms_undo_remark_group"
+      : "rlms_undo_change_group";
   const { data, error } = await supabaseAdmin.rpc(rpcName, {
     p_group: group,
     p_actor: actor,

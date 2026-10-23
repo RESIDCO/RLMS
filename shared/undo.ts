@@ -138,7 +138,7 @@ export function finalizeUndoPreview(input: {
 export function nonUndoableMessage(action: string | null | undefined): string {
   const a = String(action ?? "").toLowerCase();
   if (a.includes("remark") || a.includes("mark_change") || a.includes("change-number")) {
-    return "Remarks cannot be undone (the old car row is retired and a new id is inserted).";
+    return "Remarks saved before change capture cannot be undone.";
   }
   if (a.includes("import") || a.includes("vcf")) {
     return "Imports cannot be undone.";

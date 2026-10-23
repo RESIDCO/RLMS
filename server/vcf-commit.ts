@@ -243,8 +243,12 @@ export async function runVcfCommit(opts: {
     }> = [];
 
     for (const car of review.cars) {
-      // Old mark of a car already renamed in place: do not insert a duplicate
-      // and do not copy active/status from the old-mark row onto the current car.
+      // Old mark of a car already renamed, and that mark is NOT still a railcars
+      // row: do not insert a duplicate. When a remark left the old mark as an
+      // inactive row, remarkAlias is empty (the key exists). That row is then
+      // an existing car and skipVcfRailcarPatch holds it (active=false and
+      // active_source=manual), so the file does not recreate or reactivate it
+      // and does not apply this old-mark payload onto the successor.
       if (car.remarkAlias) continue;
       const payload = railcarPayloadFromCurrent(car.current, { needsReview: car.needsReview });
       const existingId = keyToId.get(car.carKey);

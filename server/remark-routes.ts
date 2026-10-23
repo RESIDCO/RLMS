@@ -4,6 +4,7 @@ import { requireUser, requireWrite } from "./auth";
 import { REMARK_CONFIRM, parseRemarkMatrix, parseRemarkText, type RemarkInputRow } from "@shared/remark-in-place";
 import { appendNotesInGroup, normalizeAppendNote, withNoteReport } from "./append-note";
 import { withChangeGroupResult } from "./change-log";
+import { remarkFailure } from "./remark-apply";
 import { applyRemarkInPlace, chooseRemarkItems, parseRemarkUpload, previewRemark } from "./remark-in-place";
 import { resolvePriorMarkCars } from "./prior-marks";
 
@@ -61,18 +62,16 @@ export function registerRemarkRoutes(app: Express) {
         changedBy: req.authUser?.email ?? writerId,
         actor: writerId,
       });
-      if (result.ok === false) {
-        const status = Array.isArray(result.conflicts) && result.conflicts.length ? 409 : 400;
-        return res.status(status).json({
-          message: String(result.error ?? "Remark failed"),
-          conflicts: result.conflicts ?? null,
-        });
-      }
+      const failed = remarkFailure(result);
+      if (failed) return res.status(failed.status).json(failed.body);
+      const newIds = (result.results ?? [])
+        .map((row) => Number(row.new_id))
+        .filter((n) => Number.isFinite(n) && n > 0);
       const noted = normalizeAppendNote(req.body?.append_note)
         ? await withChangeGroupResult(writerId, async () =>
             appendNotesInGroup({
               entityType: "railcar",
-              ids: selected.items.map((item) => item.id),
+              ids: newIds,
               note: req.body?.append_note,
               actor: writerId,
             }),

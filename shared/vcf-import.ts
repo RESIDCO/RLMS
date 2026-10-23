@@ -512,6 +512,9 @@ export function buildVcfReview(
     const prior = existingCars?.get(carKey);
     const manual = String(prior?.active_source ?? "").trim() === "manual";
     const frozen = isFrozenRailcar({ active: prior?.active, status: prior?.status });
+    // Alias applies only when this mark is not already a railcars row. A remark
+    // now leaves the old mark in place as an inactive row, so a later file hits
+    // that row (and the commit skips it) instead of following the alias.
     const alias = !exists ? remarkAliases?.get(carKey) : undefined;
     let remarkAlias: VcfRemarkAliasHit | null = null;
     if (alias === "ambiguous") {

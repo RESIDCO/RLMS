@@ -1,10 +1,10 @@
 /**
- * Bulk in-place remark. Does not call remark_railcars (retire-and-create).
- * Writes go through remark_railcars_in_place, which keeps the railcar id.
+ * Bulk remark preview. Apply goes through applyRemark (remark_railcars_apply).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
+import { applyRemark, type RemarkApplyResult } from "./remark-apply";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import {
@@ -117,15 +117,13 @@ export async function applyRemarkInPlace(input: {
   reason: string;
   changedBy: string;
   actor: string;
-}): Promise<Record<string, unknown>> {
-  const { data, error } = await supabaseAdmin.rpc("remark_railcars_in_place", {
-    p_items: input.items,
-    p_reason: input.reason,
-    p_changed_by: input.changedBy,
-    p_actor: input.actor,
+}): Promise<RemarkApplyResult> {
+  return applyRemark({
+    items: input.items,
+    reason: input.reason,
+    changedBy: input.changedBy,
+    actor: input.actor,
   });
-  if (error) throw error;
-  return (data ?? {}) as Record<string, unknown>;
 }
 
 export function chooseRemarkItems(preview: RemarkPreview, mode: "all" | "good") {

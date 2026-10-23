@@ -16,7 +16,8 @@ import { loadOlIdentity } from "./ol-identity";
 import { resolveRiderLabel } from "./rider-resolve";
 import { applyMove, previewMove } from "./move-cars";
 import { queryRailcars, queryRailcarIds, queryRailcarSummary, parseRailcarListParams, parseSearchScope, attachAccountManagerInitials, listCarsAssignedToRider } from "./railcar-list";
-import { conflictResponse, findCarNumberConflict, remarkConflictsHttp } from "./car-number-guard";
+import { conflictResponse, findCarNumberConflict } from "./car-number-guard";
+import { applyRemark, remarkFailure } from "./remark-apply";
 import { runGlobalSearch } from "./global-search";
 import { attachFocusColumns } from "./focus-columns";
 import { decoratePasteSearch } from "./search-focus";
@@ -2162,57 +2163,37 @@ export async function registerRoutes(
       if (!split.reporting_marks) {
         return res.status(400).json({ message: "Enter a mark and number (e.g. OFCX 349699)" });
       }
-      const { data, error } = await supabaseAdmin.rpc("remark_railcars", {
-        p_items: [{ id, reporting_marks: split.reporting_marks, car_number: split.car_number }],
-        p_reason: reason ?? null,
-        p_changed_by: changed_by ?? req.authUser?.email ?? "system",
+      const out = await applyRemark({
+        items: [{ id, reporting_marks: split.reporting_marks, car_number: split.car_number }],
+        reason: reason ?? null,
+        changedBy: changed_by ?? req.authUser?.email ?? writerId,
+        actor: writerId,
       });
-      if (error) throw error;
-      const out = data as {
-        ok?: boolean;
-        error?: string;
-        conflicts?: Parameters<typeof remarkConflictsHttp>[0];
-        results?: Array<Record<string, unknown>>;
-      };
-      if (!out?.ok) {
-        if (out?.conflicts?.length) {
-          const http = remarkConflictsHttp(out.conflicts);
-          return res.status(http.status).json(http.body);
-        }
-        return res.status(400).json({ message: out?.error || "Remark failed" });
-      }
+      const failed = remarkFailure(out);
+      if (failed) return res.status(failed.status).json(failed.body);
       const row = out.results?.[0] ?? {};
-      const payload = await withChangeGroupResult(writerId, async () => {
-        await recordNonUndoable({
-          table: "railcars",
-          pk: Number(row.old_id ?? id),
-          action: "mark_change",
-          entity_type: "railcar",
-          entity_id: Number(row.new_id ?? row.old_id ?? id),
-          railcar_id: Number(row.new_id ?? id),
-          actor: writerId,
-          reason: "remarks retire the old railcar row and create a new id via remark_railcars RPC; Phase 1 cannot restore identity in place",
-          detail: { old_id: row.old_id, new_id: row.new_id },
-        });
-        const newId = Number(row.new_id);
-        const noteReport = await appendNotesInGroup({
-          entityType: "railcar",
-          ids: Number.isFinite(newId) && newId > 0 ? [newId] : [],
-          note: req.body?.append_note,
-          actor: writerId,
-        });
-        return withNoteReport({
-          ok: true as const,
-          undoable: false as const,
-          old_id: row.old_id,
-          new_id: row.new_id,
-          old_car_initial: row.old_car_initial,
-          old_car_number: row.old_car_number,
-          new_car_initial: row.new_car_initial,
-          new_car_number: row.new_car_number,
-        }, req.body?.append_note, noteReport);
-      });
-      res.json(payload);
+      const newId = Number(row.new_id);
+      const noted = normalizeAppendNote(req.body?.append_note)
+        ? await withChangeGroupResult(writerId, async () =>
+            appendNotesInGroup({
+              entityType: "railcar",
+              ids: Number.isFinite(newId) && newId > 0 ? [newId] : [],
+              note: req.body?.append_note,
+              actor: writerId,
+            }),
+          )
+        : null;
+      res.json(withNoteReport({
+        ok: true as const,
+        undoable: true as const,
+        change_group: out.change_group,
+        old_id: row.old_id,
+        new_id: row.new_id,
+        old_car_initial: row.old_car_initial,
+        old_car_number: row.old_car_number,
+        new_car_initial: row.new_car_initial,
+        new_car_number: row.new_car_number,
+      }, req.body?.append_note, noted ?? { appended: [], skipped: [] }));
     } catch (err) { errHandler(res, err); }
   });
 
@@ -2239,55 +2220,32 @@ export async function registerRoutes(
       }
       if (!items.length) return res.status(400).json({ message: "No cars to remark" });
       await assertRailcarsWritable(items.map((item) => item.id));
-      const { data, error } = await supabaseAdmin.rpc("remark_railcars", {
-        p_items: items,
-        p_reason: reason,
-        p_changed_by: changed_by ?? req.authUser?.email ?? "system",
+      const out = await applyRemark({
+        items,
+        reason,
+        changedBy: changed_by ?? req.authUser?.email ?? writerId,
+        actor: writerId,
       });
-      if (error) throw error;
-      const out = data as {
-        ok?: boolean;
-        error?: string;
-        conflicts?: Parameters<typeof remarkConflictsHttp>[0];
-        results?: unknown[];
-      };
-      if (!out?.ok) {
-        if (out?.conflicts?.length) {
-          const http = remarkConflictsHttp(out.conflicts);
-          return res.status(http.status).json(http.body);
-        }
-        return res.status(400).json({ message: out?.error || "Remark failed" });
-      }
-      const payload = await withChangeGroupResult(writerId, async () => {
-        for (const row of (out.results ?? []) as Array<Record<string, unknown>>) {
-          await recordNonUndoable({
-            table: "railcars",
-            pk: Number(row.old_id ?? 0) || null,
-            action: "mark_change",
-            entity_type: "railcar",
-            entity_id: Number(row.new_id ?? row.old_id ?? 0),
-            railcar_id: Number(row.new_id ?? row.old_id ?? 0) || null,
-            actor: writerId,
-            reason: "remarks retire the old railcar row and create a new id via remark_railcars RPC; Phase 1 cannot restore identity in place",
-            detail: { old_id: row.old_id, new_id: row.new_id },
-          });
-        }
-        const newIds = ((out.results ?? []) as Array<Record<string, unknown>>)
-          .map((row) => Number(row.new_id))
-          .filter((n) => Number.isFinite(n) && n > 0);
-        const noteReport = await appendNotesInGroup({
-          entityType: "railcar",
-          ids: newIds,
-          note: req.body?.append_note,
-          actor: writerId,
-        });
-        return withNoteReport(
-          { ok: true as const, undoable: false as const, results: out.results ?? [] },
-          req.body?.append_note,
-          noteReport,
-        );
-      });
-      res.json(payload);
+      const failed = remarkFailure(out);
+      if (failed) return res.status(failed.status).json(failed.body);
+      const newIds = (out.results ?? [])
+        .map((row) => Number(row.new_id))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      const noted = normalizeAppendNote(req.body?.append_note)
+        ? await withChangeGroupResult(writerId, async () =>
+            appendNotesInGroup({
+              entityType: "railcar",
+              ids: newIds,
+              note: req.body?.append_note,
+              actor: writerId,
+            }),
+          )
+        : null;
+      res.json(withNoteReport(
+        { ok: true as const, undoable: true as const, change_group: out.change_group, results: out.results ?? [] },
+        req.body?.append_note,
+        noted ?? { appended: [], skipped: [] },
+      ));
     } catch (err) { errHandler(res, err); }
   });
 

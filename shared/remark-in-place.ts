@@ -1,11 +1,9 @@
 /**
- * In-place remark (same railcar id).
+ * Remark preview and parsing for the bulk tool.
  *
- * The car-detail Remark dialog and POST /api/railcars/bulk-change-number still
- * call remark_railcars, which retires the old row and inserts a new id.
- * This module is the bulk tool: it renames reporting_marks / car_initial on
- * the existing row, writes car_number_history, and records undoable
- * activity_log mark_change rows. It never reads or writes rent_events.
+ * Apply is server/remark-apply.ts → remark_railcars_apply. The old mark
+ * becomes an inactive row. The new mark is a new active id that keeps the
+ * lease. This module never reads or writes rent_events.
  */
 
 import { normalizeStoredCarNumber, splitCarNumber } from "./residco-import";
@@ -120,7 +118,7 @@ export function remarkIdentityKey(mark: string, number: string): string | null {
 }
 
 export function remarkHistoryReason(reason: string, changeGroup: string): string {
-  const base = reason.trim() || "Remark in place";
+  const base = reason.trim() || "Remark";
   return `${base}; ${REMARK_CHANGE_GROUP_MARKER}${changeGroup}`;
 }
 
@@ -434,9 +432,22 @@ export function classifyRemarkBatch(input: {
     }
     const occupants = (byKey.get(newKey) ?? []).filter((other) => other.id !== car!.id);
     if (occupants.length) {
-      return blankRow(row, "clash", `Target already exists: ${currentMark(occupants[0])} ${occupants[0].car_number}`, car, clashOf(occupants[0]));
+      const other = occupants[0];
+      const state = other.active === true ? "an active" : "an inactive";
+      return blankRow(
+        row,
+        "clash",
+        `Target ${currentMark(other)} ${other.car_number} already exists as ${state} car (record ${other.id}). Remark will not merge into it.`,
+        car,
+        clashOf(other),
+      );
     }
-    return blankRow(row, "ready", `Rename in place to ${row.new_mark} ${row.new_number}`, car);
+    return blankRow(
+      row,
+      "ready",
+      `Remark to ${row.new_mark} ${row.new_number}. The old mark stays inactive and the lease moves to the new car.`,
+      car,
+    );
   });
 
   const targetCount = new Map<string, number>();

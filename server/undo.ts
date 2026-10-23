@@ -7,7 +7,6 @@ import { fetchCanonicalObject, fetchCanonicalQuery } from "./postgrest-raw";
 import {
   UNDO_WINDOW_HOURS,
   changedSinceReason,
-  isUndoAllowedTable,
   nonUndoableMessage,
   opOf,
   REFERENCED_SINCE_MESSAGE,
@@ -20,6 +19,7 @@ import {
 import { assertLineInsertUndoHasNoOutsideFiles } from "./crm-bid-attachments";
 import { isDealCalcOnlyGroup } from "./crm-deal-calc";
 import { routeUndoGroup } from "@shared/dealCalcUndo";
+import { isRemarkRetireGroup, remarkUndoTableAllowed } from "@shared/remark-group";
 
 const CHANGE_GROUP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -110,12 +110,12 @@ export async function previewUndo(group: string, actor: string) {
       conflicts.push({ activity_id: r.id, table_name: r.table_name, row_pk: r.row_pk, reason: "missing table_name or row_pk" });
       continue;
     }
-    if (!isUndoAllowedTable(r.table_name)) {
+    if (!remarkUndoTableAllowed(r.table_name, rows)) {
       conflicts.push({ activity_id: r.id, table_name: r.table_name, row_pk: r.row_pk, reason: "table not undoable" });
       continue;
     }
     const op = opOf(r);
-    if (op === "insert") {
+    if (op === "insert" && !(isRemarkRetireGroup(rows) && r.table_name === "railcars")) {
       if ((REFERENCED_SINCE_TABLES as readonly string[]).includes(r.table_name)) {
         const { data: outside, error: outsideErr } = await supabaseAdmin.rpc("rlms_referenced_outside_group", {
           p_table: r.table_name,
@@ -202,7 +202,11 @@ export async function applyUndo(group: string, actor: string) {
     }
     return { ...result, preview, otherPreview };
   }
-  const rpcName = isDealCalcOnlyGroup(rowsBefore) ? "rlms_undo_deal_calc_group" : "rlms_undo_change_group";
+  const rpcName = isDealCalcOnlyGroup(rowsBefore)
+    ? "rlms_undo_deal_calc_group"
+    : isRemarkRetireGroup(rowsBefore)
+      ? "rlms_undo_remark_group"
+      : "rlms_undo_change_group";
   const { data, error } = await supabaseAdmin.rpc(rpcName, {
     p_group: group,
     p_actor: actor,

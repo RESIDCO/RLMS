@@ -2816,7 +2816,7 @@ function RemarkChangeDialog({
             <div className="font-mono font-semibold">{currentLabel || "—"}</div>
           </div>
           <p className="text-xs text-muted-foreground">
-            This retires the current mark and number as an inactive Off-Lease row and creates a new active car for the new identity. The lease assignment moves with the new row. Nothing is deleted.
+            This retires the current mark as an inactive Off-Lease row and creates a new active car. Lease dates, rent, assignment, ownership, commitments, and programs move with the new car. Rent events stay on the retired row. The remark can be undone.
           </p>
           <div>
             <Label>New Mark + Number <span className="text-destructive">*</span></Label>

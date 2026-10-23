@@ -144,8 +144,8 @@ export default function RemarkCars() {
     <div>
       <PageHeader
         title="Remark cars"
-        subtitle="Rename in place. The railcar id, programs, and commitments stay on the same record."
-        note="Active cars only. One Undo reverses the batch. The monthly VCF import treats an old mark plus number as this same car, so it will not create a duplicate."
+        subtitle="Retires the old mark as an inactive row and opens a new active car that keeps the lease, rent, assignment, commitments, and programs."
+        note="Active cars only. One Undo reverses the batch. Rent events stay on the retired row. A later VCF file matches the old mark to that inactive row and does not create a second car, and it does not copy the old-mark row onto the new car."
       />
       <div className="px-4 sm:px-8 py-6 max-w-6xl space-y-6">
         {!canEdit && (

@@ -1,5 +1,5 @@
 import { isFrozenRailcar } from "./car-lifecycle-status";
-import { assignmentRentStartOnMove, statusFromAssignmentLink } from "./commitment";
+import { assignmentRentStartOnMove, statusFromAssignmentLink, type RentStartMoveAction } from "./commitment";
 import { formatUsDate } from "./display-date";
 
 export type MoveDisposition = "move" | "left_alone";
@@ -37,6 +37,8 @@ export type MovePlanOptions = {
   typedLessee: string | null;
   dateSupplied: boolean;
   suppliedDate: string | null;
+  /** keep / clear / set. Omitted keeps the legacy same-rider rule. */
+  rentStartAction?: RentStartMoveAction | null;
   actor: string;
   movedAt: string;
 };
@@ -129,14 +131,48 @@ function sideStatus(input: {
 
 function rentImpact(
   disposition: MoveDisposition,
+  action: RentStartMoveAction | null,
   dateSupplied: boolean,
   sameRider: boolean,
   rentStart: string | null,
 ): string {
   if (disposition === "left_alone") return "left alone";
-  if (dateSupplied) return `set to ${formatUsDate(rentStart) || rentStart || "—"}`;
+  if (action === "keep") return rentStart ? `kept ${formatUsDate(rentStart) || rentStart}` : "kept";
+  if (action === "clear") return "cleared";
+  if (action === "set" || dateSupplied) return `set to ${formatUsDate(rentStart) || rentStart || "—"}`;
   if (sameRider) return "kept";
   return "cleared";
+}
+
+/** How a move request treats rent start. keep and clear ignore a stray date. */
+export function rentStartRequest(input: {
+  action?: RentStartMoveAction | null;
+  rentStartDate?: string | null;
+}): {
+  action: RentStartMoveAction | null;
+  dateSupplied: boolean;
+  suppliedDate: string | null;
+  error: string | null;
+} {
+  const action = input.action ?? null;
+  const supplied =
+    typeof input.rentStartDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.rentStartDate)
+      ? input.rentStartDate
+      : null;
+  switch (action) {
+    case "keep":
+    case "clear":
+      return { action, dateSupplied: false, suppliedDate: null, error: null };
+    case "set":
+      if (!supplied) return { action, dateSupplied: false, suppliedDate: null, error: "A rent start date is required" };
+      return { action, dateSupplied: true, suppliedDate: supplied, error: null };
+    case null:
+      return { action, dateSupplied: Boolean(supplied), suppliedDate: supplied, error: null };
+    default: {
+      const _never: never = action;
+      return _never;
+    }
+  }
 }
 
 function statusImpact(disposition: MoveDisposition, before: string, after: string | null): string {
@@ -188,6 +224,7 @@ export function planMoveCar(car: MovePlanCarInput, opts: MovePlanOptions): MoveP
     suppliedDate: opts.suppliedDate,
     actor: opts.actor,
     movedAt: opts.movedAt,
+    action: opts.rentStartAction ?? null,
   });
   const afterStatus = statusFromAssignmentLink({
     hasAssignment: true,
@@ -211,7 +248,7 @@ export function planMoveCar(car: MovePlanCarInput, opts: MovePlanOptions): MoveP
     left_alone_reason: null,
     before,
     after,
-    rent_start_impact: rentImpact("move", opts.dateSupplied, sameRider, rent.rent_start_date),
+    rent_start_impact: rentImpact("move", opts.rentStartAction ?? null, opts.dateSupplied, sameRider, rent.rent_start_date),
     status_impact: statusImpact("move", beforeStatus, afterStatus),
     assignment: {
       from_rider_id: car.from_rider_id ?? null,

@@ -5,6 +5,7 @@ import {
   moveActor,
   moveHistoryCapture,
   planMoveBatch,
+  rentStartRequest,
   resolveWillCreate,
   withCurrentAssignmentPointer,
 } from "./move-plan";
@@ -69,6 +70,33 @@ ok(plans[0].disposition === "move", "an active car is planned to move");
 ok(plans[0].before.rider_name === "OL100" && plans[0].after?.rider_name === "OL200", "preview shows before and after rider");
 ok(plans[0].after?.fleet_name === "Covia", "destination lessee is the after fleet");
 ok(plans[0].rent_start_impact.includes("10/20/2026"), "rent start impact names the supplied date");
+ok(rentStartRequest({ action: "keep", rentStartDate: "2026-10-20" }).dateSupplied === false, "keep does not count as a supplied date");
+const keptMove = planMoveBatch(
+  [
+    {
+      id: 8,
+      label: "HWCX 8",
+      found: true,
+      active: true,
+      from_rider_id: 10,
+      from_rider_name: "OL100",
+      from_fleet: "Old",
+      rent_start_date: "2024-01-01",
+      rent_start_set_by: "bruce",
+      assignment_id: 9,
+    },
+  ],
+  { ...opts, dateSupplied: false, suppliedDate: null, rentStartAction: "keep" },
+);
+ok(keptMove[0].assignment?.rent_start_date === "2024-01-01", "keep preserves rent start when the OL changes");
+ok(keptMove[0].rent_start_impact.startsWith("kept"), "preview names a kept rent start");
+ok(
+  planMoveBatch(
+    [{ id: 8, label: "HWCX 8", found: true, active: true, from_rider_id: 10, rent_start_date: "2024-01-01", assignment_id: 9 }],
+    { ...opts, dateSupplied: false, suppliedDate: null, rentStartAction: "clear" },
+  )[0].assignment?.rent_start_date === null,
+  "clear drops rent start on the move plan",
+);
 ok(plans[0].status_impact.length > 0, "status impact is present");
 ok(plans[1].disposition === "left_alone" && plans[1].left_alone_reason === "inactive", "inactive car is left alone");
 ok(plans[1].after == null, "a left-alone car has no after state");

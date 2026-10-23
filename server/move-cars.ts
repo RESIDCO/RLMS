@@ -4,6 +4,7 @@ import {
   allRequestedCarsInactive,
   moveHistoryCapture,
   planMoveBatch,
+  rentStartRequest,
   withCurrentAssignmentPointer,
   type MovePlanCarInput,
   type MovePlanRow,
@@ -124,7 +125,8 @@ async function buildPlans(input: MoveCarsInput, actor: string): Promise<{ plans:
   }
   const deriveOlLessee = !identity.is_sold && !identity.is_adhoc && !input.lessee_override && Boolean(identity.canonical_lessee);
   const olLessee = deriveOlLessee ? identity.canonical_lessee : null;
-  const dateSupplied = typeof input.rent_start_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.rent_start_date);
+  const rentStart = rentStartRequest({ action: input.rent_start_action ?? null, rentStartDate: input.rent_start_date });
+  if (rentStart.error) throw httpError(400, rentStart.error);
   const movedAt = effectiveDateToTimestamp(input.effective_date);
   const cars = await loadCars(input.car_ids);
   const planInputs: MovePlanCarInput[] = input.car_ids.map((id) => {
@@ -151,8 +153,9 @@ async function buildPlans(input: MoveCarsInput, actor: string): Promise<{ plans:
     toRiderName: identity.rider_name,
     olLessee,
     typedLessee,
-    dateSupplied,
-    suppliedDate: input.rent_start_date ?? null,
+    dateSupplied: rentStart.dateSupplied,
+    suppliedDate: rentStart.suppliedDate,
+    rentStartAction: rentStart.action,
     actor,
     movedAt,
   });

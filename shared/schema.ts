@@ -407,8 +407,17 @@ export const moveCarsSchema = z.object({
   moved_by: z.string().nullable().optional(),
   /** YYYY-MM-DD; omitted/today uses the current timestamp. Past dates backdate the audit trail. */
   effective_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  /** Explicit date. Omitted on a same-rider move keeps the existing date; a rider change clears it. */
+  /**
+   * Explicit date. Omitted on a same-rider move keeps the existing date; a rider change clears it.
+   * Ignored when rent_start_action is keep or clear.
+   */
   rent_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  /**
+   * keep preserves the current rent start across an OL change.
+   * clear drops it. set requires rent_start_date.
+   * Omitted uses the legacy same-rider rule above.
+   */
+  rent_start_action: z.enum(["keep", "clear", "set"]).optional(),
   /** When true, keep the client lessee instead of the OL's master-lease lessee. Requires reason. */
   lessee_override: z.boolean().optional(),
   /** Optional activity note. Appended; never written into railcars.notes by this field. */

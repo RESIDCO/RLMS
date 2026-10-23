@@ -108,6 +108,31 @@ const keep = assignmentRentStartOnMove({
 ok(keep.rent_start_date === "2020-01-01" && keep.priorDateNote === null, "same-OL fleet rename keeps rent start");
 const reset = assignmentRentStartOnMove({ fromRiderId: 10, toRiderId: 11, prevDate: "2020-01-01" });
 ok(reset.rent_start_date === null && reset.priorDateNote === "2020-01-01", "new OL without date clears rent start");
+const keptAcross = assignmentRentStartOnMove({
+  fromRiderId: 10,
+  toRiderId: 11,
+  prevDate: "2020-01-01",
+  prevSetBy: "bruce",
+  prevSetAt: "2026-01-01T00:00:00Z",
+  action: "keep",
+});
+ok(
+  keptAcross.rent_start_date === "2020-01-01" && keptAcross.rent_start_set_by === "bruce" && keptAcross.priorDateNote === null,
+  "keep preserves rent start across an OL change",
+);
+const clearedSame = assignmentRentStartOnMove({ fromRiderId: 10, toRiderId: 10, prevDate: "2020-01-01", action: "clear" });
+ok(clearedSame.rent_start_date === null && clearedSame.priorDateNote === "2020-01-01", "clear drops rent start even on the same OL");
+const setAcross = assignmentRentStartOnMove({
+  fromRiderId: 10,
+  toRiderId: 11,
+  prevDate: "2020-01-01",
+  action: "set",
+  dateSupplied: true,
+  suppliedDate: "2026-05-01",
+  actor: "ada",
+  movedAt: "2026-05-01T00:00:00Z",
+});
+ok(setAcross.rent_start_date === "2026-05-01" && setAcross.rent_start_set_by === "ada", "set writes the chosen rent start");
 ok(statusFromAssignmentLink({ hasAssignment: true, rider: "OL1917", rentStartDate: "2020-01-01", asOf: "2026-10-15" }) === "Leased", "new OL car with past rent start");
 const csvRows = parseCarDateRows("TFOX 000644,2024-10-18\nBAD\nTFOX 1,EA skip", "2026-01-01");
 ok(csvRows[0].date === "2024-10-18" && csvRows[0].number === "000644", "csv car,date");

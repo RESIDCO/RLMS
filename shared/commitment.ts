@@ -60,7 +60,17 @@ export function isOnRent(input: LinkInput): boolean {
   return false;
 }
 
-/** Same-rider moves keep the date unless a new one is explicitly supplied. */
+export type RentStartMoveAction = "keep" | "clear" | "set";
+
+function previousRentStart(prevDate: string | null | undefined): string | null {
+  return isoDateOnly(prevDate) ?? (prevDate ? String(prevDate).slice(0, 10) : null);
+}
+
+/**
+ * Same-rider moves keep the date unless a new one is explicitly supplied.
+ * An OL change clears it unless the caller chooses keep or set.
+ * keep preserves the date and who set it. clear drops it. set writes the supplied date.
+ */
 export function assignmentRentStartOnMove(input: {
   fromRiderId?: number | null;
   toRiderId: number;
@@ -71,25 +81,44 @@ export function assignmentRentStartOnMove(input: {
   suppliedDate?: string | null;
   actor?: string | null;
   movedAt?: string | null;
+  action?: RentStartMoveAction | null;
 }): {
   rent_start_date: string | null;
   rent_start_set_by: string | null;
   rent_start_set_at: string | null;
   priorDateNote: string | null;
 } {
-  const supplied = Boolean(input.dateSupplied) && Boolean(isoDateOnly(input.suppliedDate));
+  const prev = previousRentStart(input.prevDate);
   const sameRider = input.fromRiderId != null && Number(input.fromRiderId) === Number(input.toRiderId);
-  if (supplied) {
+  const action = input.action ?? null;
+  if (action === "keep") {
+    return {
+      rent_start_date: prev,
+      rent_start_set_by: input.prevSetBy ?? null,
+      rent_start_set_at: input.prevSetAt ?? null,
+      priorDateNote: null,
+    };
+  }
+  if (action === "clear") {
+    return {
+      rent_start_date: null,
+      rent_start_set_by: null,
+      rent_start_set_at: null,
+      priorDateNote: prev,
+    };
+  }
+  const supplied = Boolean(input.dateSupplied) && Boolean(isoDateOnly(input.suppliedDate));
+  if (action === "set" || supplied) {
     return {
       rent_start_date: isoDateOnly(input.suppliedDate),
       rent_start_set_by: input.actor ?? "system",
       rent_start_set_at: input.movedAt ?? null,
-      priorDateNote: sameRider ? null : isoDateOnly(input.prevDate),
+      priorDateNote: sameRider ? null : prev,
     };
   }
   if (sameRider) {
     return {
-      rent_start_date: isoDateOnly(input.prevDate) ?? (input.prevDate ? String(input.prevDate).slice(0, 10) : null),
+      rent_start_date: prev,
       rent_start_set_by: input.prevSetBy ?? null,
       rent_start_set_at: input.prevSetAt ?? null,
       priorDateNote: null,
@@ -99,7 +128,7 @@ export function assignmentRentStartOnMove(input: {
     rent_start_date: null,
     rent_start_set_by: null,
     rent_start_set_at: null,
-    priorDateNote: isoDateOnly(input.prevDate) ?? (input.prevDate ? String(input.prevDate).slice(0, 10) : null),
+    priorDateNote: prev,
   };
 }
 

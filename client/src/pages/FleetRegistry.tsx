@@ -14,7 +14,7 @@ import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
 import { RAILCARS_HANDOFF_KEY, markSearchRefresh } from "@/lib/searchState";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
-import { ReassignCarForm } from "@/components/ReassignCarForm";
+import { MoveCarToOlForm } from "@/components/ReassignCarForm";
 import { MoveCarsDialog } from "@/components/MoveCarsDialog";
 import { idsEligibleForMove } from "@shared/move-plan";
 import { fleetMoveSource } from "@shared/move-legacy";
@@ -46,7 +46,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Image, ClipboardList, ExternalLink } from "lucide-react";
+import { Plus, Pencil, ArrowUpDown, ChevronRight, ChevronLeft, Wrench, Hash, CheckSquare, Square, X as XIcon, ChevronDown, Download, Image, ClipboardList, ExternalLink } from "lucide-react";
 import { FormerlyBadge } from "@/components/FormerlyBadge";
 import ClearableSearchInput from "@/components/ClearableSearchInput";
 import { searchPagePath } from "@/lib/search-query";
@@ -73,6 +73,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { apiRequest, apiGet, asRailcarList, queryClient, railcarsQs } from "@/lib/queryClient";
 import { confirmRiderEntityMismatch } from "@/lib/rider-entity-confirm";
@@ -91,7 +92,7 @@ import PhotoFinderPanel, { carsToPasteText } from "@/components/PhotoFinderPanel
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AddNoteField, appendNoteBody, noteSkipDescription } from "@/components/AddNoteField";
 import { LastNoteCell } from "@/components/LastNoteCell";
-import { confirmDelete, confirmSave, confirmSaveWithNote, confirmWithReason } from "@/components/ConfirmActionDialog";
+import { confirmSave, confirmSaveWithNote, confirmWithReason } from "@/components/ConfirmActionDialog";
 import { lastNoteForRow, lastNoteSortKey } from "@shared/lineage-notes";
 import { LeaseGlanceSheet } from "@/components/LeaseGlanceSheet";
 import { glanceRiderFromCar, type LeaseGlanceRider } from "@/lib/glance-rider";
@@ -102,6 +103,12 @@ import {
   isInactiveCarStatus,
 } from "@shared/car-lifecycle-status";
 import { INACTIVATE_BATCH_MAX } from "@shared/inactivate-cars";
+import {
+  carPanelStatus,
+  carPanelStatusLabel,
+  flagsFromCommitmentPayload,
+  type CarPanelStatus,
+} from "@shared/car-detail-panel";
 import { InactivateCarsDialog } from "@/pages/railcars/InactivateCarsDialog";
 import { PasteSearchBar } from "@/pages/railcars/PasteSearchBar";
 import { BulkEditDrawer } from "@/pages/railcars/BulkEditDrawer";
@@ -2059,31 +2066,15 @@ export function RailcarDetailSheet({
 }: {
   carId: number | null;
   onClose: () => void;
-  /** Context-gated: hide Edit / Change Number / Delete and the edit form. Not a role check. */
+  /** Context-gated: hide Edit / Change number / Move and the edit form. Not a role check. */
   readOnly?: boolean;
   /** Same-tab car page link. Falls back to opening a new tab. */
   carPageHref?: string;
 }) {
   const canEdit = useCanEdit() && !readOnly;
-  const { toast } = useToast();
   const [editCar, setEditCar] = useState<Row | null>(null);
   const [viewId, setViewId] = useState<number | null>(carId);
   useEffect(() => { setViewId(carId); }, [carId]);
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/railcars/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      void invalidateFleetQueries(queryClient);
-      toast({ title: "Railcar deleted" });
-      onClose();
-    },
-    onError: (e: Error) =>
-      toast({ title: "Cannot delete", description: e.message, variant: "destructive" }),
-  });
 
   return (
     <>
@@ -2093,7 +2084,6 @@ export function RailcarDetailSheet({
             <CarDetail
               carId={viewId}
               onEdit={readOnly ? () => {} : (car) => setEditCar(car)}
-              onDelete={readOnly ? () => {} : () => deleteMutation.mutate(viewId)}
               canEdit={canEdit}
               showCarPageLink={!readOnly || Boolean(carPageHref)}
               carPageHref={carPageHref}
@@ -2114,10 +2104,26 @@ export function RailcarDetailSheet({
   );
 }
 
+function statusChipClass(status: CarPanelStatus): string {
+  switch (status) {
+    case "on_rent":
+      return "bg-[hsl(var(--success))]/15 text-[hsl(var(--success))] border-[hsl(var(--success))]/30";
+    case "idle":
+      return "bg-amber-500/15 text-amber-800 border-amber-500/30 dark:text-amber-300";
+    case "awaiting_rent_start":
+      return "bg-sky-500/15 text-sky-800 border-sky-500/30 dark:text-sky-300";
+    case "off_rent":
+      return "bg-muted text-muted-foreground border-border";
+    default: {
+      const _never: never = status;
+      return _never;
+    }
+  }
+}
+
 export function CarDetail({
   carId,
   onEdit,
-  onDelete,
   canEdit,
   showCarPageLink = true,
   carPageHref,
@@ -2126,7 +2132,6 @@ export function CarDetail({
 }: {
   carId: number;
   onEdit: (car: RailcarWithAssignment) => void;
-  onDelete: () => void;
   canEdit: boolean;
   /** Hide when already on `#/cars/:id`. */
   showCarPageLink?: boolean;
@@ -2153,9 +2158,14 @@ export function CarDetail({
     queryKey: ["/api/railcars", carId],
   });
 
-  // Riders list for the assign dropdown (cached from parent's query)
+  // Riders list for the move combobox (cached from the parent's query)
   const { data: ridersData } = useQuery<any[]>({ queryKey: ["/api/riders"] });
   const allRiders: any[] = ridersData ?? [];
+  const { data: commitment } = useQuery<any>({
+    queryKey: ["/api/commitments/car", carId],
+    queryFn: () => apiGet<any>(`/api/commitments/car/${carId}`),
+    enabled: Number.isFinite(carId) && carId > 0,
+  });
 
   // Rent events for this car
   const { data: rentEventsData } = useQuery<any[]>({
@@ -2201,28 +2211,119 @@ export function CarDetail({
     );
   }
   const r = data.railcar;
+  const assignment = Array.isArray((r as any).assignment) ? (r as any).assignment[0] : r.assignment;
+  const currentRiderRaw = Number(assignment?.rider_id ?? assignment?.rider?.id);
+  const currentRiderId = Number.isFinite(currentRiderRaw) && currentRiderRaw > 0 ? currentRiderRaw : null;
+  const currentRiderName = String(assignment?.rider?.rider_name || (r as any).rider_external_id || commitment?.ol || "").trim();
+  const currentRentStart = assignment?.rent_start_date ?? commitment?.rent_start_date ?? null;
+  const panelFlags = flagsFromCommitmentPayload(commitment);
+  const panelStatus: CarPanelStatus | null = panelFlags ? carPanelStatus(panelFlags) : null;
+  const typeLine = [
+    r.car_type,
+    (r as any).equipment_type_code,
+    (r as any).mechanical_designation,
+  ].filter(Boolean).join(" · ");
+
+  const heading = (
+    <div data-testid="car-panel-header">
+      <div className="flex items-center gap-2 mb-1">
+        {showCarPageLink ? <span className="font-eyebrow">Railcar Detail</span> : null}
+        <EntityBadge entity={(r as any).entity} size="lg" />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {showCarPageLink ? (
+          <SheetTitle className="font-mono-num whitespace-nowrap">{formatCarId(r)}</SheetTitle>
+        ) : (
+          <h2 className="font-mono-num text-lg font-semibold whitespace-nowrap">{formatCarId(r)}</h2>
+        )}
+        {panelStatus ? (
+          <span
+            data-testid="car-status-chip"
+            className={cn(
+              "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+              statusChipClass(panelStatus),
+            )}
+          >
+            {carPanelStatusLabel(panelFlags!)}
+          </span>
+        ) : null}
+        <span data-testid="car-header-ol" className="text-sm text-muted-foreground">
+          {currentRiderName || "Unassigned"}
+        </span>
+      </div>
+      {showCarPageLink ? (
+        <SheetDescription>{typeLine || "—"}</SheetDescription>
+      ) : (
+        <p className="text-sm text-muted-foreground">{typeLine || "—"}</p>
+      )}
+    </div>
+  );
 
   return (
     <div>
-      {showCarPageLink ? (
-        <SheetHeader>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-eyebrow">Railcar Detail</span>
-            <EntityBadge entity={(r as any).entity} size="lg" />
-          </div>
-          <SheetTitle className="font-mono-num whitespace-nowrap">{formatCarId(r)}</SheetTitle>
-          <SheetDescription>
-            {r.car_type ?? "—"}
-            {(r as any).equipment_type_code ? ` · ${(r as any).equipment_type_code}` : ""}
-            {(r as any).mechanical_designation ? ` · ${(r as any).mechanical_designation}` : ""}
-          </SheetDescription>
-        </SheetHeader>
-      ) : null}
+      {showCarPageLink ? <SheetHeader>{heading}</SheetHeader> : heading}
 
-      {/* Sold banner */}
-      <div className="mt-4">
-        <CommitmentPanel carId={carId} />
+      <div className="flex gap-2 mt-4 flex-wrap items-center">
+        {showCarPageLink && carPageHref && (
+          <Button size="sm" variant="outline" asChild>
+            <Link href={carPageHref} data-testid="button-open-car-page">
+              <ExternalLink className="h-3.5 w-3.5" />
+              Car page
+            </Link>
+          </Button>
+        )}
+        {showCarPageLink && !carPageHref && (
+          <Button size="sm" variant="outline" onClick={() => openAppTab(carPath(r.id))} data-testid="button-open-car-page">
+            <ExternalLink className="h-3.5 w-3.5" />
+            Car page
+          </Button>
+        )}
+        {allowEdits && (
+          <Button size="sm" variant="secondary" onClick={() => onEdit(data.railcar)} data-testid="button-edit-car">
+            <Pencil className="h-4 w-4" />
+            Edit details
+          </Button>
+        )}
+        {allowEdits && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setAssignOpen((open) => !open)}
+            data-testid="btn-open-assign"
+          >
+            Move to another OL
+          </Button>
+        )}
+        {allowEdits && r.active === true && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" aria-label="More actions" data-testid="button-car-more">
+                ⋯
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setRemarkOpen(true)} data-testid="button-change-number">
+                <Hash className="h-3.5 w-3.5" />
+                Change number
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
+
+      {allowEdits && assignOpen && (
+        <div className="mt-4">
+          <MoveCarToOlForm
+            carId={carId}
+            currentRiderId={currentRiderId}
+            currentRiderName={currentRiderName}
+            currentRentStart={currentRentStart}
+            carEntity={r.entity}
+            riders={allRiders}
+            onCancel={() => setAssignOpen(false)}
+          />
+        </div>
+      )}
 
       {(r as any).sold_to && (
         <div className="mt-4 rounded-md border border-umler-amber/30 bg-umler-amber/10 px-4 py-3">
@@ -2249,7 +2350,6 @@ export function CarDetail({
         </div>
       )}
 
-      {/* Transit / repair banner */}
       {r.transit_status && (
         <div className="mt-4 rounded-md border border-umler-signal/30 bg-umler-signal/10 px-4 py-3">
           <div className="flex items-center gap-2 text-xs font-medium text-umler-signal">
@@ -2269,51 +2369,8 @@ export function CarDetail({
         </div>
       )}
 
-      <div className="flex gap-2 mt-4 flex-wrap">
-        {showCarPageLink && carPageHref && (
-          <Button size="sm" variant="outline" asChild>
-            <Link href={carPageHref} data-testid="button-open-car-page">
-              <ExternalLink className="h-3.5 w-3.5" />
-              Car page
-            </Link>
-          </Button>
-        )}
-        {showCarPageLink && !carPageHref && (
-          <Button size="sm" variant="outline" onClick={() => openAppTab(carPath(r.id))} data-testid="button-open-car-page">
-            <ExternalLink className="h-3.5 w-3.5" />
-            Car page
-          </Button>
-        )}
-        {allowEdits && (
-          <Button size="sm" variant="secondary" onClick={() => onEdit(data.railcar)} data-testid="button-edit-car">
-            <Pencil className="h-4 w-4" />
-            Edit
-          </Button>
-        )}
-        {allowEdits && r.active === true && (
-          <Button size="sm" variant="outline" onClick={() => setRemarkOpen(true)}>
-            <Hash className="h-3.5 w-3.5" />
-            Change Number
-          </Button>
-        )}
-        {allowEdits && (
-          <Button
-            size="sm"
-            variant="destructive"
-            data-testid="button-delete-car"
-            onClick={async () => {
-              const mark = [r.reporting_marks, r.car_number].filter(Boolean).join(" ");
-              const ok = await confirmDelete({
-                title: `Delete railcar ${mark}?`,
-                description: "This cannot be undone. Cars with active assignments cannot be deleted.",
-              });
-              if (ok) onDelete();
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </Button>
-        )}
+      <div className="mt-4">
+        <CommitmentPanel carId={carId} />
       </div>
 
       {/* Entity ownership — prominent section */}
@@ -2456,39 +2513,19 @@ export function CarDetail({
         )}
       </div>
 
-      {/* Assign / Reassign panel */}
-      {allowEdits && (
-        <div className="mt-4">
-          {!assignOpen ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={() => setAssignOpen(true)}
-              data-testid="btn-open-assign"
-            >
-              {r.assignment ? "Reassign to Different Rider" : "Assign to Rider"}
-            </Button>
-          ) : (
-            <ReassignCarForm
-              carId={carId}
-              isReassign={Boolean(r.assignment)}
-              initialRiderName={r.assignment?.rider?.rider_name ?? ""}
-              initialLessee={r.assignment?.fleet_name ?? r.lessee_name ?? ""}
-              carEntity={r.entity}
-              riders={allRiders}
-              onCancel={() => setAssignOpen(false)}
-            />
-          )}
-        </div>
-      )}
-
-      <div className="mt-6">
+      <Collapsible className="mt-6 border-t border-border pt-5">
+        <CollapsibleTrigger
+          className="flex w-full items-center justify-between text-left"
+          data-testid="rent-history-toggle"
+        >
+          <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Rent history</span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-3 space-y-4">
         <RentStopsCard carId={carId} canEdit={allowEdits} />
-      </div>
 
-      {/* ── Legacy rent_events log (unchanged; not car_rent_stops) ── */}
-      <div className="mt-6 border-t border-border pt-5">
+      {/* Legacy rent_events log. Not car_rent_stops. */}
+      <div>
         <div className="flex items-center justify-between mb-3">
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             On / Off Rent
@@ -2588,6 +2625,8 @@ export function CarDetail({
           </div>
         )}
       </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <ActivityTimeline railcarId={carId} canEdit={allowEdits} title="Activity" />
 

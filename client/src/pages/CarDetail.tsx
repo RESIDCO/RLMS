@@ -3,17 +3,15 @@ import { useHashSearch } from "@/lib/hash-location";
 import { KPI_TITLES } from "@shared/kpi-buckets";
 import { formatCarId } from "@shared/residco-import";
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
-import { invalidateFleetQueries } from "@/lib/fleetQueryRefresh";
 import { formatCalendarDate } from "@shared/lease-authority";
 import { fmtUsd } from "@/lib/dv/format";
 import { useCanEdit } from "@/lib/AuthContext";
-import { useToast } from "@/hooks/use-toast";
 import { ChevronRight, Calculator, ArrowLeft } from "lucide-react";
 import { CATEGORY_BADGE, STATUS_LABEL, type ProgramStatus } from "@shared/programs";
 import {
@@ -42,8 +40,6 @@ export default function CarDetailPage() {
   const [, navigate] = useLocation();
   const searchQs = useHashSearch();
   const canEdit = useCanEdit();
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [editCar, setEditCar] = useState<any | null>(null);
 
   const [direct, directP] = useRoute("/cars/:id");
@@ -66,21 +62,6 @@ export default function CarDetailPage() {
     queryKey: ["/api/railcars", id, "programs"],
     queryFn: () => apiRequest("GET", `/api/railcars/${id}/programs`).then((r) => r.json()),
     enabled: Number.isFinite(id) && id > 0,
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("DELETE", `/api/railcars/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/railcars"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      void invalidateFleetQueries(queryClient);
-      toast({ title: "Railcar deleted" });
-      navigate("/railcars");
-    },
-    onError: (e: Error) =>
-      toast({ title: "Cannot delete", description: e.message, variant: "destructive" }),
   });
 
   const r = data?.railcar;
@@ -223,7 +204,6 @@ export default function CarDetailPage() {
                 canEdit={canEdit}
                 showCarPageLink={false}
                 onEdit={(car) => setEditCar(car)}
-                onDelete={() => deleteMutation.mutate()}
                 onRemarked={(newId) => navigate(`/cars/${newId}`)}
               />
             </div>

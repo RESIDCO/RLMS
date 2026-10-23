@@ -5,24 +5,16 @@ import { appendNotesInGroup, withNoteReport } from "./append-note";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { parseCarListText } from "@shared/commitment";
 import { formatCarId } from "@shared/residco-import";
+import {
+  offRentRowStopDate,
+  parseOffRentPaste,
+  rentStopReasonFields,
+} from "@shared/rent-stops";
 import { annotateKpiDelta } from "./kpi-delta";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 
-const STOP_TYPES = ["Abatement", "Off rent"] as const;
-const REASONS = ["quality repair", "goodwill", "damage", "dispute", "other"] as const;
-
-type StopType = (typeof STOP_TYPES)[number];
-type StopReason = (typeof REASONS)[number];
-
 function errHandler(res: Response, e: any) {
   res.status(e?.status || 500).json({ message: e?.message || "Error", code: e?.code });
-}
-
-function isType(v: unknown): v is StopType {
-  return STOP_TYPES.includes(String(v) as StopType);
-}
-function isReason(v: unknown): v is StopReason {
-  return REASONS.includes(String(v) as StopReason);
 }
 
 async function loadCar(id: number) {
@@ -85,8 +77,8 @@ export async function setAbatement(railcarId: number, body: any, actor: string) 
   const assignment = await latestAssignment(railcarId);
   const stopDate = String(body.stop_date ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(stopDate)) throw Object.assign(new Error("stop_date must be YYYY-MM-DD"), { status: 400 });
-  const reason = body.reason;
-  if (!isReason(reason)) throw Object.assign(new Error("invalid reason"), { status: 400 });
+  const fields = rentStopReasonFields(body, { strict: true });
+  const reason = fields.reason;
   const { data, error } = await supabaseAdmin
     .from("car_rent_stops")
     .insert({
@@ -99,8 +91,8 @@ export async function setAbatement(railcarId: number, body: any, actor: string) 
       stop_date: stopDate,
       expected_resume_date: body.expected_resume_date || null,
       reason,
-      reason_other: body.reason_other ?? null,
-      note: body.note ?? null,
+      reason_other: fields.reason_other,
+      note: fields.note,
       created_by: actor,
     })
     .select()
@@ -116,7 +108,7 @@ export async function setAbatement(railcarId: number, body: any, actor: string) 
     entity_id: railcarId,
     railcar_id: railcarId,
     actor,
-    detail: { type: "Abatement", stop_date: stopDate, reason, expected_resume_date: body.expected_resume_date || null },
+    detail: { type: "Abatement", stop_date: stopDate, reason, reason_other: fields.reason_other, note: fields.note, expected_resume_date: body.expected_resume_date || null },
     source: "ui",
     source_table: "car_rent_stops",
     source_id: Number(data.id),
@@ -138,7 +130,8 @@ export async function setOffRent(railcarId: number, body: any, actor: string) {
   const assignment = await latestAssignment(railcarId);
   const stopDate = String(body.stop_date ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(stopDate)) throw Object.assign(new Error("stop_date must be YYYY-MM-DD"), { status: 400 });
-  const reason = isReason(body.reason) ? body.reason : "other";
+  const fields = rentStopReasonFields(body);
+  const reason = fields.reason;
   const { data, error } = await supabaseAdmin
     .from("car_rent_stops")
     .insert({
@@ -151,8 +144,8 @@ export async function setOffRent(railcarId: number, body: any, actor: string) {
       stop_date: stopDate,
       expected_resume_date: body.expected_resume_date || null,
       reason,
-      reason_other: body.reason_other ?? null,
-      note: body.note ?? null,
+      reason_other: fields.reason_other,
+      note: fields.note,
       created_by: actor,
     })
     .select()
@@ -168,7 +161,7 @@ export async function setOffRent(railcarId: number, body: any, actor: string) {
     entity_id: railcarId,
     railcar_id: railcarId,
     actor,
-    detail: { type: "Off rent", stop_date: stopDate, reason, reason_other: body.reason_other ?? null },
+    detail: { type: "Off rent", stop_date: stopDate, reason, reason_other: fields.reason_other, note: fields.note },
     source: "ui",
     source_table: "car_rent_stops",
     source_id: Number(data.id),
@@ -236,6 +229,11 @@ async function convertToOffRent(railcarId: number, actor: string, body: any) {
     source_id: Number(existing.id),
   });
   const assignment = await latestAssignment(railcarId);
+  const fields = rentStopReasonFields({
+    reason: body.reason ?? existing.reason,
+    reason_other: body.reason_other ?? existing.reason_other,
+    note: body.note ?? existing.note,
+  });
   const { data, error } = await supabaseAdmin
     .from("car_rent_stops")
     .insert({
@@ -247,9 +245,9 @@ async function convertToOffRent(railcarId: number, actor: string, body: any) {
       type: "Off rent",
       stop_date: body.stop_date || today,
       expected_resume_date: body.expected_resume_date || null,
-      reason: isReason(body.reason) ? body.reason : existing.reason,
-      reason_other: body.reason_other ?? existing.reason_other,
-      note: body.note ?? existing.note,
+      reason: fields.reason,
+      reason_other: fields.reason_other,
+      note: fields.note,
       created_by: actor,
       converted_from_id: existing.id,
     })
@@ -272,6 +270,32 @@ async function convertToOffRent(railcarId: number, actor: string, body: any) {
     source_id: Number(data.id),
   });
   return data;
+}
+
+type BulkStopKind = "off_rent" | "resume" | "convert" | "abatement";
+
+function bulkStopKind(raw: string): BulkStopKind {
+  if (raw === "Off rent" || raw === "off_rent") return "off_rent";
+  if (raw === "resume") return "resume";
+  if (raw === "convert") return "convert";
+  return "abatement";
+}
+
+function bulkStopLabels(kind: BulkStopKind): { actionLabel: string; storedAction: string } {
+  switch (kind) {
+    case "off_rent":
+      return { actionLabel: "Off rent", storedAction: "Off rent" };
+    case "resume":
+      return { actionLabel: "Resume", storedAction: "resume" };
+    case "convert":
+      return { actionLabel: "Convert to off rent", storedAction: "convert" };
+    case "abatement":
+      return { actionLabel: "Abatement", storedAction: "Abatement" };
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`Unknown rent stop action ${String(exhaustive)}`);
+    }
+  }
 }
 
 export function registerRentStopRoutes(
@@ -368,18 +392,22 @@ export function registerRentStopRoutes(
     try {
       const actor = await requireWrite(req, res);
       if (!actor) return;
-      const action = String(req.body?.action ?? req.body?.type ?? "abatement");
-      const stopType: StopType = action === "Off rent" || action === "off_rent" ? "Off rent" : "Abatement";
+      const kind = bulkStopKind(String(req.body?.action ?? req.body?.type ?? "abatement"));
+      const { actionLabel, storedAction } = bulkStopLabels(kind);
       const text = String(req.body?.text ?? "");
       const idsIn = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n: number) => n > 0) : [];
-      const rowsIn: { car?: string; id?: number; stop_date?: string; note?: string }[] = Array.isArray(req.body?.rows)
+      let rowsIn: { car?: string; id?: number; stop_date?: string | null; note?: string | null }[] = Array.isArray(req.body?.rows)
         ? req.body.rows
         : [];
-      const parsed = text ? parseCarListText(text) : [];
+      if (!rowsIn.length && text) {
+        const dated = parseOffRentPaste(text);
+        if (dated.some((row) => row.stop_date || row.note)) rowsIn = dated;
+      }
+      const parsed = text && !rowsIn.length ? parseCarListText(text) : [];
       const rejected: any[] = [];
       const warnings: any[] = [];
       let ids = idsIn;
-      const dateById = new Map<number, { stop_date?: string; note?: string }>();
+      const dateById = new Map<number, { stop_date?: string | null; note?: string | null }>();
       if (rowsIn.length) {
         for (const row of rowsIn) {
           const raw = String(row.car ?? "").trim();
@@ -388,8 +416,13 @@ export function registerRentStopRoutes(
             rejected.push({ car: raw || row.id, reason: "not_found" });
             continue;
           }
-          ids.push(...found);
-          dateById.set(found[0], { stop_date: row.stop_date, note: row.note });
+          if (found.length > 1) {
+            rejected.push({ car: raw, reason: "ambiguous" });
+            continue;
+          }
+          const id = found[0];
+          ids.push(id);
+          dateById.set(id, { stop_date: row.stop_date, note: row.note });
         }
       }
       if (!ids.length) {
@@ -401,8 +434,14 @@ export function registerRentStopRoutes(
         }
       }
       const today = new Date().toISOString().slice(0, 10);
+      const fields = rentStopReasonFields(req.body ?? {});
+      const needsDate = kind === "off_rent" || kind === "abatement";
       const toWrite: any[] = [];
-      for (const id of [...new Set(ids)]) {
+      const seenIds = new Set<number>();
+      for (let index = 0; index < ids.length; index += 1) {
+        const id = ids[index];
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
         const car = await loadCar(id);
         if (!car) {
           rejected.push({ id, reason: "not_found" });
@@ -413,7 +452,7 @@ export function registerRentStopRoutes(
           continue;
         }
         const existing = await openStop(id);
-        if (existing) {
+        if (existing && kind !== "resume" && kind !== "convert") {
           rejected.push({
             id,
             car: formatCarId(car),
@@ -421,8 +460,20 @@ export function registerRentStopRoutes(
           });
           continue;
         }
+        if ((kind === "resume" || kind === "convert") && !existing) {
+          rejected.push({ id, car: formatCarId(car), reason: "no open stop" });
+          continue;
+        }
+        if (kind === "convert" && existing?.type !== "Abatement") {
+          rejected.push({ id, car: formatCarId(car), reason: "Open abatement required to convert" });
+          continue;
+        }
         const per = dateById.get(id);
-        const stopDate = String(per?.stop_date ?? req.body?.stop_date ?? "").slice(0, 10);
+        const stopDate = offRentRowStopDate(per?.stop_date, req.body?.stop_date);
+        if (needsDate && !stopDate) {
+          rejected.push({ id, car: formatCarId(car), reason: "stop_date required" });
+          continue;
+        }
         const { data: startRow } = await supabaseAdmin
           .from("railcars")
           .select("id, lease_start_date")
@@ -435,25 +486,34 @@ export function registerRentStopRoutes(
         if (stopDate && stopDate > today) {
           warnings.push({ id, car: formatCarId(car), reason: "date after today", stop_date: stopDate });
         }
+        const rowNote = String(per?.note ?? "").trim();
         toWrite.push({
           id: car.id,
           car: formatCarId(car),
           ol: car.rider_external_id,
           lessee: car.lessee_name,
-          action: stopType,
+          action: actionLabel,
           stop_date: stopDate || null,
-          reason: req.body?.reason ?? null,
-          reason_other: req.body?.reason_other ?? null,
-          note: per?.note ?? req.body?.note ?? null,
+          reason: fields.reason,
+          reason_other: fields.reason_other,
+          note: rowNote || fields.note,
           expected_resume_date: req.body?.expected_resume_date ?? null,
         });
       }
-      const token = await putPreview("rent_stop", { action: stopType, toWrite, body: req.body ?? {}, warnings });
-      const kpi_delta = await annotateKpiDelta(
-        toWrite.map((r) => r.id),
-        { kind: "abatement" },
-        req.body?.bucket ?? null,
-      );
+      const storedBody = {
+        ...(req.body ?? {}),
+        reason: fields.reason,
+        reason_other: fields.reason_other,
+        note: fields.note,
+      };
+      const token = await putPreview("rent_stop", { action: storedAction, toWrite, body: storedBody, warnings });
+      const kpi_delta = kind === "abatement"
+        ? await annotateKpiDelta(
+          toWrite.map((r) => r.id),
+          { kind: "abatement" },
+          req.body?.bucket ?? null,
+        )
+        : null;
       res.json({ preview_token: token, to_write: toWrite, rejected, warnings, kpi_delta });
     } catch (e) {
       errHandler(res, e);
@@ -468,7 +528,12 @@ export function registerRentStopRoutes(
         const snap = await getPreview("rent_stop", String(req.body?.preview_token ?? ""));
         const written: any[] = [];
         for (const row of snap.toWrite ?? []) {
-          const body = { ...(snap.body ?? {}), stop_date: row.stop_date ?? snap.body?.stop_date, note: row.note ?? snap.body?.note };
+          const rowNote = String(row.note ?? "").trim();
+          const body = {
+            ...(snap.body ?? {}),
+            stop_date: row.stop_date ?? snap.body?.stop_date,
+            note: rowNote || snap.body?.note || null,
+          };
           if (snap.action === "resume") written.push(await resumeStop(row.id, actor, snap.body?.actual_resume_date));
           else if (snap.action === "convert") written.push(await convertToOffRent(row.id, actor, body));
           else if (snap.action === "Off rent" || snap.action === "off_rent") written.push(await setOffRent(row.id, body, actor));

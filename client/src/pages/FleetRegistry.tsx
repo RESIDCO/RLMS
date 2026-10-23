@@ -20,6 +20,8 @@ import {
 import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
 import { RAILCARS_HANDOFF_KEY, markSearchRefresh } from "@/lib/searchState";
+import { OFF_RENT_PASTE_STORAGE_KEY } from "@shared/rent-stops";
+import { FOCUS_COLUMN_LABELS, layoutNeedsFocus } from "@shared/saved-views";
 import { RiderFreeTextInput, resolveRiderLabel } from "@/components/RiderFreeTextInput";
 import { MoveCarToOlForm } from "@/components/ReassignCarForm";
 import { MoveCarsDialog } from "@/components/MoveCarsDialog";
@@ -212,6 +214,16 @@ const FR_WIDTHS: Record<string, number> = {
   lease: 110,
   expires: 110,
   latest_note: 200,
+  open_stop_type: 110,
+  open_stop_since: 110,
+  open_stop_days: 90,
+  open_stop_expected: 120,
+  open_stop_reason: 180,
+  open_stop_note: 180,
+  scrapped_at: 110,
+  program_name: 180,
+  tags: 140,
+  umler_status: 120,
   _actions: 40,
 };
 
@@ -354,6 +366,24 @@ function renderOptTd(key: string, r: any) {
       );
     case "latest_note":
       return <LastNoteCell key={key} row={r} className={text} />;
+    case "tags": {
+      const tags = Array.isArray(r.tags) ? r.tags.join(", ") : r.tags;
+      return <td key={key} className={`${text} max-w-[160px] truncate`}>{tags || "—"}</td>;
+    }
+    case "program_name": {
+      const extra = Number(r.program_extra) > 0 ? ` +${r.program_extra}` : "";
+      return <td key={key} className={`${text} max-w-[180px] truncate`}>{`${r.program_name || "—"}${extra}`}</td>;
+    }
+    case "open_stop_days":
+      return <td key={key} className={num}>{r.open_stop_days ?? "—"}</td>;
+    case "open_stop_type":
+    case "open_stop_since":
+    case "open_stop_expected":
+    case "open_stop_reason":
+    case "open_stop_note":
+    case "scrapped_at":
+    case "umler_status":
+      return <td key={key} className={`${text} max-w-[180px] truncate`} title={r[key] || ""}>{r[key] || "—"}</td>;
     default:
       return <td key={key} className={text}>—</td>;
   }
@@ -573,7 +603,9 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     | "commodity" | "commodity_family"
     | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
     | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials" | "am_note"
-    | "latest_note";
+    | "latest_note"
+    | "open_stop_type" | "open_stop_since" | "open_stop_days" | "open_stop_expected" | "open_stop_reason" | "open_stop_note"
+    | "scrapped_at" | "program_name" | "tags" | "umler_status";
   const OPT_COLS: { key: OptCol; label: string }[] = [
     { key: "nbv",                 label: "NBV" },
     { key: "oac",                 label: "OAC" },
@@ -598,7 +630,17 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     { key: "account_manager_initials", label: "Acct Mgr" },
     { key: "am_note", label: "Latest AM Note" },
     { key: "comment_event_note",  label: "Comment / Event Note" },
-    { key: "latest_note", label: "Last note" },
+    { key: "latest_note", label: FOCUS_COLUMN_LABELS.latest_note },
+    { key: "open_stop_type", label: FOCUS_COLUMN_LABELS.open_stop_type },
+    { key: "open_stop_since", label: FOCUS_COLUMN_LABELS.open_stop_since },
+    { key: "open_stop_days", label: FOCUS_COLUMN_LABELS.open_stop_days },
+    { key: "open_stop_expected", label: FOCUS_COLUMN_LABELS.open_stop_expected },
+    { key: "open_stop_reason", label: FOCUS_COLUMN_LABELS.open_stop_reason },
+    { key: "open_stop_note", label: FOCUS_COLUMN_LABELS.open_stop_note },
+    { key: "scrapped_at", label: FOCUS_COLUMN_LABELS.scrapped_at },
+    { key: "program_name", label: FOCUS_COLUMN_LABELS.program_name },
+    { key: "tags", label: FOCUS_COLUMN_LABELS.tags },
+    { key: "umler_status", label: FOCUS_COLUMN_LABELS.umler_status },
   ];
   const colPrefs = useColumnPrefs("fleet_registry", FR_DEFAULT_COLS);
   const {
@@ -636,6 +678,7 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
     batch: turning50Year || batchFilter === "all" ? undefined : batchFilter,
     needs_completion: turning50Year || needsCompletionFilter === "all" ? undefined : needsCompletionFilter,
     flag: pasteMatch || turning50Year || carLookup || flagFilter === "all" ? undefined : flagFilter,
+    focus: layoutNeedsFocus(tableCols) ? 1 : undefined,
   };
 
   type RailcarPage = { rows: Row[]; total_count: number; page: number; pageSize: number };
@@ -1574,6 +1617,35 @@ export default function FleetRegistry({ scopedRiderId }: { scopedRiderId?: numbe
                 data-testid="bulk-workbench"
               >
                 Bulk edit…
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void (async () => {
+                    let selected = filtered.filter((r) => selectedIds.has(r.id));
+                    if (selected.length < selectedIds.size) {
+                      try {
+                        const all = await loadAllFilteredRailcars();
+                        selected = all.filter((r) => selectedIds.has(r.id));
+                      } catch {
+                        /* keep the cars already on this page */
+                      }
+                    }
+                    const lines = selected
+                      .map((r) => [r.reporting_marks, r.car_number].filter(Boolean).join(" "))
+                      .filter(Boolean);
+                    try {
+                      if (lines.length) sessionStorage.setItem(OFF_RENT_PASTE_STORAGE_KEY, lines.join("\n"));
+                    } catch {
+                      /* private mode */
+                    }
+                    navigateHash("/rent-stops/bulk?action=off_rent");
+                  })();
+                }}
+                data-testid="bulk-off-rent"
+              >
+                Bulk off rent…
               </Button>
               <Button
                 variant="ghost"

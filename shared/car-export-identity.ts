@@ -284,6 +284,7 @@ export const RAILCAR_EXPORT_KEYS = [
   "open_stop_days",
   "open_stop_expected",
   "open_stop_reason",
+  "open_stop_note",
   "program_name",
   "program_status",
   "program_milestone",

@@ -67,6 +67,7 @@ const RAILCAR_CSV_DEFS: CsvCol[] = [
   { key: "open_stop_days", header: "Days stopped", get: (r) => r.open_stop_days != null ? String(r.open_stop_days) : "" },
   { key: "open_stop_expected", header: "Expected resume", get: (r) => str(r.open_stop_expected) },
   { key: "open_stop_reason", header: "Stop reason", get: (r) => str(r.open_stop_reason) },
+  { key: "open_stop_note", header: "Stop note", get: (r) => str(r.open_stop_note) },
   { key: "program_name", header: "Program", get: (r) => str(r.program_name) },
   { key: "program_status", header: "Program status", get: (r) => str(r.program_status) },
   { key: "program_milestone", header: "Milestone", get: (r) => [r.program_milestone, r.program_milestone_at].filter(Boolean).join(" ") },

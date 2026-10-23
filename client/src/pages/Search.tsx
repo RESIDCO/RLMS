@@ -124,7 +124,7 @@ type OptCol =
   | "commodity" | "commodity_family"
   | "dot_code" | "lease_expiry" | "lease_start_date" | "lease_end_date"
   | "data_source" | "active" | "comment_event_note" | "rider_external_id" | "account_manager_initials" | "am_note"
-  | "open_stop_type" | "open_stop_since" | "open_stop_days" | "open_stop_expected" | "open_stop_reason"
+  | "open_stop_type" | "open_stop_since" | "open_stop_days" | "open_stop_expected" | "open_stop_reason" | "open_stop_note"
   | "program_name" | "program_status" | "program_milestone" | "program_note"
   | "scrapped_at" | "umler_status" | "latest_note" | "tags" | "view_note";
 
@@ -157,6 +157,7 @@ const OPT_COLS: { key: OptCol; label: string }[] = [
   { key: "open_stop_days", label: FOCUS_COLUMN_LABELS.open_stop_days },
   { key: "open_stop_expected", label: FOCUS_COLUMN_LABELS.open_stop_expected },
   { key: "open_stop_reason", label: FOCUS_COLUMN_LABELS.open_stop_reason },
+  { key: "open_stop_note", label: FOCUS_COLUMN_LABELS.open_stop_note },
   { key: "program_name", label: FOCUS_COLUMN_LABELS.program_name },
   { key: "program_status", label: FOCUS_COLUMN_LABELS.program_status },
   { key: "program_milestone", label: FOCUS_COLUMN_LABELS.program_milestone },
@@ -201,6 +202,7 @@ const WIDTHS: Record<string, number> = {
   open_stop_days: 90,
   open_stop_expected: 120,
   open_stop_reason: 160,
+  open_stop_note: 180,
   program_name: 180,
   program_status: 180,
   program_milestone: 140,
@@ -306,6 +308,7 @@ function renderOptTd(key: string, r: any, compact = false) {
     case "open_stop_type":
     case "open_stop_since":
     case "open_stop_expected":
+    case "open_stop_note":
     case "program_status":
     case "program_note":
     case "scrapped_at":

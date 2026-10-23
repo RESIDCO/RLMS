@@ -31,7 +31,7 @@ if (!PG_BIN) {
 const root = mkdtempSync(join(tmpdir(), "remark-unified-pg-"));
 const data = join(root, "data");
 const sock = root;
-const port = "55441";
+const port = "55447";
 const migration = join(import.meta.dirname, "../migrations/20261125_remark_unified.sql");
 
 function bin(name: string): string {
@@ -216,6 +216,26 @@ VALUES (1, 1, 'Off rent', '2026-01-01', 'other');
 INSERT INTO public.attachments (entity_type, entity_id, file_name) VALUES ('railcar', 1, 'lease.pdf');
 INSERT INTO public.rent_events (car_id, event_type, event_date, reason) VALUES (1, 'on_rent', '2020-01-15', 'start');
 INSERT INTO public.car_status_history (car_id) VALUES (1);
+ALTER TABLE public.program_cars
+  ADD CONSTRAINT program_cars_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE CASCADE;
+ALTER TABLE public.car_tags
+  ADD CONSTRAINT car_tags_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE CASCADE;
+ALTER TABLE public.car_list_members
+  ADD CONSTRAINT car_list_members_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE CASCADE;
+ALTER TABLE public.car_rent_stops
+  ADD CONSTRAINT car_rent_stops_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE CASCADE;
+ALTER TABLE public.car_number_history
+  ADD CONSTRAINT car_number_history_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE CASCADE;
+ALTER TABLE public.rent_events
+  ADD CONSTRAINT rent_events_car_fkey FOREIGN KEY (car_id) REFERENCES public.railcars(id) ON DELETE CASCADE;
+ALTER TABLE public.car_status_history
+  ADD CONSTRAINT car_status_history_car_fkey FOREIGN KEY (car_id) REFERENCES public.railcars(id) ON DELETE CASCADE;
+ALTER TABLE public.assignment_history
+  ADD CONSTRAINT assignment_history_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE RESTRICT;
+ALTER TABLE public.railcar_assignments
+  ADD CONSTRAINT railcar_assignments_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE RESTRICT;
+ALTER TABLE public.car_commitments
+  ADD CONSTRAINT car_commitments_railcar_fkey FOREIGN KEY (railcar_id) REFERENCES public.railcars(id) ON DELETE RESTRICT;
 `;
 
 const HELPERS = `
@@ -261,6 +281,54 @@ BEGIN
   EXECUTE stmt USING p_patch, p_id;
 END;
 $fn$;
+
+CREATE OR REPLACE FUNCTION public.rlms_fk_outside_group(p_table text, p_column text, p_id bigint, p_group uuid)
+RETURNS boolean LANGUAGE plpgsql STABLE AS $fn$
+DECLARE
+  hit boolean;
+BEGIN
+  -- sentinel remark-unified-test-fk
+  IF p_id IS NULL THEN RETURN false; END IF;
+  IF p_table NOT IN (
+    'master_leases', 'account_transition_records', 'companies', 'crm_activities',
+    'opportunities', 'programs', 'company_contacts', 'company_fleet_stats',
+    'company_products', 'contact_company_dedup_candidates', 'contact_lease_links',
+    'opportunity_contacts', 'opportunity_lines'
+  ) THEN
+    RAISE EXCEPTION 'referenced-since: table % is not checked', p_table;
+  END IF;
+  IF p_column NOT IN (
+    'account_id', 'company_id', 'contact_id', 'company_contact_id',
+    'family_parent_id', 'merged_into_id', 'agent_home_company_id',
+    'company_id_a', 'company_id_b', 'opportunity_id'
+  ) THEN
+    RAISE EXCEPTION 'referenced-since: column % is not checked', p_column;
+  END IF;
+  EXECUTE format(
+    'select exists (
+       select 1 from public.%I t
+       where t.%I = $1
+         and not exists (
+           select 1 from public.activity_log a
+           where a.change_group = $2 and a.table_name = %L and a.row_pk = t.id
+         )
+     )',
+    p_table, p_column, p_table
+  ) INTO hit USING p_id, p_group;
+  RETURN coalesce(hit, false);
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION public.rlms_referenced_outside_group(p_table text, p_id bigint, p_group uuid)
+RETURNS boolean LANGUAGE plpgsql STABLE AS $fn$
+BEGIN
+  -- sentinel remark-unified-test-referenced
+  IF p_table = 'railcars' THEN
+    RETURN false;
+  END IF;
+  RETURN false;
+END;
+$fn$;
 `;
 
 try {
@@ -276,6 +344,14 @@ try {
   ok(
     psql("SELECT position('sentinel remark-unified-test-patcher' in prosrc) > 0 FROM pg_proc WHERE proname = 'rlms_apply_jsonb_patch'") === "t",
     "migration leaves the patch function in place",
+  );
+  ok(
+    psql("SELECT position('sentinel remark-unified-test-fk' in prosrc) > 0 FROM pg_proc WHERE proname = 'rlms_fk_outside_group'") === "t",
+    "migration leaves rlms_fk_outside_group in place",
+  );
+  ok(
+    psql("SELECT position('sentinel remark-unified-test-referenced' in prosrc) > 0 FROM pg_proc WHERE proname = 'rlms_referenced_outside_group'") === "t",
+    "migration leaves rlms_referenced_outside_group in place",
   );
   ok(psql("SELECT count(*) FROM pg_proc WHERE proname = 'rlms_undo_change_group'") === "0", "migration does not create rlms_undo_change_group");
   ok(
@@ -361,6 +437,7 @@ try {
   );
   ok(psql("SELECT reporting_marks FROM public.railcars WHERE id = 3") === "KCS", "a car outside the batch is unchanged");
 
+  psql(`INSERT INTO public.car_number_history (railcar_id, old_car_number, new_car_number, reason) VALUES (1, '999999', '310001', 'decoy change_group ${group}')`);
   const undone = JSON.parse(psql(`SELECT public.rlms_undo_remark_group('${group}'::uuid, 'user-1')::text`)) as { ok: boolean; history_removed: number };
   ok(undone.ok === true && undone.history_removed === 2, "undo removes the remark history");
   ok(psql("SELECT reporting_marks || '|' || active::text || '|' || status || '|' || monthly_rent_per_car::text FROM public.railcars WHERE id = 1") === "KCS|true|Active/In-Service|1250.50", "undo restores the original car");
@@ -372,9 +449,59 @@ try {
   ok(psql("SELECT count(*) FROM public.assignment_history WHERE reason = 'Remark assignment copy'") === "0", "undo deletes the copied period");
   ok(psql("SELECT car_id::text || '|' || count(*)::text FROM public.rent_events GROUP BY car_id") === "1|1", "undo does not touch rent events");
   ok(psql("SELECT count(*) FROM public.railcars WHERE id = 2 AND reporting_marks = 'KCS' AND active IS TRUE") === "1", "the second car in the batch is restored too");
+  ok(psql(`SELECT count(*) FROM public.car_number_history WHERE reason = 'decoy change_group ${group}'`) === "1", "undo leaves a history row that only matches the reason text");
 
   const again = JSON.parse(psql(`SELECT public.rlms_undo_remark_group('${group}'::uuid, 'user-1')::text`)) as { ok: boolean; error: string };
   ok(again.ok === false && again.error === "already_undone", "a second undo is refused");
+
+  const remarked = JSON.parse(psql(`
+    SELECT public.remark_railcars_apply(
+      jsonb_build_array(jsonb_build_object('id', 1, 'reporting_marks', 'OFOX', 'car_number', '410001')),
+      'later', 'editor@example.com', 'user-1', NULL
+    )::text
+  `)) as { ok: boolean; change_group: string; results: Array<{ new_id: number }> };
+  ok(remarked.ok === true, "a second remark applies");
+  const laterId = remarked.results[0].new_id;
+  const laterGroup = remarked.change_group;
+  psql(`INSERT INTO public.program_cars (program_id, railcar_id) VALUES (8, ${laterId})`);
+  psql(`INSERT INTO public.car_tags (railcar_id, tag) VALUES (${laterId}, 'later')`);
+  psql(`INSERT INTO public.car_list_members (list_id, railcar_id) VALUES (6, ${laterId})`);
+  psql(`INSERT INTO public.car_rent_stops (railcar_id, type, stop_date, reason) VALUES (${laterId}, 'Off rent', '2026-10-01', 'later')`);
+  const blockedChild = JSON.parse(psql(`SELECT public.rlms_undo_remark_group('${laterGroup}'::uuid, 'user-1')::text`)) as { ok: boolean; message: string };
+  ok(
+    blockedChild.ok === false && blockedChild.message.includes("program membership") && blockedChild.message.includes("will not delete"),
+    "undo refuses a program membership added after the remark",
+  );
+  ok(psql(`SELECT count(*) FROM public.railcars WHERE id = ${laterId}`) === "1", "refusing undo keeps the new car");
+  ok(psql(`SELECT count(*) FROM public.program_cars WHERE railcar_id = ${laterId}`) === "2", "the later program row is not cascade-deleted");
+  ok(psql(`SELECT count(*) FROM public.car_tags WHERE tag = 'later'`) === "1", "the later tag is not cascade-deleted");
+  ok(psql(`SELECT count(*) FROM public.car_list_members WHERE list_id = 6`) === "1", "the later list item is not cascade-deleted");
+  ok(psql(`SELECT count(*) FROM public.car_rent_stops WHERE reason = 'later'`) === "1", "the later rent stop is not cascade-deleted");
+  ok(psql("SELECT active::text FROM public.railcars WHERE id = 1") === "false", "a refused undo leaves the retired car inactive");
+
+  psql("DELETE FROM public.program_cars WHERE program_id = 8");
+  psql("DELETE FROM public.car_tags WHERE tag = 'later'");
+  psql("DELETE FROM public.car_list_members WHERE list_id = 6");
+  psql("DELETE FROM public.car_rent_stops WHERE reason = 'later'");
+  psql(`INSERT INTO public.assignment_history (railcar_id, start_date, active, reason) VALUES (${laterId}, '2026-10-01', true, 'later move')`);
+  const blockedHistory = JSON.parse(psql(`SELECT public.rlms_undo_remark_group('${laterGroup}'::uuid, 'user-1')::text`)) as { ok: boolean; message: string };
+  ok(
+    blockedHistory.ok === false &&
+      blockedHistory.message.includes("assignment history was added on the new car after the remark") &&
+      blockedHistory.message.includes("will not delete it"),
+    "undo names a later assignment history row",
+  );
+  ok(psql(`SELECT count(*) FROM public.assignment_history WHERE reason = 'later move'`) === "1", "the later history row stays");
+  ok(psql(`SELECT count(*) FROM public.railcars WHERE id = ${laterId}`) === "1", "assignment history blocks deletion of the new car");
+
+  psql("DELETE FROM public.assignment_history WHERE reason = 'later move'");
+  psql(`INSERT INTO public.railcar_assignments (railcar_id, rider_id, fleet_name) VALUES (${laterId}, 90, 'Later fleet')`);
+  const blockedAssignment = JSON.parse(psql(`SELECT public.rlms_undo_remark_group('${laterGroup}'::uuid, 'user-1')::text`)) as { ok: boolean; message: string };
+  ok(
+    blockedAssignment.ok === false && blockedAssignment.message.includes("an assignment was added on the new car after the remark"),
+    "undo names a later assignment row",
+  );
+  ok(psql("SELECT count(*) FROM public.railcar_assignments WHERE fleet_name = 'Later fleet'") === "1", "the later assignment stays");
 } catch (err) {
   failed += 1;
   console.error("FAIL", err instanceof Error ? err.message : err);

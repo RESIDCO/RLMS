@@ -5,7 +5,13 @@ import { readFileSync } from "node:fs";
 import { skipVcfRailcarPatch } from "./vcf-assignment-closeout";
 import { buildVcfReview } from "./vcf-import";
 import { classifyRemarkBatch, type RemarkCarRecord } from "./remark-in-place";
-import { isRemarkRetireGroup, remarkUndoTableAllowed } from "./remark-group";
+import {
+  firstOutsideRecordId,
+  frozenFkOutsideUnchecked,
+  isRemarkRetireGroup,
+  remarkOutsideUndoMessage,
+  remarkUndoTableAllowed,
+} from "./remark-group";
 
 let passed = 0;
 let failed = 0;
@@ -51,6 +57,28 @@ ok(remarkRoutes.includes("applyRemarkInPlace") && remarkRoutes.includes("remarkF
 ok(!remarkRoutes.includes("remark_railcars_in_place"), "bulk route does not call the old RPC");
 ok(applySrc.includes("remark_railcars_apply"), "server apply calls the shared function");
 ok(undoSrc.includes("rlms_undo_remark_group") && undoSrc.includes("isRemarkRetireGroup"), "undo routes a remark group to its own function");
+ok(sql.includes("public.rlms_referenced_outside_group("), "undo calls rlms_referenced_outside_group");
+ok(sql.includes("public.rlms_fk_outside_group("), "undo calls rlms_fk_outside_group");
+ok(sql.includes("assignment history was added on the new car after the remark"), "a later assignment history row gets a clear refusal");
+ok(sql.includes("an assignment was added on the new car after the remark"), "a later assignment row gets a clear refusal");
+ok(!sql.includes("reason LIKE"), "history is deleted by the logged row id, not by reason text");
+ok(
+  undoSrc.includes('rpc("rlms_referenced_outside_group"') && undoSrc.includes('rpc("rlms_fk_outside_group"'),
+  "undo preview calls both frozen reference checks",
+);
+ok(firstOutsideRecordId([4, 9], [4]) === 9, "a child row logged in the group is not an outside reference");
+ok(firstOutsideRecordId([4], [4]) == null, "only logged child rows do not block");
+ok(frozenFkOutsideUnchecked("referenced-since: table program_cars is not checked"), "the frozen table refusal is recognized");
+ok(!frozenFkOutsideUnchecked("function public.rlms_fk_outside_group does not exist"), "a missing function is not treated as an empty check");
+ok(
+  remarkOutsideUndoMessage("assignment history", 12).includes("record 12") &&
+    remarkOutsideUndoMessage("assignment history", 12).includes("will not delete it"),
+  "preview names the later assignment history row",
+);
+ok(
+  remarkOutsideUndoMessage("a program membership", 7).includes("program membership"),
+  "preview names a later program membership",
+);
 
 ok(
   isRemarkRetireGroup([{ action: "mark_change", table_name: "railcars", detail: { op: "insert" } }]),

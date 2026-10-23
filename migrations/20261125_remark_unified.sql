@@ -8,9 +8,22 @@
 -- Does not replace the frozen functions:
 --   rlms_apply_jsonb_patch, rlms_undo_change_group,
 --   rlms_referenced_outside_group, rlms_fk_outside_group.
--- Undo of a remark goes through rlms_undo_remark_group. A direct call to
--- rlms_undo_change_group refuses the group (car_number_history is not an
--- undoable table) and writes nothing.
+-- Undo of a remark goes through rlms_undo_remark_group. It calls
+-- rlms_referenced_outside_group and rlms_fk_outside_group and does not
+-- replace them. rlms_fk_outside_group only accepts CRM tables; for a railcar
+-- child it raises "referenced-since: table … is not checked". The remark
+-- undo catches that and applies the same "row id is not in this change
+-- group" predicate itself. A direct call to rlms_undo_change_group refuses
+-- the group (car_number_history is not an undoable table) and writes nothing.
+--
+-- Undo deletes the inserted railcar only after every logged child has been
+-- moved or deleted. If anything outside the change group still references
+-- the new id (program membership, rent stop, tag, list item, assignment,
+-- assignment history, and the other children below), undo returns a 409 and
+-- writes nothing. Deleting the railcar would CASCADE program_cars,
+-- car_rent_stops, car_tags, car_list_members, car_number_history,
+-- car_status_history, and rent_events. car_number_history rows this remark
+-- inserted are deleted by the logged row id only.
 --
 -- Tables written by remark_railcars_apply:
 --   railcars                  old row deactivated (lease/rent columns kept);
@@ -36,7 +49,10 @@
 --                             rent_events; this function never deletes a railcar
 --                             that existed before the remark. Undo deletes only
 --                             the railcar id this remark inserted, and only when
---                             that id has zero rent_events.
+--                             that id has no remaining references. A child
+--                             row logged in the change group is restored
+--                             first. A child row that is not in the group
+--                             blocks the undo.
 --   car_status_history        stays on the retired id
 --   railcar_ab_items          stays on the retired id
 --   dv_calculations           stays on the retired id
@@ -582,6 +598,226 @@ AS $fn$
   SELECT public.remark_railcars_apply(p_items, p_reason, p_changed_by, p_actor, NULL);
 $fn$;
 
+-- Row id of a child that points at p_id and is not logged in p_group.
+-- Calls rlms_fk_outside_group first. That function raises for railcar
+-- children; the handler then uses the same predicate on the railcar allowlist.
+CREATE OR REPLACE FUNCTION public.remark_outside_row(
+  p_table text,
+  p_column text,
+  p_id bigint,
+  p_group uuid
+) RETURNS bigint
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public
+AS $fn$
+DECLARE
+  hit boolean;
+  found bigint;
+  msg text;
+BEGIN
+  IF p_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+  BEGIN
+    hit := public.rlms_fk_outside_group(p_table, p_column, p_id, p_group);
+  EXCEPTION
+    WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+      IF msg NOT LIKE 'referenced-since:%' THEN
+        RAISE;
+      END IF;
+      hit := NULL;
+  END;
+  IF hit IS FALSE THEN
+    RETURN NULL;
+  END IF;
+  IF hit IS TRUE THEN
+    EXECUTE format(
+      'SELECT min(t.id) FROM public.%I t
+        WHERE t.%I = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM public.activity_log a
+             WHERE a.change_group = $2
+               AND a.table_name = %L
+               AND a.row_pk = t.id
+          )',
+      p_table, p_column, p_table
+    ) INTO found USING p_id, p_group;
+    RETURN found;
+  END IF;
+  IF p_table = 'activity_log' AND p_column = 'railcar_id' THEN
+    SELECT min(t.id) INTO found
+      FROM public.activity_log t
+     WHERE t.railcar_id = p_id
+       AND t.change_group IS DISTINCT FROM p_group;
+    RETURN found;
+  END IF;
+  IF p_table = 'attachments' AND p_column = 'entity_id' THEN
+    SELECT min(t.id) INTO found
+      FROM public.attachments t
+     WHERE t.entity_type = 'railcar'
+       AND t.entity_id = p_id
+       AND NOT EXISTS (
+         SELECT 1 FROM public.activity_log a
+          WHERE a.change_group = p_group
+            AND a.table_name = 'attachments'
+            AND a.row_pk = t.id
+       );
+    RETURN found;
+  END IF;
+  IF p_table NOT IN (
+    'program_cars', 'car_rent_stops', 'car_tags', 'car_list_members',
+    'car_commitments', 'railcar_assignments', 'assignment_history',
+    'car_number_history', 'car_status_history', 'railcar_ab_items',
+    'dv_calculations', 'program_activity', 'rent_events'
+  ) OR p_column NOT IN ('railcar_id', 'car_id') THEN
+    RAISE EXCEPTION 'remark undo: table % column % is not checked', p_table, p_column;
+  END IF;
+  EXECUTE format(
+    'SELECT min(t.id) FROM public.%I t
+      WHERE t.%I = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM public.activity_log a
+           WHERE a.change_group = $2
+             AND a.table_name = %L
+             AND a.row_pk = t.id
+        )',
+    p_table, p_column, p_table
+  ) INTO found USING p_id, p_group;
+  RETURN found;
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION public.remark_new_car_block_message(p_id bigint, p_group uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ VOLATILE
+ SECURITY DEFINER
+ SET search_path TO public
+AS $fn$
+DECLARE
+  spec record;
+  found bigint;
+BEGIN
+  -- activity_log is not in this list. It is ON DELETE SET NULL, and a note
+  -- saved with the remark is a later group that still points at the new id.
+  -- Treating that as a block would make the remark impossible to undo.
+  -- The group's own activity rows are re-pointed to the old id before delete.
+  IF public.rlms_referenced_outside_group('railcars', p_id, p_group) THEN
+    RETURN 'Undo refused: the new car was referenced after the remark.';
+  END IF;
+  FOR spec IN
+    SELECT * FROM (VALUES
+      ('rent_events', 'car_id', 'rent event'),
+      ('railcar_assignments', 'railcar_id', 'assignment'),
+      ('assignment_history', 'railcar_id', 'assignment history'),
+      ('program_cars', 'railcar_id', 'a program membership'),
+      ('car_rent_stops', 'railcar_id', 'a rent stop'),
+      ('car_tags', 'railcar_id', 'a tag'),
+      ('car_list_members', 'railcar_id', 'a list item'),
+      ('car_commitments', 'railcar_id', 'a commitment'),
+      ('car_number_history', 'railcar_id', 'car number history'),
+      ('car_status_history', 'car_id', 'status history'),
+      ('railcar_ab_items', 'railcar_id', 'an A/B item'),
+      ('dv_calculations', 'railcar_id', 'a DV calculation'),
+      ('program_activity', 'railcar_id', 'program activity'),
+      ('attachments', 'entity_id', 'an attachment')
+    ) AS t(tbl, col, label)
+  LOOP
+    found := public.remark_outside_row(spec.tbl, spec.col, p_id, p_group);
+    IF found IS NULL THEN
+      CONTINUE;
+    END IF;
+    IF spec.label = 'rent event' THEN
+      RETURN 'Undo refused: a rent event is attached to the new car. Remark does not delete rent events.';
+    ELSIF spec.label = 'assignment' THEN
+      RETURN format(
+        'Undo refused: an assignment was added on the new car after the remark (record %s). Undo will not delete it.',
+        found
+      );
+    ELSIF spec.label = 'assignment history' THEN
+      RETURN format(
+        'Undo refused: assignment history was added on the new car after the remark (record %s). Undo will not delete it.',
+        found
+      );
+    ELSE
+      RETURN format(
+        'Undo refused: %s on the new car is outside this change (record %s). Undo will not delete it.',
+        spec.label, found
+      );
+    END IF;
+  END LOOP;
+  RETURN NULL;
+END;
+$fn$;
+
+-- Any remaining pointer, including rows this group logged. Used after those
+-- rows have been moved or deleted, so a hit means delete would cascade.
+CREATE OR REPLACE FUNCTION public.remark_remaining_ref_message(p_id bigint)
+ RETURNS text
+ LANGUAGE plpgsql
+ VOLATILE
+ SECURITY DEFINER
+ SET search_path TO public
+AS $fn$
+DECLARE
+  spec record;
+  found bigint;
+BEGIN
+  FOR spec IN
+    SELECT * FROM (VALUES
+      ('rent_events', 'car_id', 'rent event'),
+      ('railcar_assignments', 'railcar_id', 'assignment'),
+      ('assignment_history', 'railcar_id', 'assignment history'),
+      ('program_cars', 'railcar_id', 'a program membership'),
+      ('car_rent_stops', 'railcar_id', 'a rent stop'),
+      ('car_tags', 'railcar_id', 'a tag'),
+      ('car_list_members', 'railcar_id', 'a list item'),
+      ('car_commitments', 'railcar_id', 'a commitment'),
+      ('car_number_history', 'railcar_id', 'car number history'),
+      ('car_status_history', 'car_id', 'status history'),
+      ('railcar_ab_items', 'railcar_id', 'an A/B item'),
+      ('dv_calculations', 'railcar_id', 'a DV calculation'),
+      ('program_activity', 'railcar_id', 'program activity'),
+      ('attachments', 'entity_id', 'an attachment')
+    ) AS t(tbl, col, label)
+  LOOP
+    IF spec.tbl = 'attachments' THEN
+      SELECT min(t.id) INTO found
+        FROM public.attachments t
+       WHERE t.entity_type = 'railcar' AND t.entity_id = p_id;
+    ELSE
+      EXECUTE format('SELECT min(t.id) FROM public.%I t WHERE t.%I = $1', spec.tbl, spec.col)
+        INTO found USING p_id;
+    END IF;
+    IF found IS NULL THEN
+      CONTINUE;
+    END IF;
+    IF spec.label = 'rent event' THEN
+      RETURN 'remark undo blocked: a rent event is attached to the new car. Remark does not delete rent events.';
+    ELSIF spec.label = 'assignment history' THEN
+      RETURN format(
+        'remark undo blocked: assignment history on the new car (record %s) would be removed with the car. Undo will not delete it.',
+        found
+      );
+    ELSIF spec.label = 'assignment' THEN
+      RETURN format(
+        'remark undo blocked: an assignment on the new car (record %s) would be removed with the car. Undo will not delete it.',
+        found
+      );
+    ELSE
+      RETURN format(
+        'remark undo blocked: %s on the new car (record %s) would be removed with the car. Undo will not delete it.',
+        spec.label, found
+      );
+    END IF;
+  END LOOP;
+  RETURN NULL;
+END;
+$fn$;
+
 CREATE OR REPLACE FUNCTION public.rlms_undo_remark_group(p_group uuid, p_actor text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -604,7 +840,8 @@ DECLARE
   tbl text;
   pk bigint;
   new_ids bigint[];
-  stray int;
+  nid bigint;
+  block_msg text;
 BEGIN
   IF p_group IS NULL OR coalesce(btrim(p_actor), '') = '' THEN
     RETURN jsonb_build_object('ok', false, 'error', 'missing_group_or_actor', 'status', 400);
@@ -637,34 +874,17 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'not_a_remark', 'status', 400);
   END IF;
 
-  IF EXISTS (
-    SELECT 1 FROM public.rent_events e WHERE e.car_id = ANY (new_ids)
-  ) THEN
-    RETURN jsonb_build_object(
-      'ok', false,
-      'error', 'rent_events_on_new_car',
-      'status', 409,
-      'message', 'Undo refused: a rent event is attached to the new car. Remark does not delete rent events.'
-    );
-  END IF;
-
-  SELECT count(*) INTO stray FROM (
-    SELECT 1 FROM public.car_status_history h WHERE h.car_id = ANY (new_ids)
-    UNION ALL
-    SELECT 1 FROM public.railcar_ab_items ab WHERE ab.railcar_id = ANY (new_ids)
-    UNION ALL
-    SELECT 1 FROM public.dv_calculations d WHERE d.railcar_id = ANY (new_ids)
-    UNION ALL
-    SELECT 1 FROM public.program_activity pa WHERE pa.railcar_id = ANY (new_ids)
-  ) s;
-  IF stray > 0 THEN
-    RETURN jsonb_build_object(
-      'ok', false,
-      'error', 'referenced_since',
-      'status', 409,
-      'message', 'Undo refused: the new car was referenced after the remark.'
-    );
-  END IF;
+  FOREACH nid IN ARRAY new_ids LOOP
+    block_msg := public.remark_new_car_block_message(nid, p_group);
+    IF block_msg IS NOT NULL THEN
+      RETURN jsonb_build_object(
+        'ok', false,
+        'error', 'referenced_since',
+        'status', 409,
+        'message', block_msg
+      );
+    END IF;
+  END LOOP;
 
   FOR rec IN SELECT * FROM public.activity_log WHERE change_group = p_group ORDER BY id DESC LOOP
     tbl := rec.table_name;
@@ -738,25 +958,22 @@ BEGIN
    WHERE h.id IN (
      SELECT a.row_pk FROM public.activity_log a
       WHERE a.change_group = p_group AND a.table_name = 'car_number_history'
-   )
-   OR (
-     h.reason LIKE '%change_group ' || p_group::text
-     AND h.railcar_id IN (
-       SELECT a.railcar_id FROM public.activity_log a
-        WHERE a.change_group = p_group AND a.railcar_id IS NOT NULL
-     )
+        AND a.row_pk IS NOT NULL
    );
   GET DIAGNOSTICS hist_removed = ROW_COUNT;
-
-  IF EXISTS (SELECT 1 FROM public.rent_events e WHERE e.car_id = ANY (new_ids)) THEN
-    RAISE EXCEPTION 'remark undo: rent_events appeared on the new car';
-  END IF;
 
   UPDATE public.activity_log a
      SET railcar_id = (a.detail->>'old_id')::bigint
    WHERE a.change_group = p_group
      AND a.railcar_id = ANY (new_ids)
      AND coalesce(a.detail->>'old_id', '') ~ '^[0-9]+$';
+
+  FOREACH nid IN ARRAY new_ids LOOP
+    block_msg := public.remark_remaining_ref_message(nid);
+    IF block_msg IS NOT NULL THEN
+      RAISE EXCEPTION '%', block_msg;
+    END IF;
+  END LOOP;
 
   DELETE FROM public.railcars r WHERE r.id = ANY (new_ids);
   restored := restored + coalesce(array_length(new_ids, 1), 0);
@@ -810,6 +1027,18 @@ REVOKE ALL ON FUNCTION public.remark_railcars_in_place(jsonb, text, text, text) 
 REVOKE ALL ON FUNCTION public.remark_railcars_in_place(jsonb, text, text, text) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.remark_railcars_in_place(jsonb, text, text, text) TO service_role;
 
+REVOKE ALL ON FUNCTION public.remark_outside_row(text, text, bigint, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.remark_outside_row(text, text, bigint, uuid) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.remark_outside_row(text, text, bigint, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.remark_new_car_block_message(bigint, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.remark_new_car_block_message(bigint, uuid) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.remark_new_car_block_message(bigint, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.remark_remaining_ref_message(bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.remark_remaining_ref_message(bigint) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.remark_remaining_ref_message(bigint) TO service_role;
+
 REVOKE ALL ON FUNCTION public.rlms_undo_remark_group(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.rlms_undo_remark_group(uuid, text) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.rlms_undo_remark_group(uuid, text) TO service_role;
@@ -818,6 +1047,6 @@ COMMENT ON FUNCTION public.remark_railcars_apply(jsonb, text, text, text, uuid) 
   'Retire the current mark as an inactive row and insert the new mark as the active car. Copies lease columns. Moves programs, commitments, rent stops, tags, list membership, and railcar attachments. Does not write rent_events. One undoable change group.';
 
 COMMENT ON FUNCTION public.rlms_undo_remark_group(uuid, text) IS
-  'Undo one remark_railcars_apply change group. Deletes only the railcar ids that remark inserted. Leaves rent_events rows unchanged. Does not replace rlms_undo_change_group.';
+  'Undo one remark_railcars_apply change group. Refuses when a row outside the group references the new car. Deletes car_number_history by the logged row id only. Deletes only the railcar ids that remark inserted. Leaves rent_events rows unchanged. Calls rlms_referenced_outside_group and rlms_fk_outside_group. Does not replace them or rlms_undo_change_group.';
 
 commit;

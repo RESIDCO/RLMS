@@ -8,6 +8,7 @@ import {
   carNumberLookupValues,
   derivedFleetStatus,
   implicitAwaitingLabel,
+  isoDateOnly,
   isOffRentLink,
   isOnOl,
   isOnRentOlRider,
@@ -98,6 +99,19 @@ async function latestAssignment(railcarId: number) {
 
 async function linkForCar(railcarId: number) {
   return latestAssignment(railcarId);
+}
+
+const CAR_KPI_FLAG_COLS =
+  "on_rent, off_rent, awaiting_rent_start, future_rent_start, on_ol, has_open_commitment, in_open_program, going_on_lease, no_assignment, rent_start_date, link_rider";
+
+async function carKpiFlags(railcarId: number) {
+  const { data, error } = await supabaseAdmin
+    .from("v_rlms_car_kpi")
+    .select(CAR_KPI_FLAG_COLS)
+    .eq("railcar_id", railcarId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
 let enforcedCache: { value: boolean; at: number } | null = null;
@@ -1267,21 +1281,35 @@ export function registerCommitmentRoutes(
       const open = await openCommitment(id);
       const { rider, assignment } = await linkForCar(id);
       const { data: car } = await supabaseAdmin.from("railcars").select(CAR_SEL).eq("id", id).maybeSingle();
-      const onOl = isOnOl(linkInput(car, rider?.rider_name, assignment));
-      const off = await offRentOf(car, rider?.rider_name, assignment);
+      const kpi = await carKpiFlags(id);
+      const computedOnOl = isOnOl(linkInput(car, rider?.rider_name, assignment));
+      const computedOff = await offRentOf(car, rider?.rider_name, assignment);
+      const onOl = kpi ? kpi.on_ol === true : computedOnOl;
+      const off = kpi ? kpi.off_rent === true : computedOff;
+      const onRent = kpi ? kpi.on_rent === true : !computedOff && computedOnOl;
+      const awaiting = kpi ? kpi.awaiting_rent_start === true : computedOnOl && computedOff;
       const implicit =
         onOl && off
           ? {
-              name: implicitAwaitingLabel(rider?.rider_name, car?.lessee_name),
+              name: implicitAwaitingLabel(kpi?.link_rider ?? rider?.rider_name, car?.lessee_name),
               read_only: true,
             }
           : null;
+      const rentStart = isoDateOnly(kpi?.rent_start_date ?? assignment?.rent_start_date) ?? assignment?.rent_start_date ?? null;
       res.json({
         commitment: open,
         implicit,
         on_ol: onOl,
         off_rent: off,
-        rent_start_date: assignment?.rent_start_date ?? null,
+        on_rent: onRent,
+        awaiting_rent_start: awaiting,
+        future_rent_start: kpi ? kpi.future_rent_start === true : false,
+        has_open_commitment: kpi ? kpi.has_open_commitment === true : Boolean(open),
+        in_open_program: kpi ? kpi.in_open_program === true : false,
+        going_on_lease: kpi ? kpi.going_on_lease === true : false,
+        no_assignment: kpi ? kpi.no_assignment === true : !assignment,
+        ol: kpi?.link_rider ?? rider?.rider_name ?? null,
+        rent_start_date: rentStart,
         derived_status: derivedFleetStatus({
           sold: car?.fleet_status === "Sold",
           offRent: off,

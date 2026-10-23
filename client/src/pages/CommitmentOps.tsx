@@ -20,6 +20,11 @@ import { useCanEdit } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { AddNoteField, appendNoteBody, noteSkipDescription } from "@/components/AddNoteField";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
+import {
+  commitmentVisibility,
+  flagsFromCommitmentPayload,
+  rentStartVisibility,
+} from "@shared/car-detail-panel";
 import { Link } from "wouter";
 import { carPath, openAppTab } from "@/lib/browse-nav";
 import { LineageCarLink } from "@/components/LineageCarLink";
@@ -46,6 +51,11 @@ export function CommitmentPanel({ carId }: { carId: number }) {
   const implicit = data?.implicit;
   const [rentDate, setRentDate] = useState("");
   const [rentNote, setRentNote] = useState("");
+  const [correctRentOpen, setCorrectRentOpen] = useState(false);
+  const flags = flagsFromCommitmentPayload(data);
+  const rentVis = flags ? rentStartVisibility(flags) : null;
+  const commitVis = flags ? commitmentVisibility(flags, Boolean(open)) : "loading";
+  const showRentBox = rentVis === "open" || correctRentOpen;
   const saveRent = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/rent-start/car/${carId}`, { date: rentDate || null, ...appendNoteBody(rentNote) });
@@ -84,77 +94,115 @@ export function CommitmentPanel({ carId }: { carId: number }) {
     },
     onError: (e: Error) => toast({ title: "Could not clear", description: e.message, variant: "destructive" }),
   });
-  return (
-    <div className="rounded-lg border border-border p-4 space-y-3">
-      <div className="text-sm font-semibold">Rent start / Commitment</div>
-      <div className="text-sm space-y-1">
-        <div>
-          <span className="text-muted-foreground">Rent start date</span>{" "}
-          {data?.rent_start_date ?? "—"}
-          {data?.on_ol ? "" : " (only editable on an OL)"}
-        </div>
-        {canEdit && data?.on_ol ? (
-          <div className="space-y-2">
-            <div className="flex gap-2 items-end">
-              <div>
-                <Label>Set date</Label>
-                <Input type="date" value={rentDate} onChange={(e) => setRentDate(e.target.value)} />
-              </div>
-              <Button size="sm" disabled={saveRent.isPending} onClick={() => saveRent.mutate()}>Save date</Button>
-            </div>
-            <AddNoteField id={`rent-start-note-${carId}`} value={rentNote} onChange={setRentNote} />
-          </div>
-        ) : null}
+  const rentEditor = (
+    <div className="text-sm space-y-2" data-testid="rent-start-box">
+      <div className="font-semibold">Rent start</div>
+      <div>
+        <span className="text-muted-foreground">Rent start date</span>{" "}
+        {data?.rent_start_date ?? "—"}
+        {data?.on_ol ? "" : " (only editable on an OL)"}
       </div>
-      {implicit ? (
-        <div className="text-sm rounded-md border border-border bg-muted/30 px-3 py-2">
-          {implicit.name}
-          <div className="text-xs text-muted-foreground">Read-only. No Commitment row is written.</div>
+      {canEdit && data?.on_ol ? (
+        <div className="space-y-2">
+          <div className="flex gap-2 items-end">
+            <div>
+              <Label>Set date</Label>
+              <Input type="date" value={rentDate} onChange={(e) => setRentDate(e.target.value)} />
+            </div>
+            <Button size="sm" disabled={saveRent.isPending} onClick={() => saveRent.mutate()}>Save date</Button>
+          </div>
+          <AddNoteField id={`rent-start-note-${carId}`} value={rentNote} onChange={setRentNote} />
         </div>
       ) : null}
-      {open ? (
-        <div className="text-sm space-y-1">
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border p-4">
+        {commitVis === "loading" || rentVis == null ? (
+          <p className="text-sm text-muted-foreground">Loading rent start…</p>
+        ) : showRentBox ? (
+          rentEditor
+        ) : (
+          <button
+            type="button"
+            className="text-sm text-primary underline-offset-2 hover:underline"
+            data-testid="link-correct-rent-start"
+            onClick={() => setCorrectRentOpen(true)}
+          >
+            Correct rent start
+          </button>
+        )}
+      </div>
+
+      {commitVis === "readonly" && open ? (
+        <div className="rounded-lg border border-border p-4 text-sm space-y-1" data-testid="commitment-readonly">
+          <div className="font-semibold">Commitment</div>
           <div><span className="text-muted-foreground">Type</span> {open.type}</div>
           <div><span className="text-muted-foreground">Name</span> {open.name}</div>
           <div><span className="text-muted-foreground">Target</span> {open.target_date ?? "—"}</div>
           {open.note ? <div className="text-muted-foreground">{open.note}</div> : null}
+          {canEdit ? (
+            <Button size="sm" variant="outline" disabled={clear.isPending} onClick={() => clear.mutate()}>Clear</Button>
+          ) : null}
         </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">None — Available for Opportunities if off rent.</p>
-      )}
-      {canEdit && (
-        <div className="grid gap-2 sm:grid-cols-2">
-          <div>
-            <Label>Type</Label>
-            <Select value={type} onValueChange={(v) => setType(v as CommitmentType)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {COMMITMENT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Metalico" />
-          </div>
-          <div>
-            <Label>Target date</Label>
-            <Input type="date" value={target} onChange={(e) => setTarget(e.target.value)} />
-          </div>
-          <div>
-            <Label>Note</Label>
-            <Input value={note} onChange={(e) => setNote(e.target.value)} />
-          </div>
-          <div className="sm:col-span-2 flex gap-2">
-            <Button size="sm" disabled={!name.trim() || save.isPending} onClick={() => save.mutate(Boolean(open))}>
-              {open ? "Edit" : "Set"} Commitment
-            </Button>
-            {open ? (
-              <Button size="sm" variant="outline" disabled={clear.isPending} onClick={() => clear.mutate()}>Clear</Button>
-            ) : null}
-          </div>
+      ) : null}
+
+      {commitVis === "form" ? (
+        <div className="rounded-lg border border-border p-4 space-y-3" data-testid="commitment-form">
+          <div className="text-sm font-semibold">Commitment</div>
+          {implicit ? (
+            <div className="text-sm rounded-md border border-border bg-muted/30 px-3 py-2">
+              {implicit.name}
+              <div className="text-xs text-muted-foreground">Read-only. No Commitment row is written.</div>
+            </div>
+          ) : null}
+          {open ? (
+            <div className="text-sm space-y-1">
+              <div><span className="text-muted-foreground">Type</span> {open.type}</div>
+              <div><span className="text-muted-foreground">Name</span> {open.name}</div>
+              <div><span className="text-muted-foreground">Target</span> {open.target_date ?? "—"}</div>
+              {open.note ? <div className="text-muted-foreground">{open.note}</div> : null}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">None — Available for Opportunities if off rent.</p>
+          )}
+          {canEdit && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <Label>Type</Label>
+                <Select value={type} onValueChange={(v) => setType(v as CommitmentType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COMMITMENT_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Name</Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Metalico" />
+              </div>
+              <div>
+                <Label>Target date</Label>
+                <Input type="date" value={target} onChange={(e) => setTarget(e.target.value)} />
+              </div>
+              <div>
+                <Label>Note</Label>
+                <Input value={note} onChange={(e) => setNote(e.target.value)} />
+              </div>
+              <div className="sm:col-span-2 flex gap-2">
+                <Button size="sm" disabled={!name.trim() || save.isPending} onClick={() => save.mutate(Boolean(open))}>
+                  {open ? "Edit" : "Set"} Commitment
+                </Button>
+                {open ? (
+                  <Button size="sm" variant="outline" disabled={clear.isPending} onClick={() => clear.mutate()}>Clear</Button>
+                ) : null}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

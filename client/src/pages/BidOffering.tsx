@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { ActorLabel } from "@/components/ActorLabel";
 import PageHeader from "@/components/PageHeader";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import ActivityDialog from "@/components/crm/ActivityDialog";
@@ -25,7 +26,14 @@ type Offering = {
   file_lines?: OpportunityFileLine[];
 };
 
-type TimelineItem = { id: string; occurred_at: string; kind: string; body: string; actor: string | null };
+type TimelineItem = {
+  id: string;
+  occurred_at: string;
+  kind: string;
+  body: string;
+  actor: string | null;
+  actor_label?: string | null;
+};
 
 export default function BidOfferingPage() {
   const [, params] = useRoute("/opportunities/:id");
@@ -158,7 +166,9 @@ export default function BidOfferingPage() {
               <ul className="space-y-2 text-sm">
                 {(timeline.data ?? []).map((item) => (
                   <li key={item.id} className="border rounded-md px-3 py-2">
-                    <div className="text-xs text-muted-foreground">{item.occurred_at.slice(0, 16).replace("T", " ")} · {item.actor || "—"} · {item.kind}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {item.occurred_at.slice(0, 16).replace("T", " ")} · <ActorLabel label={item.actor_label} raw={item.actor} empty="—" /> · {item.kind}
+                    </div>
                     <div>{item.body}</div>
                   </li>
                 ))}

@@ -538,6 +538,7 @@ export type Account360TimelineItem = {
   label: string;
   body: string;
   actor: string | null;
+  actor_label: string | null;
 };
 
 export type Account360Payload = {

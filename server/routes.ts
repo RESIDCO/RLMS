@@ -89,6 +89,7 @@ import { canonicalChangePair } from "@shared/canonical-json";
 import { pickRow } from "@shared/change-log";
 import { diffRailcarPatch, preprocessRailcarPatchBody } from "@shared/railcar-patch";
 import { diffProgramPatch } from "@shared/program-patch";
+import { annotateActorLabels } from "./actor-label";
 import { addNote, listActivityLog, logActivity } from "./activity-log";
 import { appendNotesInGroup, normalizeAppendNote, stripNotesField, withNoteReport } from "./append-note";
 import { listLineage } from "./lineage-read";
@@ -1674,7 +1675,7 @@ export async function registerRoutes(
         .eq("car_id", carId)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      res.json(data ?? []);
+      res.json(await annotateActorLabels(data ?? [], (row) => row.created_by));
     } catch (err) {
       errHandler(res, err);
     }
@@ -1945,7 +1946,11 @@ export async function registerRoutes(
           railcar_ab_items: abRes.error ? [] : (abRes.data ?? []),
         }),
       ]));
-      res.json({ railcar: normalized, history: histRes.data ?? [], number_history: numHistRes.data ?? [] });
+      res.json({
+        railcar: normalized,
+        history: await annotateActorLabels(histRes.data ?? [], (row) => row.moved_by),
+        number_history: numHistRes.data ?? [],
+      });
     } catch (err) {
       errHandler(res, err);
     }
@@ -4316,7 +4321,7 @@ export async function registerRoutes(
           r.railcar?.car_number?.toLowerCase().includes(q)
         );
       }
-      res.json(rows);
+      res.json(await annotateActorLabels(rows, (row) => row.moved_by));
     } catch (err) {
       errHandler(res, err);
     }
@@ -4881,7 +4886,7 @@ export async function registerRoutes(
         .select("*, railcar:railcars(car_number, entity)")
         .order("event_date", { ascending: false });
       if (error) throw error;
-      res.json(data ?? []);
+      res.json(await annotateActorLabels(data ?? [], (row) => row.created_by));
     } catch (err) { errHandler(res, err); }
   });
 
@@ -4894,7 +4899,7 @@ export async function registerRoutes(
         .eq("car_id", Number(req.params.carId))
         .order("event_date", { ascending: false });
       if (error) throw error;
-      res.json(data ?? []);
+      res.json(await annotateActorLabels(data ?? [], (row) => row.created_by));
     } catch (err) { errHandler(res, err); }
   });
 
@@ -4941,7 +4946,8 @@ export async function registerRoutes(
         });
         return data;
       });
-      res.json(payload);
+      const [labeled] = await annotateActorLabels([payload], (row) => row.created_by);
+      res.json(labeled);
     } catch (err) { errHandler(res, err); }
   });
 
@@ -5306,7 +5312,11 @@ export async function registerRoutes(
       if (e1) throw e1;
       const { data: disputes } = await supabase.from("dispute_logs").select("*").eq("invoice_id", req.params.id).order("log_date", { ascending: false });
       const { data: comms } = await supabase.from("invoice_communications").select("*").eq("invoice_id", req.params.id).order("comm_date", { ascending: false });
-      res.json({ ...inv, dispute_logs: disputes ?? [], communications: comms ?? [] });
+      const [dispute_logs, communications] = await Promise.all([
+        annotateActorLabels(disputes ?? [], (row) => row.logged_by),
+        annotateActorLabels(comms ?? [], (row) => row.logged_by),
+      ]);
+      res.json({ ...inv, dispute_logs, communications });
     } catch (err) { errHandler(res, err); }
   });
 
@@ -5365,7 +5375,8 @@ export async function registerRoutes(
         outcome: outcome ?? null,
       }).select().single();
       if (error) throw error;
-      res.json(data);
+      const [labeled] = await annotateActorLabels([data], (row) => row.logged_by);
+      res.json(labeled);
     } catch (err) { errHandler(res, err); }
   });
 
@@ -5404,7 +5415,8 @@ export async function registerRoutes(
         logged_by: email,
       }).select().single();
       if (error) throw error;
-      res.json(data);
+      const [labeled] = await annotateActorLabels([data], (row) => row.logged_by);
+      res.json(labeled);
     } catch (err) { errHandler(res, err); }
   });
 

@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { annotateActorLabels } from "./actor-label";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 
@@ -150,7 +151,7 @@ export async function getTerritoryHistory(opts: { county?: string; state?: strin
     }))
     .sort((a, b) => String(b.changed_at).localeCompare(String(a.changed_at)))
     .slice(0, opts.limit);
-  return { change_sets: sets };
+  return { change_sets: await annotateActorLabels(sets, (set) => set.changed_by) };
 }
 
 async function countiesForState(state: string): Promise<string[]> {

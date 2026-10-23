@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { geoAlbersUsa, geoCentroid, geoPath, type GeoPermissibleObjects } from "d3-geo";
 import { ArrowLeft, ChevronDown, Pencil } from "lucide-react";
+import { ActorLabel } from "@/components/ActorLabel";
 import PageHeader from "@/components/PageHeader";
 import { confirmAction } from "@/components/ConfirmActionDialog";
 import { Button } from "@/components/ui/button";
@@ -172,7 +173,7 @@ export default function TerritoryMapPage() {
     queryKey: ["/api/territories/map"],
     queryFn: () => apiRequest("GET", "/api/territories/map").then((r) => r.json()),
   });
-  const histQ = useQuery<{ change_sets: { change_set_id: string; changed_at: string; changed_by: string | null; note: string | null; counties: number }[] }>({
+  const histQ = useQuery<{ change_sets: { change_set_id: string; changed_at: string; changed_by: string | null; actor_label?: string | null; note: string | null; counties: number }[] }>({
     queryKey: ["/api/territories/history"],
     queryFn: () => apiRequest("GET", "/api/territories/history?limit=30").then((r) => r.json()),
     enabled: editOn,
@@ -714,7 +715,10 @@ export default function TerritoryMapPage() {
                   {(histQ.data?.change_sets ?? []).map((cs) => (
                     <div key={cs.change_set_id} className="text-xs border-b border-border pb-2">
                       <div className="text-foreground">{new Date(cs.changed_at).toLocaleString()} · {cs.counties} counties</div>
-                      <div className="text-muted-foreground">{cs.changed_by}{cs.note ? ` · ${cs.note}` : ""}</div>
+                      <div className="text-muted-foreground">
+                        <ActorLabel label={cs.actor_label} raw={cs.changed_by} />
+                        {cs.note ? ` · ${cs.note}` : ""}
+                      </div>
                       <Button size="sm" variant="outline" className="mt-1 h-7" onClick={() => revertSet(cs.change_set_id)}>Revert</Button>
                     </div>
                   ))}

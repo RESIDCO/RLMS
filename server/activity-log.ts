@@ -7,6 +7,7 @@ import {
   capActivityEvents,
   noteWriteDecision,
 } from "@shared/lineage-notes";
+import { annotateActorLabels } from "./actor-label";
 import { currentChangeGroup, recordChange, withChangeGroupResult } from "./change-log";
 import { supabaseAdmin } from "./supabase";
 
@@ -323,7 +324,7 @@ export async function listActivityLog(opts: ListActivityOpts) {
     if (keptSoFar.length >= limit || batch.length < pageSize) break;
   }
   const events = capActivityEvents(scanned, limit, Boolean(opts.includeVcfNoise));
-  return { events, resolved, query: qText || null };
+  return { events: await annotateActorLabels(events, (row) => row.actor), resolved, query: qText || null };
 }
 
 export async function addNote(opts: {

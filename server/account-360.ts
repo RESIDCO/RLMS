@@ -1,3 +1,4 @@
+import { annotateActorLabels } from "./actor-label";
 import { getAccount } from "./accounts";
 import { listCrmActivities } from "./crm-activities";
 import { listOpportunities, loadOnRentCars, onRentIdsByRider, utcToday } from "./crm-opportunities";
@@ -11,7 +12,6 @@ import {
   type Account360Contact,
   type Account360Ol,
   type Account360Payload,
-  type Account360TimelineItem,
 } from "@shared/crm";
 
 export type CrmSummaryRow = {
@@ -238,26 +238,29 @@ export async function getAccount360(id: number): Promise<Account360Payload | nul
     .limit(40);
   if (systemErr) throw systemErr;
 
-  const timeline: Account360TimelineItem[] = [
-    ...activities.map((row) => ({
-      id: `crm-${row.id}`,
-      occurred_at: row.occurred_at,
-      source: "crm" as const,
-      label: row.kind,
-      body: row.body,
-      actor: row.actor,
-    })),
-    ...(systemRows ?? []).map((row) => ({
-      id: `system-${row.id}`,
-      occurred_at: String(row.occurred_at ?? ""),
-      source: "system" as const,
-      label: "System",
-      body: String(row.action ?? "change"),
-      actor: row.actor == null ? null : String(row.actor),
-    })),
-  ]
-    .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
-    .slice(0, 30);
+  const timeline = await annotateActorLabels(
+    [
+      ...activities.map((row) => ({
+        id: `crm-${row.id}`,
+        occurred_at: row.occurred_at,
+        source: "crm" as const,
+        label: row.kind,
+        body: row.body,
+        actor: row.actor,
+      })),
+      ...(systemRows ?? []).map((row) => ({
+        id: `system-${row.id}`,
+        occurred_at: String(row.occurred_at ?? ""),
+        source: "system" as const,
+        label: "System",
+        body: String(row.action ?? "change"),
+        actor: row.actor == null ? null : String(row.actor),
+      })),
+    ]
+      .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+      .slice(0, 30),
+    (item) => item.actor,
+  );
 
   const transition = transitionRes.data
     ? { id: Number(transitionRes.data.id), status: transitionRes.data.status == null ? null : String(transitionRes.data.status) }

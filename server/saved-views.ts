@@ -42,6 +42,7 @@ import {
 import { recordChange, recordChanges, withChangeGroupResult } from "./change-log";
 import { countRailcars, parseRailcarListParams, type RailcarListParams } from "./railcar-list";
 import { resolveProgramCars } from "./programs";
+import { labelActors } from "./actor-label";
 import { supabaseAdmin } from "./supabase";
 
 type ViewRow = {
@@ -66,7 +67,6 @@ type Actor = { id: string; role: string };
 const SCHEMA_TTL_MS = 15_000;
 let schemaCache: { at: number; ready: boolean; unavailable: boolean } | null = null;
 const countCache = new Map<string, { at: number; value: ViewCount }>();
-const nameCache = new Map<string, string>();
 
 export type ViewCount = { count: number; active: number; inactive: number; ms: number };
 
@@ -100,36 +100,6 @@ export async function savedViewsSchemaReady(): Promise<boolean> {
   } catch (error) {
     return rememberSchema(error).ready;
   }
-}
-
-async function displayName(userId: string | null | undefined): Promise<string> {
-  const id = String(userId ?? "").trim();
-  if (!id) return "";
-  const cached = nameCache.get(id);
-  if (cached) return cached;
-  let name = "";
-  try {
-    const { data } = await supabaseAdmin.auth.admin.getUserById(id);
-    const meta = (data.user?.user_metadata ?? {}) as Record<string, unknown>;
-    name = String(meta.full_name || meta.name || meta.display_name || data.user?.email || "");
-  } catch {
-    name = "";
-  }
-  if (!name) {
-    const { data } = await supabaseAdmin.from("user_roles").select("email").eq("user_id", id).maybeSingle();
-    name = String(data?.email ?? "");
-  }
-  const label = name || id;
-  nameCache.set(id, label);
-  return label;
-}
-
-async function nameMap(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
-  const unique = Array.from(new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean)));
-  await Promise.all(unique.map((id) => displayName(id)));
-  const out = new Map<string, string>();
-  for (const id of unique) out.set(id, nameCache.get(id) ?? id);
-  return out;
 }
 
 function layoutOf(raw: unknown): ViewLayout {
@@ -306,7 +276,7 @@ export async function listSavedViews(actor: Actor) {
   const splits = await loadFixedMemberSplits(fixedIds);
   const counts = new Map<number, number>();
   splits.forEach((split, id) => counts.set(id, split.active + split.inactive));
-  const names = await nameMap(views.flatMap((view) => [view.owner, view.updated_by]));
+  const names = await labelActors(views.flatMap((view) => [view.owner, view.updated_by]));
   return {
     schema_ready: true as const,
     views: views.map((view) => summary(view, names, view.kind === "fixed" ? counts.get(view.id) ?? 0 : null)),
@@ -316,7 +286,7 @@ export async function listSavedViews(actor: Actor) {
 export async function getSavedView(id: number, actor: Actor) {
   const view = await loadRow(id);
   if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
-  const names = await nameMap([view.owner, view.updated_by]);
+  const names = await labelActors([view.owner, view.updated_by]);
   let members: { railcar_id: number; note: string | null; sort_order: number | null; active: boolean | null }[] = [];
   if (view.kind === "fixed") {
     const { data, error } = await supabaseAdmin
@@ -564,7 +534,8 @@ export async function patchSavedView(id: number, actor: Actor, body: Record<stri
   if (!view || !canRead(view, actor)) throw httpError(404, "View not found");
   if (viewWriteStatus({ role: actor.role, action: "update" })) throw httpError(403, "Forbidden");
   if (viewUpdatedAtConflicts(view.updated_at, body.expected_updated_at == null ? "" : String(body.expected_updated_at))) {
-    const who = await displayName(view.updated_by);
+    const whoId = String(view.updated_by ?? "").trim();
+    const who = (await labelActors([view.updated_by])).get(whoId) ?? "";
     throw httpError(409, `Changed by ${who || "someone else"} at ${formatEtTime(view.updated_at)}. Reload, or Save as a copy.`);
   }
   const patch: Record<string, unknown> = { ...stamp(actor.id) };

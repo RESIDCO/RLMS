@@ -1247,6 +1247,7 @@ export default function SearchPage() {
       pin_order: detail.pin_order,
       owner: detail.owner,
       owner_name: detail.owner_name,
+      updated_by: detail.updated_by,
       updated_by_name: detail.updated_by_name,
       updated_at: detail.updated_at,
       updated_at_et: detail.updated_at_et,

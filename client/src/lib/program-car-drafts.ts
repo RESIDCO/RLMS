@@ -24,13 +24,13 @@ export type SaveCarItem = { link_id: number; updates: Record<string, unknown> };
 
 export type CarSavePlan = {
   items: SaveCarItem[];
-  /** Unique visible cars whose patch would write, after the focused editor is merged. */
+  /** Cars whose patch would write. Includes cars the grid filter is hiding. */
   count: number;
-  /** Meaningful drafts hidden by the cars filter. Not included in `count`. */
-  hidden: number;
-  /** Draft map with no-op patches removed. Hidden edits stay. */
+  /** Draft map with no-op patches removed. */
   retained: CarDraftMap;
 };
+
+export type SaveCountPhase = "confirm" | "saving" | "saved";
 
 export type FlushResult = "queued" | "unchanged" | "invalid";
 
@@ -85,31 +85,78 @@ export function draftDiffers(car: CarBaseline, patch: Record<string, unknown> | 
   return commitmentPending(patch);
 }
 
-export function planCarSave(
+/**
+ * Ids whose draft would change the loaded row. A draft with no loaded row
+ * still counts, so hiding exited cars cannot drop it from Save or the leave guard.
+ */
+export function unsavedDraftIds(
   drafts: CarDraftMap,
-  visibleIds: ReadonlySet<number>,
   baselines: ReadonlyMap<number, CarBaseline>,
-): CarSavePlan {
-  const retained: CarDraftMap = {};
-  const items: SaveCarItem[] = [];
-  let hidden = 0;
+): number[] {
   const ids = Object.keys(drafts)
     .map((id) => Number(id))
     .filter((id) => Number.isFinite(id))
     .sort((a, b) => a - b);
+  const unsaved: number[] = [];
   for (const linkId of ids) {
     const updates = drafts[linkId];
-    if (!updates) continue;
+    if (!updates || Object.keys(updates).length === 0) continue;
     const baseline = baselines.get(linkId);
     if (baseline && !draftDiffers(baseline, updates)) continue;
+    unsaved.push(linkId);
+  }
+  return unsaved;
+}
+
+/** Every differing draft is saved. Visibility is not an input. */
+export function planCarSave(
+  drafts: CarDraftMap,
+  baselines: ReadonlyMap<number, CarBaseline>,
+): CarSavePlan {
+  const retained: CarDraftMap = {};
+  const items: SaveCarItem[] = [];
+  for (const linkId of unsavedDraftIds(drafts, baselines)) {
+    const updates = drafts[linkId];
+    if (!updates) continue;
     retained[linkId] = updates;
-    if (!visibleIds.has(linkId)) {
-      hidden += 1;
-      continue;
-    }
     items.push({ link_id: linkId, updates });
   }
-  return { items, count: items.length, hidden, retained };
+  return { items, count: items.length, retained };
+}
+
+export function saveCarCountLabel(count: number, phase: SaveCountPhase): string {
+  const noun = `${count} car${count === 1 ? "" : "s"}`;
+  switch (phase) {
+    case "confirm":
+      return `Save ${noun}?`;
+    case "saving":
+      return `Saving ${noun}…`;
+    case "saved":
+      return `Saved ${noun}`;
+    default: {
+      const exhaustive: never = phase;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * Dirty rows stay on the grid. Text search, the paste list, and the completion
+ * chips can hide a clean row only.
+ */
+export function programCarStaysVisible(input: {
+  matchesText: boolean;
+  pasteActive: boolean;
+  matchesPaste: boolean;
+  applyLevelFilter: boolean;
+  levelSelected: boolean;
+  dirty: boolean;
+}): boolean {
+  if (input.dirty) return true;
+  if (!input.matchesText) return false;
+  if (input.pasteActive && !input.matchesPaste) return false;
+  if (input.applyLevelFilter && !input.levelSelected) return false;
+  return true;
 }
 
 /** Keep every draft unless the server actually stored the patch we sent. */
@@ -159,10 +206,7 @@ export function keptEditsToast(): { title: string; description: string } {
   };
 }
 
-export function emptySaveToast(invalid: boolean, hidden: number): { title: string; description?: string } {
-  if (hidden > 0 && !invalid) {
-    return { title: `${hidden} unsaved car${hidden === 1 ? "" : "s"} hidden by the filter` };
-  }
+export function emptySaveToast(invalid: boolean): { title: string; description?: string } {
   if (invalid) {
     return {
       title: "Couldn't read the value you're editing",

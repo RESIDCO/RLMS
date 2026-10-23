@@ -56,6 +56,24 @@ ok(applyFn.includes("programCarPatchApplyPath") && applyFn.includes("offerUndoTo
 ok(applyFn.includes("invalidateQueries"), "apply refreshes the grid and the open panel");
 ok(program.includes("sheetPreview"), "the preview is shown before apply");
 
+const openStart = program.indexOf("function openProgramCar");
+const openFn = program.slice(openStart, program.indexOf("async function requestSheetPreview"));
+ok(openFn.includes("programCarSectionDiscardConfirmed"), "opening another car asks before discarding side-panel edits");
+ok(
+  openFn.indexOf("programCarSectionDiscardConfirmed") < openFn.indexOf("setSheetLinkId"),
+  "the warning runs before the panel switches cars",
+);
+ok(program.includes("programCarSectionDiscardConfirmed(null)"), "closing the sheet asks before discarding side-panel edits");
+ok(section.includes("Discard them and switch cars?"), "the section warns before a car switch drops edits");
+ok(section.includes("programCarSectionSwitchBlocked"), "the section uses the switch guard");
+ok(program.includes("unsavedDraftIds"), "save and the leave guard count every dirty draft");
+ok(program.includes("programCarSectionHasUnsavedEdits"), "reload guard includes side-panel edits");
+ok(!program.includes("visibleIdsRef"), "save no longer limits itself to the filtered rows");
+ok(program.includes("programCarStaysVisible"), "dirty rows stay visible under the car filters");
+ok(program.includes("unsaved-program-car-"), "dirty rows show an unsaved marker");
+ok(program.includes('saveCarCountLabel(plan.count, "confirm")'), "save confirms how many cars will be saved");
+ok(program.includes('saveCarCountLabel(plan.count, "saved")'), "save reports how many cars were saved");
+
 ok(fleet.includes("ProgramCarSection"), "the shared sheet renders the program section");
 ok(fleet.includes('commitmentScopeLabel("car")'), "car-level commitment is labeled Car commitment from a program");
 ok(fleet.includes("programCarActionMode(fromProgram)") && fleet.includes('data-testid="move-ol-expander"'), "Move to another OL collapses behind an expander from a program");

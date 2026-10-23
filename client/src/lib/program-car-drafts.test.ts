@@ -10,8 +10,11 @@ import {
   keptEditsToast,
   moneyPatchValue,
   planCarSave,
+  programCarStaysVisible,
+  saveCarCountLabel,
   saveFailureToast,
   textPatchValue,
+  unsavedDraftIds,
   type CarBaseline,
   type CarDraftMap,
 } from "./program-car-drafts";
@@ -41,7 +44,6 @@ const baselines = new Map<number, CarBaseline>([
   [1, car1],
   [2, car2],
 ]);
-const visible = new Set([1, 2]);
 
 function settlement(amount: number): Record<string, unknown> {
   return { custom_fields: { settlement_amount: amount } };
@@ -59,7 +61,7 @@ function settlement(amount: number): Record<string, unknown> {
   ok(Object.keys(session.getDrafts()).length === 0, "typing has not committed before Save");
   const flushed = session.flushEditors();
   ok(!flushed.invalid, "9178.90 is a real amount");
-  const plan = planCarSave(session.getDrafts(), visible, baselines);
+  const plan = planCarSave(session.getDrafts(), baselines);
   ok(plan.count === 1, "Save while editing counts one car");
   ok(plan.items.length === 1 && plan.items[0].link_id === 1, "payload has the edited car");
   const fields = plan.items[0].updates.custom_fields as Record<string, unknown>;
@@ -83,7 +85,7 @@ function settlement(amount: number): Record<string, unknown> {
   if (typeof note === "string") session.queue(1, { notes: note });
   if (typeof dated === "string") session.queue(1, { milestone_at: dated });
   if (typeof status === "string") session.queue(1, { status });
-  const plan = planCarSave(session.getDrafts(), visible, baselines);
+  const plan = planCarSave(session.getDrafts(), baselines);
   ok(plan.count === 1, "Enter-then-Save counts the one car, not each field");
   const updates = plan.items[0].updates;
   const fields = updates.custom_fields as Record<string, unknown>;
@@ -103,14 +105,93 @@ function settlement(amount: number): Record<string, unknown> {
   };
   ok(Object.keys(stale).length === 2, "stale map still has two keys");
   ok(!draftDiffers(car2, stale[2]), "the second car does not differ from the loaded row");
-  const plan = planCarSave(stale, visible, baselines);
+  const plan = planCarSave(stale, baselines);
   ok(plan.count === 1, "count is the one car that actually changed");
   ok(plan.items.length === 1 && plan.items[0].link_id === 1, "the unchanged car is left out of the payload");
-  const hiddenPlan = planCarSave({ 1: settlement(5), 9: { notes: "hidden edit" } }, new Set([1]), new Map([
+  const hiddenBaselines = new Map<number, CarBaseline>([
     [1, car1],
     [9, { notes: "" }],
-  ]));
-  ok(hiddenPlan.count === 1 && hiddenPlan.hidden === 1, "a filtered car is not part of the saving count");
+  ]);
+  const hiddenDrafts: CarDraftMap = { 1: settlement(5), 9: { notes: "hidden edit" } };
+  const hiddenPlan = planCarSave(hiddenDrafts, hiddenBaselines);
+  ok(hiddenPlan.count === 2, "a filtered car is part of the saving count");
+  ok(!("hidden" in hiddenPlan), "a filtered car is not split out of the save");
+  ok(
+    hiddenPlan.items.map((item) => item.link_id).join(",") === "1,9",
+    "a filtered car is included in the save payload",
+  );
+  ok(saveCarCountLabel(hiddenPlan.count, "confirm") === "Save 2 cars?", "confirm names every car that will be saved");
+  ok(saveCarCountLabel(1, "saving") === "Saving 1 car…", "the saving toast uses the singular count");
+  ok(saveCarCountLabel(hiddenPlan.count, "saved") === "Saved 2 cars", "the saved toast names every car that was saved");
+}
+
+// Editing two cars, then narrowing the text filter, the level chips, or a paste
+// list, still saves both. The filtered car stays on screen because it is dirty.
+{
+  const filterBaselines = new Map<number, CarBaseline>([
+    [1, car1],
+    [2, { notes: "same" }],
+    [3, { notes: "" }],
+  ]);
+  const across: CarDraftMap = {
+    1: { notes: "shop called" },
+    2: { notes: "hidden edit" },
+  };
+  const dirty = new Set(unsavedDraftIds(across, filterBaselines));
+  ok(dirty.has(1) && dirty.has(2) && !dirty.has(3), "leave guard sees both edited cars and skips the clean one");
+
+  function shown(input: {
+    matchesText: boolean;
+    levelSelected: boolean;
+    narrowing: boolean;
+    pasteActive?: boolean;
+    matchesPaste?: boolean;
+    id: number;
+  }): boolean {
+    return programCarStaysVisible({
+      matchesText: input.matchesText,
+      pasteActive: input.pasteActive === true,
+      matchesPaste: input.matchesPaste !== false,
+      applyLevelFilter: !input.narrowing,
+      levelSelected: input.levelSelected,
+      dirty: dirty.has(input.id),
+    });
+  }
+
+  const levelDefault = shown({ id: 2, matchesText: true, levelSelected: false, narrowing: false });
+  const textNarrowed = [
+    shown({ id: 1, matchesText: false, levelSelected: true, narrowing: true }),
+    shown({ id: 2, matchesText: true, levelSelected: false, narrowing: true }),
+    shown({ id: 3, matchesText: false, levelSelected: true, narrowing: true }),
+  ];
+  ok(levelDefault, "a dirty car stays visible when its completion level is filtered out");
+  ok(textNarrowed[0] && textNarrowed[1] && !textNarrowed[2], "dirty cars stay visible when the text filter misses them");
+  ok(
+    shown({ id: 1, matchesText: false, levelSelected: false, narrowing: true, pasteActive: true, matchesPaste: false }),
+    "a dirty car stays visible when a paste list excludes it",
+  );
+  ok(
+    !shown({ id: 3, matchesText: false, levelSelected: false, narrowing: false }),
+    "a clean car stays hidden when the text and level filters miss it",
+  );
+
+  const beforeSwitch = planCarSave(across, filterBaselines);
+  const afterText = planCarSave(across, filterBaselines);
+  const afterLevel = planCarSave(across, filterBaselines);
+  ok(beforeSwitch.count === 2 && afterText.count === 2 && afterLevel.count === 2, "changing the filter does not change the saving count");
+  ok(
+    afterText.items.map((item) => item.link_id).join(",") === "1,2"
+      && afterLevel.items.map((item) => item.link_id).join(",") === "1,2",
+    "multi-car save keeps every edited car across filter changes",
+  );
+  const cleared = draftsAfterSave(across, afterLevel.items, "saved");
+  ok(cleared[1] == null && cleared[2] == null, "saving across a filter clears every sent car");
+  ok(
+    unsavedDraftIds({ 4: { notes: "kept while exited" } }, filterBaselines).join(",") === "4",
+    "leave guard keeps a draft whose car is not in the loaded rows",
+  );
+  const orphan = planCarSave({ 4: { notes: "kept while exited" }, 2: { notes: "same" } }, filterBaselines);
+  ok(orphan.count === 1 && orphan.items[0].link_id === 4, "save still sends a draft whose car is not loaded");
 }
 
 // Failed save and "no changes" keep the typed value. A real save clears it.
@@ -137,7 +218,8 @@ function settlement(amount: number): Record<string, unknown> {
   ok(onSaved[1] == null, "a stored save clears that car");
   const raced = draftsAfterSave({ 1: { ...settlement(9178.9), notes: "typed while saving" } }, sent, "saved");
   ok(raced[1]?.notes === "typed while saving", "a newer edit during save is not cleared");
-  ok(emptySaveToast(true, 0).description?.includes("still in the cell"), "unreadable text is kept");
+  ok(emptySaveToast(true).description?.includes("still in the cell"), "unreadable text is kept");
+  ok(emptySaveToast(false).title === "No changes", "an empty save does not mention a hidden car");
 }
 
 {

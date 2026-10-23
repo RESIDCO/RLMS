@@ -1,6 +1,6 @@
 import { changedKeys, jsonEqual, pickRow } from "@shared/change-log";
 import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates";
-import { patchColumns } from "@shared/program-car-patch";
+import { patchColumns, PROGRAM_COMPLETE_CF } from "@shared/program-car-patch";
 import { moneyNumber, parseUsdInput } from "@shared/money";
 
 /** Pending edits for the Program Detail cars grid, keyed by program_cars id. */
@@ -157,6 +157,88 @@ export function programCarStaysVisible(input: {
   if (input.pasteActive && !input.matchesPaste) return false;
   if (input.applyLevelFilter && !input.levelSelected) return false;
   return true;
+}
+
+/** Shown only because of an unsaved edit. A dirty row that also matches the filter is not pinned-only. */
+export function programCarPinnedOnly(input: {
+  matchesText: boolean;
+  pasteActive: boolean;
+  matchesPaste: boolean;
+  applyLevelFilter: boolean;
+  levelSelected: boolean;
+  dirty: boolean;
+}): boolean {
+  if (!input.dirty) return false;
+  return !programCarStaysVisible({ ...input, dirty: false });
+}
+
+export function selectAllShownCarIds(cars: readonly { id: number; exited: boolean; pinnedOnly: boolean }[]): number[] {
+  return cars.filter((car) => !car.exited && !car.pinnedOnly).map((car) => car.id);
+}
+
+function customFieldRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Drop the fields a bulk apply just wrote. Other pending keys on those cars stay.
+ * Bulk Complete is stored on the draft as outcome_reached / __complete, so those
+ * aliases are cleared with `completed`. Cars outside `ids` are left untouched.
+ */
+export function draftsAfterBulkApply(
+  drafts: CarDraftMap,
+  ids: readonly number[],
+  updates: Record<string, unknown>,
+): CarDraftMap {
+  const topKeys = Object.keys(updates).filter((key) => key !== "custom_fields");
+  const customKeys: string[] = [];
+  const appliedCustom = customFieldRecord(updates.custom_fields);
+  if (appliedCustom) {
+    for (const key of Object.keys(appliedCustom)) customKeys.push(key);
+  }
+  if (topKeys.indexOf("completed") >= 0 || topKeys.indexOf("outcome_reached") >= 0) {
+    if (topKeys.indexOf("completed") < 0) topKeys.push("completed");
+    if (topKeys.indexOf("outcome_reached") < 0) topKeys.push("outcome_reached");
+    customKeys.push(PROGRAM_COMPLETE_CF);
+  }
+  let changed = false;
+  const next: CarDraftMap = { ...drafts };
+  for (const id of ids) {
+    const current = next[id];
+    if (!current) continue;
+    const patched: Record<string, unknown> = { ...current };
+    let carChanged = false;
+    for (const key of topKeys) {
+      if (Object.prototype.hasOwnProperty.call(patched, key)) {
+        delete patched[key];
+        carChanged = true;
+      }
+    }
+    if (customKeys.length > 0 && Object.prototype.hasOwnProperty.call(patched, "custom_fields")) {
+      const fields = customFieldRecord(patched.custom_fields);
+      if (fields) {
+        const remaining = { ...fields };
+        let customChanged = false;
+        for (const key of customKeys) {
+          if (Object.prototype.hasOwnProperty.call(remaining, key)) {
+            delete remaining[key];
+            customChanged = true;
+          }
+        }
+        if (customChanged) {
+          carChanged = true;
+          if (Object.keys(remaining).length === 0) delete patched.custom_fields;
+          else patched.custom_fields = remaining;
+        }
+      }
+    }
+    if (!carChanged) continue;
+    changed = true;
+    if (Object.keys(patched).length === 0) delete next[id];
+    else next[id] = patched;
+  }
+  return changed ? next : drafts;
 }
 
 /** Keep every draft unless the server actually stored the patch we sent. */

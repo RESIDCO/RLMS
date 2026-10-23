@@ -73,6 +73,12 @@ ok(program.includes("programCarStaysVisible"), "dirty rows stay visible under th
 ok(program.includes("unsaved-program-car-"), "dirty rows show an unsaved marker");
 ok(program.includes('saveCarCountLabel(plan.count, "confirm")'), "save confirms how many cars will be saved");
 ok(program.includes('saveCarCountLabel(plan.count, "saved")'), "save reports how many cars were saved");
+ok(program.includes("programCarPinnedOnly"), "select all skips rows that are only pinned because they are dirty");
+ok(program.includes("selectAllShownCarIds"), "select all uses the filter-matching id list");
+const bulkStart = program.indexOf("onApply={async (label, updates)");
+const bulkFn = program.slice(bulkStart, bulkStart + 900);
+ok(bulkFn.includes("draftsAfterBulkApply"), "bulk apply clears only the fields it wrote");
+ok(!bulkFn.includes("clearLinks"), "bulk apply does not drop the rest of the car draft");
 
 ok(fleet.includes("ProgramCarSection"), "the shared sheet renders the program section");
 ok(fleet.includes('commitmentScopeLabel("car")'), "car-level commitment is labeled Car commitment from a program");

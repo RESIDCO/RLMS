@@ -6,13 +6,16 @@ import {
   datePatchValue,
   draftDiffers,
   draftsAfterSave,
+  draftsAfterBulkApply,
   emptySaveToast,
   keptEditsToast,
   moneyPatchValue,
   planCarSave,
+  programCarPinnedOnly,
   programCarStaysVisible,
   saveCarCountLabel,
   saveFailureToast,
+  selectAllShownCarIds,
   textPatchValue,
   unsavedDraftIds,
   type CarBaseline,
@@ -229,6 +232,83 @@ function settlement(amount: number): Record<string, unknown> {
   session.endSave();
   ok(session.beginSave() === true, "Save can run again after the first finishes");
   session.endSave();
+}
+
+// Select all skips a row that is on screen only because it is dirty.
+{
+  const pinned = programCarPinnedOnly({
+    matchesText: false,
+    pasteActive: false,
+    matchesPaste: true,
+    applyLevelFilter: true,
+    levelSelected: false,
+    dirty: true,
+  });
+  const matchingDirty = programCarPinnedOnly({
+    matchesText: true,
+    pasteActive: false,
+    matchesPaste: true,
+    applyLevelFilter: true,
+    levelSelected: true,
+    dirty: true,
+  });
+  const cleanHidden = programCarPinnedOnly({
+    matchesText: false,
+    pasteActive: true,
+    matchesPaste: false,
+    applyLevelFilter: false,
+    levelSelected: true,
+    dirty: false,
+  });
+  ok(pinned, "a dirty car that misses the filter is pinned only");
+  ok(!matchingDirty, "a dirty car that matches the filter is part of select all");
+  ok(!cleanHidden, "a clean hidden car is not a pinned row");
+  const ids = selectAllShownCarIds([
+    { id: 1, exited: false, pinnedOnly: false },
+    { id: 2, exited: false, pinnedOnly: true },
+    { id: 3, exited: true, pinnedOnly: false },
+    { id: 4, exited: false, pinnedOnly: false },
+  ]);
+  ok(ids.join(",") === "1,4", "select all shown cars skips pinned-only and exited rows");
+}
+
+// Bulk apply clears the field it wrote and leaves the car's other drafts.
+{
+  const before: CarDraftMap = {
+    1: { notes: "shop called", status: "At shop", custom_fields: { settlement_amount: 5, __keep_open: true } },
+    2: { notes: "other car", status: "Enroute" },
+  };
+  const statusApplied = draftsAfterBulkApply(before, [1], { status: "Ready" });
+  ok(statusApplied[1]?.notes === "shop called", "bulk status keeps the pending note");
+  ok(statusApplied[1]?.status == null, "bulk status clears the pending status");
+  const keptFields = statusApplied[1]?.custom_fields as Record<string, unknown>;
+  ok(keptFields.settlement_amount === 5 && keptFields.__keep_open === true, "bulk status keeps custom fields");
+  ok(statusApplied[2]?.notes === "other car" && statusApplied[2]?.status === "Enroute", "a car outside the bulk set keeps every field");
+
+  const keepOpen = draftsAfterBulkApply(before, [1], { custom_fields: { __keep_open: false } });
+  const afterKeep = keepOpen[1]?.custom_fields as Record<string, unknown>;
+  ok(afterKeep.settlement_amount === 5 && !("__keep_open" in afterKeep), "bulk keep-open clears only that custom field");
+  ok(keepOpen[1]?.notes === "shop called" && keepOpen[1]?.status === "At shop", "bulk keep-open keeps the other pending fields");
+
+  const completed = draftsAfterBulkApply(
+    { 1: { notes: "keep", outcome_reached: false, custom_fields: { settlement_amount: 9, __complete: false } } },
+    [1],
+    { completed: true },
+  );
+  ok(completed[1]?.notes === "keep", "bulk complete keeps the note");
+  ok(completed[1]?.outcome_reached == null, "bulk complete clears the outcome draft");
+  const completedFields = completed[1]?.custom_fields as Record<string, unknown>;
+  ok(completedFields.settlement_amount === 9 && !("__complete" in completedFields), "bulk complete clears __complete and keeps other custom fields");
+
+  const onlyStatus = draftsAfterBulkApply({ 1: { status: "At shop" }, 2: { notes: "stay" } }, [1], { status: "Ready" });
+  ok(onlyStatus[1] == null && onlyStatus[2]?.notes === "stay", "clearing the only pending field drops that car");
+
+  const milestone = draftsAfterBulkApply(
+    { 1: { notes: "keep", milestone: "Enroute", milestone_at: "2026-01-01" } },
+    [1],
+    { milestone: "Arrived", milestone_at: "2026-04-02" },
+  );
+  ok(milestone[1]?.notes === "keep" && milestone[1]?.milestone == null && milestone[1]?.milestone_at == null, "bulk milestone clears both milestone fields and keeps the note");
 }
 
 console.log(`${passed} passed, ${failed} failed`);

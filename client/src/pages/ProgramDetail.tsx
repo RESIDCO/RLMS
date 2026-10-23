@@ -84,8 +84,11 @@ import {
   moneyPatchValue,
   patchApplyMadeNoChanges,
   planCarSave,
+  draftsAfterBulkApply,
+  programCarPinnedOnly,
   programCarStaysVisible,
   saveCarCountLabel,
+  selectAllShownCarIds,
   saveFailureToast,
   textPatchValue,
   unsavedDraftIds,
@@ -856,8 +859,8 @@ export default function ProgramDetailPage() {
         {key === "_select" ? (
           <Checkbox
             checked={
-              visibleCars.filter((c) => !c.exited_date).length > 0 &&
-              visibleCars.filter((c) => !c.exited_date).every((c) => selected.has(c.id))
+              selectAllIds.length > 0 &&
+              selectAllIds.every((id) => selected.has(id))
             }
             onCheckedChange={toggleAll}
             aria-label="Select all shown cars"
@@ -1193,6 +1196,22 @@ export default function ProgramDetailPage() {
       }),
     );
   }, [sortedCars, pasteMatch, levelFilter, carFilter, unsavedCarIds]);
+  const selectAllIds = useMemo(() => {
+    const pasteIds = pasteMatch ? new Set(pasteMatch.matched.map((m) => m.link_id)) : null;
+    const narrowing = carFilter.trim() !== "" || pasteMatch != null;
+    return selectAllShownCarIds(visibleCars.map((car) => ({
+      id: car.id,
+      exited: Boolean(car.exited_date),
+      pinnedOnly: programCarPinnedOnly({
+        matchesText: programCarMatchesQuery(carQueryFields(car), carFilter),
+        pasteActive: pasteIds != null,
+        matchesPaste: pasteIds ? pasteIds.has(car.id) : true,
+        applyLevelFilter: !narrowing,
+        levelSelected: levelFilter.has(carCompletionLevel(car)),
+        dirty: unsavedCarIds.has(car.id),
+      }),
+    })));
+  }, [visibleCars, pasteMatch, carFilter, levelFilter, unsavedCarIds]);
   carsRef.current = cars;
 
   useEffect(() => {
@@ -1242,7 +1261,7 @@ export default function ProgramDetailPage() {
   }
 
   function toggleAll() {
-    const openIds = visibleCars.filter((c) => !c.exited_date).map((c) => c.id);
+    const openIds = selectAllIds;
     setSelected((prev) => {
       if (openIds.length && openIds.every((id) => prev.has(id))) return new Set();
       return new Set(openIds);
@@ -1716,7 +1735,7 @@ export default function ProgramDetailPage() {
                       toast({ title: "No changes" });
                       return;
                     }
-                    draftSession.clearLinks(ids);
+                    draftSession.replaceDrafts(draftsAfterBulkApply(draftSession.getDrafts(), ids, updates));
                     setSelected(new Set());
                   } catch {
                     /* toast already shown */

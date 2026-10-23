@@ -8,6 +8,7 @@ import {
   INACTIVATE_CONFIRM,
   chooseInactivateIds,
   classifyInactivateRow,
+  collectOpenRentStops,
   inactivateEndDateError,
   summarizeInactivate,
   type InactivateFacts,
@@ -30,7 +31,7 @@ function fact(over: Partial<InactivateFacts> & Pick<InactivateFacts, "id">): Ina
     car_status: "Storage",
     active: true,
     assignment: null,
-    rent_stop: null,
+    rent_stops: [],
     programs: [],
     commitment: null,
     ...over,
@@ -61,7 +62,7 @@ ok(closable.status === "ready" && !closable.blockers.includes("open_assignment")
 ok(closable.message.includes("last active car"), "closing still says it is the last car");
 
 const stopped = classifyInactivateRow(
-  fact({ id: 3, rent_stop: { type: "Off rent", stop_date: "2026-10-01" }, programs: ["NLD"], commitment: { type: "scrap", name: "Cut up" } }),
+  fact({ id: 3, rent_stops: [{ type: "Off rent", stop_date: "2026-10-01" }], programs: ["NLD"], commitment: { type: "scrap", name: "Cut up" } }),
   { closeAssignment: true, endDate: "2026-10-19" },
 );
 ok(
@@ -79,7 +80,7 @@ ok(!stopped.message.includes("Not closed"), "a kept off-rent stop is not describ
 ok(!stopped.message.toLowerCase().includes("rent_events"), "preview does not mention rent events as something it will write");
 
 const offRentLeftOpen = classifyInactivateRow(
-  fact({ id: 6, rent_stop: { type: "Off rent", stop_date: "2026-10-19" } }),
+  fact({ id: 6, rent_stops: [{ type: "Off rent", stop_date: "2026-10-19" }] }),
   { closeAssignment: false },
 );
 ok(
@@ -92,7 +93,7 @@ const kept = classifyInactivateRow(
     id: 36017,
     car_number: "074041",
     assignment: { ol: "1220", label: "OL1220", last_active_on_ol: false, other_active_on_ol: 2 },
-    rent_stop: { type: "Off rent", stop_date: "2026-10-19" },
+    rent_stops: [{ type: "Off rent", stop_date: "2026-10-19" }],
   }),
   { closeAssignment: true, endDate: "2026-10-19" },
 );
@@ -105,13 +106,13 @@ ok(
 ok(kept.rent_stop === "Off rent 2026-10-19", "rent stop column stays the stop's own date");
 
 const keptLater = classifyInactivateRow(
-  fact({ id: 8, rent_stop: { type: "Off rent", stop_date: "2026-10-19" } }),
+  fact({ id: 8, rent_stops: [{ type: "Off rent", stop_date: "2026-10-19" }] }),
   { closeAssignment: true, endDate: "2026-10-20" },
 );
 ok(keptLater.status === "ready", "an inactivation date after the off-rent date is ready");
 
 const keptUndated = classifyInactivateRow(
-  fact({ id: 9, rent_stop: { type: "Off rent", stop_date: "2026-10-19" } }),
+  fact({ id: 9, rent_stops: [{ type: "Off rent", stop_date: "2026-10-19" }] }),
   { closeAssignment: true },
 );
 ok(
@@ -120,7 +121,7 @@ ok(
 );
 
 const early = classifyInactivateRow(
-  fact({ id: 10, rent_stop: { type: "Off rent", stop_date: "2026-10-19" } }),
+  fact({ id: 10, rent_stops: [{ type: "Off rent", stop_date: "2026-10-19" }] }),
   { closeAssignment: true, endDate: "2026-10-01" },
 );
 ok(
@@ -139,7 +140,7 @@ ok(chooseInactivateIds(earlyPreview, "all").ok === false, "a too-early inactivat
 ok(chooseInactivateIds(earlyPreview, "good").ok === false, "a too-early inactivation date is not ready");
 
 const abatement = classifyInactivateRow(
-  fact({ id: 11, rent_stop: { type: "Abatement", stop_date: "2026-10-01" } }),
+  fact({ id: 11, rent_stops: [{ type: "Abatement", stop_date: "2026-10-01" }] }),
   { closeAssignment: true, endDate: "2026-10-19" },
 );
 ok(
@@ -148,10 +149,76 @@ ok(
 );
 
 const otherStop = classifyInactivateRow(
-  fact({ id: 12, rent_stop: { type: "Shop", stop_date: "2026-10-01" } }),
+  fact({ id: 12, rent_stops: [{ type: "Shop", stop_date: "2026-10-01" }] }),
   { closeAssignment: true, endDate: "2026-10-19" },
 );
 ok(otherStop.blockers.includes("open_rent_stop"), "other stop types still block");
+
+const mixedRows = collectOpenRentStops([
+  { railcar_id: 13, type: "Off rent", stop_date: "2026-10-01" },
+  { railcar_id: 13, type: "Abatement", stop_date: "2026-10-19" },
+]);
+ok(mixedRows.get(13)?.length === 2, "collector keeps the off-rent stop and the later abatement");
+const mixedStops = classifyInactivateRow(
+  fact({ id: 13, rent_stops: mixedRows.get(13) ?? [] }),
+  { closeAssignment: true, endDate: "2026-10-19" },
+);
+ok(
+  mixedStops.status === "blocked" && mixedStops.blockers.includes("open_rent_stop") && mixedStops.blockers.length === 1,
+  "off rent plus abatement blocks even when off rent is first",
+);
+ok(
+  mixedStops.message.includes("Open rent stop (Off rent 2026-10-01). Not closed.") &&
+    mixedStops.message.includes("Open rent stop (Abatement 2026-10-19). Not closed."),
+  "blocked preview lists each open stop",
+);
+const mixedPreview = summarizeInactivate([mixedStops]);
+ok(chooseInactivateIds(mixedPreview, "all").ok === false, "apply-all refuses off rent plus abatement");
+ok(chooseInactivateIds(mixedPreview, "good").ok === false, "apply-ready skips off rent plus abatement");
+
+const twoOff = classifyInactivateRow(
+  fact({
+    id: 14,
+    rent_stops: [
+      { type: "Off rent", stop_date: "2026-10-19" },
+      { type: "Off rent", stop_date: "2026-10-01" },
+    ],
+  }),
+  { closeAssignment: true, endDate: "2026-10-19" },
+);
+ok(twoOff.status === "ready" && twoOff.blockers.length === 0, "two off-rent stops pass when the date is on or after both");
+ok(
+  twoOff.message.includes("Off rent since 2026-10-01 (kept) · Inactive/assignment end 2026-10-19") &&
+    twoOff.message.includes("Off rent since 2026-10-19 (kept) · Inactive/assignment end 2026-10-19"),
+  "both off-rent dates are listed as kept",
+);
+ok(twoOff.rent_stop === "Off rent 2026-10-01; Off rent 2026-10-19", "rent stop column lists both stop dates");
+const twoReady = summarizeInactivate([twoOff]);
+const twoChosen = chooseInactivateIds(twoReady, "all");
+ok(twoChosen.ok === true && twoChosen.ok && twoChosen.ids.join(",") === "14", "apply accepts two off-rent stops covered by the date");
+
+const twoEarly = classifyInactivateRow(
+  fact({
+    id: 15,
+    rent_stops: [
+      { type: "Off rent", stop_date: "2026-10-19" },
+      { type: "Off rent", stop_date: "2026-10-01" },
+    ],
+  }),
+  { closeAssignment: true, endDate: "2026-10-10" },
+);
+ok(
+  twoEarly.status === "blocked" &&
+    twoEarly.blockers.includes("inactivation_before_off_rent") &&
+    !twoEarly.blockers.includes("open_rent_stop"),
+  "a date before either off-rent stop is not ready",
+);
+ok(
+  twoEarly.message.includes("Off rent since 2026-10-01 (kept)") &&
+    twoEarly.message.includes("Off rent since 2026-10-19 (kept)") &&
+    twoEarly.message.includes("Inactivation date is before the off-rent date."),
+  "the early pair still lists each stop",
+);
 
 const dead = classifyInactivateRow(fact({ id: 4, car_status: "Inactive", active: false }), { closeAssignment: false });
 ok(dead.status === "already_inactive", "already inactive is not ready");
@@ -186,6 +253,9 @@ ok(!/\.from\(["']car_rent_stops["']\)/.test(applyFn), "apply does not query rent
 ok(!/\.from\(["']rent_events["']\)/.test(applyFn), "apply does not query rent events");
 ok(!/\b(update|insert|delete)\b[\s\S]{0,80}car_rent_stops/i.test(applyFn), "apply does not write rent stops");
 ok(/from\("car_rent_stops"\)/.test(serverSrc.slice(0, applyStart)), "preview only reads open rent stops");
+ok(serverSrc.includes("collectOpenRentStops(rentStopRows)"), "preview passes every open stop into classify");
+ok(!serverSrc.includes("if (rentStops.has(id)) continue"), "preview does not drop open stops after the first");
+ok(applyFn.includes("previewInactivate"), "apply uses the same preview classification");
 
 const dialogSrc = readFileSync(join(import.meta.dirname, "../client/src/pages/railcars/InactivateCarsDialog.tsx"), "utf8");
 ok(dialogSrc.includes("Inactive / assignment end date"), "dialog labels the inactivation date as its own field");

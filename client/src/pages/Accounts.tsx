@@ -23,6 +23,13 @@ import { AmCommentThread } from "@/components/AmCommentThread";
 import { AccountTransitionDocuments } from "@/components/AccountTransitionDocuments";
 import { InactiveFleetBadge } from "@/components/InactiveFleetBadge";
 import { CopyCarsButton } from "@/components/CopyCarsButton";
+import { useColumnPrefs } from "@/hooks/use-column-prefs";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { mergeColOrder } from "@/lib/grid-columns";
+import { RENT_STOP_COLUMN_KEYS, rentStopPickerColumns, type RentStopColumnKey } from "@shared/saved-views";
+import { columnLabel } from "@shared/column-dictionary";
+import { downloadGridCsv } from "@/lib/grid-csv";
+import { exportCarNumberText, exportReportingMarkText } from "@shared/car-export-identity";
 import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 import { navigateHash } from "@/lib/hash-location";
 import {
@@ -101,7 +108,9 @@ type OlCar = {
   reporting_marks: string | null;
   car_type: string | null;
   expiration_date: string | null;
-};
+} & Partial<Record<RentStopColumnKey, string | number | null>>;
+
+const ACCOUNT_OL_STOP_DEFAULTS = new Set<string>();
 
 let overviewInvalidateTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleOverviewInvalidate(qc: QueryClient) {
@@ -719,6 +728,11 @@ function OlRows({
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const stopCols = useColumnPrefs("account_ol_cars", ACCOUNT_OL_STOP_DEFAULTS);
+  const stopKeys = mergeColOrder(
+    RENT_STOP_COLUMN_KEYS.filter((key) => stopCols.visibleCols.has(key)),
+    stopCols.colOrder,
+  );
   const cars = useQuery<{ cars: OlCar[] }>({
     queryKey: ["/api/account-management/riders", ol.id, "cars"],
     queryFn: () => apiRequest("GET", `/api/account-management/riders/${ol.id}/cars`).then((r) => r.json()),
@@ -815,11 +829,39 @@ function OlRows({
               <p className="text-xs text-muted-foreground">No active cars on this OL.</p>
             ) : (
               <>
-              <div className="mb-1 flex justify-end">
+              <div className="mb-1 flex justify-end gap-2">
                 <CopyCarsButton
                   rows={cars.data?.cars ?? []}
                   testId={`button-copy-cars-account-ol-${ol.id}`}
                 />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[11px]"
+                  disabled={(cars.data?.cars ?? []).length === 0}
+                  onClick={() => {
+                    const rows = cars.data?.cars ?? [];
+                    const headers = ["Reporting Mark", "Car Number", "Type", "Expiration", ...stopKeys.map((key) => columnLabel("account_ol_cars", key))];
+                    downloadGridCsv(
+                      `RLMS_account_ol_${ol.id}_cars.csv`,
+                      headers,
+                      rows.map((car) => [
+                        exportReportingMarkText(car.reporting_marks),
+                        exportCarNumberText(car.car_number),
+                        car.car_type ?? "",
+                        car.expiration_date ? formatCalendarDate(car.expiration_date) : "",
+                        ...stopKeys.map((key) => {
+                          const value = car[key as RentStopColumnKey];
+                          return value == null ? "" : String(value);
+                        }),
+                      ]),
+                      [1],
+                    );
+                  }}
+                >
+                  CSV
+                </Button>
+                <ColumnPicker columns={rentStopPickerColumns()} prefs={stopCols} />
               </div>
               <table className="w-full text-xs">
                 <thead className="text-muted-foreground">
@@ -836,6 +878,9 @@ function OlRows({
                     </th>
                     <th className="text-left font-medium py-1">Type</th>
                     <th className="text-left font-medium py-1">Expiration</th>
+                    {stopKeys.map((key) => (
+                      <th key={key} className="text-left font-medium py-1">{columnLabel("account_ol_cars", key)}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -855,6 +900,11 @@ function OlRows({
                       <td className="py-0.5 text-muted-foreground">
                         {c.expiration_date ? formatCalendarDate(c.expiration_date) : ""}
                       </td>
+                      {stopKeys.map((key) => {
+                        const value = c[key as RentStopColumnKey];
+                        const text = value == null || value === "" ? "—" : String(value);
+                        return <td key={key} className="py-0.5 text-muted-foreground max-w-[180px] truncate" title={text === "—" ? undefined : text}>{text}</td>;
+                      })}
                     </tr>
                   ))}
                 </tbody>

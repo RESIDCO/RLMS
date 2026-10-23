@@ -35,6 +35,7 @@ export function BulkEditDrawer({
   const [stopType, setStopType] = useState<"Off rent" | "Abatement">("Off rent");
   const [stopReason, setStopReason] = useState<string>("other");
   const [stopDetail, setStopDetail] = useState("");
+  const [stopNote, setStopNote] = useState("");
   const [scrapped, setScrapped] = useState("");
   const [umler, setUmler] = useState("");
   const [buyer, setBuyer] = useState("");
@@ -48,7 +49,7 @@ export function BulkEditDrawer({
     if (note.trim()) out.push({ op: "add_note", note: note.trim() });
     if (tag.trim()) out.push({ op: "add_tag", value: tag.trim() });
     if (stopDate) {
-      const fields = rentStopReasonFields({ reason: stopReason, reason_other: stopDetail, note: stopDetail });
+      const fields = rentStopReasonFields({ reason: stopReason, reason_other: stopDetail, note: stopNote });
       out.push({
         op: "rent_stop",
         type: stopType,
@@ -130,7 +131,15 @@ export function BulkEditDrawer({
         rows={2}
         value={stopDetail}
         onChange={(e) => setStopDetail(e.target.value)}
-        placeholder="Shown on the stop. Scrap uses this as the note."
+        placeholder="For Other, this is the reason. It is not copied into the stop note."
+      />
+      <label className="text-xs text-muted-foreground">Stop note (optional)</label>
+      <Textarea
+        className="mb-2"
+        rows={2}
+        value={stopNote}
+        onChange={(e) => setStopNote(e.target.value)}
+        placeholder="Saved on the rent stop only."
       />
       <Button
         size="sm"

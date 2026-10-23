@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "./supabase";
+import { attachOpenStopColumns } from "./focus-columns";
 import { fetchAllRows } from "./fetch-all";
 import { assertAccountImporterPatch } from "@shared/rider-import-guard";
 import { countActiveCarsByRiderId } from "./rider-car-counts";
@@ -575,7 +576,7 @@ export async function listRiderCarsForAccountMgmt(riderId: number) {
     .eq("rider_id", riderId)
     .eq("railcars.active", true);
   if (error) throw error;
-  return (assigns ?? []).map((row: any) => {
+  const cars = (assigns ?? []).map((row: any) => {
     const c = Array.isArray(row.railcars) ? row.railcars[0] : row.railcars;
     return {
       id: c?.id ?? row.railcar_id,
@@ -586,5 +587,6 @@ export async function listRiderCarsForAccountMgmt(riderId: number) {
         c?.estimated_lease_expiry || c?.lease_expiry || c?.lease_end_date || null,
     };
   });
+  return attachOpenStopColumns(cars, (row) => Number(row.id));
 }
 

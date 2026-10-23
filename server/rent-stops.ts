@@ -11,6 +11,7 @@ import {
   rentStopReasonFields,
 } from "@shared/rent-stops";
 import { annotateKpiDelta } from "./kpi-delta";
+import { summarizeKpiCountImpact } from "@shared/kpi-buckets";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 
 function errHandler(res: Response, e: any) {
@@ -507,14 +508,19 @@ export function registerRentStopRoutes(
         note: fields.note,
       };
       const token = await putPreview("rent_stop", { action: storedAction, toWrite, body: storedBody, warnings });
-      const kpi_delta = kind === "abatement"
+      const kpiKind = kind === "abatement" || kind === "off_rent" || kind === "convert" ? kind : null;
+      const kpi_delta = kpiKind
         ? await annotateKpiDelta(
           toWrite.map((r) => r.id),
-          { kind: "abatement" },
+          { kind: kpiKind },
           req.body?.bucket ?? null,
         )
         : null;
-      res.json({ preview_token: token, to_write: toWrite, rejected, warnings, kpi_delta });
+      const kpi_counts = kpi_delta ? summarizeKpiCountImpact(kpi_delta) : [];
+      const kpi_note = kind === "off_rent" && toWrite.length
+        ? "Dashboard tiles follow the assignment off-rent flag and open abatements. This stop changes neither, so the counts stay the same."
+        : null;
+      res.json({ preview_token: token, to_write: toWrite, rejected, warnings, kpi_delta, kpi_counts, kpi_note });
     } catch (e) {
       errHandler(res, e);
     }
@@ -539,13 +545,30 @@ export function registerRentStopRoutes(
           else if (snap.action === "Off rent" || snap.action === "off_rent") written.push(await setOffRent(row.id, body, actor));
           else written.push(await setAbatement(row.id, body, actor));
         }
-        const noteReport = await appendNotesInGroup({
-          entityType: "railcar",
-          ids: (snap.toWrite ?? []).map((row: { id?: number }) => Number(row.id)),
-          note: req.body?.append_note,
-          actor,
-        });
-        return withNoteReport({ written: written.length }, req.body?.append_note, noteReport);
+        const noteReport = { appended: [] as number[], skipped: [] as { id: number; status: number; message: string }[] };
+        if (req.body?.copy_car_note === true) {
+          const byNote = new Map<string, number[]>();
+          for (const row of snap.toWrite ?? []) {
+            const text = String(row.note ?? "").trim();
+            if (!text) continue;
+            const list = byNote.get(text) ?? [];
+            list.push(Number(row.id));
+            byNote.set(text, list);
+          }
+          const notes = Array.from(byNote.keys());
+          for (let i = 0; i < notes.length; i += 1) {
+            const text = notes[i];
+            const part = await appendNotesInGroup({
+              entityType: "railcar",
+              ids: byNote.get(text) ?? [],
+              note: text,
+              actor,
+            });
+            noteReport.appended.push(...part.appended);
+            noteReport.skipped.push(...part.skipped);
+          }
+        }
+        return withNoteReport({ written: written.length }, req.body?.copy_car_note === true ? "car note" : null, noteReport);
       });
       res.json(result);
     } catch (e) {

@@ -4,6 +4,7 @@
  */
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
+import { attachOpenStopColumns } from "./focus-columns";
 import { isOperatingFleetCar, parseFleetStatus, deriveFleetStatus } from "@shared/fleet-status";
 import { carOlCode, carLesseeName } from "@shared/lease-authority";
 
@@ -218,7 +219,10 @@ export async function browseOl(code: string, filter?: { lessee?: string; entity?
   const summary = riderRowForOl(ol, index, cars.length);
   return {
     ...summary,
-    cars: cars.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
+    cars: await attachOpenStopColumns(
+      cars.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
+      (row) => Number(row.id),
+    ),
   };
 }
 
@@ -250,7 +254,10 @@ export async function browseTurning50(year: number, ol?: string) {
     year,
     build_year: year - 50,
     ...summary,
-    cars: filtered.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
+    cars: await attachOpenStopColumns(
+      filtered.map(mapCarListRow).sort((a, b) => String(a.car_number).localeCompare(String(b.car_number))),
+      (row) => Number(row.id),
+    ),
   };
 }
 
@@ -319,7 +326,18 @@ export async function loadTurning50Export(
       return { ...row, cars: mapped };
     })
     .sort((a, b) => b.car_count - a.car_count || a.ol.localeCompare(b.ol));
-  return { year, build_year: year - 50, riders };
+  const flat: Turning50ExportCar[] = [];
+  for (const rider of riders) flat.push(...rider.cars);
+  const withStops = await attachOpenStopColumns(flat, (car) => Number(car.id));
+  const stopById = new Map(withStops.map((car) => [Number(car.id), car]));
+  return {
+    year,
+    build_year: year - 50,
+    riders: riders.map((rider) => ({
+      ...rider,
+      cars: rider.cars.map((car) => stopById.get(Number(car.id)) ?? car),
+    })),
+  };
 }
 
 /** Distinct cars on any non-completed program. Fleet status / active is ignored. */

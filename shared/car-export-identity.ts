@@ -8,6 +8,7 @@
 
 import { normalizeStoredCarNumber, splitCarNumber } from "./residco-import";
 import { selectProgramCarExportColumns } from "./program-export-columns";
+import { FOCUS_COLUMN_LABELS, RENT_STOP_COLUMN_KEYS } from "./saved-views";
 
 export const CAR_EXPORT_MARK_HEADER = "Reporting Mark";
 export const CAR_EXPORT_NUMBER_HEADER = "Car Number";
@@ -145,6 +146,7 @@ export const KPI_EXPORT_DATA_KEYS = [
   "rent_start_date",
   "last_ol",
   "reason",
+  ...RENT_STOP_COLUMN_KEYS,
 ] as const;
 
 export type KpiExportDataKey = (typeof KPI_EXPORT_DATA_KEYS)[number];
@@ -188,6 +190,13 @@ export function kpiExportHeader(key: KpiExportKey): string {
     case "last_ol":
     case "reason":
       return key;
+    case "open_stop_type":
+    case "open_stop_since":
+    case "open_stop_days":
+    case "open_stop_expected":
+    case "open_stop_reason":
+    case "open_stop_note":
+      return FOCUS_COLUMN_LABELS[key];
     default: {
       const unreachable: never = key;
       return unreachable;
@@ -211,7 +220,13 @@ export function kpiExportCell(row: CarIdentitySource & Record<string, unknown>, 
     case "commitment":
     case "rent_start_date":
     case "last_ol":
-    case "reason": {
+    case "reason":
+    case "open_stop_type":
+    case "open_stop_since":
+    case "open_stop_days":
+    case "open_stop_expected":
+    case "open_stop_reason":
+    case "open_stop_note": {
       const value = row[key];
       return value == null ? "" : String(value);
     }

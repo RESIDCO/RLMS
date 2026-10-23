@@ -568,6 +568,7 @@ export function BulkRentStopsPage() {
   const [stopDate, setStopDate] = useState(new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("quality repair");
   const [batchNote, setBatchNote] = useState("");
+  const [copyCarNote, setCopyCarNote] = useState(false);
   const [preview, setPreview] = useState<any>(null);
   useEffect(() => {
     if (!openedOffRent) return;
@@ -602,7 +603,7 @@ export function BulkRentStopsPage() {
     mutationFn: async () =>
       (await apiRequest("POST", "/api/rent-stops/bulk/apply", {
         preview_token: preview?.preview_token,
-        ...appendNoteBody(batchNote),
+        ...(copyCarNote ? { copy_car_note: true } : {}),
       })).json(),
     onSuccess: (d) => {
       void invalidateFleetQueries(qc);
@@ -611,6 +612,9 @@ export function BulkRentStopsPage() {
     onError: (e: Error) => toast({ title: "Apply failed", description: e.message, variant: "destructive" }),
   });
   const datedMode = action === "off_rent";
+  const kpiMoves = (preview?.kpi_delta ?? []).filter(
+    (row: { before_title?: string; after_title?: string }) => row.before_title !== row.after_title,
+  );
   return (
     <div>
       <PageHeader title="Bulk rent stops" subtitle="Active cars only. Preview first. Off rent and abatement stay on the current assignment. One apply is one undo." />
@@ -664,8 +668,24 @@ export function BulkRentStopsPage() {
             </Select>
           </div>
           <div className="min-w-[240px] flex-1">
-            <AddNoteField id="bulk-rent-stop-note" value={batchNote} onChange={setBatchNote} />
+            <Label htmlFor="bulk-rent-stop-note">Stop note</Label>
+            <Textarea
+              id="bulk-rent-stop-note"
+              rows={2}
+              value={batchNote}
+              onChange={(e) => setBatchNote(e.target.value)}
+              placeholder="Saved on the rent stop. A date line’s note overrides this for that car."
+            />
           </div>
+          <label className="text-sm flex items-center gap-2 pb-2">
+            <input
+              type="checkbox"
+              checked={copyCarNote}
+              data-testid="bulk-copy-car-note"
+              onChange={(e) => setCopyCarNote(e.target.checked)}
+            />
+            Also add the stop note on each car
+          </label>
           {canEdit && <Button disabled={runPreview.isPending} onClick={() => runPreview.mutate()}>Preview</Button>}
           {canEdit && preview?.preview_token && (
             <Button disabled={apply.isPending} onClick={() => apply.mutate()}>Apply preview</Button>
@@ -681,6 +701,25 @@ export function BulkRentStopsPage() {
         {preview && (
           <div className="text-sm space-y-2">
             <div>To write {preview.to_write?.length ?? 0} · rejected {preview.rejected?.length ?? 0} · warnings {preview.warnings?.length ?? 0}</div>
+            {(preview.kpi_note || (preview.kpi_counts ?? []).length > 0 || kpiMoves.length > 0) && (
+              <div className="text-xs space-y-0.5">
+                <div className="font-medium">Dashboard counts</div>
+                {preview.kpi_note ? <div className="text-muted-foreground">{preview.kpi_note}</div> : null}
+                {(preview.kpi_counts ?? []).map((row: { bucket: string; title: string; delta: number }) => (
+                  <div key={row.bucket}>
+                    {row.title}: {row.delta > 0 ? `+${row.delta}` : row.delta}
+                  </div>
+                ))}
+                {kpiMoves.slice(0, 8).map((row: { railcar_id: number; car?: string; before_title?: string; after_title?: string }) => (
+                  <div key={row.railcar_id} className="text-muted-foreground">
+                    {row.car}: {row.before_title} → {row.after_title}
+                  </div>
+                ))}
+                {kpiMoves.length > 8 ? (
+                  <div className="text-muted-foreground">+{kpiMoves.length - 8} more</div>
+                ) : null}
+              </div>
+            )}
             {(preview.rejected ?? []).length > 0 && (
               <ul className="text-xs text-destructive space-y-0.5">
                 {preview.rejected.map((row: { car?: string; id?: number; reason?: string }, index: number) => (

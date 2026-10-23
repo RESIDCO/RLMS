@@ -109,6 +109,38 @@ async function loadOpenPrograms(ids: number[]): Promise<(ProgramJoinRow & { rail
 }
 
 /**
+ * Open rent-stop columns only. Closed stops stay blank.
+ * `idOf` is the railcar id, which is not always `row.id`.
+ */
+export async function attachOpenStopColumns<T>(
+  rows: T[],
+  idOf: (row: T) => number,
+): Promise<T[]> {
+  if (!rows.length) return rows;
+  const ids = Array.from(new Set(rows.map((row) => Number(idOf(row))).filter((id) => Number.isFinite(id) && id > 0)));
+  const stops = await inBatches<OpenStopRow & { railcar_id: number }>(ids, async (slice) => {
+    const { data, error } = await supabaseAdmin
+      .from("car_rent_stops")
+      .select("railcar_id, type, stop_date, expected_resume_date, actual_resume_date, reason, reason_other, note")
+      .in("railcar_id", slice)
+      .is("actual_resume_date", null);
+    if (error) throw error;
+    return (data ?? []) as (OpenStopRow & { railcar_id: number })[];
+  });
+  const byCar = new Map<number, OpenStopRow[]>();
+  for (const stop of stops) {
+    const id = Number(stop.railcar_id);
+    const list = byCar.get(id) ?? [];
+    list.push(stop);
+    byCar.set(id, list);
+  }
+  return rows.map((row) => ({
+    ...row,
+    ...openStopFocusFields(byCar.get(Number(idOf(row))) ?? []),
+  }));
+}
+
+/**
  * Open rent stops, latest open program, latest note, and tags for the rows
  * already being returned. Closed rent stops are never attached.
  */

@@ -100,6 +100,7 @@ import { formatProgramDate, parseProgramDateInput } from "@shared/program-dates"
 import { diffProgramPatch } from "@shared/program-patch";
 import { isCompleteProgramStatus, mergeProgramStatusOptions, statusLeavesComplete } from "@shared/program-status";
 import { GLOBAL_PROGRAM_CAR_COLUMN_ORDER } from "@shared/program-tracker-sync";
+import { RENT_STOP_COLUMN_KEYS, FOCUS_COLUMN_LABELS, type RentStopColumnKey } from "@shared/saved-views";
 import { confirmRiderEntityMismatch } from "@/lib/rider-entity-confirm";
 import type { EntityCar } from "@shared/rider-entity";
 
@@ -181,6 +182,12 @@ type ProgramCar = {
   arrived_at?: string | null;
   program_done_at?: string | null;
   program_done_step?: string | null;
+  open_stop_type?: string | null;
+  open_stop_since?: string | null;
+  open_stop_days?: number | null;
+  open_stop_expected?: string | null;
+  open_stop_reason?: string | null;
+  open_stop_note?: string | null;
 };
 
 type HeaderDraft = {
@@ -252,6 +259,13 @@ function programCarSortValue(c: ProgramCar, key: string): string {
       return (c.railcar?.ops_flag ?? "").toLowerCase();
     case "scrapped_at":
       return String(c.railcar?.scrapped_at ?? "").slice(0, 10);
+    case "open_stop_type":
+    case "open_stop_since":
+    case "open_stop_days":
+    case "open_stop_expected":
+    case "open_stop_reason":
+    case "open_stop_note":
+      return c[key] == null ? "" : String(c[key]);
     default:
       return "";
   }
@@ -335,7 +349,7 @@ function carCompletionLevel(c: ProgramCar): CompletionLevel {
   });
 }
 
-const PD_CORE = ["completion", "active", "keep_open", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi", "ops_flag", "scrapped_at"] as const;
+const PD_CORE = ["completion", "active", "keep_open", "milestone", "milestone_at", "status", "notes", "shop", "commitment", "kpi", "ops_flag", "scrapped_at", ...RENT_STOP_COLUMN_KEYS] as const;
 const PD_LABELS: Record<string, string> = {
   car: "Car",
   complete: "Outcome",
@@ -351,6 +365,12 @@ const PD_LABELS: Record<string, string> = {
   kpi: "KPI bucket",
   ops_flag: "Scrap flag",
   scrapped_at: "Scrapped date",
+  open_stop_type: FOCUS_COLUMN_LABELS.open_stop_type,
+  open_stop_since: FOCUS_COLUMN_LABELS.open_stop_since,
+  open_stop_days: FOCUS_COLUMN_LABELS.open_stop_days,
+  open_stop_expected: FOCUS_COLUMN_LABELS.open_stop_expected,
+  open_stop_reason: FOCUS_COLUMN_LABELS.open_stop_reason,
+  open_stop_note: FOCUS_COLUMN_LABELS.open_stop_note,
 };
 const PD_WIDTHS: Record<string, number> = {
   _select: 36,
@@ -367,6 +387,12 @@ const PD_WIDTHS: Record<string, number> = {
   shop: 160,
   ops_flag: 120,
   scrapped_at: 120,
+  open_stop_type: 110,
+  open_stop_since: 110,
+  open_stop_days: 90,
+  open_stop_expected: 120,
+  open_stop_reason: 180,
+  open_stop_note: 180,
   repair: 90,
   _actions: 120,
 };
@@ -1039,6 +1065,20 @@ export default function ProgramDetailPage() {
             {formatProgramDate(c.railcar?.scrapped_at) || "—"}
           </td>
         );
+      case "open_stop_type":
+      case "open_stop_since":
+      case "open_stop_days":
+      case "open_stop_expected":
+      case "open_stop_reason":
+      case "open_stop_note": {
+        const value = c[key as RentStopColumnKey];
+        const text = value == null || value === "" ? "—" : String(value);
+        return (
+          <td key={key} className="px-2 py-1 max-w-[180px] truncate" title={text === "—" ? undefined : text}>
+            {text}
+          </td>
+        );
+      }
       case "status":
         return (
           <td key={key} className="px-2 py-1 overflow-hidden">

@@ -2704,7 +2704,8 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid rider" });
       }
       const active = String(req.query.active ?? "active");
-      res.json(await listCarsAssignedToRider(riderId, active));
+      const focus = req.query.focus === "1" || req.query.focus === "true";
+      res.json(await listCarsAssignedToRider(riderId, active, { focus }));
     } catch (err) {
       errHandler(res, err);
     }

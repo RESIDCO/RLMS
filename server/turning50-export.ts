@@ -11,8 +11,9 @@ import {
   exportReportingMarkText,
   stampExcelCarNumber,
 } from "@shared/car-export-identity";
+import { rentStopExportCells, rentStopExportHeaders } from "@shared/saved-views";
 
-const CAR_HEADERS = TURNING50_CAR_SHEET_HEADERS;
+const CAR_HEADERS = [...TURNING50_CAR_SHEET_HEADERS, ...rentStopExportHeaders()];
 
 function money(v: number | null | undefined): number | string {
   if (v == null) return "";
@@ -35,6 +36,7 @@ function carCells(c: Turning50ExportCar, ol: string, mlaType: string | null): (s
     money(c.oec),
     money(c.capacity_cf),
     c.lining ?? "",
+    ...rentStopExportCells(c),
   ];
 }
 

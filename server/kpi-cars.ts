@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { supabaseAdmin } from "./supabase";
 import { fetchAllRows } from "./fetch-all";
 import { KPI_BUCKETS, KPI_GROUP_COLS, KPI_SORT_COLS, KPI_TITLES, kpiCarRowsSource, type KpiBucket } from "@shared/kpi-buckets";
+import { searchWantsFocus, selectionNeedsRentStops } from "@shared/saved-views";
 import { whitelistExportCols } from "@shared/column-views";
 import { formatCarId } from "@shared/residco-import";
 import {
@@ -16,6 +17,7 @@ import {
 import { loadKpiCarRow } from "./kpi-delta";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { attachFormerly } from "./prior-marks";
+import { attachOpenStopColumns } from "./focus-columns";
 
 const ROW_COLS =
   "railcar_id, active, car, reporting_marks, car_number, entity, status_tag, derived_status, current_lease, lessee, legal_owner, buyer, commitment, rent_start_date, last_ol, reason, sale_class, is_sold, is_op, off_rent, on_ol, on_rent, awaiting_rent_start, shop_conflict, future_rent_start, no_assignment, has_open_commitment, in_open_program, going_on_lease, sold_needs_tag, sale_unclear, sold_tag_suspect, sold_missing_buyer, lease_status, master_lease_id, rider_id, open_abatement, rent_stop_type, stop_date, expected_resume_date, rent_stop_reason";
@@ -152,8 +154,11 @@ export async function listKpiCarsPaged(req: Request) {
     formatted.map((r: any) => ({ ...r, id: Number(r.railcar_id) })),
     opts.q,
   );
+  const withStops = searchWantsFocus(req.query.focus)
+    ? await attachOpenStopColumns(badged, (row) => Number(row.id))
+    : badged;
   return {
-    rows: badged.map(({ id: _id, ...row }) => row),
+    rows: withStops.map(({ id: _id, ...row }) => row),
     total: count ?? 0,
     page: opts.page,
     page_size: opts.pageSize,
@@ -186,7 +191,11 @@ export async function exportKpiCars(req: Request, res: Response) {
   });
   const name = fileBase(opts.bucket);
   const requested = whitelistExportCols(EXPORT_HEADERS, req.query.cols, EXPORT_HEADERS);
-  const table = buildKpiCarExport(rows as any[], requested);
+  const formatted = (rows as any[]).map((row) => withFormattedCar(row));
+  const withStops = searchWantsFocus(req.query.focus) || selectionNeedsRentStops(requested)
+    ? await attachOpenStopColumns(formatted, (row) => Number(row.railcar_id))
+    : formatted;
+  const table = buildKpiCarExport(withStops as any[], requested);
   const numberCol = table.headers.indexOf(CAR_EXPORT_NUMBER_HEADER);
   if (format === "csv") {
     const lines = [

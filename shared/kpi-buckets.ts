@@ -234,3 +234,56 @@ export function kpiBucketTitle(bucket: string | null | undefined): string {
   if (!bucket) return "—";
   return KPI_TITLES[bucket] ?? bucket;
 }
+
+/**
+ * Dashboard tiles a rent-stop preview should count.
+ * Abatement moves On rent and Rental abatement. Converting an abatement to off rent
+ * drops the abatement. A new off-rent stop does not change the assignment off-rent flag,
+ * so those tiles stay put.
+ */
+export const RENT_STOP_COUNT_BUCKETS = [
+  "on_rent",
+  "off_rent",
+  "rental_abatement",
+  "idle",
+  "unassigned",
+  "leased_off_rent",
+] as const;
+
+export type RentStopKpiKind = "off_rent" | "abatement" | "convert";
+
+/**
+ * Flags after the stop is written. Dashboard tiles read `off_rent` from the assignment
+ * and `open_abatement` from an open Abatement row. An Off rent stop changes neither.
+ */
+export function projectRentStopFlags(row: KpiFlagRow, kind: RentStopKpiKind): KpiFlagRow {
+  if (kind === "abatement") return { ...row, open_abatement: true, on_rent: false };
+  if (kind === "convert") return { ...row, open_abatement: false };
+  return row;
+}
+
+export type KpiCountImpact = {
+  bucket: (typeof RENT_STOP_COUNT_BUCKETS)[number];
+  title: string;
+  before: number;
+  after: number;
+  delta: number;
+};
+
+/** How many cars enter or leave each dashboard tile. Zero changes are omitted. */
+export function summarizeKpiCountImpact(
+  rows: readonly { before: readonly string[]; after: readonly string[] }[],
+): KpiCountImpact[] {
+  const out: KpiCountImpact[] = [];
+  for (const bucket of RENT_STOP_COUNT_BUCKETS) {
+    let before = 0;
+    let after = 0;
+    for (const row of rows) {
+      if (row.before.includes(bucket)) before += 1;
+      if (row.after.includes(bucket)) after += 1;
+    }
+    if (before === after) continue;
+    out.push({ bucket, title: kpiBucketTitle(bucket), before, after, delta: after - before });
+  }
+  return out;
+}

@@ -23,6 +23,12 @@ import { AddNoteField, appendNoteBody } from "@/components/AddNoteField";
 import { useToast } from "@/hooks/use-toast";
 import { COMMITMENT_TYPES, type CommitmentType } from "@shared/commitment";
 import { KPI_COL_LAYOUT, KPI_SORT_COLS, KPI_TITLES } from "@shared/kpi-buckets";
+import {
+  RENT_STOP_COLUMN_KEYS,
+  rentStopPickerColumns,
+  selectionNeedsRentStops,
+  type RentStopColumnKey,
+} from "@shared/saved-views";
 import { FLEET_DATA_ISSUES_PATH, isIssueListBucket } from "@shared/fleet-data-issues";
 import { matchPastedCarsOnList, type AwaitingPasteMatch } from "@shared/kpi-paste-cars";
 import { useColumnPrefs } from "@/hooks/use-column-prefs";
@@ -58,14 +64,33 @@ type Row = {
   last_ol: string | null;
   reason: string | null;
   formerly?: string | null;
+  open_stop_type?: string | null;
+  open_stop_since?: string | null;
+  open_stop_days?: number | null;
+  open_stop_expected?: string | null;
+  open_stop_reason?: string | null;
+  open_stop_note?: string | null;
 };
+
+type KpiGridCol = (typeof KPI_SORT_COLS)[number] | RentStopColumnKey;
+
+function isRentStopCol(col: string): col is RentStopColumnKey {
+  return (RENT_STOP_COLUMN_KEYS as readonly string[]).includes(col);
+}
+
+function kpiMinWidth(col: string): string {
+  if ((KPI_SORT_COLS as readonly string[]).includes(col)) {
+    return KPI_COL_LAYOUT[col as (typeof KPI_SORT_COLS)[number]].minWidth;
+  }
+  return col === "open_stop_note" || col === "open_stop_reason" ? "10rem" : "7.5rem";
+}
 
 function qsFrom(sp: URLSearchParams) {
   const q = sp.toString();
   return q ? `?${q}` : "";
 }
 
-function kpiThClass(col: (typeof KPI_SORT_COLS)[number]) {
+function kpiThClass(col: string) {
   const sticky =
     col === "car"
       ? "sticky left-8 z-20 bg-background border-r border-border"
@@ -73,8 +98,10 @@ function kpiThClass(col: (typeof KPI_SORT_COLS)[number]) {
   return `py-1.5 pr-3 ${sticky}`;
 }
 
-function kpiTdClass(col: (typeof KPI_SORT_COLS)[number], selected = false) {
-  const layout = KPI_COL_LAYOUT[col];
+function kpiTdClass(col: string, selected = false) {
+  const layout = (KPI_SORT_COLS as readonly string[]).includes(col)
+    ? KPI_COL_LAYOUT[col as (typeof KPI_SORT_COLS)[number]]
+    : { truncate: true };
   const fill = selected
     ? "bg-muted/40 group-hover/kpirow:bg-muted/40"
     : "bg-background group-hover/kpirow:bg-muted/20";
@@ -137,11 +164,14 @@ function compareKpiRows(a: Row, b: Row, col: (typeof KPI_SORT_COLS)[number], dir
 }
 
 const KPI_DEFAULT_COLS = new Set<string>(KPI_SORT_COLS);
-const KPI_PICKER_COLS = KPI_SORT_COLS.map((key) => ({
-  key,
-  label: columnLabel("kpi_cars", key),
-  pinned: key === "car",
-}));
+const KPI_PICKER_COLS = [
+  ...KPI_SORT_COLS.map((key) => ({
+    key,
+    label: columnLabel("kpi_cars", key),
+    pinned: key === "car",
+  })),
+  ...rentStopPickerColumns(),
+];
 
 function KpiCell({
   col,
@@ -151,14 +181,23 @@ function KpiCell({
   sheetPushedRef,
   setParams,
 }: {
-  col: (typeof KPI_SORT_COLS)[number];
+  col: KpiGridCol;
   r: Row;
   rowSelected: boolean;
   listPathWithoutCar: string;
   sheetPushedRef: { current: boolean };
   setParams: (patch: Record<string, string | null>, resetPage?: boolean) => void;
 }) {
-  const style = { minWidth: KPI_COL_LAYOUT[col].minWidth };
+  const style = { minWidth: kpiMinWidth(col) };
+  if (isRentStopCol(col)) {
+    const value = r[col];
+    const text = value == null || value === "" ? "—" : String(value);
+    return (
+      <td className={kpiTdClass(col, rowSelected)} style={style} title={text === "—" ? undefined : text}>
+        {text}
+      </td>
+    );
+  }
   if (col === "car") {
     return (
       <td className={kpiTdClass("car", rowSelected)} style={style}>
@@ -249,6 +288,7 @@ export function KpiCarListPage() {
     navigate(`/kpi/cars${qsFrom(next)}`);
   };
 
+  const colPrefs = useColumnPrefs("kpi_cars", KPI_DEFAULT_COLS);
   const listQs = useMemo(() => {
     const p = new URLSearchParams();
     p.set("bucket", bucket);
@@ -257,13 +297,14 @@ export function KpiCarListPage() {
     if (lease) p.set("lease", lease);
     if (lessee) p.set("lessee", lessee);
     if (reason) p.set("reason", reason);
-    p.set("sort", sort);
+    p.set("sort", (KPI_SORT_COLS as readonly string[]).includes(sort) ? sort : "car");
     p.set("dir", dir);
     if (group) p.set("group", group);
     p.set("page", String(page));
     p.set("page_size", "200");
+    if (selectionNeedsRentStops(colPrefs.visibleCols)) p.set("focus", "1");
     return p.toString();
-  }, [bucket, q, entity, lease, lessee, reason, sort, dir, group, page]);
+  }, [bucket, q, entity, lease, lessee, reason, sort, dir, group, page, colPrefs.visibleCols]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/kpi/cars", listQs],
@@ -489,9 +530,19 @@ export function KpiCarListPage() {
     ? (sort as (typeof KPI_SORT_COLS)[number])
     : "car";
   const displayRows = useMemo(() => {
+    if (isRentStopCol(sort)) {
+      const base = pasteRows ? [...pasteRows] : [...rows];
+      base.sort((a, b) => {
+        const av = a[sort] == null ? "" : String(a[sort]);
+        const bv = b[sort] == null ? "" : String(b[sort]);
+        const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+        return dir === "desc" ? -cmp : cmp;
+      });
+      return base;
+    }
     if (!pasteRows) return rows;
     return [...pasteRows].sort((a, b) => compareKpiRows(a, b, sortCol, dir));
-  }, [pasteRows, rows, sortCol, dir]);
+  }, [pasteRows, rows, sortCol, dir, sort]);
   const viewTotal = pasteRows ? pasteRows.length : total;
 
   const groupedRows = useMemo(() => {
@@ -516,11 +567,13 @@ export function KpiCarListPage() {
     }));
   }, [displayRows, pasteRows, group, groups]);
 
-  const colPrefs = useColumnPrefs("kpi_cars", KPI_DEFAULT_COLS);
   const kpiCols = useMemo(() => {
-    const movable = KPI_SORT_COLS.filter((c) => c !== "car");
-    const ordered = mergeColOrder([...movable], colPrefs.colOrder).filter((c) => colPrefs.visibleCols.has(c));
-    return ["car" as const, ...(ordered as typeof movable)];
+    const movable = [
+      ...KPI_SORT_COLS.filter((c) => c !== "car"),
+      ...RENT_STOP_COLUMN_KEYS,
+    ];
+    const ordered = mergeColOrder(movable, colPrefs.colOrder).filter((c) => colPrefs.visibleCols.has(c));
+    return ["car" as const, ...ordered] as KpiGridCol[];
   }, [colPrefs.visibleCols, colPrefs.colOrder]);
 
   const exportHref = (format: "csv" | "xlsx") => {
@@ -763,7 +816,7 @@ export function KpiCarListPage() {
                     />
                   </th>
                   {kpiCols.map((col) => (
-                    <th key={col} className={kpiThClass(col)} style={{ minWidth: KPI_COL_LAYOUT[col].minWidth }}>
+                    <th key={col} className={kpiThClass(col)} style={{ minWidth: kpiMinWidth(col) }}>
                       <span className="inline-flex items-center gap-1">
                         <button type="button" className="hover:underline" onClick={() => toggleSort(col)}>
                           {columnLabel("kpi_cars", col)}{sort === col ? (dir === "asc" ? " ↑" : " ↓") : ""}

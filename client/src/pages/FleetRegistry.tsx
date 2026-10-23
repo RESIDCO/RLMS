@@ -11,6 +11,7 @@ import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-s
 import { railcarFormPatch } from "@shared/railcar-patch";
 import { CommitmentPanel } from "@/pages/CommitmentOps";
 import { ProgramCarSection, type ProgramCarSheetContext } from "@/components/ProgramCarSection";
+import { KpiWhySection, type KpiSheetContext } from "@/components/KpiWhySection";
 import {
   commitmentScopeLabel,
   programCarActionMode,
@@ -113,6 +114,7 @@ import {
   carPanelStatus,
   carPanelStatusLabel,
   flagsFromCommitmentPayload,
+  rentStopVisibility,
   type CarPanelStatus,
 } from "@shared/car-detail-panel";
 import { InactivateCarsDialog } from "@/pages/railcars/InactivateCarsDialog";
@@ -2070,6 +2072,7 @@ export function RailcarDetailSheet({
   readOnly = false,
   carPageHref,
   programContext = null,
+  kpiContext = null,
 }: {
   carId: number | null;
   onClose: () => void;
@@ -2079,6 +2082,8 @@ export function RailcarDetailSheet({
   carPageHref?: string;
   /** Set when the sheet was opened from a program car row. */
   programContext?: ProgramCarSheetContext | null;
+  /** Set when the sheet was opened from a KPI or fleet-data-issues list. */
+  kpiContext?: KpiSheetContext | null;
 }) {
   const canEdit = useCanEdit() && !readOnly;
   const [editCar, setEditCar] = useState<Row | null>(null);
@@ -2099,6 +2104,7 @@ export function RailcarDetailSheet({
               readOnly={readOnly}
               onRemarked={(newId) => setViewId(newId)}
               programContext={programContext}
+              kpiContext={kpiContext}
             />
           )}
         </SheetContent>
@@ -2140,6 +2146,7 @@ export function CarDetail({
   readOnly = false,
   onRemarked,
   programContext = null,
+  kpiContext = null,
 }: {
   carId: number;
   onEdit: (car: RailcarWithAssignment) => void;
@@ -2153,10 +2160,17 @@ export function CarDetail({
   onRemarked?: (newId: number) => void;
   /** Program car row, when this panel was opened from a program. */
   programContext?: ProgramCarSheetContext | null;
+  /** KPI list row context. Omitted on Fleet, Search, History, and the car page. */
+  kpiContext?: KpiSheetContext | null;
 }) {
   const allowEdits = canEdit && !readOnly;
   const fromProgram = programCarSectionVisible(programContext);
   const carActions = programCarActionMode(fromProgram);
+  const kpiBlock = kpiContext ? (
+    <div className="mt-4">
+      <KpiWhySection context={kpiContext} />
+    </div>
+  ) : null;
   const programBlock = fromProgram && programContext ? (
     <div className="mt-4">
       <ProgramCarSection context={programContext} />
@@ -2184,6 +2198,11 @@ export function CarDetail({
   const { data: commitment } = useQuery<any>({
     queryKey: ["/api/commitments/car", carId],
     queryFn: () => apiGet<any>(`/api/commitments/car/${carId}`),
+    enabled: Number.isFinite(carId) && carId > 0,
+  });
+  const { data: rentStopRow } = useQuery<{ open?: unknown }>({
+    queryKey: ["/api/rent-stops/car", carId],
+    queryFn: () => apiGet<{ open?: unknown }>(`/api/rent-stops/car/${carId}`),
     enabled: Number.isFinite(carId) && carId > 0,
   });
 
@@ -2224,6 +2243,7 @@ export function CarDetail({
   if (isLoading || !data) {
     return (
       <div className="space-y-3 pt-3">
+        {kpiBlock}
         {programBlock}
         <Skeleton className="h-8 w-2/3" />
         <Skeleton className="h-4 w-full" />
@@ -2239,6 +2259,7 @@ export function CarDetail({
   const currentRentStart = assignment?.rent_start_date ?? commitment?.rent_start_date ?? null;
   const panelFlags = flagsFromCommitmentPayload(commitment);
   const panelStatus: CarPanelStatus | null = panelFlags ? carPanelStatus(panelFlags) : null;
+  const showRentStop = rentStopVisibility(panelFlags, Boolean(rentStopRow?.open)) === "expander";
   const typeLine = [
     r.car_type,
     (r as any).equipment_type_code,
@@ -2283,6 +2304,7 @@ export function CarDetail({
   return (
     <div>
       {showCarPageLink ? <SheetHeader>{heading}</SheetHeader> : heading}
+      {kpiBlock}
       {programBlock}
 
       <div className="flex gap-2 mt-4 flex-wrap items-center">
@@ -2574,6 +2596,21 @@ export function CarDetail({
         )}
       </div>
 
+      {showRentStop ? (
+        <Collapsible className="mt-6 border-t border-border pt-5">
+          <CollapsibleTrigger
+            className="flex w-full items-center justify-between text-left"
+            data-testid="rent-stop-expander"
+          >
+            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Rent stop / abatement</span>
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3">
+            <RentStopsCard carId={carId} canEdit={allowEdits} />
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+
       <Collapsible className="mt-6 border-t border-border pt-5">
         <CollapsibleTrigger
           className="flex w-full items-center justify-between text-left"
@@ -2583,8 +2620,6 @@ export function CarDetail({
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-3 space-y-4">
-        <RentStopsCard carId={carId} canEdit={allowEdits} />
-
       {/* Legacy rent_events log. Not car_rent_stops. */}
       <div>
         <div className="flex items-center justify-between mb-3">

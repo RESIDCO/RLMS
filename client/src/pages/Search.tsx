@@ -1955,6 +1955,14 @@ export default function SearchPage() {
     }
   }
 
+  async function toggleShare(view: ViewSummary) {
+    try {
+      await patchView(view.id, { shared: !view.shared, expected_updated_at: view.updated_at });
+    } catch (e: any) {
+      toast({ title: "Could not update sharing", description: e.message, variant: "destructive" });
+    }
+  }
+
   async function renameView(view: ViewSummary) {
     const name = window.prompt("Rename view", view.name);
     if (!name || !name.trim() || name.trim() === view.name) return;
@@ -2222,6 +2230,7 @@ export default function SearchPage() {
     onDuplicate: (view: ViewSummary) => { void duplicateView(view); },
     onDelete: (view: ViewSummary) => { void deleteView(view); },
     onCopy: (view: ViewSummary) => { void copyViewLink(view); },
+    onShare: (view: ViewSummary) => { void toggleShare(view); },
   };
 
   const selectedInactive = rows.filter((row) => selected.has(Number(row.id)) && row.active === false).length;
@@ -2293,7 +2302,7 @@ export default function SearchPage() {
                   <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void renameView(activeView)}>Rename</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => activeView && void duplicateView(activeView)}>Duplicate</DropdownMenuItem>
                   <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void togglePin(activeView)}>{activeView?.pinned ? "Unpin" : "Pin"}</DropdownMenuItem>
-                  <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void patchView(activeView.id, { shared: !activeView.shared, expected_updated_at: activeView.updated_at }).catch((e) => toast({ title: "Could not update sharing", description: e.message, variant: "destructive" }))}>{activeView?.shared ? "Make private" : "Share"}</DropdownMenuItem>
+                  <DropdownMenuItem disabled={!canEdit} onClick={() => activeView && void toggleShare(activeView)}>{activeView?.shared ? "Make private" : "Share"}</DropdownMenuItem>
                   <DropdownMenuItem disabled={!viewDirty} onClick={resetView}>Reset to saved</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => activeView && void copyViewLink(activeView)}>Copy link</DropdownMenuItem>
                   <DropdownMenuItem disabled={!(isAdmin || activeView?.owner === user?.id)} onClick={() => activeView && void deleteView(activeView)}>Delete</DropdownMenuItem>

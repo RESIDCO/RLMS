@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, ChevronLeft, ChevronRight, Copy, GripVertical, List, Loader2, MoreHorizontal, Pin, Plus, RefreshCw } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, GripVertical, List, Loader2, Lock, MoreHorizontal, Pin, Plus, RefreshCw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -65,6 +65,16 @@ function countTitle(count: ViewCount | undefined): string {
   if (!count) return "Count unavailable";
   const inactive = count.inactive > 0 ? ` · ${count.inactive.toLocaleString()} inactive` : "";
   return `${count.active.toLocaleString()} active${inactive}`;
+}
+
+export function ViewVisibilityIcon({ shared }: { shared: boolean }) {
+  const Icon = shared ? Users : Lock;
+  return (
+    <Icon
+      className="h-3 w-3 shrink-0 text-muted-foreground"
+      aria-label={shared ? "Shared with all users" : "Private"}
+    />
+  );
 }
 
 export function PinnedViewStrip({
@@ -148,7 +158,10 @@ export function PinnedViewStrip({
             >
               {canPin ? <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-muted-foreground" /> : null}
               <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-foreground">{view.name}</span>
+                <span className="flex min-w-0 items-center gap-1">
+                  <ViewVisibilityIcon shared={view.shared} />
+                  <span className="block truncate text-xs font-medium text-foreground">{view.name}</span>
+                </span>
                 <span className="block font-mono-num text-lg leading-tight text-foreground">{label}</span>
               </span>
             </button>
@@ -192,6 +205,7 @@ function ViewRow({
   onDuplicate,
   onDelete,
   onCopy,
+  onShare,
 }: {
   view: ViewSummary;
   count: ViewCount | undefined;
@@ -205,12 +219,15 @@ function ViewRow({
   onDuplicate: (view: ViewSummary) => void;
   onDelete: (view: ViewSummary) => void;
   onCopy: (view: ViewSummary) => void;
+  /** Same canEditFleet gate as the search-page ⋯ menu. */
+  onShare: (view: ViewSummary) => void;
 }) {
   const canDelete = isAdmin || view.owner === userId;
   return (
     <div className={cn("group flex items-center gap-1 rounded px-1.5 py-1 text-sm", active && "bg-primary/10")}>
       <button type="button" className="flex min-w-0 flex-1 items-center gap-1.5 text-left" onClick={() => onOpen(view.id)} title={countTitle(count)}>
         {view.kind === "query" ? <RefreshCw className="h-3 w-3 shrink-0 text-muted-foreground" /> : <List className="h-3 w-3 shrink-0 text-muted-foreground" />}
+        <ViewVisibilityIcon shared={view.shared} />
         <span className="truncate">{view.name}</span>
         <span className="ml-auto font-mono-num text-xs text-muted-foreground">{countLabel(count)}</span>
       </button>
@@ -225,6 +242,9 @@ function ViewRow({
           <DropdownMenuItem disabled={!canEdit} onClick={() => onPin(view)}>{view.pinned ? "Unpin" : "Pin"}</DropdownMenuItem>
           <DropdownMenuItem disabled={!canEdit} onClick={() => onRename(view)}>Rename</DropdownMenuItem>
           <DropdownMenuItem onClick={() => onDuplicate(view)}>Duplicate</DropdownMenuItem>
+          <DropdownMenuItem disabled={!canEdit} data-testid={`view-share-${view.id}`} onClick={() => onShare(view)}>
+            {view.shared ? "Make private" : "Share with all users"}
+          </DropdownMenuItem>
           <DropdownMenuItem disabled={!canDelete} onClick={() => onDelete(view)}>Delete</DropdownMenuItem>
           <DropdownMenuItem onClick={() => onCopy(view)}>Copy link</DropdownMenuItem>
         </DropdownMenuContent>
@@ -247,6 +267,7 @@ export function ViewsMenu({
   onDuplicate,
   onDelete,
   onCopy,
+  onShare,
 }: {
   views: ViewSummary[];
   counts: Record<string, ViewCount | undefined>;
@@ -261,6 +282,7 @@ export function ViewsMenu({
   onDuplicate: (view: ViewSummary) => void;
   onDelete: (view: ViewSummary) => void;
   onCopy: (view: ViewSummary) => void;
+  onShare: (view: ViewSummary) => void;
 }) {
   const [filter, setFilter] = useState("");
   const needle = filter.trim().toLowerCase();
@@ -296,6 +318,7 @@ export function ViewsMenu({
           onDuplicate={onDuplicate}
           onDelete={onDelete}
           onCopy={onCopy}
+          onShare={onShare}
         />
       ))}
     </div>

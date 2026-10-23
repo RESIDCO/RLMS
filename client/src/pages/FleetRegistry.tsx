@@ -10,6 +10,12 @@ import { LeaseTypeBadge } from "@/components/LeaseTypeBadge";
 import { displayStatusInputFromRailcar, type FleetStatus } from "@shared/fleet-status";
 import { railcarFormPatch } from "@shared/railcar-patch";
 import { CommitmentPanel } from "@/pages/CommitmentOps";
+import { ProgramCarSection, type ProgramCarSheetContext } from "@/components/ProgramCarSection";
+import {
+  commitmentScopeLabel,
+  programCarActionMode,
+  programCarSectionVisible,
+} from "@shared/program-car-section";
 import { RentStopsCard } from "@/components/RentStopsCard";
 import { carListSearchTokens } from "@shared/programs";
 import { RAILCARS_HANDOFF_KEY, markSearchRefresh } from "@/lib/searchState";
@@ -2063,6 +2069,7 @@ export function RailcarDetailSheet({
   onClose,
   readOnly = false,
   carPageHref,
+  programContext = null,
 }: {
   carId: number | null;
   onClose: () => void;
@@ -2070,6 +2077,8 @@ export function RailcarDetailSheet({
   readOnly?: boolean;
   /** Same-tab car page link. Falls back to opening a new tab. */
   carPageHref?: string;
+  /** Set when the sheet was opened from a program car row. */
+  programContext?: ProgramCarSheetContext | null;
 }) {
   const canEdit = useCanEdit() && !readOnly;
   const [editCar, setEditCar] = useState<Row | null>(null);
@@ -2089,6 +2098,7 @@ export function RailcarDetailSheet({
               carPageHref={carPageHref}
               readOnly={readOnly}
               onRemarked={(newId) => setViewId(newId)}
+              programContext={programContext}
             />
           )}
         </SheetContent>
@@ -2129,6 +2139,7 @@ export function CarDetail({
   carPageHref,
   readOnly = false,
   onRemarked,
+  programContext = null,
 }: {
   carId: number;
   onEdit: (car: RailcarWithAssignment) => void;
@@ -2140,8 +2151,17 @@ export function CarDetail({
   /** Context-gated read-only (e.g. Account Management). Overrides canEdit. */
   readOnly?: boolean;
   onRemarked?: (newId: number) => void;
+  /** Program car row, when this panel was opened from a program. */
+  programContext?: ProgramCarSheetContext | null;
 }) {
   const allowEdits = canEdit && !readOnly;
+  const fromProgram = programCarSectionVisible(programContext);
+  const carActions = programCarActionMode(fromProgram);
+  const programBlock = fromProgram && programContext ? (
+    <div className="mt-4">
+      <ProgramCarSection context={programContext} />
+    </div>
+  ) : null;
   const { toast } = useToast();
   const [remarkOpen, setRemarkOpen] = useState(false);
   const [rentFormOpen, setRentFormOpen] = useState(false);
@@ -2204,6 +2224,7 @@ export function CarDetail({
   if (isLoading || !data) {
     return (
       <div className="space-y-3 pt-3">
+        {programBlock}
         <Skeleton className="h-8 w-2/3" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-32 w-full" />
@@ -2262,6 +2283,7 @@ export function CarDetail({
   return (
     <div>
       {showCarPageLink ? <SheetHeader>{heading}</SheetHeader> : heading}
+      {programBlock}
 
       <div className="flex gap-2 mt-4 flex-wrap items-center">
         {showCarPageLink && carPageHref && (
@@ -2284,7 +2306,7 @@ export function CarDetail({
             Edit details
           </Button>
         )}
-        {allowEdits && (
+        {allowEdits && carActions === "expanded" && (
           <Button
             size="sm"
             variant="outline"
@@ -2311,7 +2333,42 @@ export function CarDetail({
         )}
       </div>
 
-      {allowEdits && assignOpen && (
+      {allowEdits && carActions === "collapsed" && (
+        <Collapsible className="mt-4 rounded-md border border-border">
+          <CollapsibleTrigger
+            className="flex w-full items-center justify-between px-3 py-2 text-left text-sm"
+            data-testid="move-ol-expander"
+          >
+            <span>Move to another OL</span>
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="px-3 pb-3">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAssignOpen((open) => !open)}
+              data-testid="btn-open-assign"
+            >
+              Move to another OL
+            </Button>
+            {assignOpen && (
+              <div className="mt-3">
+                <MoveCarToOlForm
+                  carId={carId}
+                  currentRiderId={currentRiderId}
+                  currentRiderName={currentRiderName}
+                  currentRentStart={currentRentStart}
+                  carEntity={r.entity}
+                  riders={allRiders}
+                  onCancel={() => setAssignOpen(false)}
+                />
+              </div>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+      {allowEdits && carActions === "expanded" && assignOpen && (
         <div className="mt-4">
           <MoveCarToOlForm
             carId={carId}
@@ -2370,7 +2427,11 @@ export function CarDetail({
       )}
 
       <div className="mt-4">
-        <CommitmentPanel carId={carId} />
+        <CommitmentPanel
+          carId={carId}
+          heading={fromProgram ? commitmentScopeLabel("car") : commitmentScopeLabel("default")}
+          rentStartCollapsed={carActions === "collapsed"}
+        />
       </div>
 
       {/* Entity ownership — prominent section */}

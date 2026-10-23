@@ -59,7 +59,8 @@ ok(programsPathFromQuery(null) === "/programs", "no from returns plain /programs
 
 const programQuery = programHref.slice(programHref.indexOf("?") + 1);
 const carHref = carPathFromProgram(99, 12, programQuery);
-ok(carHref.includes("from_program=12"), "car path carries from_program");
+ok(carHref.startsWith("/cars/99?"), "panel Car page link stays on /cars/:id");
+ok(carHref.includes("from_program=12"), "panel Car page link carries from_program for Back to program");
 const carParsed = parseHashSearch("#" + carHref);
 ok(carParsed.get("from_program") === "12", "from_program id round-trips");
 ok(carParsed.get("from") === programQuery, "car from= is encoded program query");

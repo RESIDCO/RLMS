@@ -2,6 +2,7 @@ import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useCanEdit } from "@/lib/AuthContext";
+import { ActorLabel } from "@/components/ActorLabel";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,6 +90,7 @@ interface DisputeLog {
   invoice_id: string;
   log_date: string;
   logged_by: string | null;
+  actor_label?: string | null;
   description: string;
   outcome: string | null;
   created_at: string;
@@ -102,6 +104,7 @@ interface CommLog {
   contact_name: string | null;
   notes: string;
   logged_by: string | null;
+  actor_label?: string | null;
   created_at: string;
 }
 
@@ -618,7 +621,11 @@ function InvoiceDetailSheet({
                             {c.contact_name && <span className="text-xs">· {c.contact_name}</span>}
                           </div>
                           <p className="text-foreground leading-snug">{c.notes}</p>
-                          {c.logged_by && <p className="text-[11px] text-muted-foreground mt-1">Logged by {c.logged_by}</p>}
+                          {(c.actor_label || c.logged_by) && (
+                            <p className="text-[11px] text-muted-foreground mt-1">
+                              Logged by <ActorLabel label={c.actor_label} raw={c.logged_by} />
+                            </p>
+                          )}
                           {canEdit && (
                             <button
                               onClick={async () => {
@@ -664,7 +671,11 @@ function InvoiceDetailSheet({
                           <div className="flex items-center gap-2 mb-1 pr-6">
                             <Calendar className="h-3.5 w-3.5 text-amber-400" />
                             <span className="text-xs text-muted-foreground">{fmtDate(d.log_date)}</span>
-                            {d.logged_by && <span className="text-xs text-muted-foreground">· {d.logged_by}</span>}
+                            {(d.actor_label || d.logged_by) && (
+                              <span className="text-xs text-muted-foreground">
+                                · <ActorLabel label={d.actor_label} raw={d.logged_by} />
+                              </span>
+                            )}
                           </div>
                           <p className="text-foreground leading-snug">{d.description}</p>
                           {d.outcome && (

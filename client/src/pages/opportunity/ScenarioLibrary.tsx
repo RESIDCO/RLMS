@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ActorLabel } from "@/components/ActorLabel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiGet, apiRequest } from "@/lib/queryClient";
@@ -19,6 +20,7 @@ export type LibraryScenario = {
   updated_at?: string | null;
   author?: string | null;
   created_by?: string | null;
+  actor_label?: string | null;
   notes?: string | null;
 };
 
@@ -128,7 +130,9 @@ export default function ScenarioLibrary({
                 <td className="px-2 py-2">{hidden ? "—" : row.verdict ?? "—"}</td>
                 <td className="px-2 py-2">{row.opportunity_id == null ? "Unlinked" : row.opportunity_label ?? `Opportunity ${row.opportunity_id}`}</td>
                 <td className="px-2 py-2">{row.updated_at ? new Date(row.updated_at).toLocaleString() : "—"}</td>
-                <td className="px-2 py-2">{row.author ?? row.created_by ?? "—"}</td>
+                <td className="px-2 py-2">
+                  <ActorLabel label={row.actor_label ?? row.author} raw={row.created_by ?? row.author} empty="—" />
+                </td>
                 <td className="px-2 py-2">
                   <div className="flex gap-1">
                     <Button type="button" size="sm" variant="outline" onClick={() => onOpen(row.id)}>Open</Button>

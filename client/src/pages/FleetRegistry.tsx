@@ -2124,7 +2124,7 @@ function downloadRentEventsCsv(events: any[], car: { reporting_marks?: string | 
     escape(e.event_type === "off_rent" ? "Off Rent" : "On Rent"),
     escape(e.event_date),
     escape(e.reason),
-    escape(e.created_by),
+    escape(e.actor_label ?? e.created_by),
     escape(new Date(e.created_at).toLocaleString()),
   ].join(","));
   const csv = [headers.map(escape).join(","), ...rows].join("\n");

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronLeft, ChevronRight, Copy, GripVertical, List, Loader2, Lock, MoreHorizontal, Pin, Plus, RefreshCw, Users } from "lucide-react";
+import { ActorLabel } from "@/components/ActorLabel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,6 +30,7 @@ export type ViewSummary = {
   pin_order: number | null;
   owner?: string | null;
   owner_name?: string;
+  updated_by?: string | null;
   updated_by_name?: string;
   updated_at?: string;
   updated_at_et?: string;
@@ -424,9 +426,23 @@ export function SaveViewDialog({
 export function ViewMeta({ view }: { view: ViewSummary | null }) {
   if (!view?.updated_at) return null;
   const when = view.updated_at_et || formatEtTime(view.updated_at);
-  const editor = view.updated_by_name ? `edited by ${view.updated_by_name}` : "";
-  const creator = view.owner_name ? `Created by ${view.owner_name}` : "";
-  return <span className="text-[11px] text-muted-foreground">{[creator, editor, when].filter(Boolean).join(" · ")}</span>;
+  return (
+    <span className="text-[11px] text-muted-foreground">
+      {view.owner_name ? (
+        <>
+          Created by <ActorLabel label={view.owner_name} raw={view.owner} />
+          {" · "}
+        </>
+      ) : null}
+      {view.updated_by_name ? (
+        <>
+          edited by <ActorLabel label={view.updated_by_name} raw={view.updated_by} />
+          {" · "}
+        </>
+      ) : null}
+      {when}
+    </span>
+  );
 }
 
 export function FilterPopover({

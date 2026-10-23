@@ -8,6 +8,7 @@ import {
   type BidLineOutcome,
 } from "@shared/crm-bid";
 import { changeCaptureRow } from "@shared/crm";
+import { annotateActorLabels } from "./actor-label";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { CrmHttpError } from "./crm-error";
 import { mapOpportunityRow } from "./crm-opportunities";
@@ -548,6 +549,7 @@ export async function listBidTimeline(opportunityId: number, canSeePrices: boole
   kind: string;
   body: string;
   actor: string | null;
+  actor_label: string | null;
 }>> {
   await requireOpportunity(opportunityId);
   const [{ data: activities, error: actErr }, { data: logs, error: logErr }, { data: lineRows, error: lineErr }] = await Promise.all([
@@ -582,7 +584,10 @@ export async function listBidTimeline(opportunityId: number, canSeePrices: boole
     ...(logs ?? []).map((row) => timelineFromLog(row as Record<string, unknown>, canSeePrices)),
     ...lineLogs.map((row) => timelineFromLog(row, canSeePrices)),
   ];
-  return items.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 80);
+  return annotateActorLabels(
+    items.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 80),
+    (item) => item.actor,
+  );
 }
 
 function timelineFromLog(row: Record<string, unknown>, canSeePrices: boolean): {

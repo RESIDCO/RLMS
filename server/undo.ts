@@ -1,5 +1,6 @@
 import { canonicalRows } from "@shared/canonical-json";
 import { viewUndoNameConflict } from "@shared/saved-views";
+import { labelActors } from "./actor-label";
 import { supabaseAdmin } from "./supabase";
 import { syncCurrentAssignmentHistoryActive } from "./car-status-history";
 import { clearViewCountCache } from "./saved-views";
@@ -159,9 +160,12 @@ export async function previewUndo(group: string, actor: string) {
   }
 
   const summary = summarizeUndoRows(rows);
+  const rawActor = first.actor == null ? "" : String(first.actor).trim();
+  const labels = await labelActors([first.actor]);
   return {
     change_group: group,
     actor: first.actor,
+    actor_label: rawActor ? (labels.get(rawActor) ?? rawActor) : null,
     occurred_at: first.occurred_at,
     count: summary.count,
     lines: summary.lines,
@@ -274,6 +278,7 @@ export async function applyUndo(group: string, actor: string) {
     : isRemarkRetireGroup(rowsBefore)
       ? "rlms_undo_remark_group"
       : "rlms_undo_change_group";
+  // Undo identity stays the raw caller id. actor_label is not sent to the RPC.
   const { data, error } = await supabaseAdmin.rpc(rpcName, {
     p_group: group,
     p_actor: actor,
@@ -361,10 +366,15 @@ export async function eligibleUndo(opts: {
   const group = data.find((r) => r.change_group)?.change_group;
   if (!group) return null;
   const members = await loadChangeGroup(String(group));
+  const actor = members[0]?.actor == null ? null : String(members[0].actor);
+  const rawActor = actor == null ? "" : actor.trim();
+  const labels = await labelActors([actor]);
   return {
     change_group: group,
     count: members.length,
     occurred_at: members[0]?.occurred_at,
     action: members[0]?.action,
+    actor,
+    actor_label: rawActor ? (labels.get(rawActor) ?? rawActor) : null,
   };
 }

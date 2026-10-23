@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ActorLabel } from "@/components/ActorLabel";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -299,7 +300,12 @@ function Timeline({ items }: { items: Account360Payload["timeline"] }) {
         <li key={item.id} className="border-b border-border/60 pb-2">
           <div className="text-xs text-muted-foreground">
             {when(item.occurred_at)} · {item.source === "system" ? "System" : item.label}
-            {item.actor ? ` · ${item.actor}` : ""}
+            {item.actor || item.actor_label ? (
+              <>
+                {" "}
+                · <ActorLabel label={item.actor_label} raw={item.actor} />
+              </>
+            ) : null}
           </div>
           <div>{item.body}</div>
         </li>

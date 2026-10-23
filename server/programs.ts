@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { annotateActorLabels } from "./actor-label";
 import { supabaseAdmin } from "./supabase";
 import { resolveRailcarsByAnyIdentity } from "./activity-log";
 import { CAR_NUMBER_WIDTH, formatCarId, splitCarNumber } from "@shared/residco-import";
@@ -944,10 +945,11 @@ export async function listActivity(programId: number, programCarId?: number) {
   if (programCarId && Number.isFinite(programCarId)) q = q.eq("program_car_id", programCarId);
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []).map((row: any) => ({
+  const rows = (data ?? []).map((row: any) => ({
     ...row,
     railcar: Array.isArray(row.railcar) ? row.railcar[0] ?? null : row.railcar,
   }));
+  return annotateActorLabels(rows, (row) => row.actor);
 }
 
 export async function carProgramHistory(railcarId: number) {

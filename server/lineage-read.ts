@@ -1,4 +1,5 @@
 import { mergeLineageFeed, type LineageSourceBundle } from "@shared/lineage-feed";
+import { annotateActorLabels } from "./actor-label";
 import { listActivityLog, type ListActivityOpts } from "./activity-log";
 import { resolveLineageRailcars } from "./lineage-identity";
 import { supabaseAdmin } from "./supabase";
@@ -279,12 +280,13 @@ export async function listLineage(opts: ListActivityOpts) {
     return { ...activity, events: [], message };
   }
   const bundle = await readLineageSources({ railcarIds, riderIds, scoped });
+  const events = mergeLineageFeed(activity.events ?? [], bundle, {
+    limit,
+    includeVcfNoise: Boolean(opts.includeVcfNoise),
+  });
   return {
     ...activity,
     message,
-    events: mergeLineageFeed(activity.events ?? [], bundle, {
-      limit,
-      includeVcfNoise: Boolean(opts.includeVcfNoise),
-    }),
+    events: await annotateActorLabels(events, (row) => row.actor),
   };
 }

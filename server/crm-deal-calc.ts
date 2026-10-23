@@ -34,6 +34,7 @@ import {
   type LineSeed,
 } from "@shared/dealCalc";
 import { planPin, planSoftDelete, type ScenarioSlot } from "@shared/dealCalcUndo";
+import { annotateActorLabels } from "./actor-label";
 import { recordChange, withChangeGroupResult } from "./change-log";
 import { CrmHttpError } from "./crm-error";
 import { saveOpportunityLines } from "./crm-bid-lines";
@@ -492,7 +493,8 @@ export async function listStandaloneScenarios(
     author: row.created_by ?? null,
     opportunity_label: row.opportunity_id == null ? null : labels.get(Number(row.opportunity_id)) ?? `Opportunity ${row.opportunity_id}`,
   }));
-  return presentStandaloneScenarioList(decorated, canSeeNumbers);
+  const withAuthors = await annotateActorLabels(decorated, (row) => row.author);
+  return presentStandaloneScenarioList(withAuthors, canSeeNumbers);
 }
 
 export async function getStandaloneScenario(scenarioId: number, canSeeNumbers: boolean) {

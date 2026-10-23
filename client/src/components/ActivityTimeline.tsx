@@ -11,12 +11,14 @@ import { displayLeaseNumber } from "@shared/residco-import";
 import { formatUsDateTimeEt } from "@shared/display-date";
 import { activityMatchesFilter } from "@shared/lineage-filters";
 import { timelineFilters, type TimelineVariant } from "@shared/timeline-filters";
+import { ActorLabel } from "@/components/ActorLabel";
 import { UndoLastChange } from "@/components/UndoLastChange";
 
 export type ActivityEvent = {
   id: number | string;
   action: string;
   actor?: string | null;
+  actor_label?: string | null;
   occurred_at?: string | null;
   created_at?: string | null;
   detail?: Record<string, any> | null;
@@ -225,7 +227,12 @@ export default function ActivityTimeline({
               <li key={ev.id} className={cn("text-xs border-l-2 pl-3 py-1", accentClass(ev.action))}>
                 <div className="font-mono-num text-muted-foreground">
                   {when ? (usDates ? (formatUsDateTimeEt(when) || "—") : new Date(when).toLocaleString()) : "—"}
-                  {ev.actor ? <span> — {ev.actor}</span> : null}
+                  {ev.actor || ev.actor_label ? (
+                    <span>
+                      {" "}
+                      — <ActorLabel label={ev.actor_label} raw={ev.actor} />
+                    </span>
+                  ) : null}
                 </div>
                 <div className="mt-0.5 font-medium">
                   {eventHeadline(ev)}

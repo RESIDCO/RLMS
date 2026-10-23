@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useHashSearch } from "@/lib/hash-location";
-import { olPath } from "@/lib/browse-nav";
+import { carPath, olPath } from "@/lib/browse-nav";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,7 @@ import { FormerlyBadge } from "@/components/FormerlyBadge";
 import { LineageCarLink } from "@/components/LineageCarLink";
 import { overlayLifecycle, parseCarPasteList } from "@shared/programs";
 import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
-import { KpiCarSheet } from "@/pages/KpiCarSheet";
+import { RailcarDetailSheet } from "@/pages/FleetRegistry";
 
 type Row = {
   railcar_id: number;
@@ -867,10 +867,10 @@ export function KpiCarListPage() {
           </div>
         )}
       </div>
-      <KpiCarSheet
+      <RailcarDetailSheet
         carId={carId}
-        bucket={bucket}
-        fromPath={listPathWithoutCar}
+        carPageHref={carId ? `${carPath(carId)}?from=${encodeURIComponent(listPathWithoutCar)}` : undefined}
+        kpiContext={carId ? { carId, bucket } : null}
         onClose={() => {
           if (!carId) return;
           if (sheetPushedRef.current) {

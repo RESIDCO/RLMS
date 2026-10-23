@@ -13,6 +13,7 @@ import {
   moveFormBlock,
   moveRentStartPayload,
   rentStartVisibility,
+  rentStopVisibility,
   type OlListRider,
 } from "./car-detail-panel.ts";
 
@@ -31,6 +32,8 @@ ok(carPanelStatusLabel(onRent) === "On rent", "on rent chip");
 ok(commitmentVisibility(onRent, false) === "hidden", "on-rent car hides the commitment form");
 ok(commitmentVisibility(onRent, true) === "readonly", "on-rent car with a commitment is read-only");
 ok(rentStartVisibility(onRent, "2026-10-23") === "collapsed", "on-rent car collapses rent start");
+ok(rentStopVisibility(onRent) === "expander", "on-rent car gets the abatement expander");
+ok(rentStopVisibility(onRent, false) === "expander", "on-rent without an open stop still gets the expander");
 
 const idle = {
   on_rent: false,
@@ -42,6 +45,8 @@ const idle = {
 ok(carPanelStatusLabel(idle) === "Idle", "committed off-rent car is Idle");
 ok(commitmentVisibility(idle, true) === "form", "Idle car shows the commitment form");
 ok(rentStartVisibility(idle, "2026-10-23") === "collapsed", "Idle car collapses rent start");
+ok(rentStopVisibility(idle) === "hidden", "Idle car does not get an always-open abatement form");
+ok(rentStopVisibility(idle, true) === "expander", "an open stop stays behind the expander so it can be resumed");
 
 const awaiting = {
   on_rent: false,
@@ -53,6 +58,7 @@ const awaiting = {
 ok(carPanelStatusLabel(awaiting) === "Awaiting rent start", "awaiting chip wins over Idle");
 ok(commitmentVisibility(awaiting, false) === "form", "awaiting car can take a commitment");
 ok(rentStartVisibility(awaiting, "2026-10-23") === "open", "awaiting car shows the rent start box");
+ok(rentStopVisibility(awaiting) === "hidden", "awaiting rent start hides the abatement form");
 
 const future = {
   on_rent: true,
@@ -68,6 +74,9 @@ ok(commitmentVisibility(future, false) === "hidden", "future start that is alrea
 const unassigned = { on_rent: false, off_rent: true, awaiting_rent_start: false, no_assignment: true };
 ok(carPanelStatusLabel(unassigned) === "Off rent", "unassigned off-rent chip");
 ok(commitmentVisibility(unassigned, false) === "form", "unassigned car shows the commitment form");
+ok(rentStopVisibility(unassigned) === "hidden", "unassigned car hides the abatement form");
+ok(rentStopVisibility(null) === "hidden", "missing flags do not open the abatement form");
+ok(rentStopVisibility(undefined, false) === "hidden", "an unloaded panel does not invent the form");
 
 const laterThan30 = {
   on_rent: false,
@@ -178,6 +187,16 @@ ok(!form.includes("new codes are accepted") && !combo.includes("new codes are ac
 ok(form.includes("Move to another OL") && form.includes("From:"), "the move form names the action and the current OL");
 ok(combo.includes("+ Create new OL"), "a new OL is an explicit option");
 ok(fleet.includes("Rent history") && fleet.includes("Correct rent start") === false, "rent history lives on the panel; the correct-rent link lives with the commitment panel");
+const rentStopAt = fleet.indexOf('data-testid="rent-stop-expander"');
+const rentCardAt = fleet.indexOf("<RentStopsCard");
+const rentHistoryAt = fleet.indexOf('data-testid="rent-history-toggle"');
+ok(fleet.includes("Rent stop / abatement"), "the abatement section is labeled Rent stop / abatement");
+ok(rentStopAt > 0 && rentCardAt > rentStopAt && rentHistoryAt > rentCardAt, "the abatement card sits inside its expander, ahead of the rent history log");
+ok(fleet.includes("rentStopVisibility"), "the panel gates abatement from the KPI flags");
+ok(fleet.includes("kpiContext ?") && fleet.includes("<KpiWhySection"), "Why in this KPI is an optional block on the shared panel");
+const kpiAt = fleet.indexOf("{kpiBlock}");
+const programAt = fleet.indexOf("{programBlock}");
+ok(kpiAt > 0 && programAt > kpiAt, "KPI context renders at the top, with the program context");
 
 if (failed) {
   console.error(`${failed} failed`);

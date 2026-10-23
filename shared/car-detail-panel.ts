@@ -26,6 +26,7 @@ export type CarPanelFlags = {
 
 export type CommitmentVisibility = "form" | "readonly" | "hidden";
 export type RentStartVisibility = "open" | "collapsed";
+export type RentStopVisibility = "expander" | "hidden";
 
 type FlagPayload = {
   on_rent?: boolean | null;
@@ -96,6 +97,18 @@ export function rentStartVisibility(flags: CarPanelFlags, today?: string | null)
   const asOf = isoDateOnly(today) ?? new Date().toISOString().slice(0, 10);
   if (date && date > asOf) return "open";
   return "collapsed";
+}
+
+/**
+ * Abatement belongs on a car that is on rent. A car that already has an open stop
+ * keeps Resume / Convert behind the same expander. Everyone else does not see the form.
+ */
+export function rentStopVisibility(
+  flags: CarPanelFlags | null | undefined,
+  hasOpenStop = false,
+): RentStopVisibility {
+  if (hasOpenStop || flags?.on_rent === true) return "expander";
+  return "hidden";
 }
 
 /**

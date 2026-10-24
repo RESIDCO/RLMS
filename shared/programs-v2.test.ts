@@ -66,6 +66,13 @@ ok(isCarDone({ active: true, completed: true }), "legacy complete checkbox is pr
 ok(!isCarDone({ active: true, completed: false }), "active open is remaining");
 ok(deriveCompletionLevel({ active: true, completed: true }) === "program_done", "completed → program_done");
 ok(deriveCompletionLevel({ active: true, outcome_reached_at: "2026-10-17" }) === "program_done", "outcome → program_done");
+ok(isCarDone({ active: true, scrapped_at: "2026-09-18" }), "active car with scrapped_at is program done");
+ok(deriveCompletionLevel({ active: true, scrapped_at: "2026-09-18" }) === "program_done", "scrapped_at → program_done");
+ok(deriveCompletionLevel({ active: true, keep_open: true, scrapped_at: "2026-09-18", status: "Enroute" }) === "program_done", "keep open does not override scrapped_at");
+ok(deriveCompletionLevel({ active: true, scrapped_at: "  " }) === "not_started", "blank scrapped_at is not program done");
+ok(deriveCompletionLevel({ active: true, scrapped_at: null }) === "not_started", "null scrapped_at is not program done");
+ok(!isCarDone({ active: true, status: "Complete" }), "status text alone is not program done");
+ok(!isCarDone({ active: true, status: "Sold" }), "Sold status text is not program done");
 ok(deriveCompletionLevel({ active: true, status: "COMPLETE - Arrived Lessee" }) === "in_progress", "status text is not done");
 ok(deriveCompletionLevel({ active: true, status: "Enroute" }) === "in_progress", "status is in progress");
 ok(deriveCompletionLevel({ active: true, milestone: "Work complete" }) === "work_done", "work complete level");

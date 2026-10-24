@@ -526,6 +526,7 @@ export async function listProgramCarsWithDocs(programId: number, includeExited: 
     const completion_level = deriveCompletionLevel({
       active: r.railcar?.active,
       railcar_status: r.railcar?.status,
+      scrapped_at: r.railcar?.scrapped_at,
       status: r.status,
       milestone: r.milestone,
       milestones: trail,

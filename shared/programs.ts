@@ -142,6 +142,8 @@ export function deriveCompletionLevel(row: {
   active?: boolean | null;
   /** railcars.status. Inactive freezes the car even when active is still true. */
   railcar_status?: string | null;
+  /** railcars.scrapped_at. A non-empty date is Program done even when the car stays active. */
+  scrapped_at?: string | null;
   /** program_cars.status. The text alone is not Program done. */
   status?: string | null;
   milestone?: string | null;
@@ -154,6 +156,8 @@ export function deriveCompletionLevel(row: {
 }): CompletionLevel {
   const frozen = isFrozenRailcar({ active: row.active, status: row.railcar_status });
   if (frozen && row.keep_open !== true) return "program_done";
+  // Same order as rlms_program_car_is_program_done: scrap date counts even when Keep open is set.
+  if (String(row.scrapped_at ?? "").trim()) return "program_done";
   if (row.completed === true) return "program_done";
   if (String(row.outcome_reached_at ?? "").trim()) return "program_done";
   if (String(row.exited_date ?? "").trim()) return "program_done";
@@ -247,6 +251,7 @@ export function displayTypeFromCategory(categoryName: string | null | undefined)
 export function isCarDone(row: {
   active?: boolean | null;
   railcar_status?: string | null;
+  scrapped_at?: string | null;
   status?: string | null;
   milestone?: string | null;
   milestones?: { milestone?: string | null }[] | null;

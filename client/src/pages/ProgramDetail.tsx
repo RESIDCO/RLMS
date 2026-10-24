@@ -308,6 +308,7 @@ function applyCarDraft(car: ProgramCar, patch: Record<string, unknown> | undefin
   next.completion_level = deriveCompletionLevel({
     active: next.railcar?.active,
     railcar_status: next.railcar?.status,
+    scrapped_at: next.railcar?.scrapped_at,
     status: next.status,
     milestone: next.milestone,
     milestones: car.trail,
@@ -339,6 +340,7 @@ function carCompletionLevel(c: ProgramCar): CompletionLevel {
   return c.completion_level ?? deriveCompletionLevel({
     active: c.railcar?.active,
     railcar_status: c.railcar?.status,
+    scrapped_at: c.railcar?.scrapped_at,
     status: c.status,
     milestone: c.milestone,
     milestones: c.trail,

@@ -5,13 +5,15 @@ function isProgramDone(row: {
   active?: boolean;
   keep_open?: boolean;
   scrapped_at?: string | null;
+  /** program_cars.status. The text alone is not Program done. */
+  status?: string | null;
   outcome_reached_at?: string | null;
   complete?: boolean;
   milestone?: string | null;
   exited_date?: string | null;
 }) {
   if (row.active === false && !row.keep_open) return true;
-  if (row.scrapped_at) return true;
+  if (String(row.scrapped_at ?? "").trim()) return true;
   if (row.outcome_reached_at) return true;
   if (row.complete) return true;
   if (String(row.exited_date ?? "").trim()) return true;
@@ -34,6 +36,10 @@ ok(isProgramDone({ active: true, outcome_reached_at: "2026-01-01" }), "outcome_r
 ok(isProgramDone({ active: true, milestone: "On rent" }), "On rent milestone still Program done");
 ok(!isProgramDone({ active: true, milestone: "Work complete" }), "Work complete is not Program done");
 ok(isProgramDone({ active: true, scrapped_at: "2026-09-18" }), "scrapped_at is Program done");
+ok(isProgramDone({ active: true, keep_open: true, scrapped_at: "2026-09-18" }), "keep open plus scrapped_at is Program done");
+ok(!isProgramDone({ active: true, scrapped_at: "  " }), "blank scrapped_at is not Program done");
+ok(!isProgramDone({ active: true, status: "Complete" }), "status text alone is not Program done");
+ok(!isProgramDone({ active: true, status: "Sold" }), "Sold status text is not Program done");
 ok(isProgramDone({ active: false }), "fleet inactive is Program done");
 ok(!isProgramDone({ active: false, keep_open: true }), "keep open is not done by inactivity");
 ok(isProgramDone({ active: false, keep_open: true, outcome_reached_at: "2026-10-17" }), "keep open plus outcome is Program done");
